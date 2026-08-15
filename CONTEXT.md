@@ -140,6 +140,34 @@ _Avoid_: Confidence percentage, valid flag
 A versioned, content-identified mapping from one analyzer task and score scale to assertion thresholds or calibrated probabilities established on declared benchmark evidence. Calibrations are not shared implicitly between capabilities, classes, or analyzers.
 _Avoid_: Raw score, universal confidence, UI percentage
 
+**Benchmark Corpus**:
+The versioned 30–50-track, rights-cleared collection used to characterize and gate one Open Chords release, including its fixed calibration and release-gate cohorts, slice labels, Gold References, and content manifests.
+_Avoid_: Test playlist, training data, demo set
+
+**Corpus Rights Ledger**:
+The per-track eligibility record that separately proves the permitted benchmark use and disclosure of the sound recording, composition and lyrics, Gold References, and derived results.
+_Avoid_: License field, source URL, legal assumption
+
+**Gold Reference**:
+The adjudicated, versioned human annotation used for scoring one benchmark capability while preserving the independent annotations and their disagreements as reliability evidence.
+_Avoid_: Ground truth, Reference Lyrics, model output
+
+**Release Baseline**:
+The immutable benchmark result used for paired regression comparison: the prior supported release, or for v1 the frozen pre-release baseline Recipe selected before the release-gate cohort is opened.
+_Avoid_: Gold Reference, competitor result, latest run
+
+**Benchmark Policy**:
+The versioned, content-identified release-gate contract fixing corpus cohorts, metrics, calibration, thresholds, uncertainty rules, platform profiles, and support claims before the release-gate cohort is evaluated.
+_Avoid_: Benchmark result, mutable CI config, target score
+
+**Benchmark Run**:
+One immutable execution of a Benchmark Policy for a candidate release, producing content-addressed predictions, measurements, comparisons, and a pass, fail, or insufficient-evidence verdict.
+_Avoid_: Analysis Attempt, ad hoc experiment, leaderboard entry
+
+**Support Claim**:
+A release-versioned statement that one automatic capability is tested for named inputs, slices, platform profiles, and operating conditions. Missing or insufficient evidence narrows the claim instead of being treated as a pass.
+_Avoid_: Feature presence, best effort, universal support
+
 **Analysis Manifest**:
 The immutable portable provenance record for an Analysis Revision, containing its identity-bearing Recipe and accepted output hashes plus producing reproducibility conditions, stage outcomes, and warnings without volatile or private machine data.
 _Avoid_: Attempt Record, log, environment dump, metadata bag
