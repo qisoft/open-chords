@@ -7,3 +7,8 @@ out/
 !.env.example
 *.log
 .scratch/
+.venv/
+.prototype-venv/
+prototypes/youtube-acquisition/results/
+__pycache__/
+*.pyc
