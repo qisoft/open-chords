@@ -196,17 +196,33 @@ _Avoid_: Chord label, chord-at-beat
 The normalized musical structure of a chord: root, quality, extensions, additions, alterations, omissions, and optional bass. Enharmonic spelling and display text do not change Chord Identity.
 _Avoid_: Chord string, diagram name
 
+**Reference Lyrics**:
+The user-selected lyrical text supplied as evidence of the expected words, represented by a Lyrics Document and never generated or rewritten from audio. It may differ from the performed recording and is not treated as ground truth.
+_Avoid_: Transcript, ASR output, canonical truth
+
 **Lyrics Document**:
 An immutable revision of Reference Lyrics obtained from an allowed provider, YouTube subtitles, or the user, preserving original text, line structure, language, and provenance. Text correction creates another Lyrics Document rather than mutating an alignment.
 _Avoid_: Transcript, generated lyrics, aligned lyrics
+
+**Lyrics Token Occurrence**:
+One ordered token occurrence in a Lyrics Document, identified independently of its text so repeated words and lines remain distinct. It may receive one Project Time interval or remain unmatched in a Lyrics Alignment.
+_Avoid_: Unique word, word string, array position
 
 **Lyrics Alignment**:
 The relationship between one Lyrics Document, one Analysis Revision, and available Project Time intervals for its token occurrences. Tokens may remain unmatched; alignment never rewrites the Lyrics Document.
 _Avoid_: Timed lyrics document, transcript
 
+**Alignment Job**:
+A bounded offline job that relates one Lyrics Document to one existing Analysis Revision and publishes one Lyrics Alignment or a retryable failure. It is independent of the Analysis Job and never changes either input.
+_Avoid_: Analysis stage, STT job, lyric correction
+
 **Alignment Mismatch**:
 A Reference Lyrics region for which the audio evidence does not support a reliable timing assignment and which therefore requires visibility or manual correction.
 _Avoid_: Hallucination, missing lyric
+
+**Lyrics Anchor**:
+A user-authored constraint relating a boundary or span in a Lyrics Document to Project Time for alignment or manual correction. It stays separate from machine timing evidence and is scoped to the same Lyrics Document and Analysis Revision.
+_Avoid_: Machine word timing, lyric rewrite, global marker
 
 **Beginner View**:
 A deterministic presentation derived from the Original chord vocabulary, including simplification and capo suggestions without changing stored Chord Events.
