@@ -105,7 +105,7 @@ A release-versioned, content-identified set of CPU, memory, workspace, process, 
 _Avoid_: Adaptive tuning, arbitrary process priority, Acquisition Budget Profile
 
 **Analysis Job**:
-The durable intent to produce one Analysis Revision for one Project Range and verified Source Snapshot using one fixed Analysis Recipe. It may remain blocked before execution, have several Attempts, and accept at most one result.
+The durable intent to produce one Analysis Revision for one Project Range and verified Source Snapshot using one fixed Analysis Recipe. It may remain blocked or retryable and own several immutable Attempts; it terminates only by accepting one result or explicit abandonment.
 _Avoid_: Analysis Revision, sidecar session, Alignment Job
 
 **Analysis Job Key**:
@@ -113,7 +113,7 @@ The identity of one logical analysis request: Project, verified Source Snapshot 
 _Avoid_: Attempt ID, queue position, Analysis Revision ID
 
 **Analysis Attempt**:
-One execution of an Analysis Job with its own lifecycle, runtime evidence, stage outcomes, and terminal state. Failed, cancelled, or interrupted Attempts never become Analysis Revisions.
+One execution of an Analysis Job with its own lifecycle, runtime evidence, stage outcomes, and immutable terminal state. A failed, cancelled, or interrupted Attempt may leave its Job retryable but never becomes an Analysis Revision.
 _Avoid_: Retry continuation, Analysis Revision, Acquisition Attempt
 
 **Analysis Stage Outcome**:
@@ -149,7 +149,7 @@ The immutable, bounded, schema-valid machine observations and named score data r
 _Avoid_: Analysis Revision, temporary feature dump, diagnostic log
 
 **Attempt Record**:
-The non-portable operational evidence for one Analysis Attempt, including its identity, timestamps, platform/resource measurements, retry history, diagnostics, and terminal reason. It does not affect Analysis Revision identity.
+The non-portable, seven-day operational evidence for one Analysis Attempt, including its identity, timestamps, platform/resource measurements, retry history, diagnostics, and terminal reason. It does not affect Analysis Revision identity or replace permanent Analysis Manifest provenance.
 _Avoid_: Analysis Manifest, Analysis Revision, diagnostic log
 
 **Edit Layer**:
