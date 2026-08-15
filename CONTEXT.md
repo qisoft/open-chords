@@ -5,12 +5,68 @@ Open Chords turns one selected range of a user-authorized recording into a local
 ## Language
 
 **Project**:
-A local single-user workspace for one selected time range of one media source, containing machine analysis, user edits, provenance, and practice state.
+A local single-user workspace for one selected time range of one media source, containing machine analysis, user edits, provenance, and practice state. Projects remain independent even when they share the same Source and Project Range.
 _Avoid_: Song, track, document
 
+**Project Library**:
+The one active local collection that authoritatively stores Projects and their revisions, provenance, settings, and allowed derived artifacts while referring to Source media outside the Library. Portable Project Archives, caches, and rebuildable indexes are not the Library.
+_Avoid_: Account, cloud library, project index, media folder
+
+**Library Trash**:
+The recoverable 30-day holding state for deleted Projects and their owned artifacts. Trashed Projects retain references needed for restoration but are excluded from the active Project Library.
+_Avoid_: Permanent deletion, system trash, archive
+
 **Source**:
-The local media file or YouTube video from which a Project range is selected. A Source is not stored inside a portable archive by default.
-_Avoid_: Upload, song
+A stable local record for the media from which Project ranges are selected. Local-file Sources are identified by content fingerprint and YouTube Sources by provider plus canonical video ID; one Source may be shared by multiple Projects and is not stored inside a portable archive by default.
+_Avoid_: File path, URL, upload, song
+
+**Source Locator**:
+One of the replaceable locations through which Open Chords can currently access and verify a Source, such as a local file path or an original YouTube URL. A Source may have several Locators; each may change or become invalid without changing Source identity.
+_Avoid_: Source ID, canonical identity
+
+**Source Fingerprint**:
+The full SHA-256 content identity of a local Source or acquired media representation, used to confirm exact equality independently of filename and location.
+_Avoid_: Fast hash, file metadata, Source Locator
+
+**Source Snapshot**:
+An immutable record of one acquired representation of a Source, including its byte and canonical-audio fingerprints, duration, acquisition provenance, and observed metadata. Multiple Snapshots may belong to one YouTube Source when its delivered media changes.
+_Avoid_: Source, cache entry, latest download
+
+**Source Metadata Observation**:
+A timestamped, provider-attributed observation of mutable Source metadata such as title, uploader, thumbnail, and declared duration. It neither defines Source identity nor rewrites earlier Source Snapshots.
+_Avoid_: Source identity, Project title, metadata truth
+
+**Acquisition Job**:
+The bounded operation that obtains one representation of one canonical public YouTube video, validates it, and terminates its network domain before publishing a Source Snapshot or handing media to offline analysis.
+_Avoid_: Download, Analysis Job, YouTube playback
+
+**Acquisition Attempt**:
+One isolated execution of an Acquisition Job with its own workspace, manifest, budgets, and terminal outcome. Failed or cancelled Attempts retain only safe provenance for seven days and never partial media or an unpublished Source Snapshot.
+_Avoid_: Retry continuation, partial download, Source Snapshot
+
+**Extractor Worker**:
+The contained, credential-free acquisition participant that runs the pinned YouTube extractor without direct IP-network access and can see only its packaged tools and disposable workspace.
+_Avoid_: Sidecar, downloader process, Network Broker
+
+**Acquisition Network Broker**:
+The sole networked participant in an Acquisition Job, enforcing the versioned endpoint, redirect, DNS, TLS, request, and resource policy for every transfer requested by the Extractor Worker.
+_Avoid_: Proxy setting, generic fetch, Extractor Worker
+
+**Acquisition Budget Profile**:
+The release-versioned set of hard network, time, storage, memory, CPU, and process ceilings enforced consistently across an Acquisition Job and identified in its provenance.
+_Avoid_: User preference, metadata estimate, adaptive limit
+
+**Offline Media Cache**:
+An explicitly enabled, removable local copy of a Project Range from a verified Source Snapshot, used for offline playback or reanalysis without becoming part of the Project or changing Source identity. It remains until explicit removal or loss/corruption rather than being silently evicted by recency.
+_Avoid_: Source, Project data, temporary job audio, archive content
+
+**Model Store**:
+The global content-addressed collection of installed, immutable analyzer models and dictionaries shared across Projects. Projects and archives reference exact artifacts but do not contain the Store.
+_Avoid_: Project data, model cache, application bundle
+
+**Unavailable Source**:
+A Source for which no current Locator yields its verified content. It retains its identity and Projects rather than being replaced by whatever occupies an old location.
+_Avoid_: Deleted Project, changed Source
 
 **Project Range**:
 The immutable contiguous interval of a Source analyzed by one Project. Choosing another interval creates another Project; multiple Projects may refer to the same long Source.
@@ -101,12 +157,20 @@ A deterministic presentation derived from the Original chord vocabulary, includi
 _Avoid_: Beginner analysis, easy chords
 
 **Portable Project Archive**:
-An export containing the Project's analysis, edits, metadata, and provenance, excluding Source audio unless the user explicitly opts in.
-_Avoid_: Backup with audio, public share
+A versioned, hash-manifested package of a complete Project and its retained non-derived history, with safe provenance and external model requirements. Source media is excluded unless the user explicitly includes only the Project Range after confirming rights.
+_Avoid_: Open Chords JSON snapshot, Project Library backup, public share
 
 **Project Revision**:
 A schema-valid persisted revision of a Project created by save or migration. Migration produces a new Project Revision and preserves a recoverable prior revision rather than rewriting the only copy in place.
 _Avoid_: Analysis Revision, autosave file
+
+**Project Head**:
+The durably committed reference to the current validated Project Revision. A mutation is not saved or acknowledged until the Head atomically identifies its complete persisted result.
+_Avoid_: Renderer state, latest file, unsaved draft
+
+**Imported Project Copy**:
+A newly identified Project created when an otherwise valid Portable Project Archive conflicts with a different local history bearing the same Project identity. It preserves the imported history and origin identity as provenance without merging either Project.
+_Avoid_: Merged Project, duplicate, overwritten Project
 
 **Active View**:
 The explicit selection of Analysis Revision, Edit Layer history position, optional Lyrics Document and Lyrics Alignment, and presentation settings used to materialize the current Effective Timeline.
