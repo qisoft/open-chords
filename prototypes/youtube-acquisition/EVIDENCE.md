@@ -29,8 +29,18 @@ No media was requested or retained.
 
 The second fixture is present in the pinned release's `YoutubeIE` test matrix. The first remains widely referenced in official yt-dlp source/tests but is no longer available as a successful fixture.
 
+## Independent metadata fallback
+
+A direct YouTube oEmbed request for the user-supplied video succeeded without cookies, an API key, or media access. It returned the title, author/channel link, thumbnail, and embed markup. This proves a narrow metadata-card path only; oEmbed does not provide a downloadable media stream or establish that analysis audio can be acquired.
+
+The accepted v1 split is:
+
+- use oEmbed for best-effort public metadata and the embedded YouTube player for playback;
+- attempt pinned, brokered `yt-dlp` acquisition without cookies, account credentials, plugins, remote components, HLS/DASH, or acquisition-time FFmpeg;
+- fail closed when that strict media path is unavailable and offer local-file import as the guaranteed analysis path.
+
 ## Current verdict
 
 The prototype proves that the pinned internal `RequestDirector` seam can run with one broker-only handler and that real extractor traffic crosses the framed broker protocol without Python-worker sockets. It has **not** proved a successful credential-free acquisition, single-stream selection/download, Deno challenge execution, native OS containment, or the future licensed corpus.
 
-The observed bot check is product-significant: v1 must keep the fail-closed behavior and may have unreliable YouTube acquisition unless the authorized corpus succeeds without cookies from the intended user-network environments. This result does not justify adding cookies, account credentials, remote components, or a broad-network compatibility mode.
+The observed bot check is product-significant. The prototype decision is therefore to narrow the support claim: YouTube metadata/playback and credential-free analysis acquisition are best effort, while local-file import is the guaranteed analysis path. A successful authorized corpus remains a release gate for any stronger YouTube acquisition claim. This result does not justify adding cookies, account credentials, remote components, or a broad-network compatibility mode.
