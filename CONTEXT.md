@@ -64,6 +64,10 @@ _Avoid_: Source, Project data, temporary job audio, archive content
 The global content-addressed collection of installed, immutable analyzer models and dictionaries shared across Projects. Projects and archives reference exact artifacts but do not contain the Store.
 _Avoid_: Project data, model cache, application bundle
 
+**Model Artifact**:
+One immutable data-only model, dictionary, or calibration dependency identified by exact version, content hash, source, license, model card, and compatible runtime. A newer Artifact never silently substitutes for one named by a Recipe.
+_Avoid_: Latest model, executable plugin, Model Store
+
 **Unavailable Source**:
 A Source for which no current Locator yields its verified content. It retains its identity and Projects rather than being replaced by whatever occupies an old location.
 _Avoid_: Deleted Project, changed Source
@@ -84,17 +88,69 @@ _Avoid_: Seconds, player time, Source Time
 An immutable machine-produced set of musical observations for a Project Range, including confidence, provenance, model versions, and settings. A Project may retain multiple Analysis Revisions and designate one as active.
 _Avoid_: Analysis, final result, truth
 
+**Reviewable Revision**:
+A successfully published Analysis Revision that is available for comparison but has not replaced the Project's current Active View. Activating it is an explicit durable choice and does not transfer existing edits automatically.
+_Avoid_: Candidate output, latest analysis, pending save
+
+**Analysis Recipe**:
+The immutable, content-identified declaration of canonical audio, requested capabilities, pipeline graph, component/model/calibration artifacts, settings, seeds, and resource profile for one analysis result.
+_Avoid_: User preset, mutable job settings, Analysis Manifest
+
+**Analysis Preset**:
+A release-supported, versioned product choice that materializes into a complete Analysis Recipe. It names only packaged and validated pipeline options rather than exposing arbitrary analyzer internals or executable/model paths.
+_Avoid_: Analysis Recipe, plugin configuration, command-line arguments
+
+**Analysis Resource Profile**:
+A release-versioned, content-identified set of CPU, memory, workspace, process, backend, checkpoint, and deadline policies used by an Analysis Recipe. Eco, Balanced, and Fast profiles express bounded execution trade-offs without changing themselves at runtime.
+_Avoid_: Adaptive tuning, arbitrary process priority, Acquisition Budget Profile
+
+**Analysis Job**:
+The durable intent to produce one Analysis Revision for one Project Range and verified Source Snapshot using one fixed Analysis Recipe. It may remain blocked before execution, have several Attempts, and accept at most one result.
+_Avoid_: Analysis Revision, sidecar session, Alignment Job
+
+**Analysis Job Key**:
+The identity of one logical analysis request: Project, verified Source Snapshot or canonical-audio fingerprint, and Analysis Recipe hash. An existing nonterminal or successful Job with the same Key is reused instead of duplicating work.
+_Avoid_: Attempt ID, queue position, Analysis Revision ID
+
+**Analysis Attempt**:
+One execution of an Analysis Job with its own lifecycle, runtime evidence, stage outcomes, and terminal state. Failed, cancelled, or interrupted Attempts never become Analysis Revisions.
+_Avoid_: Retry continuation, Analysis Revision, Acquisition Attempt
+
+**Analysis Stage Outcome**:
+The technical terminal result of one Recipe stage: completed, completed with musical abstentions, cancelled, failed, or skipped by the Recipe. Technical failure is never represented as low confidence or musical abstention.
+_Avoid_: Assertion State, partial Analysis Revision, progress message
+
+**Analysis Failure**:
+A stable, redacted classification of why an Analysis Job could not publish a Revision, identifying the affected stage, retryability, and next action without converting technical failure into musical uncertainty.
+_Avoid_: Abstention, warning, raw exception
+
+**Analysis Checkpoint**:
+A completed, main-validated, content-addressed non-media stage artifact reusable only when its exact upstream inputs and Recipe subgraph still match. Reusing a Checkpoint starts a new Attempt rather than resuming process state.
+_Avoid_: Partial Analysis Revision, temporary audio, process snapshot
+
 **Timeline Entity**:
 An identified machine-produced or user-authored section, meter region, bar, beat, chord event, or lyric interval in a Musical Timeline. Machine identity is scoped to one Analysis Revision and never implies identity across revisions.
 _Avoid_: Array item, timestamp, annotation
 
 **Assertion State**:
-The status of a machine observation as asserted, low-confidence, or abstained. An abstention is unknown evidence and is distinct from the musical value `N`; user-authored assertions carry no invented machine confidence.
+The status of a machine observation as asserted, low-confidence, or abstained, accompanied by named evidence and reason codes. An abstention is unknown evidence and is distinct from the musical value `N`; user-authored assertions carry no invented machine confidence.
 _Avoid_: Confidence percentage, valid flag
 
+**Confidence Calibration**:
+A versioned, content-identified mapping from one analyzer task and score scale to assertion thresholds or calibrated probabilities established on declared benchmark evidence. Calibrations are not shared implicitly between capabilities, classes, or analyzers.
+_Avoid_: Raw score, universal confidence, UI percentage
+
 **Analysis Manifest**:
-The immutable provenance record for an Analysis Revision, identifying its source material, canonical timebase, analyzer stages, artifacts, models, settings, versions, hashes, outcomes, and reproducibility conditions without exposing private machine paths.
-_Avoid_: Log, environment dump, metadata bag
+The immutable portable provenance record for an Analysis Revision, containing its identity-bearing Recipe and accepted output hashes plus producing reproducibility conditions, stage outcomes, and warnings without volatile or private machine data.
+_Avoid_: Attempt Record, log, environment dump, metadata bag
+
+**Analysis Evidence**:
+The immutable, bounded, schema-valid machine observations and named score data retained with an Analysis Revision to explain its assertions without preserving source audio, arbitrary tool state, or debug output.
+_Avoid_: Analysis Revision, temporary feature dump, diagnostic log
+
+**Attempt Record**:
+The non-portable operational evidence for one Analysis Attempt, including its identity, timestamps, platform/resource measurements, retry history, diagnostics, and terminal reason. It does not affect Analysis Revision identity.
+_Avoid_: Analysis Manifest, Analysis Revision, diagnostic log
 
 **Edit Layer**:
 The nondestructive user-authored changes based on one specific Analysis Revision, with undo and reset semantics that preserve machine output. Moving edits to another Analysis Revision is an explicit operation whose conflicts remain visible.
