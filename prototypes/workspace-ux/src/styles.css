@@ -510,6 +510,33 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .legend { gap: 16px; color: #9b9ba5; font-size: 14px; }
 .variant-a .legend svg { width: 15px; height: 15px; }
 .variant-a .timeline-viewport { margin-top: 14px; border: 0; border-radius: 7px; background: #0b0b0e; }
+.variant-a .timeline-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 10px;
+  border-radius: 7px;
+  background: #17171c;
+  padding: 8px;
+}
+.variant-a .timeline-control-bar .transport { min-height: auto; justify-content: flex-start; flex-wrap: nowrap; padding: 0; }
+.variant-a .timeline-control-bar .transport-key { flex: 0 0 auto; }
+.variant-a .presentation-controls { display: flex; align-items: center; justify-content: flex-end; gap: 7px; min-width: 0; }
+.variant-a .presentation-label { color: #92929c; font-size: 14px; white-space: nowrap; }
+.variant-a .value-stepper,
+.variant-a .chord-mode-control { display: inline-flex; align-items: stretch; overflow: hidden; border-radius: 7px; background: #101014; }
+.variant-a .value-stepper button,
+.variant-a .value-stepper .stepper-value,
+.variant-a .chord-mode-control button { min-height: 40px; border: 0; background: transparent; color: #b8b8c0; }
+.variant-a .value-stepper > button:not(.stepper-value) { display: grid; width: 36px; place-items: center; padding: 0; }
+.variant-a .value-stepper > button:not(.stepper-value):hover,
+.variant-a .chord-mode-control button:hover { background: rgba(255,255,255,.055); color: #ededf0; }
+.variant-a .value-stepper button:disabled { cursor: not-allowed; opacity: .3; }
+.variant-a .value-stepper .stepper-value { display: inline-flex; min-width: 72px; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; font-size: 13px; white-space: nowrap; }
+.variant-a .value-stepper button.stepper-value:hover { background: rgba(141,134,255,.09); color: #d7d5ff; }
+.variant-a .chord-mode-control button { padding: 0 11px; font-size: 13px; }
+.variant-a .chord-mode-control button[aria-pressed="true"] { background: rgba(141,134,255,.2); color: #eeedff; }
 .variant-a .beat-grid { border: 0; background: rgba(255,255,255,.012); }
 .variant-a .beat-grid span { border-color: #2a2a31; }
 .variant-a .playhead-handle { top: 5px; width: 38px; height: 38px; border: 0; }
@@ -630,6 +657,11 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .transport-option.icon-only { width: 40px; }
 .variant-a .time-readout { margin: 0 10px; font-size: 14px; }
 .variant-a .time-readout span { font-size: 13px; }
+
+@media (max-width: 1320px) {
+  .variant-a .timeline-control-bar { align-items: flex-start; flex-direction: column; }
+  .variant-a .presentation-controls { width: 100%; justify-content: flex-start; overflow-x: auto; padding-bottom: 2px; }
+}
 
 /* Variant B */
 .mode-tabs { display: flex; justify-content: center; gap: 5px; padding: 14px; border-bottom: 1px solid var(--line); }
