@@ -141,9 +141,23 @@ function reducer(state, action) {
         dirtyBarIds: markDirty(state, state.activeBarId),
         bars: state.bars.map((bar) => {
           if (bar.id !== state.activeBarId) return bar
-          const index = bar.events.findIndex((event) => event.id === state.activeEventId)
+          return { ...bar, events: [...bar.events, action.event] }
+        }),
+      }
+    case 'reorderEvent':
+      return {
+        ...state,
+        activeBarId: action.barId,
+        activeEventId: action.eventId,
+        dirtyBarIds: markDirty(state, action.barId),
+        bars: state.bars.map((bar) => {
+          if (bar.id !== action.barId) return bar
+          const fromIndex = bar.events.findIndex((item) => item.id === action.eventId)
+          const toIndex = bar.events.findIndex((item) => item.id === action.targetEventId)
+          if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return bar
           const events = [...bar.events]
-          events.splice(index + 1, 0, action.event)
+          const [moved] = events.splice(fromIndex, 1)
+          events.splice(toIndex, 0, moved)
           return { ...bar, events }
         }),
       }
@@ -424,7 +438,11 @@ function Timeline({ state, dispatch, simple = false }) {
 function EventEditor({ state, bar, event, dispatch }) {
   const [chordDraft, setChordDraft] = useState(() => parseChord(event.chord))
   const [chordPickerStep, setChordPickerStep] = useState('root')
+  const [draggedEventId, setDraggedEventId] = useState(null)
+  const [dropTargetId, setDropTargetId] = useState(null)
   const chordPickerRef = useRef(null)
+  const eventDragRef = useRef(null)
+  const suppressEventClickRef = useRef(false)
   useEffect(() => { setChordDraft(parseChord(event.chord)); setChordPickerStep('root') }, [event.id, event.chord])
   const activeIndex = bar.events.findIndex((item) => item.id === event.id)
   const start = bar.events.slice(0, activeIndex).reduce((sum, item) => sum + item.duration, 0)
@@ -441,9 +459,42 @@ function EventEditor({ state, bar, event, dispatch }) {
     setChordDraft((current) => ({ ...current, noChord: false, type }))
     setChordPickerStep('bass')
   }
+  const reorderEvent = (eventId, targetEventId) => {
+    if (!eventId || eventId === targetEventId) return
+    dispatch({ type: 'reorderEvent', barId: bar.id, eventId, targetEventId })
+  }
+  const clearDragState = () => { setDraggedEventId(null); setDropTargetId(null) }
+  const startEventDrag = (pointerEvent, eventId) => {
+    if (pointerEvent.button !== 0) return
+    try { pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId) } catch { /* synthetic pointers may not own capture */ }
+    eventDragRef.current = { eventId, pointerId: pointerEvent.pointerId, startX: pointerEvent.clientX, startY: pointerEvent.clientY, targetEventId: eventId, dragging: false }
+  }
+  const moveEventDrag = (pointerEvent) => {
+    const drag = eventDragRef.current
+    if (!drag || (drag.pointerId != null && pointerEvent.pointerId !== drag.pointerId)) return
+    if (!drag.dragging && Math.hypot(pointerEvent.clientX - drag.startX, pointerEvent.clientY - drag.startY) < 5) return
+    pointerEvent.preventDefault()
+    drag.dragging = true
+    suppressEventClickRef.current = true
+    setDraggedEventId(drag.eventId)
+    const target = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)?.closest('[data-event-option-id]')
+    drag.targetEventId = target?.dataset.eventOptionId || drag.eventId
+    setDropTargetId(drag.targetEventId)
+  }
+  const endEventDrag = (pointerEvent) => {
+    const drag = eventDragRef.current
+    if (!drag || (drag.pointerId != null && pointerEvent.pointerId !== drag.pointerId)) return
+    try { pointerEvent.currentTarget.releasePointerCapture(pointerEvent.pointerId) } catch { /* pointer may finish outside its source */ }
+    if (drag.dragging) {
+      reorderEvent(drag.eventId, drag.targetEventId)
+      setTimeout(() => { suppressEventClickRef.current = false }, 0)
+    }
+    eventDragRef.current = null
+    clearDragState()
+  }
   return <aside className="inspector panel" aria-label="Редактор выбранного события аккорда">
     <div className="panel-heading"><div className="inspector-current"><span><PencilLine size={16} aria-hidden="true" />Выбранный аккорд · такт {bar.number}</span><strong data-selected-chord-label>{event.chord}</strong></div><span className="event-counter">{activeIndex + 1} из {bar.events.length}</span></div>
-    <div className="event-picker-shell"><span className="event-picker-label">Аккорды в этом такте</span><div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item) => { const isSelected = item.id === event.id; return <button key={item.id} className={`event-option ${isSelected ? 'selected' : ''}`} aria-pressed={isSelected} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id })}>{isSelected && <Check size={15} aria-hidden="true" />}<strong>{item.chord}</strong><span>{durationLabel(item.duration, bar)}</span></button> })}</div></div>
+    <div className="event-picker-shell"><span className="event-picker-label">Аккорды в этом такте</span><div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item, itemIndex) => { const isSelected = item.id === event.id; return <button key={item.id} data-event-option-id={item.id} className={`event-option ${isSelected ? 'selected' : ''} ${draggedEventId === item.id ? 'dragging' : ''} ${dropTargetId === item.id && draggedEventId !== item.id ? 'drop-target' : ''}`} aria-pressed={isSelected} aria-label={`${item.chord}, ${durationLabel(item.duration, bar)}, позиция ${itemIndex + 1} из ${bar.events.length}. Перетащи для перестановки`} aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight" title="Перетащи для перестановки · Alt + ←/→" onClick={() => { if (suppressEventClickRef.current) { suppressEventClickRef.current = false; return } dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id }) }} onPointerDown={(pointerEvent) => startEventDrag(pointerEvent, item.id)} onPointerMove={moveEventDrag} onPointerUp={endEventDrag} onPointerCancel={endEventDrag} onKeyDown={(keyEvent) => { if (!keyEvent.altKey || !['ArrowLeft', 'ArrowRight'].includes(keyEvent.key)) return; keyEvent.preventDefault(); const target = bar.events[itemIndex + (keyEvent.key === 'ArrowLeft' ? -1 : 1)]; if (target) reorderEvent(item.id, target.id) }}><GripVertical className="event-drag-handle" size={16} aria-hidden="true" /><strong>{item.chord}</strong><span>{durationLabel(item.duration, bar)}</span>{isSelected && <Check className="event-selected-check" size={15} aria-hidden="true" />}</button> })}<button className="event-add-option" type="button" aria-label="Добавить аккорд в конец такта" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}><Plus size={18} aria-hidden="true" /><span>Добавить аккорд</span></button></div></div>
     {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><AlertTriangle size={14} aria-hidden="true" /><span>Автоанализ не уверен</span><button className="inline-icon-action" type="button" aria-label="Подтвердить такт" title="Подтвердить" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}><Check size={14} aria-hidden="true" /></button></section>}
     {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><CheckCircle2 size={14} aria-hidden="true" /><span>Проверено вручную</span><button className="inline-icon-action" type="button" aria-label="Вернуть такт на проверку" title="Вернуть на проверку" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}><RotateCcw size={14} aria-hidden="true" /></button></section>}
     <form onSubmit={save}>
@@ -458,7 +509,7 @@ function EventEditor({ state, bar, event, dispatch }) {
         <fieldset className="duration-control"><legend><Clock3 size={12} aria-hidden="true" />Длительность</legend><div>{durationOptionsForBar(bar).map((option) => <button key={option.units} type="button" className={event.duration === option.units ? 'selected' : ''} aria-pressed={event.duration === option.units} onClick={() => dispatch({ type: 'updateEvent', patch: { duration: option.units } })}>{option.label}</button>)}</div></fieldset>
         <div className="editor-meta" role="status"><span><LocateFixed size={12} aria-hidden="true" />{start + 1}/16</span><span className={valid ? 'valid' : 'invalid'}>{valid ? <><CheckCircle2 size={12} aria-hidden="true" />{used}/{capacity}</> : delta > 0 ? <><AlertTriangle size={12} aria-hidden="true" />−{delta}/16</> : <><AlertTriangle size={12} aria-hidden="true" />+{-delta}/16</>}</span></div>
       </div>
-      <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid}><Save size={14} aria-hidden="true" />Сохранить</button><button className="icon-action" type="button" aria-label="Добавить аккорд после выбранного" title="Добавить аккорд" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}><Plus size={15} aria-hidden="true" /></button><button className="icon-action danger" type="button" aria-label="Удалить выбранный аккорд" title="Удалить аккорд" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}><Trash2 size={15} aria-hidden="true" /></button></div>
+      <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid}><Save size={14} aria-hidden="true" />Сохранить</button><button className="icon-action danger" type="button" aria-label="Удалить выбранный аккорд" title="Удалить аккорд" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}><Trash2 size={15} aria-hidden="true" /></button></div>
     </form>
     <p className="original-note">{state.dirtyBarIds.includes(bar.id) ? 'Есть несохранённые изменения.' : 'Раскладка сохранена. Original остаётся отдельно.'}</p>
   </aside>

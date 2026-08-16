@@ -539,25 +539,47 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .event-picker { gap: 8px; overflow-x: auto; border: 0; padding: 0; }
 .variant-a .event-option {
   display: grid;
-  grid-template-columns: 18px auto;
+  grid-template-columns: 18px minmax(38px, auto) 18px;
   grid-template-rows: auto auto;
   align-items: center;
   column-gap: 6px;
-  min-width: 102px;
+  min-width: 118px;
   min-height: 64px;
   border: 0;
   border-radius: 7px;
   background: #202027;
   padding: 9px 12px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 .variant-a .event-option:hover { background: #282830; }
-.variant-a .event-option > svg { grid-row: 1 / span 2; color: #c9c6ff; }
+.variant-a .event-option:active { cursor: grabbing; }
+.variant-a .event-drag-handle { grid-column: 1; grid-row: 1 / span 2; color: #777781; }
 .variant-a .event-option strong { grid-column: 2; font-size: 20px; }
 .variant-a .event-option span { grid-column: 2; color: #aaaab4; font-size: 13px; }
-.variant-a .event-option:not(.selected):not(:has(svg)) strong,
-.variant-a .event-option:not(.selected):not(:has(svg)) span { grid-column: 1 / span 2; }
+.variant-a .event-selected-check { grid-column: 3; grid-row: 1 / span 2; color: #c9c6ff; }
 .variant-a .event-option.selected { border: 0; background: rgba(141,134,255,.2); color: #f0efff; padding: 9px 12px; }
 .variant-a .event-option.selected::after { display: none; }
+.variant-a .event-option.dragging { opacity: .38; }
+.variant-a .event-option.drop-target { box-shadow: inset 3px 0 #8d86ff; }
+.variant-a .event-add-option {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 160px;
+  min-height: 64px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #aaaab4;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 560;
+}
+.variant-a .event-add-option:hover { background: #222229; color: #e1e1e6; }
 .variant-a .review-status {
   min-height: 52px;
   margin: 10px 14px 0;
