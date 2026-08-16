@@ -64,14 +64,19 @@ function timedLyricLine(id, section, text, start, end) {
   return {
     id,
     section,
+    start,
+    end,
     words: tokens.map((word, index) => ({ id: `${id}-${index + 1}`, text: word, start: start + step * index, end: start + step * (index + 1) })),
   }
 }
 
+function instrumentalLine(id, section, start, end) {
+  return { id, section, start, end, instrumental: true, words: [] }
+}
+
 // Prototype fixture: a complete original song, long enough to exercise independent lyric scrolling.
 const LYRIC_LINES = [
-  timedLyricLine('intro-1', 'Интро', 'Ночь собирает огни на пустой мостовой', 0, 4),
-  timedLyricLine('intro-2', '', 'Первый аккорд отпирает уснувшие окна', 4, 8),
+  instrumentalLine('intro', 'Интро', 0, 8),
   timedLyricLine('verse-1-1', 'Куплет 1', 'Мы выходили из дома без карты и плана', 8, 12),
   timedLyricLine('verse-1-2', '', 'Ветер листал переулки как старую книгу', 12, 16),
   timedLyricLine('verse-1-3', '', 'Каждый фонарь оставался за нами сигналом', 16, 20),
@@ -80,18 +85,17 @@ const LYRIC_LINES = [
   timedLyricLine('chorus-1-2', '', 'Пусть этот ритм поднимает нас выше', 28, 32),
   timedLyricLine('chorus-1-3', '', 'Свет не погас пока мы его держим', 32, 36),
   timedLyricLine('chorus-1-4', '', 'Плачь и танцуй оставайся надеждой', 36, 40),
-  timedLyricLine('verse-2-1', 'Куплет 2', 'Утро рисует на крышах холодные тени', 40, 44),
-  timedLyricLine('verse-2-2', '', 'Чашка остыла но песня ещё не допета', 44, 48),
-  timedLyricLine('verse-2-3', '', 'Мы научились не прятать свои отражения', 48, 52),
-  timedLyricLine('verse-2-4', '', 'И выбирать направление против запретов', 52, 56),
-  timedLyricLine('bridge-1', 'Бридж', 'Если дорога внезапно закончится утром', 56, 60),
-  timedLyricLine('bridge-2', '', 'Мы нарисуем продолжение прямо на небе', 60, 64),
-  timedLyricLine('bridge-3', '', 'Тихо считаем четыре удара до света', 64, 68),
+  instrumentalLine('interlude', 'Проигрыш', 40, 48),
+  timedLyricLine('verse-2-1', 'Куплет 2', 'Мы научились не прятать свои отражения', 48, 52),
+  timedLyricLine('verse-2-2', '', 'И выбирать направление против запретов', 52, 56),
+  timedLyricLine('verse-2-3', '', 'Город рисует на крышах холодные тени', 56, 60),
+  timedLyricLine('bridge-1', 'Бридж', 'Если дорога внезапно закончится утром', 60, 64),
+  timedLyricLine('bridge-2', '', 'Мы нарисуем продолжение прямо на небе', 64, 68),
   timedLyricLine('final-1', 'Финальный припев', 'Плачь и танцуй пока город не слышит', 68, 72),
   timedLyricLine('final-2', '', 'Пусть этот ритм поднимает нас выше', 72, 76),
   timedLyricLine('final-3', '', 'Свет не погас пока мы его держим', 76, 80),
   timedLyricLine('final-4', '', 'Плачь и танцуй оставайся надеждой', 80, 84),
-  timedLyricLine('outro-1', 'Аутро', 'Последний аккорд растворяется медленно в окнах', 84, 88),
+  instrumentalLine('outro', 'Аутро', 84, 88),
 ]
 const LYRIC_WORDS = LYRIC_LINES.flatMap((line) => line.words)
 
@@ -488,6 +492,7 @@ function Timeline({ state, dispatch, simple = false, controls = false }) {
 }
 
 function EventEditor({ state, bar, event, dispatch }) {
+  const [expanded, setExpanded] = useState(false)
   const [chordDraft, setChordDraft] = useState(() => parseChord(event.chord))
   const [chordPickerStep, setChordPickerStep] = useState('root')
   const [draggedEventId, setDraggedEventId] = useState(null)
@@ -503,7 +508,7 @@ function EventEditor({ state, bar, event, dispatch }) {
   const valid = delta === 0
   const name = chordSymbol(chordDraft)
   const dirty = Boolean(state.draftBars?.[bar.id])
-  const save = (submitEvent) => { submitEvent.preventDefault(); if (!valid) return; dispatch({ type: 'updateEvent', patch: { chord: name } }); dispatch({ type: 'saveBar' }) }
+  const save = (submitEvent) => { submitEvent.preventDefault(); if (!valid) return; dispatch({ type: 'updateEvent', patch: { chord: name } }); dispatch({ type: 'saveBar' }); setExpanded(false) }
   const applyChordDraft = (nextDraft) => { setChordDraft(nextDraft); dispatch({ type: 'updateEvent', patch: { chord: chordSymbol(nextDraft) } }) }
   const closeChordPicker = () => chordPickerRef.current?.removeAttribute('open')
   const chooseRoot = (root) => {
@@ -568,6 +573,11 @@ function EventEditor({ state, bar, event, dispatch }) {
     }
   }, [bar.events])
   return <aside className="inspector panel editor-dock" aria-label="Редактор выбранного события аккорда">
+    <button className="editor-accordion-trigger" type="button" aria-expanded={expanded} aria-controls="chord-editor-body" onClick={() => setExpanded((current) => !current)}>
+      <span className="editor-accordion-title"><Music2 size={18} aria-hidden="true" /><span><strong>Редактор аккордов</strong><small>Такт {bar.number} · {name} · {bar.events.length} событий</small></span></span>
+      <span className="editor-accordion-state">{dirty && <em>Несохранённые правки</em>}<ChevronDown className={expanded ? 'expanded' : ''} size={20} aria-hidden="true" /></span>
+    </button>
+    {expanded && <div id="chord-editor-body" className="editor-accordion-body">
     <div className="event-picker-shell"><div className="event-picker-heading"><strong>Аккорды · такт {bar.number}</strong><span>{bar.events.length}</span></div><span className="sr-only" aria-live="polite">{reorderAnnouncement}</span><div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item, itemIndex) => { const isSelected = item.id === event.id; const indicatorClass = dropIndicator?.eventId === item.id ? `drop-${dropIndicator.edge}` : ''; return <button key={item.id} data-event-option-id={item.id} className={`event-option ${isSelected ? 'selected' : ''} ${draggedEventId === item.id ? 'dragging' : ''} ${indicatorClass}`} aria-pressed={isSelected} aria-label={`${item.chord}, ${durationLabel(item.duration, bar)}, позиция ${itemIndex + 1} из ${bar.events.length}. Перетащи для перестановки`} aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight" title="Перетащи для перестановки · Alt + ←/→" onClick={() => { if (suppressEventClickRef.current) { suppressEventClickRef.current = false; return } dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id }) }} onPointerDown={(pointerEvent) => startEventDrag(pointerEvent, item.id)} onKeyDown={(keyEvent) => { if (!keyEvent.altKey || !['ArrowLeft', 'ArrowRight'].includes(keyEvent.key)) return; keyEvent.preventDefault(); const toIndex = itemIndex + (keyEvent.key === 'ArrowLeft' ? -1 : 1); if (toIndex >= 0 && toIndex < bar.events.length) reorderEvent(item.id, toIndex) }}><GripVertical className="event-drag-handle" size={16} aria-hidden="true" /><strong>{item.chord}</strong><span>{durationLabel(item.duration, bar)}</span></button> })}<button className="event-add-option" type="button" aria-label="Добавить аккорд в конец такта" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}><Plus size={18} aria-hidden="true" /><span>Добавить</span></button></div></div>
     {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><AlertTriangle size={18} aria-hidden="true" /><span>Автоанализ не уверен</span><button className="review-status-action" type="button" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}><Check size={16} aria-hidden="true" />Аккорды верны</button></section>}
     {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><CheckCircle2 size={18} aria-hidden="true" /><span>Проверено вручную</span><button className="review-status-action" type="button" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}><RotateCcw size={16} aria-hidden="true" />Вернуть на проверку</button></section>}
@@ -586,6 +596,7 @@ function EventEditor({ state, bar, event, dispatch }) {
       <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid || !dirty}><Save size={14} aria-hidden="true" />Сохранить</button><button className="reset-draft-button" type="button" disabled={!dirty} onClick={() => dispatch({ type: 'resetBar' })}><RotateCcw size={15} aria-hidden="true" />Отменить правки</button><button className="icon-action danger" type="button" aria-label="Удалить выбранный аккорд" title="Удалить аккорд" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}><Trash2 size={15} aria-hidden="true" /></button></div>
     </form>
     {dirty && <p className="original-note">Есть несохранённые правки. Таймлайн и текст пока не изменились.</p>}
+    </div>}
   </aside>
 }
 
@@ -627,9 +638,9 @@ function LyricsPanel({ state }) {
   const scrollRef = useRef(null)
   const lineRefs = useRef([])
   const currentLyricIndex = LYRIC_WORDS.findIndex((word) => state.positionUnits >= word.start && state.positionUnits < word.end)
-  const currentWordId = LYRIC_WORDS[currentLyricIndex]?.id
-  const currentLineIndex = LYRIC_LINES.findIndex((line) => line.words.some((word) => word.id === currentWordId))
+  const currentLineIndex = LYRIC_LINES.findIndex((line) => state.positionUnits >= line.start && state.positionUnits < line.end)
   const lyricChordLabels = useMemo(() => chordLabelsForLyricLines(state.bars, LYRIC_LINES).map((chord) => presentedChord(chord, state)), [state.bars, state.transpose, state.chordMode])
+  const instrumentalChords = useMemo(() => timedChordEvents(state.bars).map((chordEvent) => ({ ...chordEvent, chord: presentedChord(chordEvent.chord, state) })), [state.bars, state.transpose, state.chordMode])
 
   useEffect(() => {
     const scroller = scrollRef.current
@@ -649,11 +660,12 @@ function LyricsPanel({ state }) {
         const offset = lineOffset
         lineOffset += line.words.length
         const active = lineIndex === currentLineIndex
-        return <div className="lyric-block" key={line.id}>
+        const sectionChords = line.instrumental ? instrumentalChords.filter((chordEvent) => chordEvent.start < line.end && chordEvent.end > line.start) : []
+        return <div ref={(node) => { lineRefs.current[lineIndex] = node }} className={`lyric-block${active ? ' active' : ''}`} key={line.id}>
           {line.section && <h3 className="lyric-section">{line.section}</h3>}
-          <p ref={(node) => { lineRefs.current[lineIndex] = node }} className={`lyric-line${active ? ' active-line' : ''}`} aria-current={active ? 'true' : undefined}>
+          {line.instrumental ? <div className="instrumental-line" aria-current={active ? 'true' : undefined}><span className="instrumental-label"><AudioLines size={18} aria-hidden="true" />Инструментал</span><div className="instrumental-chords">{sectionChords.map((chordEvent, chordIndex) => { const current = state.positionUnits >= chordEvent.start && state.positionUnits < chordEvent.end; return <span className={`instrumental-chord${current ? ' current' : ''}`} key={`${line.id}-${chordEvent.start}-${chordIndex}`}><strong>{chordEvent.chord}</strong></span> })}</div></div> : <p className={`lyric-line${active ? ' active-line' : ''}`} aria-current={active ? 'true' : undefined}>
             {line.words.map((word, wordIndex) => { const index = offset + wordIndex; return <span className="lyric-token" key={word.id}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span> })}
-          </p>
+          </p>}
         </div>
       })}</div>
     </div>
