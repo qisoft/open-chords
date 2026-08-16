@@ -19,7 +19,16 @@ The Vite dev server opens variant A. Use the floating arrows at the bottom or ke
 - **B — Режимы:** Edit and Practice are explicit modes with one primary surface;
 - **C — Список:** vertically ordered landmarks and a non-spatial event list for keyboard and screen-reader use.
 
-In the editor, select `C` or `G7` separately inside bar 3. The inspector must identify the exact event and let you rename it, change its time boundaries, add another event, or delete it without silently changing the other chord in the bar.
+In the editor, select `C` or `G7` separately inside bar 3. The inspector must identify the exact event and let you rename it, choose its rhythmic duration, add another event, or delete it without silently changing the other chord in the bar.
+
+Timeline interaction in the current checkpoint:
+
+- drag across bar headers to select a contiguous range; loop and delete actions use that range;
+- drag empty timeline space to scrub while the playhead stays centered;
+- press Space to play or pause; playback moves the bars under the fixed playhead;
+- chord widths use sixteenth-note units and align to four beat intervals in 4/4;
+- edit duration with 1/16, 1/8, 1/4, 1/2, or whole-note controls; manual time inputs are intentionally absent;
+- gaps and overlaps disable saving until the bar is exactly filled.
 
 Try these checks in every variant:
 
