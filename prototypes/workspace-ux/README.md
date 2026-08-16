@@ -19,7 +19,7 @@ The Vite dev server opens variant A. Use the floating arrows at the bottom or ke
 - **B — Режимы:** Edit and Practice are explicit modes with one primary surface;
 - **C — Список:** vertically ordered landmarks and a non-spatial event list for keyboard and screen-reader use.
 
-In the editor, select `C` or `G7` separately inside bar 3. The inspector must identify the exact event and let you rename it, choose its rhythmic duration, add another event, or delete it without silently changing the other chord in the bar.
+In the editor, select `C` or `G7` separately inside bar 3. The inspector must identify the exact event and let you choose a supported chord, choose its rhythmic duration, add another event, or delete it without silently changing the other chord in the bar.
 
 Timeline interaction in the current checkpoint:
 
@@ -34,6 +34,7 @@ Timeline interaction in the current checkpoint:
 - meter capacity uses both numerator and denominator, so 6/8 spans twelve sixteenth-note units rather than twenty-four;
 - beat divisions are unlabeled vertical guides behind translucent chord events; the selected-range border stays above header hover;
 - all chord events keep the same lane height regardless of duration; short 1/16 and 1/8 events use a compact in-segment label and show the complete symbol in an anchored badge when selected, hovered, or keyboard-focused;
+- chord names are never free-form: the picker combines one of twelve displayed roots with the supported major/minor/dim/aug/sus2/sus4/6/7/maj7/m7/dim7/half-dim/add9/9 types, an optional bass note for slash chords and inversions, or explicit `N`;
 - gaps and overlaps disable saving until the bar is exactly filled.
 - a low-confidence bar exposes an explicit `Подтвердить такт` action; confirmation becomes a visible manual-review state and can be reverted;
 - lyrics highlight only the currently timed word and label that visual meaning in the UI.

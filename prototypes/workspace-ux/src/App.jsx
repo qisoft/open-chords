@@ -32,6 +32,24 @@ const DURATION_OPTIONS = [
   { units: 8, label: '1/2' }, { units: 16, label: '1/1' },
 ]
 
+const CHORD_ROOTS = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B']
+const CHORD_TYPES = [
+  { id: 'major', suffix: '', label: 'мажор' },
+  { id: 'minor', suffix: 'm', label: 'минор' },
+  { id: 'dim', suffix: 'dim', label: 'уменьш.' },
+  { id: 'aug', suffix: 'aug', label: 'увелич.' },
+  { id: 'sus2', suffix: 'sus2', label: 'sus 2' },
+  { id: 'sus4', suffix: 'sus4', label: 'sus 4' },
+  { id: 'six', suffix: '6', label: 'с секстой' },
+  { id: 'seven', suffix: '7', label: 'доминант' },
+  { id: 'major-seven', suffix: 'maj7', label: 'большая 7' },
+  { id: 'minor-seven', suffix: 'm7', label: 'минорная 7' },
+  { id: 'dim-seven', suffix: 'dim7', label: 'уменьш. 7' },
+  { id: 'half-dim', suffix: 'm7♭5', label: 'полууменьш.' },
+  { id: 'add-nine', suffix: 'add9', label: 'добавл. 9' },
+  { id: 'nine', suffix: '9', label: 'с ноною' },
+]
+
 const LYRIC_WORDS = [
   { text: 'Я', start: 18, end: 20 }, { text: 'хотел', start: 20, end: 23 },
   { text: 'бы', start: 23, end: 25 }, { text: 'остаться', start: 25, end: 28 },
@@ -154,6 +172,19 @@ function durationOptionsForBar(bar) {
 function durationLabel(units, bar) {
   if (bar && units === barCapacity(bar)) return `${bar.meter} · весь такт`
   return DURATION_OPTIONS.find((item) => item.units === units)?.label || `${units}/16`
+}
+function chordSymbol(draft) {
+  if (draft.noChord) return 'N'
+  const type = CHORD_TYPES.find((item) => item.id === draft.type) || CHORD_TYPES[0]
+  return `${draft.root}${type.suffix}${draft.bass ? `/${draft.bass}` : ''}`
+}
+function parseChord(symbol) {
+  if (symbol === 'N') return { noChord: true, root: 'C', type: 'major', bass: '' }
+  const [body, bass = ''] = symbol.split('/')
+  const root = [...CHORD_ROOTS].sort((left, right) => right.length - left.length).find((item) => body.startsWith(item)) || 'C'
+  const suffix = body.slice(root.length)
+  const type = CHORD_TYPES.find((item) => item.suffix === suffix)?.id || 'major'
+  return { noChord: false, root, type, bass: CHORD_ROOTS.includes(bass) ? bass : '' }
 }
 function rangesEqual(left, right) { return Boolean(left && right && left.start === right.start && left.end === right.end) }
 function formatTime(positionUnits) {
@@ -341,27 +372,34 @@ function Timeline({ state, dispatch, simple = false }) {
 }
 
 function EventEditor({ state, bar, event, dispatch }) {
-  const [name, setName] = useState(event.chord)
-  useEffect(() => setName(event.chord), [event.id, event.chord])
+  const [chordDraft, setChordDraft] = useState(() => parseChord(event.chord))
+  useEffect(() => setChordDraft(parseChord(event.chord)), [event.id, event.chord])
   const activeIndex = bar.events.findIndex((item) => item.id === event.id)
   const start = bar.events.slice(0, activeIndex).reduce((sum, item) => sum + item.duration, 0)
   const capacity = barCapacity(bar); const used = barUsed(bar); const delta = used - capacity
   const valid = delta === 0
-  const save = (submitEvent) => { submitEvent.preventDefault(); if (!valid || !name.trim()) return; dispatch({ type: 'updateEvent', patch: { chord: name.trim() } }); dispatch({ type: 'saveBar' }) }
+  const name = chordSymbol(chordDraft)
+  const save = (submitEvent) => { submitEvent.preventDefault(); if (!valid) return; dispatch({ type: 'updateEvent', patch: { chord: name } }); dispatch({ type: 'saveBar' }) }
   return <aside className="inspector panel" aria-label="Редактор выбранного события аккорда">
     <div className="panel-heading"><div><span className="eyebrow">Редактор события</span><strong>Такт {bar.number}</strong></div><span className="event-counter">{activeIndex + 1} из {bar.events.length}</span></div>
     <div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item) => <button key={item.id} className={`event-option ${item.id === event.id ? 'selected' : ''}`} aria-pressed={item.id === event.id} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id })}><strong>{item.chord}</strong><span>{durationLabel(item.duration, bar)}</span></button>)}</div>
     {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><div><strong>Автоанализ не уверен</strong><span>Проверь все аккорды в такте. Если всё правильно — подтверди его.</span></div><button className="primary-button" type="button" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}>✓ Подтвердить такт</button></section>}
     {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><div><strong>✓ Проверено вручную</strong><span>Предупреждение снято после твоего подтверждения.</span></div><button className="quiet-button" type="button" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}>Вернуть на проверку</button></section>}
     <form onSubmit={save}>
-      <div className="field-group"><label>Аккорд<input value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <div className="field-group"><section className="chord-picker-control" aria-labelledby="chord-picker-title">
+        <div className="chord-preview"><span id="chord-picker-title">Будет сохранено</span><strong aria-live="polite">{name}</strong></div>
+        <fieldset><legend>Корень аккорда</legend><div className="chord-choice-grid root-choices">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={!chordDraft.noChord && chordDraft.root === root ? 'selected' : ''} aria-pressed={!chordDraft.noChord && chordDraft.root === root} onClick={() => setChordDraft((current) => ({ ...current, noChord: false, root }))}>{root}</button>)}</div></fieldset>
+        <fieldset><legend>Тип аккорда</legend><div className="chord-choice-grid type-choices">{CHORD_TYPES.map((type) => <button key={type.id} type="button" className={!chordDraft.noChord && chordDraft.type === type.id ? 'selected' : ''} aria-pressed={!chordDraft.noChord && chordDraft.type === type.id} onClick={() => setChordDraft((current) => ({ ...current, noChord: false, type: type.id }))}><strong>{type.suffix || 'maj'}</strong><span>{type.label}</span></button>)}</div></fieldset>
+        <label className="bass-choice">Бас / обращение<select value={chordDraft.bass} disabled={chordDraft.noChord} onChange={(selectEvent) => setChordDraft((current) => ({ ...current, bass: selectEvent.target.value }))}><option value="">Без отдельного баса</option>{CHORD_ROOTS.map((root) => <option key={root} value={root}>{root}</option>)}</select></label>
+        <button className={`no-chord-choice ${chordDraft.noChord ? 'selected' : ''}`} type="button" aria-pressed={chordDraft.noChord} onClick={() => setChordDraft((current) => ({ ...current, noChord: true, bass: '' }))}><strong>N</strong><span>Нет определённого аккорда</span></button>
+      </section>
         <fieldset className="duration-control"><legend>Длительность аккорда</legend><div>{durationOptionsForBar(bar).map((option) => <button key={option.units} type="button" className={event.duration === option.units ? 'selected' : ''} aria-pressed={event.duration === option.units} onClick={() => dispatch({ type: 'updateEvent', patch: { duration: option.units } })}>{option.label}</button>)}</div></fieldset>
         <div className="event-position"><span>Начало вычислено автоматически</span><strong>{start + 1}-я шестнадцатая такта</strong></div>
         <div className={`validation-banner ${valid ? 'valid' : 'invalid'}`} role="status">
           {valid ? <><strong>Такт заполнен точно</strong><span>{used} из {capacity} шестнадцатых</span></> : delta > 0 ? <><strong>Конфликт: аккорды выходят за такт</strong><span>Уменьши длительности на {delta}/16</span></> : <><strong>В такте остался разрыв</strong><span>Добавь или растяни аккорды ещё на {-delta}/16</span></>}
         </div>
       </div>
-      <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid || !name.trim()}>Сохранить раскладку</button><button className="quiet-button" type="button" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}>＋ Аккорд после этого</button><button className="danger-button" type="button" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}>Удалить аккорд</button></div>
+      <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid}>Сохранить раскладку</button><button className="quiet-button" type="button" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}>＋ Аккорд после этого</button><button className="danger-button" type="button" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}>Удалить аккорд</button></div>
     </form>
     <p className="original-note">{state.dirtyBarIds.includes(bar.id) ? 'Есть несохранённые изменения.' : 'Раскладка сохранена. Original остаётся отдельно.'}</p>
   </aside>

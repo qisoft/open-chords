@@ -20,10 +20,10 @@
 * { box-sizing: border-box; }
 html { background: var(--bg); color: var(--text); }
 body { margin: 0; min-width: 320px; background: radial-gradient(circle at 50% -10%, #222838 0, var(--bg) 42%); }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { color: inherit; }
-button, a, input { outline: none; }
-button:focus-visible, a:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+button, a, input, select { outline: none; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 button { cursor: pointer; }
 .skip-link { position: fixed; z-index: 100; left: 16px; top: 12px; transform: translateY(-180%); padding: 10px 14px; border-radius: 8px; background: white; color: black; }
 .skip-link:focus { transform: translateY(0); }
@@ -137,6 +137,26 @@ button { cursor: pointer; }
 .review-status.good { color: var(--good); background: #10261e; }
 .field-group { display: grid; gap: 10px; padding: 0 18px 18px; }
 .field-group label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+.chord-picker-control { display: grid; gap: 10px; }
+.chord-picker-control fieldset { margin: 0; border: 0; padding: 0; }
+.chord-picker-control legend { margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+.chord-preview { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 58px; border: 1px solid var(--accent); border-radius: 10px; background: #302b12; padding: 8px 12px; }
+.chord-preview span { color: var(--muted); font-size: 11px; }
+.chord-preview strong { color: var(--accent); font-size: 28px; line-height: 1; }
+.chord-choice-grid { display: grid; gap: 5px; }
+.root-choices { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.type-choices { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.chord-choice-grid button { min-width: 0; min-height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); padding: 5px 3px; }
+.chord-choice-grid button:hover, .no-chord-choice:hover { background: var(--surface-3); }
+.chord-choice-grid button.selected, .no-chord-choice.selected { border: 2px solid var(--accent); background: #302b12; color: var(--accent); font-weight: 900; }
+.type-choices button { display: flex; min-height: 50px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.type-choices button strong { overflow: hidden; max-width: 100%; font-size: 13px; text-overflow: ellipsis; }
+.type-choices button span { overflow: hidden; max-width: 100%; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.bass-choice select { width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--text); padding: 8px 10px; }
+.bass-choice select:disabled { cursor: not-allowed; opacity: .55; }
+.no-chord-choice { display: flex; align-items: center; gap: 10px; min-height: 44px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); padding: 7px 10px; text-align: left; }
+.no-chord-choice strong { font-size: 20px; }
+.no-chord-choice span { color: var(--muted); font-size: 11px; }
 .button-pair { gap: 8px; padding: 0 18px 18px; flex-wrap: wrap; }
 .duration-control { margin: 0; border: 0; padding: 0; }
 .duration-control legend { margin-bottom: 6px; color: var(--muted); font-size: 12px; }
@@ -224,7 +244,8 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 @media (max-width: 1050px) {
   .studio-grid { grid-template-columns: 1fr; }
   .variant-a .inspector { border-width: 1px 0 0; }
-  .variant-a .field-group { grid-template-columns: repeat(3, 1fr); }
+  .variant-a .field-group { grid-template-columns: minmax(0, 1fr) minmax(300px, .85fr); align-items: start; }
+  .variant-a .chord-picker-control { grid-row: span 3; }
   .variant-a .selected-chord { flex-direction: row; align-items: baseline; gap: 12px; }
   .event-picker { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
   .studio-footer { margin-right: 0; }
@@ -240,6 +261,7 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
   .studio-main { padding: 12px; }
   .editor-intro { grid-template-columns: 1fr; }
   .variant-a .field-group { grid-template-columns: 1fr; }
+  .variant-a .chord-picker-control { grid-row: auto; }
   .focus-main { width: calc(100% - 20px); margin: 10px auto; }
   .focus-context, .task-drawer, .section-heading { align-items: flex-start; flex-direction: column; }
   .focus-tools { overflow-x: auto; width: 100%; }
