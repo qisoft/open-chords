@@ -536,7 +536,7 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .event-counter { color: #aaaab4; font-size: 14px; }
 .variant-a .event-picker-shell { margin: 12px 14px 2px; border-radius: 8px; background: #17171c; padding: 12px; }
 .variant-a .event-picker-label { display: block; margin-bottom: 9px; color: #a4a4ae; font-size: 14px; font-weight: 560; }
-.variant-a .event-picker { gap: 8px; overflow-x: auto; border: 0; padding: 0; }
+.variant-a .event-picker { gap: 8px; overflow-x: auto; border: 0; padding: 0 8px; scroll-padding-inline: 8px; }
 .variant-a .event-option {
   display: grid;
   grid-template-columns: 18px minmax(38px, auto) 18px;
