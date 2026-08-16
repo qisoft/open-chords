@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import {
+  AlertTriangle, ArrowLeft, AudioLines, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight,
+  CircleX, Clock3, FolderOpen, Gauge, GripVertical, Keyboard, ListMusic, LoaderCircle, LocateFixed,
+  Music2, Pause, PencilLine, Play, Plus, Repeat2, RotateCcw, Save, SkipBack, SkipForward, Timer,
+  Trash2, Waves, X,
+} from 'lucide-react'
 
 const VARIANTS = { A: 'A — Редактор', B: 'B — Режимы', C: 'C — Список' }
 const PX_PER_UNIT = 20
@@ -75,10 +81,10 @@ const LYRIC_LINES = [
 const LYRIC_WORDS = LYRIC_LINES.flat()
 
 const STATES = [
-  { label: 'Готово', title: 'Проект готов', detail: 'Все данные доступны. Правок: 3.', tone: 'good', symbol: '✓' },
-  { label: 'Анализ', title: 'Анализируем гармонию', detail: 'Этап 3 из 5. Предыдущая ревизия доступна.', tone: 'busy', symbol: '◌' },
-  { label: 'Низкая уверенность', title: 'Нужно проверить 2 места', detail: 'Такты 2 и 5 отмечены текстом и узором.', tone: 'warn', symbol: '!' },
-  { label: 'Ошибка', title: 'Новая ревизия не создана', detail: 'Исходный анализ и правки сохранены.', tone: 'danger', symbol: '×' },
+  { label: 'Готово', title: 'Проект готов', detail: '3 правки', tone: 'good', icon: CheckCircle2 },
+  { label: 'Анализ', title: 'Анализируем гармонию', detail: 'Этап 3 из 5', tone: 'busy', icon: LoaderCircle },
+  { label: 'Проверить', title: 'Низкая уверенность', detail: 'Такты 2 и 5', tone: 'warn', icon: AlertTriangle },
+  { label: 'Ошибка', title: 'Ревизия не создана', detail: 'Исходные данные сохранены', tone: 'danger', icon: CircleX },
 ]
 
 const initialState = {
@@ -244,22 +250,24 @@ function useVariant() {
 }
 
 function Header({ state, dispatch }) {
+  const StatusIcon = STATES[state.statusIndex].icon
   return <header className="app-header">
-    <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">◒</span><strong>Open Chords</strong></div>
+    <div className="brand-lockup"><span className="brand-mark" aria-hidden="true"><AudioLines size={15} strokeWidth={1.8} /></span><strong>Open Chords</strong></div>
     <div className="project-title"><strong>Плачь и танцуй</strong><span>Диапазон 0:00–0:48</span></div>
     <div className="header-actions">
-      <button className="quiet-button" onClick={() => dispatch({ type: 'cycleStatus' })}>Состояние: {STATES[state.statusIndex].label}</button>
-      <button className="quiet-button" aria-pressed={state.reducedMotion} onClick={() => dispatch({ type: 'toggleMotion' })}>{state.reducedMotion ? 'Обычное движение' : 'Меньше движения'}</button>
-      <button className="quiet-button" onClick={() => dispatch({ type: 'setModal', open: true })}>Клавиши</button>
-      <button className="quiet-button">Все проекты</button>
+      <button className="icon-action" aria-label={`Сменить демонстрационное состояние. Сейчас: ${STATES[state.statusIndex].label}`} title={`Состояние: ${STATES[state.statusIndex].label}`} onClick={() => dispatch({ type: 'cycleStatus' })}><StatusIcon size={15} aria-hidden="true" /></button>
+      <button className="icon-action" aria-label={state.reducedMotion ? 'Включить обычное движение' : 'Уменьшить движение'} title={state.reducedMotion ? 'Обычное движение' : 'Меньше движения'} aria-pressed={state.reducedMotion} onClick={() => dispatch({ type: 'toggleMotion' })}><Waves size={15} aria-hidden="true" /></button>
+      <button className="icon-action" aria-label="Показать клавиатурные сокращения" title="Клавиши" onClick={() => dispatch({ type: 'setModal', open: true })}><Keyboard size={15} aria-hidden="true" /></button>
+      <button className="icon-action" aria-label="Открыть все проекты" title="Все проекты"><FolderOpen size={15} aria-hidden="true" /></button>
     </div>
   </header>
 }
 
 function StatusBanner({ state }) {
   const status = STATES[state.statusIndex]
-  return <section className={`status-banner compact ${status.tone}`} aria-label="Состояние проекта" aria-busy={status.tone === 'busy'}>
-    <span className="status-symbol" aria-hidden="true">{status.symbol}</span><div><strong>{status.title}</strong><span>{status.detail}</span></div>
+  const StatusIcon = status.icon
+  return <section className={`status-line ${status.tone}`} aria-label="Состояние проекта" aria-busy={status.tone === 'busy'}>
+    <StatusIcon className="status-line-icon" size={14} aria-hidden="true" /><strong>{status.title}</strong><span>{status.detail}</span>
   </section>
 }
 
@@ -271,10 +279,10 @@ function SelectionToolbar({ state, dispatch }) {
   const selectionIsLoop = state.loopEnabled && rangesEqual(state.selectedRange, state.loopRange)
   const loopActionLabel = selectionIsLoop ? 'Выключить loop' : state.loopEnabled ? 'Перенести loop на выбранное' : 'Зациклить выбранное'
   return <section className="selection-toolbar" aria-label="Действия с выбранными тактами">
-    <div><strong>{count === 1 ? `Такт ${first}` : `Такты ${first}–${last}`}</strong><span>Выбрано мышью</span></div>
-    <button className="primary-button" aria-pressed={selectionIsLoop} onClick={() => dispatch({ type: selectionIsLoop ? 'disableLoop' : 'setLoopFromSelection' })}>{loopActionLabel}</button>
-    <button className="danger-button" disabled={count === state.bars.length} onClick={() => dispatch({ type: 'deleteRange' })}>Удалить такты</button>
-    <button className="quiet-button" onClick={() => dispatch({ type: 'clearRange' })}>Снять выделение</button>
+    <div><strong>{count === 1 ? `Такт ${first}` : `Такты ${first}–${last}`}</strong><span>{count} выбрано</span></div>
+    <button className="toolbar-action" aria-label={loopActionLabel} title={loopActionLabel} aria-pressed={selectionIsLoop} onClick={() => dispatch({ type: selectionIsLoop ? 'disableLoop' : 'setLoopFromSelection' })}><Repeat2 size={15} aria-hidden="true" /></button>
+    <button className="toolbar-action danger" aria-label="Удалить выбранные такты" title="Удалить такты" disabled={count === state.bars.length} onClick={() => dispatch({ type: 'deleteRange' })}><Trash2 size={15} aria-hidden="true" /></button>
+    <button className="toolbar-action" aria-label="Снять выделение" title="Снять выделение" onClick={() => dispatch({ type: 'clearRange' })}><X size={15} aria-hidden="true" /></button>
   </section>
 }
 
@@ -380,10 +388,10 @@ function Timeline({ state, dispatch, simple = false }) {
   }, [])
 
   return <section className={`timeline-shell ${simple ? 'simple' : ''}`} aria-label="Музыкальный таймлайн">
-    <div className="timeline-heading"><div><span className="eyebrow">Таймлайн</span><h2>Тяни playhead для перемотки</h2></div><div className="legend"><span className="legend-low">Низкая уверенность</span><span>Playhead {formatTime(state.positionUnits)}</span></div></div>
+    <div className="timeline-heading"><h2><AudioLines size={15} aria-hidden="true" />Таймлайн</h2><div className="legend"><span className="legend-low"><AlertTriangle size={12} aria-hidden="true" />Проверить</span><span><Clock3 size={12} aria-hidden="true" />{formatTime(state.positionUnits)}</span></div></div>
     <SelectionToolbar state={state} dispatch={dispatch} />
     <div className="timeline-viewport">
-      <div className="center-line"><button className="playhead-handle" aria-label="Перемотка за playhead" onPointerDown={startScrub} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'setPosition', value: state.positionUnits + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 4 : 1) }) } }}><span aria-hidden="true">↔</span></button></div>
+      <div className="center-line"><button className="playhead-handle" aria-label="Перемотка за playhead" title="Перемотка" onPointerDown={startScrub} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'setPosition', value: state.positionUnits + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 4 : 1) }) } }}><GripVertical size={13} aria-hidden="true" /></button></div>
       <div ref={scrollRef} className="timeline-scroll" tabIndex="0" aria-label="Такты и отдельные события аккордов">
         <div ref={trackRef} className="bars-track">
         {state.bars.map((bar, barIndex) => {
@@ -403,8 +411,8 @@ function Timeline({ state, dispatch, simple = false }) {
               const compact = chordEvent.duration <= 2
               return <button key={chordEvent.id} data-chord={chordEvent.chord} title={`${chordEvent.chord} · ${durationLabel(chordEvent.duration, bar)}`} aria-label={`${chordEvent.chord}, длительность ${durationLabel(chordEvent.duration, bar)}`} className={`chord-event ${chordEvent.id === state.activeEventId ? 'selected' : ''} ${compact ? 'compact-event' : ''}`} style={{ left: start * PX_PER_UNIT, width: chordEvent.duration * PX_PER_UNIT }} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: chordEvent.id })}><b>{chordEvent.chord}</b></button>
             })}</div>
-            {bar.confidence === 'low' && <span className="confidence-label">! проверить</span>}
-            {bar.confidence === 'reviewed' && <span className="confidence-label reviewed">✓ проверено вручную</span>}
+            {bar.confidence === 'low' && <span className="confidence-label"><AlertTriangle size={10} aria-hidden="true" />Проверить</span>}
+            {bar.confidence === 'reviewed' && <span className="confidence-label reviewed"><Check size={10} aria-hidden="true" />Проверено</span>}
           </article>
         })}
         </div>
@@ -434,26 +442,23 @@ function EventEditor({ state, bar, event, dispatch }) {
     setChordPickerStep('bass')
   }
   return <aside className="inspector panel" aria-label="Редактор выбранного события аккорда">
-    <div className="panel-heading"><div><span className="eyebrow">Редактор события</span><strong>Такт {bar.number}</strong></div><span className="event-counter">{activeIndex + 1} из {bar.events.length}</span></div>
+    <div className="panel-heading"><div className="inspector-title"><PencilLine size={13} aria-hidden="true" /><strong>Такт {bar.number}</strong></div><span className="event-counter">{activeIndex + 1}/{bar.events.length}</span></div>
     <div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item) => <button key={item.id} className={`event-option ${item.id === event.id ? 'selected' : ''}`} aria-pressed={item.id === event.id} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id })}><strong>{item.chord}</strong><span>{durationLabel(item.duration, bar)}</span></button>)}</div>
-    {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><div><strong>Автоанализ не уверен</strong><span>Проверь все аккорды в такте. Если всё правильно — подтверди его.</span></div><button className="primary-button" type="button" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}>✓ Подтвердить такт</button></section>}
-    {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><div><strong>✓ Проверено вручную</strong><span>Предупреждение снято после твоего подтверждения.</span></div><button className="quiet-button" type="button" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}>Вернуть на проверку</button></section>}
+    {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><AlertTriangle size={14} aria-hidden="true" /><span>Автоанализ не уверен</span><button className="inline-icon-action" type="button" aria-label="Подтвердить такт" title="Подтвердить" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}><Check size={14} aria-hidden="true" /></button></section>}
+    {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><CheckCircle2 size={14} aria-hidden="true" /><span>Проверено вручную</span><button className="inline-icon-action" type="button" aria-label="Вернуть такт на проверку" title="Вернуть на проверку" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}><RotateCcw size={14} aria-hidden="true" /></button></section>}
     <form onSubmit={save}>
       <div className="field-group"><details ref={chordPickerRef} className="chord-picker-dropdown" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open) setChordPickerStep('root') }}>
-        <summary><span>Аккорд</span><strong aria-live="polite">{name}</strong><span>Изменить⌄</span></summary>
+        <summary><Music2 size={14} aria-hidden="true" /><strong aria-live="polite">{name}</strong><ChevronDown size={14} aria-hidden="true" /></summary>
         <div className="chord-picker-menu">
           {chordPickerStep === 'root' && <section className="chord-step" aria-label="Выбор корня аккорда"><div className="chord-step-heading"><span>Шаг 1</span><strong>Выбери корень</strong></div><div className="root-button-grid">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={!chordDraft.noChord && chordDraft.root === root ? 'selected' : ''} aria-pressed={!chordDraft.noChord && chordDraft.root === root} onClick={() => chooseRoot(root)}>{root}</button>)}<button className={`no-chord-root ${chordDraft.noChord ? 'selected' : ''}`} type="button" aria-pressed={chordDraft.noChord} onClick={() => { setChordDraft((current) => ({ ...current, noChord: true, bass: '' })); closeChordPicker() }}><strong>N</strong><span>нет аккорда</span></button></div></section>}
-          {chordPickerStep === 'quality' && <section className="chord-step" aria-label={`Выбор варианта аккорда ${chordDraft.root}`}><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('root')}>← Назад к корню</button></div><div className="chord-step-heading"><span>Шаг 2 · корень {chordDraft.root}</span><strong>Какой это аккорд?</strong></div><div className="primary-quality-grid">{CHORD_TYPES.slice(0, 2).map((type) => <button key={type.id} type="button" className={chordDraft.type === type.id ? 'selected' : ''} onClick={() => chooseQuality(type.id)}><strong>{chordDraft.root}{type.suffix}</strong><span>{type.label}</span></button>)}</div><span className="other-quality-label">Другие варианты</span><div className="other-quality-grid">{CHORD_TYPES.slice(2).map((type) => <button key={type.id} type="button" className={chordDraft.type === type.id ? 'selected' : ''} onClick={() => chooseQuality(type.id)}>{chordDraft.root}{type.suffix}</button>)}</div></section>}
-          {chordPickerStep === 'bass' && <section className="chord-step" aria-label="Выбор баса для slash-аккорда"><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('quality')}>← Назад к варианту</button></div><div className="chord-step-heading"><span>Шаг 3 · {chordSymbol({ ...chordDraft, bass: '' })}</span><strong>Добавить отдельный бас?</strong></div><button type="button" className="finish-without-bass" onClick={() => { setChordDraft((current) => ({ ...current, bass: '' })); closeChordPicker() }}><strong>Готово без баса</strong><span>{chordSymbol({ ...chordDraft, bass: '' })}</span></button><span className="other-quality-label">Или выбери бас для slash-аккорда</span><div className="bass-button-grid">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={chordDraft.bass === root ? 'selected' : ''} onClick={() => { setChordDraft((current) => ({ ...current, bass: root })); closeChordPicker() }}>{root}</button>)}</div></section>}
+          {chordPickerStep === 'quality' && <section className="chord-step" aria-label={`Выбор варианта аккорда ${chordDraft.root}`}><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('root')}><ArrowLeft size={13} aria-hidden="true" />Корень</button></div><div className="chord-step-heading"><span>Шаг 2 · корень {chordDraft.root}</span><strong>Какой это аккорд?</strong></div><div className="primary-quality-grid">{CHORD_TYPES.slice(0, 2).map((type) => <button key={type.id} type="button" className={chordDraft.type === type.id ? 'selected' : ''} onClick={() => chooseQuality(type.id)}><strong>{chordDraft.root}{type.suffix}</strong><span>{type.label}</span></button>)}</div><span className="other-quality-label">Другие варианты</span><div className="other-quality-grid">{CHORD_TYPES.slice(2).map((type) => <button key={type.id} type="button" className={chordDraft.type === type.id ? 'selected' : ''} onClick={() => chooseQuality(type.id)}>{chordDraft.root}{type.suffix}</button>)}</div></section>}
+          {chordPickerStep === 'bass' && <section className="chord-step" aria-label="Выбор баса для slash-аккорда"><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('quality')}><ArrowLeft size={13} aria-hidden="true" />Вариант</button></div><div className="chord-step-heading"><span>Шаг 3 · {chordSymbol({ ...chordDraft, bass: '' })}</span><strong>Добавить отдельный бас?</strong></div><button type="button" className="finish-without-bass" onClick={() => { setChordDraft((current) => ({ ...current, bass: '' })); closeChordPicker() }}><Check size={15} aria-hidden="true" /><strong>Без баса</strong><span>{chordSymbol({ ...chordDraft, bass: '' })}</span></button><span className="other-quality-label">Или выбери бас для slash-аккорда</span><div className="bass-button-grid">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={chordDraft.bass === root ? 'selected' : ''} onClick={() => { setChordDraft((current) => ({ ...current, bass: root })); closeChordPicker() }}>{root}</button>)}</div></section>}
         </div>
       </details>
-        <fieldset className="duration-control"><legend>Длительность аккорда</legend><div>{durationOptionsForBar(bar).map((option) => <button key={option.units} type="button" className={event.duration === option.units ? 'selected' : ''} aria-pressed={event.duration === option.units} onClick={() => dispatch({ type: 'updateEvent', patch: { duration: option.units } })}>{option.label}</button>)}</div></fieldset>
-        <div className="event-position"><span>Начало вычислено автоматически</span><strong>{start + 1}-я шестнадцатая такта</strong></div>
-        <div className={`validation-banner ${valid ? 'valid' : 'invalid'}`} role="status">
-          {valid ? <><strong>Такт заполнен точно</strong><span>{used} из {capacity} шестнадцатых</span></> : delta > 0 ? <><strong>Конфликт: аккорды выходят за такт</strong><span>Уменьши длительности на {delta}/16</span></> : <><strong>В такте остался разрыв</strong><span>Добавь или растяни аккорды ещё на {-delta}/16</span></>}
-        </div>
+        <fieldset className="duration-control"><legend><Clock3 size={12} aria-hidden="true" />Длительность</legend><div>{durationOptionsForBar(bar).map((option) => <button key={option.units} type="button" className={event.duration === option.units ? 'selected' : ''} aria-pressed={event.duration === option.units} onClick={() => dispatch({ type: 'updateEvent', patch: { duration: option.units } })}>{option.label}</button>)}</div></fieldset>
+        <div className="editor-meta" role="status"><span><LocateFixed size={12} aria-hidden="true" />{start + 1}/16</span><span className={valid ? 'valid' : 'invalid'}>{valid ? <><CheckCircle2 size={12} aria-hidden="true" />{used}/{capacity}</> : delta > 0 ? <><AlertTriangle size={12} aria-hidden="true" />−{delta}/16</> : <><AlertTriangle size={12} aria-hidden="true" />+{-delta}/16</>}</span></div>
       </div>
-      <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid}>Сохранить раскладку</button><button className="quiet-button" type="button" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}>＋ Аккорд после этого</button><button className="danger-button" type="button" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}>Удалить аккорд</button></div>
+      <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid}><Save size={14} aria-hidden="true" />Сохранить</button><button className="icon-action" type="button" aria-label="Добавить аккорд после выбранного" title="Добавить аккорд" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}><Plus size={15} aria-hidden="true" /></button><button className="icon-action danger" type="button" aria-label="Удалить выбранный аккорд" title="Удалить аккорд" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}><Trash2 size={15} aria-hidden="true" /></button></div>
     </form>
     <p className="original-note">{state.dirtyBarIds.includes(bar.id) ? 'Есть несохранённые изменения.' : 'Раскладка сохранена. Original остаётся отдельно.'}</p>
   </aside>
@@ -464,12 +469,12 @@ function Transport({ state, dispatch }) {
   const loop = state.loopRange
   const loopLabel = state.loopEnabled && loop ? `Луп: ${state.bars[loop.start].number}${loop.start === loop.end ? '' : `–${state.bars[loop.end].number}`}` : !selected ? 'Луп: выбери такты' : `Зациклить: ${state.bars[selected.start].number}${selected.start === selected.end ? '' : `–${state.bars[selected.end].number}`}`
   return <section className="transport" aria-label="Проигрывание">
-    <button className="transport-key" aria-label="Предыдущий такт" onClick={() => dispatch({ type: 'moveBar', delta: -1 })}>‹</button>
-    <button className="play-button" aria-label={state.playing ? 'Пауза' : 'Воспроизвести'} aria-pressed={state.playing} onClick={() => dispatch({ type: 'togglePlayback' })}>{state.playing ? 'Ⅱ' : '▶'}</button>
-    <button className="transport-key" aria-label="Следующий такт" onClick={() => dispatch({ type: 'moveBar', delta: 1 })}>›</button>
+    <button className="transport-key" aria-label="Предыдущий такт" title="Предыдущий такт" onClick={() => dispatch({ type: 'moveBar', delta: -1 })}><SkipBack size={16} aria-hidden="true" /></button>
+    <button className="play-button" aria-label={state.playing ? 'Пауза' : 'Воспроизвести'} title={state.playing ? 'Пауза' : 'Воспроизвести'} aria-pressed={state.playing} onClick={() => dispatch({ type: 'togglePlayback' })}>{state.playing ? <Pause size={17} fill="currentColor" aria-hidden="true" /> : <Play size={17} fill="currentColor" aria-hidden="true" />}</button>
+    <button className="transport-key" aria-label="Следующий такт" title="Следующий такт" onClick={() => dispatch({ type: 'moveBar', delta: 1 })}><SkipForward size={16} aria-hidden="true" /></button>
     <div className="time-readout"><strong>{formatTime(state.positionUnits)}</strong><span>/ {formatTime(totalUnits(state.bars))}</span></div>
-    <button className="chip-button" disabled={!state.loopEnabled && !selected} aria-pressed={state.loopEnabled} onClick={() => dispatch({ type: state.loopEnabled ? 'disableLoop' : 'setLoopFromSelection' })}>{loopLabel}</button>
-    <button className="chip-button">Скорость 1×</button><button className="chip-button">Метроном</button>
+    <button className="transport-option" disabled={!state.loopEnabled && !selected} aria-label={loopLabel} title={loopLabel} aria-pressed={state.loopEnabled} onClick={() => dispatch({ type: state.loopEnabled ? 'disableLoop' : 'setLoopFromSelection' })}><Repeat2 size={14} aria-hidden="true" />{state.loopEnabled && loop ? `${state.bars[loop.start].number}${loop.start === loop.end ? '' : `–${state.bars[loop.end].number}`}` : ''}</button>
+    <button className="transport-option" aria-label="Скорость воспроизведения 1×" title="Скорость 1×"><Gauge size={14} aria-hidden="true" /><span>1×</span></button><button className="transport-option icon-only" aria-label="Метроном" title="Метроном"><Timer size={14} aria-hidden="true" /></button>
   </section>
 }
 
@@ -477,7 +482,7 @@ function VariantA({ state, dispatch, bar, event }) {
   const currentLyricIndex = LYRIC_WORDS.findIndex((word) => state.positionUnits >= word.start && state.positionUnits < word.end)
   const lyricChordLabels = useMemo(() => chordLabelsForLyricLines(state.bars, LYRIC_LINES), [state.bars])
   return <div className="shell variant-a"><Header state={state} dispatch={dispatch} /><div className="studio-grid">
-    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. У края выделение продолжится с автоскроллом. Тяни playhead для перемотки.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip" aria-label="Многострочный текст песни с аккордами и таймингом"><div className="lyrics-heading"><span className="eyebrow">Текст и аккорды</span><span className="lyrics-key"><b>Am</b> аккорд по таймингу <i aria-hidden="true" /> текущее слово</span></div><div className="lyrics-lines">{LYRIC_LINES.map((line, lineIndex) => { const lineOffset = LYRIC_LINES.slice(0, lineIndex).reduce((sum, item) => sum + item.length, 0); return <p className="lyric-line" key={`line-${lineIndex}`}>{line.map((word, wordIndex) => { const index = lineOffset + wordIndex; return <span className="lyric-token" key={word.id}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span> })}</p> })}</div></section></main>
+    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><h1>Плачь и танцуй</h1><div className="track-facts"><span><Gauge size={12} aria-hidden="true" />88 BPM</span><span><Music2 size={12} aria-hidden="true" />C major</span><span><AudioLines size={12} aria-hidden="true" />4/4</span></div></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip" aria-label="Многострочный текст песни с аккордами и таймингом"><div className="lyrics-heading"><h2><ListMusic size={15} aria-hidden="true" />Текст</h2><span className="lyrics-key"><span title="Аккорд по таймингу"><Music2 size={12} aria-hidden="true" /></span><span title="Текущее слово"><LocateFixed size={12} aria-hidden="true" /></span></span></div><div className="lyrics-lines">{LYRIC_LINES.map((line, lineIndex) => { const lineOffset = LYRIC_LINES.slice(0, lineIndex).reduce((sum, item) => sum + item.length, 0); return <p className="lyric-line" key={`line-${lineIndex}`}>{line.map((word, wordIndex) => { const index = lineOffset + wordIndex; return <span className="lyric-token" key={word.id}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span> })}</p> })}</div></section></main>
     <EventEditor state={state} bar={bar} event={event} dispatch={dispatch} />
   </div><footer className="studio-footer"><Transport state={state} dispatch={dispatch} /></footer></div>
 }
@@ -491,8 +496,8 @@ function VariantC({ state, dispatch, bar, event }) {
   return <div className="shell variant-c"><Header state={state} dispatch={dispatch} /><main id="workspace-main" className="linear-main"><section className="linear-section"><span className="eyebrow">Текущее событие</span><div className="section-heading"><h1>Такт {bar.number}</h1><span className="big-chord">{event.chord}</span></div><Transport state={state} dispatch={dispatch} /></section><section className="linear-section"><span className="eyebrow">Список событий</span><ol className="linear-bars">{state.bars.map((item) => <li key={item.id} className={item.id === bar.id ? 'active' : ''}><div className="linear-bar-row"><button className="linear-bar-name" onClick={() => dispatch({ type: 'selectBar', barId: item.id })}><span className="linear-number">{item.number}</span><span><strong>Такт {item.number} · {item.meter}</strong><small>{item.section}</small></span></button><div className="linear-event-list">{item.events.map((chordEvent) => <button key={chordEvent.id} className={`linear-event ${chordEvent.id === event.id ? 'selected' : ''}`} onClick={() => dispatch({ type: 'selectEvent', barId: item.id, eventId: chordEvent.id })}><strong>{chordEvent.chord}</strong><small>{durationLabel(chordEvent.duration, item)}</small></button>)}</div><span className="linear-status">{item.confidence === 'low' ? '! Проверить' : item.confidence === 'reviewed' ? '✓ Вручную' : 'Проверено'}</span></div></li>)}</ol></section></main></div>
 }
 
-function PrototypeSwitcher({ variant, cycle }) { if (!import.meta.env.DEV) return null; return <nav className="prototype-switcher"><button onClick={() => cycle(-1)} aria-label="Предыдущий вариант">←</button><strong>{VARIANTS[variant]}</strong><button onClick={() => cycle(1)} aria-label="Следующий вариант">→</button></nav> }
-function Shortcuts({ onClose }) { const closeRef = useRef(null); useEffect(() => closeRef.current?.focus(), []); return <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="shortcut-title"><div className="panel-heading"><h2 id="shortcut-title">Клавиши</h2><button ref={closeRef} className="icon-button" onClick={onClose}>×</button></div><dl className="shortcut-list"><div><dt>Space</dt><dd>Play / pause</dd></div><div><dt>[ / ]</dt><dd>Предыдущий / следующий такт</dd></div><div><dt>Drag тактов</dt><dd>Выбрать диапазон; у края включается автоскролл</dd></div><div><dt>Drag playhead</dt><dd>Перемотка при неподвижной центральной линии</dd></div><div><dt>Esc</dt><dd>Закрыть окно</dd></div></dl></section></div> }
+function PrototypeSwitcher({ variant, cycle }) { if (!import.meta.env.DEV) return null; return <nav className="prototype-switcher"><button onClick={() => cycle(-1)} aria-label="Предыдущий вариант"><ChevronLeft size={18} aria-hidden="true" /></button><strong>{VARIANTS[variant]}</strong><button onClick={() => cycle(1)} aria-label="Следующий вариант"><ChevronRight size={18} aria-hidden="true" /></button></nav> }
+function Shortcuts({ onClose }) { const closeRef = useRef(null); useEffect(() => closeRef.current?.focus(), []); return <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="shortcut-title"><div className="panel-heading"><h2 id="shortcut-title">Клавиши</h2><button ref={closeRef} className="icon-button" aria-label="Закрыть" onClick={onClose}><X size={16} aria-hidden="true" /></button></div><dl className="shortcut-list"><div><dt>Space</dt><dd>Play / pause</dd></div><div><dt>[ / ]</dt><dd>Предыдущий / следующий такт</dd></div><div><dt>Drag тактов</dt><dd>Выбрать диапазон; у края включается автоскролл</dd></div><div><dt>Drag playhead</dt><dd>Перемотка при неподвижной центральной линии</dd></div><div><dt>Esc</dt><dd>Закрыть окно</dd></div></dl></section></div> }
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState)

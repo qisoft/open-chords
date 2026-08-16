@@ -40,7 +40,7 @@ Timeline interaction in the current checkpoint:
 - lyrics highlight only the currently timed word and label that visual meaning in the UI.
 - each timed Chord Event is projected above the lyric word it overlaps, so the chord track remains visible while reading and playing from lyrics.
 - the lyrics sample spans four explicit lines; a chord already sounding at a line boundary is repeated above that line's first overlapping word so the player never loses harmonic context;
-- variant A now includes a Linear-inspired visual pass: neutral near-black surfaces, hairline dividers, compact typography, restrained violet selection, and semantic colour only for status meaning.
+- variant A uses a flat Linear-inspired hierarchy rather than card containers: open timeline and lyrics sections, tab-like event selection, inline metadata, compact typography, and Lucide icon actions with accessible labels/tooltips; violet is reserved for selection and semantic colour for status meaning.
 
 Try these checks in every variant:
 
