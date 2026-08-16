@@ -26,6 +26,7 @@ Timeline interaction in the current checkpoint:
 - drag across bar headers to select a contiguous range; holding at either edge auto-scrolls and extends selection;
 - drag the fixed center playhead to scrub; only the bars move beneath it;
 - press Space to play or pause; playback moves the bars under the fixed playhead;
+- when loop is enabled, every transition from pause to playback starts at the first selected bar;
 - chord widths use 20 px sixteenth-note units (40 px per eighth) and align to four beat intervals in 4/4;
 - edit duration with 1/16, 1/8, 1/4, 1/2, or whole-note controls; manual time inputs are intentionally absent;
 - gaps and overlaps disable saving until the bar is exactly filled.

@@ -118,7 +118,12 @@ function reducer(state, action) {
     }
     case 'setPosition': return { ...state, positionUnits: Math.max(0, Math.min(totalUnits(state.bars), action.value)) }
     case 'setPlaying': return { ...state, playing: action.value }
-    case 'togglePlaying': return { ...state, playing: !state.playing }
+    case 'togglePlayback': {
+      if (state.playing) return { ...state, playing: false }
+      if (!state.loopEnabled || !state.selectedRange) return { ...state, playing: true }
+      const loopStart = barOffsets(state.bars)[state.selectedRange.start]
+      return { ...state, playing: true, positionUnits: loopStart }
+    }
     case 'cycleStatus': return { ...state, statusIndex: (state.statusIndex + 1) % STATES.length }
     case 'toggleMotion': return { ...state, reducedMotion: !state.reducedMotion }
     case 'setMode': return { ...state, mode: action.mode }
@@ -317,7 +322,7 @@ function Transport({ state, dispatch }) {
   const loopLabel = !range ? 'Луп: выбери такты' : `Луп: ${state.bars[range.start].number}${range.start === range.end ? '' : `–${state.bars[range.end].number}`}`
   return <section className="transport" aria-label="Проигрывание">
     <button className="transport-key" aria-label="Предыдущий такт" onClick={() => dispatch({ type: 'moveBar', delta: -1 })}>‹</button>
-    <button className="play-button" aria-label={state.playing ? 'Пауза' : 'Воспроизвести'} aria-pressed={state.playing} onClick={() => dispatch({ type: 'togglePlaying' })}>{state.playing ? 'Ⅱ' : '▶'}</button>
+    <button className="play-button" aria-label={state.playing ? 'Пауза' : 'Воспроизвести'} aria-pressed={state.playing} onClick={() => dispatch({ type: 'togglePlayback' })}>{state.playing ? 'Ⅱ' : '▶'}</button>
     <button className="transport-key" aria-label="Следующий такт" onClick={() => dispatch({ type: 'moveBar', delta: 1 })}>›</button>
     <div className="time-readout"><strong>{formatTime(state.positionUnits)}</strong><span>/ {formatTime(totalUnits(state.bars))}</span></div>
     <button className="chip-button" disabled={!range} aria-pressed={state.loopEnabled} onClick={() => dispatch({ type: 'toggleLoop' })}>{loopLabel}</button>
@@ -378,7 +383,7 @@ export function App() {
     const onKeyDown = (event) => {
       if (event.key === 'Escape' && state.modal) { dispatch({ type: 'setModal', open: false }); return }
       if (state.modal || event.target.matches('input, textarea, select, button, a, [contenteditable]')) return
-      if (event.key === ' ') { event.preventDefault(); dispatch({ type: 'togglePlaying' }) }
+      if (event.key === ' ') { event.preventDefault(); dispatch({ type: 'togglePlayback' }) }
       if (event.key === '[') dispatch({ type: 'moveBar', delta: -1 })
       if (event.key === ']') dispatch({ type: 'moveBar', delta: 1 })
       if (event.key === 'ArrowLeft') { event.preventDefault(); cycleVariant(-1) }
