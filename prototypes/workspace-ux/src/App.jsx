@@ -92,7 +92,7 @@ const initialState = {
   activeBarId: 'bar-3', activeEventId: '3-c',
   selectedRange: null, loopRange: null, loopEnabled: false, positionUnits: 32,
   statusIndex: 0, playing: false, reducedMotion: false, mode: 'Редактор', modal: false,
-  transpose: 0, capo: 0, chordMode: 'original', playbackRate: 1, metronome: false,
+  transpose: 0, chordMode: 'original', playbackRate: 1, metronome: false,
   dirtyBarIds: [],
 }
 
@@ -199,7 +199,6 @@ function reducer(state, action) {
     case 'setMode': return { ...state, mode: action.mode }
     case 'adjustTranspose': return { ...state, transpose: Math.max(-11, Math.min(11, (state.transpose ?? 0) + action.delta)) }
     case 'resetTranspose': return { ...state, transpose: 0 }
-    case 'adjustCapo': return { ...state, capo: Math.max(0, Math.min(11, (state.capo ?? 0) + action.delta)) }
     case 'setChordMode': return { ...state, chordMode: action.mode }
     case 'cyclePlaybackRate': {
       const rates = [.5, .75, 1, 1.25, 1.5]
@@ -239,7 +238,7 @@ function shiftedRoot(root, semitones) {
 function presentedChord(symbol, state) {
   if (!symbol || symbol === 'N') return symbol || ''
   const draft = parseChord(symbol)
-  const shift = (state.transpose ?? 0) - (state.capo ?? 0)
+  const shift = state.transpose ?? 0
   const minorLike = ['minor', 'minor-seven', 'half-dim'].includes(draft.type)
   return chordSymbol({
     ...draft,
@@ -563,11 +562,16 @@ function EventEditor({ state, bar, event, dispatch }) {
   </aside>
 }
 
-function Transport({ state, dispatch }) {
+function Transport({ state, dispatch, centered = false }) {
   const selected = state.selectedRange
   const loop = state.loopRange
   const playbackRate = state.playbackRate ?? 1
   const loopLabel = state.loopEnabled && loop ? `Луп: ${state.bars[loop.start].number}${loop.start === loop.end ? '' : `–${state.bars[loop.end].number}`}` : !selected ? 'Луп: выбери такты' : `Зациклить: ${state.bars[selected.start].number}${selected.start === selected.end ? '' : `–${state.bars[selected.end].number}`}`
+  if (centered) return <section className="transport timeline-transport" aria-label="Проигрывание">
+    <div className="transport-readout"><div className="time-readout"><strong>{formatTime(state.positionUnits)}</strong><span>/ {formatTime(totalUnits(state.bars))}</span></div><button className="transport-option" disabled={!state.loopEnabled && !selected} aria-label={loopLabel} title={loopLabel} aria-pressed={state.loopEnabled} onClick={() => dispatch({ type: state.loopEnabled ? 'disableLoop' : 'setLoopFromSelection' })}><Repeat2 size={14} aria-hidden="true" />{state.loopEnabled && loop ? `${state.bars[loop.start].number}${loop.start === loop.end ? '' : `–${state.bars[loop.end].number}`}` : ''}</button></div>
+    <div className="transport-center"><button className="transport-key" aria-label="Предыдущий такт" title="Предыдущий такт" onClick={() => dispatch({ type: 'moveBar', delta: -1 })}><SkipBack size={16} aria-hidden="true" /></button><button className="play-button" aria-label={state.playing ? 'Пауза' : 'Воспроизвести'} title={state.playing ? 'Пауза' : 'Воспроизвести'} aria-pressed={state.playing} onClick={() => dispatch({ type: 'togglePlayback' })}>{state.playing ? <Pause size={17} fill="currentColor" aria-hidden="true" /> : <Play size={17} fill="currentColor" aria-hidden="true" />}</button><button className="transport-key" aria-label="Следующий такт" title="Следующий такт" onClick={() => dispatch({ type: 'moveBar', delta: 1 })}><SkipForward size={16} aria-hidden="true" /></button></div>
+    <div className="transport-actions"><button className="transport-option" aria-label={`Скорость воспроизведения ${playbackRate}×. Нажми для смены`} title={`Скорость ${playbackRate}×`} onClick={() => dispatch({ type: 'cyclePlaybackRate' })}><Gauge size={14} aria-hidden="true" /><span>{playbackRate}×</span></button><button className="transport-option icon-only" aria-label={state.metronome ? 'Выключить метроном' : 'Включить метроном'} title={`Метроном ${state.metronome ? 'включён' : 'выключен'}`} aria-pressed={Boolean(state.metronome)} onClick={() => dispatch({ type: 'toggleMetronome' })}><Timer size={14} aria-hidden="true" /></button></div>
+  </section>
   return <section className="transport" aria-label="Проигрывание">
     <button className="transport-key" aria-label="Предыдущий такт" title="Предыдущий такт" onClick={() => dispatch({ type: 'moveBar', delta: -1 })}><SkipBack size={16} aria-hidden="true" /></button>
     <button className="play-button" aria-label={state.playing ? 'Пауза' : 'Воспроизвести'} title={state.playing ? 'Пауза' : 'Воспроизвести'} aria-pressed={state.playing} onClick={() => dispatch({ type: 'togglePlayback' })}>{state.playing ? <Pause size={17} fill="currentColor" aria-hidden="true" /> : <Play size={17} fill="currentColor" aria-hidden="true" />}</button>
@@ -580,14 +584,13 @@ function Transport({ state, dispatch }) {
 
 function TimelineControls({ state, dispatch }) {
   const transpose = state.transpose ?? 0
-  const capo = state.capo ?? 0
-  const transposeLabel = transpose > 0 ? `+${transpose}` : `${transpose}`
+  const transposeLabel = transpose > 0 ? `+${transpose}` : transpose < 0 ? `−${Math.abs(transpose)}` : '0'
+  const capoHint = transpose < 0 ? `капо ${Math.abs(transpose)}` : ''
   return <section className="timeline-control-bar" aria-label="Воспроизведение и вид аккордов">
-    <Transport state={state} dispatch={dispatch} />
+    <Transport state={state} dispatch={dispatch} centered />
     <div className="presentation-controls" aria-label="Настройки аккордов для игры">
       <span className="presentation-label">Для игры</span>
-      <div className="value-stepper" role="group" aria-label="Транспонирование"><button type="button" aria-label="Транспонировать на полтона ниже" disabled={transpose === -11} onClick={() => dispatch({ type: 'adjustTranspose', delta: -1 })}><Minus size={15} aria-hidden="true" /></button><button type="button" className="stepper-value" aria-label={`Транспонирование ${transposeLabel}. Сбросить`} title="Сбросить транспонирование" onClick={() => dispatch({ type: 'resetTranspose' })}><Music2 size={15} aria-hidden="true" /><span>Тон {transposeLabel}</span></button><button type="button" aria-label="Транспонировать на полтона выше" disabled={transpose === 11} onClick={() => dispatch({ type: 'adjustTranspose', delta: 1 })}><Plus size={15} aria-hidden="true" /></button></div>
-      <div className="value-stepper" role="group" aria-label="Каподастр"><button type="button" aria-label="Опустить каподастр" disabled={capo === 0} onClick={() => dispatch({ type: 'adjustCapo', delta: -1 })}><Minus size={15} aria-hidden="true" /></button><span className="stepper-value"><span>Капо {capo}</span></span><button type="button" aria-label="Поднять каподастр" disabled={capo === 11} onClick={() => dispatch({ type: 'adjustCapo', delta: 1 })}><Plus size={15} aria-hidden="true" /></button></div>
+      <div className="value-stepper" role="group" aria-label="Сдвиг аккордов"><button type="button" aria-label="Тон на полтона ниже" disabled={transpose === -11} onClick={() => dispatch({ type: 'adjustTranspose', delta: -1 })}><Minus size={15} aria-hidden="true" /></button><button type="button" className="stepper-value" aria-label={`Тон ${transposeLabel}${capoHint ? `, ${capoHint}` : ''}. Сбросить`} title="Сбросить сдвиг аккордов" onClick={() => dispatch({ type: 'resetTranspose' })}><Music2 size={15} aria-hidden="true" /><span><strong>Тон {transposeLabel}</strong>{capoHint && <small>{capoHint}</small>}</span></button><button type="button" aria-label="Тон на полтона выше" disabled={transpose === 11} onClick={() => dispatch({ type: 'adjustTranspose', delta: 1 })}><Plus size={15} aria-hidden="true" /></button></div>
       <div className="chord-mode-control" role="group" aria-label="Сложность аккордов"><button type="button" aria-pressed={state.chordMode !== 'beginner'} onClick={() => dispatch({ type: 'setChordMode', mode: 'original' })}>Original</button><button type="button" aria-pressed={state.chordMode === 'beginner'} onClick={() => dispatch({ type: 'setChordMode', mode: 'beginner' })}>Проще</button></div>
     </div>
   </section>
@@ -595,10 +598,10 @@ function TimelineControls({ state, dispatch }) {
 
 function VariantA({ state, dispatch, bar, event }) {
   const currentLyricIndex = LYRIC_WORDS.findIndex((word) => state.positionUnits >= word.start && state.positionUnits < word.end)
-  const lyricChordLabels = useMemo(() => chordLabelsForLyricLines(state.bars, LYRIC_LINES).map((chord) => presentedChord(chord, state)), [state.bars, state.transpose, state.capo, state.chordMode])
+  const lyricChordLabels = useMemo(() => chordLabelsForLyricLines(state.bars, LYRIC_LINES).map((chord) => presentedChord(chord, state)), [state.bars, state.transpose, state.chordMode])
   const presentedKey = shiftedRoot('C', state.transpose ?? 0)
   return <div className="shell variant-a"><Header state={state} dispatch={dispatch} /><div className="studio-grid">
-    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><h1>Плачь и танцуй</h1><div className="track-facts"><span><Gauge size={12} aria-hidden="true" />88 BPM</span><span><Music2 size={12} aria-hidden="true" />{presentedKey} major</span><span><AudioLines size={12} aria-hidden="true" />4/4</span></div></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} controls /><section className="lyrics-strip" aria-label="Многострочный текст песни с аккордами и таймингом"><div className="lyrics-heading"><h2><ListMusic size={15} aria-hidden="true" />Текст</h2><span className="lyrics-key"><span title="Аккорд по таймингу"><Music2 size={12} aria-hidden="true" /></span><span title="Текущее слово"><LocateFixed size={12} aria-hidden="true" /></span></span></div><div className="lyrics-lines">{LYRIC_LINES.map((line, lineIndex) => { const lineOffset = LYRIC_LINES.slice(0, lineIndex).reduce((sum, item) => sum + item.length, 0); return <p className="lyric-line" key={`line-${lineIndex}`}>{line.map((word, wordIndex) => { const index = lineOffset + wordIndex; return <span className="lyric-token" key={word.id}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span> })}</p> })}</div></section></main>
+    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><h1>Плачь и танцуй</h1><div className="track-facts"><span><Gauge size={12} aria-hidden="true" />88 BPM</span><span><Music2 size={12} aria-hidden="true" />{presentedKey} major</span><span><AudioLines size={12} aria-hidden="true" />4/4</span></div></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} controls /><section className="lyrics-strip" aria-label="Многострочный текст песни с аккордами и таймингом"><div className="lyrics-heading"><h2><ListMusic size={15} aria-hidden="true" />Текст</h2><span className="lyrics-key"><span title="Аккорд над словом начинает звучать с этого слова"><Music2 size={12} aria-hidden="true" />Начало аккорда</span><span title="Подсвечено слово, которое звучит в текущей позиции playhead"><LocateFixed size={12} aria-hidden="true" />Слово сейчас</span></span></div><div className="lyrics-lines">{LYRIC_LINES.map((line, lineIndex) => { const lineOffset = LYRIC_LINES.slice(0, lineIndex).reduce((sum, item) => sum + item.length, 0); return <p className="lyric-line" key={`line-${lineIndex}`}>{line.map((word, wordIndex) => { const index = lineOffset + wordIndex; return <span className="lyric-token" key={word.id}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span> })}</p> })}</div></section></main>
     <EventEditor state={state} bar={bar} event={event} dispatch={dispatch} />
   </div></div>
 }

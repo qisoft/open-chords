@@ -30,7 +30,8 @@ Timeline interaction in the current checkpoint:
 - press Space to play or pause; playback moves the bars under the fixed playhead;
 - playback, loop, speed, and metronome controls live directly below the timeline instead of in a detached bottom footer;
 - when loop is enabled, every transition from pause to playback starts at the first bar in the latched loop range;
-- the same timeline control bar exposes presentation-only transpose, capo, and Original/Проще controls; timeline and lyric chords update immediately, while the editor and saved Original data stay unchanged;
+- the same timeline control bar exposes a single signed chord shift plus Original/Проще; negative shifts show the matching capo fret (for example `Тон −1 · капо 1`), timeline and lyric chords update immediately, and the editor/saved Original stay unchanged;
+- the symmetric previous/play/next group is centred so Play sits directly below the fixed playhead; time/loop and speed/metronome occupy the side columns;
 - chord widths use 20 px sixteenth-note units (40 px per eighth) and align to four beat intervals in 4/4;
 - edit duration with fixed note values plus a meter-derived `весь такт` choice (`3/4 · весь такт`, `4/4 · весь такт`, etc.); manual time inputs are intentionally absent;
 - meter capacity uses both numerator and denominator, so 6/8 spans twelve sixteenth-note units rather than twenty-four;
@@ -40,7 +41,7 @@ Timeline interaction in the current checkpoint:
 - `Добавить аккорд` is the final control inside `Аккорды в этом такте` and appends a selected `N` event; event tiles can be pointer-dragged into insertion slots before, between, or after events (including visible, unclipped gutters beyond the first and last tile; the marker crosses an event at its horizontal midpoint and the result is mirrored immediately on the timeline) or moved with `Alt + ←/→` from the keyboard;
 - gaps and overlaps disable saving until the bar is exactly filled.
 - a low-confidence bar exposes an explicit `Подтвердить такт` action; confirmation becomes a visible manual-review state and can be reverted;
-- lyrics highlight only the currently timed word and label that visual meaning in the UI.
+- lyrics highlight only the currently timed word; the header legend says `Начало аккорда` and `Слово сейчас`, with full-sentence tooltips explaining both visual cues.
 - each timed Chord Event is projected above the lyric word it overlaps, so the chord track remains visible while reading and playing from lyrics.
 - the lyrics sample spans four explicit lines; a chord already sounding at a line boundary is repeated above that line's first overlapping word so the player never loses harmonic context;
 - variant A uses a flat Linear-inspired hierarchy rather than card containers: open timeline and lyrics sections, tab-like event selection, inline metadata, compact typography, and Lucide icon actions with accessible labels/tooltips; violet is reserved for selection and semantic colour for status meaning.
