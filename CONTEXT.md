@@ -228,8 +228,28 @@ _Avoid_: Machine word timing, lyric rewrite, global marker
 A deterministic presentation derived from the Original chord vocabulary, including simplification and capo suggestions without changing stored Chord Events.
 _Avoid_: Beginner analysis, easy chords
 
+**Open Chords JSON Snapshot**:
+A versioned deterministic semantic export of one immutable Active View snapshot, carrying Original Chord Identities, declared presentation transforms, its Effective Timeline, selected lyrics and alignment, safe provenance, and user-authorship attribution without edit history, Source media, or practice state.
+_Avoid_: Portable Project Archive, Project Library backup, raw analysis dump
+
+**ChordPro Projection**:
+A deterministic compatibility-first lead-sheet projection of an Active View using standard ChordPro constructs, preserving exact chord text without silent simplification while explicitly reporting timing, confidence, provenance, and history losses.
+_Avoid_: Canonical Project format, lossless export, Open Chords extension format
+
+**LRC Projection**:
+A line-timed projection containing only validated monotonic lyric-line onsets; unmatched lines are omitted and reported rather than assigned invented timestamps.
+_Avoid_: Lyrics Alignment, word-timed canonical export, complete lyrics document
+
+**PDF/Print Projection**:
+An accessible, self-contained rendering of one Active View under a versioned layout profile with fixed fonts, locale, page geometry, pagination rules, and one deduplicated valid chord-diagram set for the selected instrument. It makes no PDF/A or PDF/UA conformance claim unless separately validated.
+_Avoid_: Project backup, editable source, archival-conformance claim
+
+**Export Receipt**:
+The Project-owned record of one completed export, identifying the immutable Active View snapshot, export profile, output hash and location, and every reported omission or degradation without becoming an extra sidecar deliverable.
+_Avoid_: Exported document, audit log, provenance manifest
+
 **Portable Project Archive**:
-A versioned, hash-manifested package of a complete Project and its retained non-derived history, with safe provenance and external model requirements. Source media is excluded unless the user explicitly includes only the Project Range after confirming rights.
+A versioned, hash-manifested package of a complete Project and its retained non-derived history, with safe provenance and external model requirements. Source media is excluded by default; an explicit functional option may include only the verified Project Range.
 _Avoid_: Open Chords JSON snapshot, Project Library backup, public share
 
 **Project Revision**:
