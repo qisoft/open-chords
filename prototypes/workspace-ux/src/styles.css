@@ -474,6 +474,136 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .time-readout { margin: 0 8px; font-size: 11px; }
 .variant-a .time-readout span { color: #686871; }
 
+/* Variant A readability pass — larger targets, explicit selection, fewer rules */
+.variant-a .app-header { min-height: 64px; padding: 10px 18px; }
+.variant-a .brand-lockup { font-size: 15px; }
+.variant-a .brand-mark { width: 34px; height: 34px; border: 0; background: #1b1b21; }
+.variant-a .brand-mark svg { width: 18px; height: 18px; }
+.variant-a .icon-action,
+.variant-a .toolbar-action,
+.variant-a .inline-icon-action { width: 40px; height: 40px; border-radius: 7px; }
+.variant-a .icon-action svg,
+.variant-a .toolbar-action svg,
+.variant-a .inline-icon-action svg,
+.variant-a .transport-option svg,
+.variant-a .transport-key svg { width: 20px; height: 20px; }
+.variant-a .studio-main { gap: 14px; padding: 18px; }
+.variant-a .editor-intro { min-height: 62px; align-items: center; }
+.variant-a .editor-intro h1 { margin-bottom: 7px; font-size: clamp(25px, 2.3vw, 31px); }
+.variant-a .track-facts { gap: 18px; color: #aaaab3; font-size: 14px; }
+.variant-a .track-facts svg { width: 15px; height: 15px; }
+.variant-a .status-line { gap: 8px; color: #92929d; font-size: 14px; }
+.variant-a .status-line strong { color: #d0d0d6; }
+.variant-a .status-line-icon { width: 17px; height: 17px; }
+.variant-a .timeline-shell,
+.variant-a .lyrics-strip {
+  border: 0;
+  border-radius: 9px;
+  background: #111115;
+}
+.variant-a .timeline-shell { padding: 16px; }
+.variant-a .timeline-heading { padding: 0; }
+.variant-a .timeline-heading h2,
+.variant-a .lyrics-heading h2 { font-size: 15px; font-weight: 620; }
+.variant-a .timeline-heading h2 svg,
+.variant-a .lyrics-heading h2 svg { width: 18px; height: 18px; }
+.variant-a .legend { gap: 16px; color: #9b9ba5; font-size: 14px; }
+.variant-a .legend svg { width: 15px; height: 15px; }
+.variant-a .timeline-viewport { margin-top: 14px; border: 0; border-radius: 7px; background: #0b0b0e; }
+.variant-a .beat-grid { border: 0; background: rgba(255,255,255,.012); }
+.variant-a .beat-grid span { border-color: #2a2a31; }
+.variant-a .playhead-handle { top: 5px; width: 38px; height: 38px; border: 0; }
+.variant-a .playhead-handle svg { width: 17px; height: 17px; }
+.variant-a .bar-select { min-height: 45px; padding: 8px 9px; }
+.variant-a .bar-select b { font-size: 14px; }
+.variant-a .bar-select small { font-size: 12px; }
+.variant-a .confidence-label { display: inline-flex; align-items: center; gap: 5px; padding-top: 5px; font-size: 13px; }
+.variant-a .chord-event b { font-size: 18px; }
+.variant-a .selection-toolbar { min-height: 52px; border-radius: 7px; background: #191821; padding: 6px 8px 6px 12px; }
+.variant-a .selection-toolbar > div strong { font-size: 14px; }
+.variant-a .selection-toolbar > div span { font-size: 12px; }
+.variant-a .toolbar-action { flex-basis: 40px; }
+.variant-a .inspector { border-left: 0; background: #101014; }
+.variant-a .panel-heading {
+  min-height: 105px;
+  border: 0;
+  background: #17171c;
+  padding: 16px 18px;
+}
+.variant-a .inspector-current { display: grid; gap: 9px; }
+.variant-a .inspector-current > span { display: inline-flex; align-items: center; gap: 7px; color: #aaaab4; font-size: 14px; }
+.variant-a .inspector-current > strong { color: #e5e3ff; font-size: 32px; font-weight: 660; line-height: 1; }
+.variant-a .event-counter { color: #aaaab4; font-size: 14px; }
+.variant-a .event-picker-shell { margin: 12px 14px 2px; border-radius: 8px; background: #17171c; padding: 12px; }
+.variant-a .event-picker-label { display: block; margin-bottom: 9px; color: #a4a4ae; font-size: 14px; font-weight: 560; }
+.variant-a .event-picker { gap: 8px; overflow-x: auto; border: 0; padding: 0; }
+.variant-a .event-option {
+  display: grid;
+  grid-template-columns: 18px auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  min-width: 102px;
+  min-height: 64px;
+  border: 0;
+  border-radius: 7px;
+  background: #202027;
+  padding: 9px 12px;
+}
+.variant-a .event-option:hover { background: #282830; }
+.variant-a .event-option > svg { grid-row: 1 / span 2; color: #c9c6ff; }
+.variant-a .event-option strong { grid-column: 2; font-size: 20px; }
+.variant-a .event-option span { grid-column: 2; color: #aaaab4; font-size: 13px; }
+.variant-a .event-option:not(.selected):not(:has(svg)) strong,
+.variant-a .event-option:not(.selected):not(:has(svg)) span { grid-column: 1 / span 2; }
+.variant-a .event-option.selected { border: 0; background: rgba(141,134,255,.2); color: #f0efff; padding: 9px 12px; }
+.variant-a .event-option.selected::after { display: none; }
+.variant-a .review-status {
+  min-height: 52px;
+  margin: 10px 14px 0;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(199,166,106,.09);
+  padding: 6px 8px 6px 12px;
+}
+.variant-a .review-status.good { background: rgba(101,184,154,.08); }
+.variant-a .review-status span { color: #c5c2b9; font-size: 14px; }
+.variant-a .field-group { gap: 14px; padding: 14px; }
+.variant-a .chord-picker-dropdown summary {
+  min-height: 50px;
+  border: 0;
+  border-radius: 7px;
+  background: #1a1a20;
+  padding: 8px 12px;
+}
+.variant-a .chord-picker-dropdown summary:hover,
+.variant-a .chord-picker-dropdown[open] summary { border: 0; background: #22222a; }
+.variant-a .chord-picker-dropdown summary strong { font-size: 23px; }
+.variant-a .duration-control legend { margin-bottom: 7px; color: #aaaab4; font-size: 14px; }
+.variant-a .duration-control > div { gap: 4px; border: 0; border-radius: 7px; background: #17171c; padding: 4px; }
+.variant-a .duration-control button { min-height: 42px; border-radius: 5px; font-size: 14px; }
+.variant-a .duration-control button.selected { border: 0; border-radius: 5px; background: rgba(141,134,255,.2); box-shadow: none; }
+.variant-a .editor-meta { gap: 18px; border: 0; border-radius: 7px; background: #17171c; padding: 11px 12px; color: #aaaab4; font-size: 14px; }
+.variant-a .button-pair { gap: 6px; border: 0; padding: 2px 14px 10px; }
+.variant-a .primary-button { min-height: 42px; border-radius: 7px; font-size: 14px; }
+.variant-a .original-note { padding-bottom: 16px; color: #92929c; font-size: 12px; }
+.variant-a .lyrics-strip { padding: 16px 18px 20px; }
+.variant-a .lyrics-key > span { width: 40px; height: 40px; border-radius: 7px; }
+.variant-a .lyrics-key > span:hover { background: rgba(255,255,255,.045); color: #d0d0d6; }
+.variant-a .lyrics-key svg { width: 17px; height: 17px; }
+.variant-a .lyrics-lines { gap: 15px; margin-top: 16px; }
+.variant-a .lyric-line { gap: 3px 10px; font-size: clamp(21px, 2.1vw, 29px); line-height: 1.4; }
+.variant-a .lyric-token { grid-template-rows: 23px auto; }
+.variant-a .lyric-chord { min-height: 23px; font-size: 16px; font-weight: 680; }
+.variant-a .studio-footer { border-top: 0; background: rgba(13,13,16,.97); }
+.variant-a .transport { min-height: 78px; gap: 7px; }
+.variant-a .transport-key { width: 44px; height: 44px; border-radius: 8px; }
+.variant-a .play-button { width: 48px; height: 48px; }
+.variant-a .transport-option { min-width: 40px; min-height: 40px; border-radius: 7px; font-size: 14px; }
+.variant-a .transport-option.icon-only { width: 40px; }
+.variant-a .time-readout { margin: 0 10px; font-size: 14px; }
+.variant-a .time-readout span { font-size: 13px; }
+
 /* Variant B */
 .mode-tabs { display: flex; justify-content: center; gap: 5px; padding: 14px; border-bottom: 1px solid var(--line); }
 .mode-tabs button { min-width: 130px; min-height: 44px; border: 0; border-radius: 10px; background: transparent; }
@@ -532,7 +662,7 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 
 @media (max-width: 1050px) {
   .studio-grid { grid-template-columns: 1fr; min-height: 0; align-items: start; }
-  .variant-a .inspector { border: 0; border-top: 1px solid #232329; }
+  .variant-a .inspector { border: 0; }
   .variant-a .field-group { grid-template-columns: minmax(0, 1fr) minmax(300px, .85fr); align-items: start; }
   .variant-a .chord-picker-dropdown { grid-row: span 3; }
   .variant-a .selected-chord { flex-direction: row; align-items: baseline; gap: 12px; }
