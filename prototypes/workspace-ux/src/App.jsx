@@ -472,7 +472,7 @@ function EventEditor({ state, bar, event, dispatch }) {
     if (pointerEvent.button !== 0) return
     try { pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId) } catch { /* synthetic pointers may not own capture */ }
     const sourceIndex = bar.events.findIndex((item) => item.id === eventId)
-    eventDragRef.current = { eventId, sourceIndex, toIndex: sourceIndex, pointerId: pointerEvent.pointerId, startX: pointerEvent.clientX, startY: pointerEvent.clientY, dragging: false }
+    eventDragRef.current = { eventId, sourceIndex, toIndex: sourceIndex, picker: pointerEvent.currentTarget.closest('.event-picker'), pointerId: pointerEvent.pointerId, startX: pointerEvent.clientX, startY: pointerEvent.clientY, dragging: false }
   }
   const moveEventDrag = (pointerEvent) => {
     const drag = eventDragRef.current
@@ -482,8 +482,9 @@ function EventEditor({ state, bar, event, dispatch }) {
     drag.dragging = true
     suppressEventClickRef.current = true
     setDraggedEventId(drag.eventId)
-    const picker = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)?.closest('.event-picker')
-    if (!picker) { drag.toIndex = drag.sourceIndex; setDropIndicator(null); return }
+    const picker = drag.picker
+    const pickerRect = picker?.getBoundingClientRect()
+    if (!picker || pointerEvent.clientY < pickerRect.top - 24 || pointerEvent.clientY > pickerRect.bottom + 24) { drag.toIndex = drag.sourceIndex; setDropIndicator(null); return }
     const options = [...picker.querySelectorAll('[data-event-option-id]')]
     let slotIndex = options.findIndex((option) => { const rect = option.getBoundingClientRect(); return pointerEvent.clientX < rect.left + rect.width / 2 })
     if (slotIndex < 0) slotIndex = options.length
@@ -502,9 +503,19 @@ function EventEditor({ state, bar, event, dispatch }) {
     eventDragRef.current = null
     clearDragState()
   }
+  useEffect(() => {
+    window.addEventListener('pointermove', moveEventDrag, { passive: false })
+    window.addEventListener('pointerup', endEventDrag)
+    window.addEventListener('pointercancel', endEventDrag)
+    return () => {
+      window.removeEventListener('pointermove', moveEventDrag)
+      window.removeEventListener('pointerup', endEventDrag)
+      window.removeEventListener('pointercancel', endEventDrag)
+    }
+  }, [bar.events])
   return <aside className="inspector panel" aria-label="Редактор выбранного события аккорда">
     <div className="panel-heading"><div className="inspector-current"><span><PencilLine size={16} aria-hidden="true" />Выбранный аккорд · такт {bar.number}</span><strong data-selected-chord-label>{event.chord}</strong></div><span className="event-counter">{activeIndex + 1} из {bar.events.length}</span></div>
-    <div className="event-picker-shell"><span className="event-picker-label">Аккорды в этом такте</span><span className="sr-only" aria-live="polite">{reorderAnnouncement}</span><div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item, itemIndex) => { const isSelected = item.id === event.id; const indicatorClass = dropIndicator?.eventId === item.id ? `drop-${dropIndicator.edge}` : ''; return <button key={item.id} data-event-option-id={item.id} className={`event-option ${isSelected ? 'selected' : ''} ${draggedEventId === item.id ? 'dragging' : ''} ${indicatorClass}`} aria-pressed={isSelected} aria-label={`${item.chord}, ${durationLabel(item.duration, bar)}, позиция ${itemIndex + 1} из ${bar.events.length}. Перетащи для перестановки`} aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight" title="Перетащи для перестановки · Alt + ←/→" onClick={() => { if (suppressEventClickRef.current) { suppressEventClickRef.current = false; return } dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id }) }} onPointerDown={(pointerEvent) => startEventDrag(pointerEvent, item.id)} onPointerMove={moveEventDrag} onPointerUp={endEventDrag} onPointerCancel={endEventDrag} onKeyDown={(keyEvent) => { if (!keyEvent.altKey || !['ArrowLeft', 'ArrowRight'].includes(keyEvent.key)) return; keyEvent.preventDefault(); const toIndex = itemIndex + (keyEvent.key === 'ArrowLeft' ? -1 : 1); if (toIndex >= 0 && toIndex < bar.events.length) reorderEvent(item.id, toIndex) }}><GripVertical className="event-drag-handle" size={16} aria-hidden="true" /><strong>{item.chord}</strong><span>{durationLabel(item.duration, bar)}</span>{isSelected && <Check className="event-selected-check" size={15} aria-hidden="true" />}</button> })}<button className="event-add-option" type="button" aria-label="Добавить аккорд в конец такта" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}><Plus size={18} aria-hidden="true" /><span>Добавить аккорд</span></button></div></div>
+    <div className="event-picker-shell"><span className="event-picker-label">Аккорды в этом такте</span><span className="sr-only" aria-live="polite">{reorderAnnouncement}</span><div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item, itemIndex) => { const isSelected = item.id === event.id; const indicatorClass = dropIndicator?.eventId === item.id ? `drop-${dropIndicator.edge}` : ''; return <button key={item.id} data-event-option-id={item.id} className={`event-option ${isSelected ? 'selected' : ''} ${draggedEventId === item.id ? 'dragging' : ''} ${indicatorClass}`} aria-pressed={isSelected} aria-label={`${item.chord}, ${durationLabel(item.duration, bar)}, позиция ${itemIndex + 1} из ${bar.events.length}. Перетащи для перестановки`} aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight" title="Перетащи для перестановки · Alt + ←/→" onClick={() => { if (suppressEventClickRef.current) { suppressEventClickRef.current = false; return } dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id }) }} onPointerDown={(pointerEvent) => startEventDrag(pointerEvent, item.id)} onKeyDown={(keyEvent) => { if (!keyEvent.altKey || !['ArrowLeft', 'ArrowRight'].includes(keyEvent.key)) return; keyEvent.preventDefault(); const toIndex = itemIndex + (keyEvent.key === 'ArrowLeft' ? -1 : 1); if (toIndex >= 0 && toIndex < bar.events.length) reorderEvent(item.id, toIndex) }}><GripVertical className="event-drag-handle" size={16} aria-hidden="true" /><strong>{item.chord}</strong><span>{durationLabel(item.duration, bar)}</span>{isSelected && <Check className="event-selected-check" size={15} aria-hidden="true" />}</button> })}<button className="event-add-option" type="button" aria-label="Добавить аккорд в конец такта" onClick={() => dispatch({ type: 'addEvent', event: { id: crypto.randomUUID(), chord: 'N', duration: 4 } })}><Plus size={18} aria-hidden="true" /><span>Добавить аккорд</span></button></div></div>
     {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><AlertTriangle size={14} aria-hidden="true" /><span>Автоанализ не уверен</span><button className="inline-icon-action" type="button" aria-label="Подтвердить такт" title="Подтвердить" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}><Check size={14} aria-hidden="true" /></button></section>}
     {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><CheckCircle2 size={14} aria-hidden="true" /><span>Проверено вручную</span><button className="inline-icon-action" type="button" aria-label="Вернуть такт на проверку" title="Вернуть на проверку" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}><RotateCcw size={14} aria-hidden="true" /></button></section>}
     <form onSubmit={save}>
