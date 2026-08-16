@@ -108,7 +108,7 @@ button { cursor: pointer; }
 .chip-button[aria-pressed="true"] { border-color: var(--good); background: #123126; color: var(--good); }
 
 /* Variant A */
-.studio-grid { display: grid; grid-template-columns: minmax(560px, 1fr) 370px; min-height: calc(100vh - 152px); }
+.studio-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 370px); min-height: calc(100vh - 152px); }
 .library-panel { border-right: 1px solid var(--line); background: #0d1015; }
 .search-label { display: block; padding: 12px; }
 .search-label input, .field-group input { width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--text); padding: 8px 10px; }
@@ -675,6 +675,55 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .time-readout { margin: 0 10px; font-size: 14px; }
 .variant-a .time-readout span { font-size: 13px; }
 
+/* Viewport workspace: timeline and editor stay put while the complete song scrolls on its own. */
+html, body, #root { height: 100%; }
+.variant-a {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+.variant-a .studio-grid { height: 100%; min-height: 0; overflow: hidden; }
+.variant-a .studio-main {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+.variant-a .inspector {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #393941 transparent;
+}
+.variant-a .lyrics-strip {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px 0 0;
+}
+.variant-a .lyrics-heading { flex: 0 0 auto; padding: 0 18px 12px; }
+.variant-a .lyrics-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 40%;
+  scrollbar-color: #393941 transparent;
+}
+.variant-a .lyrics-scroll:focus-visible { outline-offset: -3px; }
+.variant-a .lyrics-lines { gap: 0; margin: 0; padding: 4px 18px 38vh; }
+.variant-a .lyric-block { display: grid; gap: 8px; padding: 10px 12px; border-radius: 8px; }
+.variant-a .lyric-block:has(.active-line) { background: rgba(141,134,255,.075); }
+.variant-a .lyric-section { margin: 10px 0 1px; color: #8d86ff; font-size: 12px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.variant-a .lyric-line { transition: color 160ms ease, opacity 160ms ease; }
+.variant-a .lyric-line:not(.active-line) { color: #b5b5bd; }
+.variant-a .lyric-line.active-line { color: #f0f0f3; }
+
 @media (max-width: 1320px) {
   .variant-a .presentation-controls { width: 100%; overflow-x: auto; padding-bottom: 2px; }
 }
@@ -735,7 +784,12 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .shortcut-list div { display: grid; grid-template-columns: 130px 1fr; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .shortcut-list dt { font-weight: 900; }.shortcut-list dd { margin: 0; color: var(--muted); }
 
-@media (max-width: 1050px) {
+@media (max-width: 760px) {
+  .variant-a { height: auto; min-height: 100%; overflow: visible; }
+  .variant-a .studio-grid { height: auto; overflow: visible; }
+  .variant-a .studio-main { display: flex; overflow: visible; }
+  .variant-a .lyrics-strip { min-height: 520px; }
+  .variant-a .inspector { height: auto; overflow: visible; }
   .studio-grid { grid-template-columns: 1fr; min-height: 0; align-items: start; }
   .variant-a .inspector { border: 0; }
   .variant-a .field-group { grid-template-columns: minmax(0, 1fr) minmax(300px, .85fr); align-items: start; }

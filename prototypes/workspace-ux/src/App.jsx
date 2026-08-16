@@ -56,29 +56,42 @@ const CHORD_TYPES = [
   { id: 'nine', suffix: '9', label: 'с ноною' },
 ]
 
+function timedLyricLine(id, section, text, start, end) {
+  const tokens = text.split(' ')
+  const step = (end - start) / tokens.length
+  return {
+    id,
+    section,
+    words: tokens.map((word, index) => ({ id: `${id}-${index + 1}`, text: word, start: start + step * index, end: start + step * (index + 1) })),
+  }
+}
+
+// Prototype fixture: a complete original song, long enough to exercise independent lyric scrolling.
 const LYRIC_LINES = [
-  [
-    { id: 'l1-1', text: 'Я', start: 18, end: 20 }, { id: 'l1-2', text: 'хотел', start: 20, end: 23 },
-    { id: 'l1-3', text: 'бы', start: 23, end: 25 }, { id: 'l1-4', text: 'остаться', start: 25, end: 28 },
-    { id: 'l1-5', text: 'с', start: 28, end: 29 }, { id: 'l1-6', text: 'тобой,', start: 29, end: 32 },
-  ],
-  [
-    { id: 'l2-1', text: 'этот', start: 32, end: 35 }, { id: 'l2-2', text: 'ритм', start: 35, end: 38 },
-    { id: 'l2-3', text: 'ведёт', start: 38, end: 41 }, { id: 'l2-4', text: 'нас', start: 41, end: 43 },
-    { id: 'l2-5', text: 'дальше.', start: 43, end: 48 },
-  ],
-  [
-    { id: 'l3-1', text: 'Город', start: 48, end: 51 }, { id: 'l3-2', text: 'тихо', start: 51, end: 54 },
-    { id: 'l3-3', text: 'светится', start: 54, end: 58 }, { id: 'l3-4', text: 'в', start: 58, end: 59 },
-    { id: 'l3-5', text: 'окне,', start: 59, end: 64 },
-  ],
-  [
-    { id: 'l4-1', text: 'и', start: 64, end: 66 }, { id: 'l4-2', text: 'новая', start: 66, end: 70 },
-    { id: 'l4-3', text: 'песня', start: 70, end: 74 }, { id: 'l4-4', text: 'начинается', start: 74, end: 80 },
-    { id: 'l4-5', text: 'сейчас.', start: 80, end: 84 },
-  ],
+  timedLyricLine('intro-1', 'Интро', 'Ночь собирает огни на пустой мостовой', 0, 4),
+  timedLyricLine('intro-2', '', 'Первый аккорд отпирает уснувшие окна', 4, 8),
+  timedLyricLine('verse-1-1', 'Куплет 1', 'Мы выходили из дома без карты и плана', 8, 12),
+  timedLyricLine('verse-1-2', '', 'Ветер листал переулки как старую книгу', 12, 16),
+  timedLyricLine('verse-1-3', '', 'Каждый фонарь оставался за нами сигналом', 16, 20),
+  timedLyricLine('verse-1-4', '', 'Чтобы однажды найти эту музыку снова', 20, 24),
+  timedLyricLine('chorus-1-1', 'Припев', 'Плачь и танцуй пока город не слышит', 24, 28),
+  timedLyricLine('chorus-1-2', '', 'Пусть этот ритм поднимает нас выше', 28, 32),
+  timedLyricLine('chorus-1-3', '', 'Свет не погас пока мы его держим', 32, 36),
+  timedLyricLine('chorus-1-4', '', 'Плачь и танцуй оставайся надеждой', 36, 40),
+  timedLyricLine('verse-2-1', 'Куплет 2', 'Утро рисует на крышах холодные тени', 40, 44),
+  timedLyricLine('verse-2-2', '', 'Чашка остыла но песня ещё не допета', 44, 48),
+  timedLyricLine('verse-2-3', '', 'Мы научились не прятать свои отражения', 48, 52),
+  timedLyricLine('verse-2-4', '', 'И выбирать направление против запретов', 52, 56),
+  timedLyricLine('bridge-1', 'Бридж', 'Если дорога внезапно закончится утром', 56, 60),
+  timedLyricLine('bridge-2', '', 'Мы нарисуем продолжение прямо на небе', 60, 64),
+  timedLyricLine('bridge-3', '', 'Тихо считаем четыре удара до света', 64, 68),
+  timedLyricLine('final-1', 'Финальный припев', 'Плачь и танцуй пока город не слышит', 68, 72),
+  timedLyricLine('final-2', '', 'Пусть этот ритм поднимает нас выше', 72, 76),
+  timedLyricLine('final-3', '', 'Свет не погас пока мы его держим', 76, 80),
+  timedLyricLine('final-4', '', 'Плачь и танцуй оставайся надеждой', 80, 84),
+  timedLyricLine('outro-1', 'Аутро', 'Последний аккорд растворяется медленно в окнах', 84, 88),
 ]
-const LYRIC_WORDS = LYRIC_LINES.flat()
+const LYRIC_WORDS = LYRIC_LINES.flatMap((line) => line.words)
 
 const STATES = [
   { label: 'Готово', title: 'Проект готов', detail: '3 правки', tone: 'good', icon: CheckCircle2 },
@@ -269,15 +282,15 @@ function timedChordEvents(bars) {
   return result
 }
 function chordLabelsForLyricLines(bars, lines) {
-  const labels = Array(lines.flat().length).fill('')
+  const labels = Array(lines.flatMap((line) => line.words).length).fill('')
   const chordEvents = timedChordEvents(bars)
   let lineOffset = 0
   lines.forEach((line) => {
     chordEvents.forEach((event) => {
-      const wordIndex = line.findIndex((word) => event.start < word.end && event.end > word.start)
+      const wordIndex = line.words.findIndex((word) => event.start < word.end && event.end > word.start)
       if (wordIndex >= 0 && !labels[lineOffset + wordIndex]) labels[lineOffset + wordIndex] = event.chord
     })
-    lineOffset += line.length
+    lineOffset += line.words.length
   })
   return labels
 }
@@ -608,12 +621,47 @@ function TimelineControls({ state, dispatch }) {
   </section>
 }
 
-function VariantA({ state, dispatch, bar, event }) {
+function LyricsPanel({ state }) {
+  const scrollRef = useRef(null)
+  const lineRefs = useRef([])
   const currentLyricIndex = LYRIC_WORDS.findIndex((word) => state.positionUnits >= word.start && state.positionUnits < word.end)
+  const currentWordId = LYRIC_WORDS[currentLyricIndex]?.id
+  const currentLineIndex = LYRIC_LINES.findIndex((line) => line.words.some((word) => word.id === currentWordId))
   const lyricChordLabels = useMemo(() => chordLabelsForLyricLines(state.bars, LYRIC_LINES).map((chord) => presentedChord(chord, state)), [state.bars, state.transpose, state.chordMode])
+
+  useEffect(() => {
+    const scroller = scrollRef.current
+    const target = lineRefs.current[currentLineIndex]
+    if (!scroller || !target) return
+    const scrollRect = scroller.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    const targetTop = scroller.scrollTop + targetRect.top - scrollRect.top - (scroller.clientHeight - targetRect.height) / 2
+    scroller.scrollTo({ top: Math.max(0, targetTop), behavior: state.reducedMotion ? 'auto' : 'smooth' })
+  }, [currentLineIndex, state.reducedMotion])
+
+  let lineOffset = 0
+  return <section className="lyrics-strip" aria-label="Полный текст песни с аккордами и таймингом">
+    <div className="lyrics-heading"><h2><ListMusic size={15} aria-hidden="true" />Текст</h2></div>
+    <div ref={scrollRef} className="lyrics-scroll" tabIndex="0" aria-label="Текст песни">
+      <div className="lyrics-lines">{LYRIC_LINES.map((line, lineIndex) => {
+        const offset = lineOffset
+        lineOffset += line.words.length
+        const active = lineIndex === currentLineIndex
+        return <div className="lyric-block" key={line.id}>
+          {line.section && <h3 className="lyric-section">{line.section}</h3>}
+          <p ref={(node) => { lineRefs.current[lineIndex] = node }} className={`lyric-line${active ? ' active-line' : ''}`} aria-current={active ? 'true' : undefined}>
+            {line.words.map((word, wordIndex) => { const index = offset + wordIndex; return <span className="lyric-token" key={word.id}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span> })}
+          </p>
+        </div>
+      })}</div>
+    </div>
+  </section>
+}
+
+function VariantA({ state, dispatch, bar, event }) {
   const presentedKey = shiftedRoot('C', state.transpose ?? 0)
   return <div className="shell variant-a"><Header state={state} dispatch={dispatch} /><div className="studio-grid">
-    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><h1>Плачь и танцуй</h1><div className="track-facts"><span><Gauge size={12} aria-hidden="true" />88 BPM</span><span><Music2 size={12} aria-hidden="true" />{presentedKey} major</span><span><AudioLines size={12} aria-hidden="true" />4/4</span></div></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} controls /><section className="lyrics-strip" aria-label="Многострочный текст песни с аккордами и таймингом"><div className="lyrics-heading"><h2><ListMusic size={15} aria-hidden="true" />Текст</h2></div><div className="lyrics-lines">{LYRIC_LINES.map((line, lineIndex) => { const lineOffset = LYRIC_LINES.slice(0, lineIndex).reduce((sum, item) => sum + item.length, 0); return <p className="lyric-line" key={`line-${lineIndex}`}>{line.map((word, wordIndex) => { const index = lineOffset + wordIndex; return <span className="lyric-token" key={word.id}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span> })}</p> })}</div></section></main>
+    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><h1>Плачь и танцуй</h1><div className="track-facts"><span><Gauge size={12} aria-hidden="true" />88 BPM</span><span><Music2 size={12} aria-hidden="true" />{presentedKey} major</span><span><AudioLines size={12} aria-hidden="true" />4/4</span></div></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} controls /><LyricsPanel state={state} /></main>
     <EventEditor state={state} bar={bar} event={event} dispatch={dispatch} />
   </div></div>
 }
