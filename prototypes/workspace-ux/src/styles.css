@@ -562,7 +562,21 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .event-option.selected { border: 0; background: rgba(141,134,255,.2); color: #f0efff; padding: 9px 12px; }
 .variant-a .event-option.selected::after { display: none; }
 .variant-a .event-option.dragging { opacity: .38; }
-.variant-a .event-option.drop-target { box-shadow: inset 3px 0 #8d86ff; }
+.variant-a .event-option.drop-before::before,
+.variant-a .event-option.drop-after::after {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  display: block;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 3px;
+  background: #aaa5ff;
+  box-shadow: 0 0 0 3px rgba(141,134,255,.12);
+}
+.variant-a .event-option.drop-before::before { left: -5px; }
+.variant-a .event-option.drop-after::after { right: -5px; }
 .variant-a .event-add-option {
   display: inline-flex;
   flex: 0 0 auto;
