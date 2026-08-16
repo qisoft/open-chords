@@ -2,17 +2,18 @@
 
 > Three structurally different Open Chords desktop workspaces, switchable with `?variant=`, built only to decide information hierarchy, navigation, state presentation, keyboard behavior, and accessibility boundaries.
 
-This is a throwaway UI prototype. It does not analyze audio, persist edits, or define the final visual style.
+This is a throwaway React + Vite UI prototype. It does not analyze audio, persist edits, or define the final visual style.
 
 ## Run
 
-From the repository root:
+From this directory:
 
 ```bash
-python3 prototypes/workspace-ux/run_ui.py
+npm install
+npm run dev
 ```
 
-The browser opens variant A. Use the floating arrows at the bottom or keyboard `←` / `→` to compare:
+The Vite dev server opens variant A. Use the floating arrows at the bottom or keyboard `←` / `→` to compare:
 
 - **A — Редактор:** focused chord-event timeline and inspector; every chord inside a bar is selected and edited independently;
 - **B — Режимы:** Edit and Practice are explicit modes with one primary surface;
