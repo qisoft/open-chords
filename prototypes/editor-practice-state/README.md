@@ -15,21 +15,36 @@ It deliberately tests the awkward cases:
 
 The sample timeline uses small integer Project Time values so state changes are easy to inspect. Nothing is persisted.
 
-## Run
+## Run the visual prototype
 
 From the repository root:
+
+```bash
+python3 prototypes/editor-practice-state/run_ui.py
+```
+
+It opens a local browser page. Start with variant C (the default), then use the floating arrows or keyboard `←` / `→` to compare:
+
+- **A — Таймлайн:** editing around a centered playhead;
+- **B — Практика:** current/next chords and loop controls first;
+- **C — До / сейчас:** machine output and the effective result shown together.
+
+In any variant, use the large labelled actions. A useful first path is:
+
+1. **Save bars 2–3 as a loop**;
+2. **Move the start of bar 2** and observe the loop follow;
+3. **Split bar 2** and observe the visible review warning;
+4. **Undo** and observe the loop become valid again;
+5. change speed/transpose/Beginner, then **Reset edits** and verify those view/practice choices remain.
+
+## Internal reducer view
+
+The earlier terminal display remains available only for inspecting the reducer's full state:
 
 ```bash
 python3 prototypes/editor-practice-state/prototype.py
 ```
 
-Use the shortcuts printed at the bottom of the screen. A useful first path is:
-
-1. `l` — save a two-bar loop;
-2. `d` — move its starting downbeat and observe the loop follow;
-3. `z` — split the current bar and observe `needs_review`;
-4. `u` — undo and observe the loop become valid again;
-5. `u`, then `c` — create an alternate edit branch; use `f` and `r` to select/redo branches;
-6. change `s`, `o`, `t`, `a`, or `g`, then `x` — reset edits and verify practice/presentation state remains.
+It is not the user-facing review artifact.
 
 This branch is primary-source evidence for a product decision. It is not application code and must not be merged as an implementation.
