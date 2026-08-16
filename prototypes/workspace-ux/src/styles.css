@@ -657,6 +657,9 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .editor-meta { gap: 18px; border: 0; border-radius: 7px; background: #17171c; padding: 11px 12px; color: #aaaab4; font-size: 14px; }
 .variant-a .button-pair { gap: 6px; border: 0; padding: 2px 14px 10px; }
 .variant-a .primary-button { min-height: 42px; border-radius: 7px; font-size: 14px; }
+.variant-a .reset-draft-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; border: 0; border-radius: 7px; background: #1b1b21; color: #c2c2ca; padding: 7px 11px; font-size: 14px; font-weight: 560; }
+.variant-a .reset-draft-button:hover { background: #24242b; color: #ededf0; }
+.variant-a .reset-draft-button:disabled { cursor: not-allowed; opacity: .35; }
 .variant-a .original-note { padding-bottom: 16px; color: #92929c; font-size: 12px; }
 .variant-a .lyrics-strip { padding: 16px 18px 20px; }
 .variant-a .lyrics-lines { gap: 15px; margin-top: 16px; }

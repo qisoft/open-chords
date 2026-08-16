@@ -93,7 +93,7 @@ const initialState = {
   selectedRange: null, loopRange: null, loopEnabled: false, positionUnits: 32,
   statusIndex: 0, playing: false, reducedMotion: false, mode: 'Редактор', modal: false,
   transpose: 0, chordMode: 'original', playbackRate: 1, metronome: false,
-  dirtyBarIds: [],
+  draftBars: {},
 }
 
 const meterParts = (bar) => bar.meter.split('/').map(Number)
@@ -101,12 +101,13 @@ const barCapacity = (bar) => { const [beats, denominator] = meterParts(bar); ret
 const barUsed = (bar) => bar.events.reduce((sum, event) => sum + event.duration, 0)
 const barOffsets = (bars) => bars.map((_, index) => bars.slice(0, index).reduce((sum, bar) => sum + barCapacity(bar), 0))
 const totalUnits = (bars) => bars.reduce((sum, bar) => sum + barCapacity(bar), 0)
-const markDirty = (state, barId) => state.dirtyBarIds.includes(barId) ? state.dirtyBarIds : [...state.dirtyBarIds, barId]
+const editorBarFor = (state, barId) => state.draftBars?.[barId] ?? state.bars.find((bar) => bar.id === barId)
+const storeDraftBar = (state, bar) => ({ ...state, draftBars: { ...(state.draftBars ?? {}), [bar.id]: bar } })
 
 function reducer(state, action) {
   switch (action.type) {
     case 'selectBar': {
-      const bar = state.bars.find((item) => item.id === action.barId)
+      const bar = editorBarFor(state, action.barId)
       return { ...state, activeBarId: bar.id, activeEventId: bar.events[0].id }
     }
     case 'selectEvent':
@@ -125,74 +126,73 @@ function reducer(state, action) {
       if (end - start + 1 >= state.bars.length) return state
       const bars = state.bars.filter((_, index) => index < start || index > end).map((bar, index) => ({ ...bar, number: index + 1 }))
       const target = bars[Math.min(start, bars.length - 1)]
-      return { ...state, bars, activeBarId: target.id, activeEventId: target.events[0].id, selectedRange: null, loopRange: null, loopEnabled: false, positionUnits: 0 }
+      const survivingIds = new Set(bars.map((bar) => bar.id))
+      const draftBars = Object.fromEntries(Object.entries(state.draftBars ?? {}).filter(([barId]) => survivingIds.has(barId)))
+      return { ...state, bars, draftBars, activeBarId: target.id, activeEventId: target.events[0].id, selectedRange: null, loopRange: null, loopEnabled: false, positionUnits: 0 }
     }
-    case 'updateEvent':
-      return {
-        ...state,
-        dirtyBarIds: markDirty(state, state.activeBarId),
-        bars: state.bars.map((bar) => bar.id !== state.activeBarId ? bar : {
-          ...bar, events: bar.events.map((event) => event.id === state.activeEventId ? { ...event, ...action.patch } : event),
-        }),
-      }
-    case 'addEvent':
-      return {
-        ...state,
-        activeEventId: action.event.id,
-        dirtyBarIds: markDirty(state, state.activeBarId),
-        bars: state.bars.map((bar) => {
-          if (bar.id !== state.activeBarId) return bar
-          return { ...bar, events: [...bar.events, action.event] }
-        }),
-      }
-    case 'reorderEvent':
-      return {
-        ...state,
-        activeBarId: action.barId,
-        activeEventId: action.eventId,
-        dirtyBarIds: markDirty(state, action.barId),
-        bars: state.bars.map((bar) => {
-          if (bar.id !== action.barId) return bar
-          const fromIndex = bar.events.findIndex((item) => item.id === action.eventId)
-          const toIndex = Math.max(0, Math.min(bar.events.length - 1, action.toIndex))
-          if (fromIndex < 0 || fromIndex === toIndex) return bar
-          const events = [...bar.events]
-          const [moved] = events.splice(fromIndex, 1)
-          events.splice(toIndex, 0, moved)
-          return { ...bar, events }
-        }),
-      }
+    case 'updateEvent': {
+      const bar = editorBarFor(state, state.activeBarId)
+      return storeDraftBar(state, { ...bar, events: bar.events.map((event) => event.id === state.activeEventId ? { ...event, ...action.patch } : event) })
+    }
+    case 'addEvent': {
+      const bar = editorBarFor(state, state.activeBarId)
+      return { ...storeDraftBar(state, { ...bar, events: [...bar.events, action.event] }), activeEventId: action.event.id }
+    }
+    case 'reorderEvent': {
+      const bar = editorBarFor(state, action.barId)
+      const fromIndex = bar.events.findIndex((item) => item.id === action.eventId)
+      const toIndex = Math.max(0, Math.min(bar.events.length - 1, action.toIndex))
+      if (fromIndex < 0 || fromIndex === toIndex) return state
+      const events = [...bar.events]
+      const [moved] = events.splice(fromIndex, 1)
+      events.splice(toIndex, 0, moved)
+      return { ...storeDraftBar(state, { ...bar, events }), activeBarId: action.barId, activeEventId: action.eventId }
+    }
     case 'deleteEvent': {
-      const bar = state.bars.find((item) => item.id === state.activeBarId)
+      const bar = editorBarFor(state, state.activeBarId)
       if (bar.events.length === 1) return state
       const index = bar.events.findIndex((event) => event.id === state.activeEventId)
       const events = bar.events.filter((event) => event.id !== state.activeEventId)
-      return {
-        ...state,
-        activeEventId: events[Math.min(index, events.length - 1)].id,
-        dirtyBarIds: markDirty(state, bar.id),
-        bars: state.bars.map((item) => item.id === bar.id ? { ...item, events } : item),
-      }
+      return { ...storeDraftBar(state, { ...bar, events }), activeEventId: events[Math.min(index, events.length - 1)].id }
     }
-    case 'confirmBar':
-      return { ...state, bars: state.bars.map((bar) => bar.id === action.barId ? { ...bar, confidence: 'reviewed' } : bar) }
-    case 'flagBarForReview':
-      return { ...state, bars: state.bars.map((bar) => bar.id === action.barId ? { ...bar, confidence: 'low' } : bar) }
+    case 'confirmBar': {
+      const draftBars = state.draftBars?.[action.barId] ? { ...state.draftBars, [action.barId]: { ...state.draftBars[action.barId], confidence: 'reviewed' } } : state.draftBars
+      return { ...state, draftBars, bars: state.bars.map((bar) => bar.id === action.barId ? { ...bar, confidence: 'reviewed' } : bar) }
+    }
+    case 'flagBarForReview': {
+      const draftBars = state.draftBars?.[action.barId] ? { ...state.draftBars, [action.barId]: { ...state.draftBars[action.barId], confidence: 'low' } } : state.draftBars
+      return { ...state, draftBars, bars: state.bars.map((bar) => bar.id === action.barId ? { ...bar, confidence: 'low' } : bar) }
+    }
     case 'focusNextReview': {
       const reviewIndexes = state.bars.map((bar, index) => bar.confidence === 'low' ? index : -1).filter((index) => index >= 0)
       if (!reviewIndexes.length) return state
       const currentIndex = state.bars.findIndex((bar) => bar.id === state.activeBarId)
       const targetIndex = reviewIndexes.find((index) => index > currentIndex) ?? reviewIndexes[0]
       const target = state.bars[targetIndex]
-      return { ...state, activeBarId: target.id, activeEventId: target.events[0].id, positionUnits: barOffsets(state.bars)[targetIndex] }
+      const editorTarget = editorBarFor(state, target.id)
+      return { ...state, activeBarId: target.id, activeEventId: editorTarget.events[0].id, positionUnits: barOffsets(state.bars)[targetIndex] }
     }
-    case 'saveBar':
-      return { ...state, dirtyBarIds: state.dirtyBarIds.filter((id) => id !== state.activeBarId) }
+    case 'saveBar': {
+      const draft = state.draftBars?.[state.activeBarId]
+      if (!draft || barUsed(draft) !== barCapacity(draft)) return state
+      const draftBars = { ...(state.draftBars ?? {}) }
+      delete draftBars[state.activeBarId]
+      return { ...state, bars: state.bars.map((bar) => bar.id === draft.id ? draft : bar), draftBars }
+    }
+    case 'resetBar': {
+      const saved = state.bars.find((bar) => bar.id === state.activeBarId)
+      if (!saved || !state.draftBars?.[saved.id]) return state
+      const draftBars = { ...state.draftBars }
+      delete draftBars[saved.id]
+      const activeEventId = saved.events.some((event) => event.id === state.activeEventId) ? state.activeEventId : saved.events[0].id
+      return { ...state, draftBars, activeEventId }
+    }
     case 'moveBar': {
       const index = state.bars.findIndex((bar) => bar.id === state.activeBarId)
       const targetIndex = Math.max(0, Math.min(state.bars.length - 1, index + action.delta))
       const target = state.bars[targetIndex]
-      return { ...state, activeBarId: target.id, activeEventId: target.events[0].id, positionUnits: barOffsets(state.bars)[targetIndex] }
+      const editorTarget = editorBarFor(state, target.id)
+      return { ...state, activeBarId: target.id, activeEventId: editorTarget.events[0].id, positionUnits: barOffsets(state.bars)[targetIndex] }
     }
     case 'setPosition': return { ...state, positionUnits: Math.max(0, Math.min(totalUnits(state.bars), action.value)) }
     case 'setPlaying': return { ...state, playing: action.value }
@@ -487,7 +487,9 @@ function EventEditor({ state, bar, event, dispatch }) {
   const capacity = barCapacity(bar); const used = barUsed(bar); const delta = used - capacity
   const valid = delta === 0
   const name = chordSymbol(chordDraft)
+  const dirty = Boolean(state.draftBars?.[bar.id])
   const save = (submitEvent) => { submitEvent.preventDefault(); if (!valid) return; dispatch({ type: 'updateEvent', patch: { chord: name } }); dispatch({ type: 'saveBar' }) }
+  const applyChordDraft = (nextDraft) => { setChordDraft(nextDraft); dispatch({ type: 'updateEvent', patch: { chord: chordSymbol(nextDraft) } }) }
   const closeChordPicker = () => chordPickerRef.current?.removeAttribute('open')
   const chooseRoot = (root) => {
     setChordDraft((current) => ({ ...current, noChord: false, root, bass: current.root === root ? current.bass : '' }))
@@ -558,17 +560,17 @@ function EventEditor({ state, bar, event, dispatch }) {
       <div className="field-group"><details ref={chordPickerRef} className="chord-picker-dropdown" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open) setChordPickerStep('root') }}>
         <summary><Music2 size={14} aria-hidden="true" /><strong aria-live="polite">{name}</strong><ChevronDown size={14} aria-hidden="true" /></summary>
         <div className="chord-picker-menu">
-          {chordPickerStep === 'root' && <section className="chord-step" aria-label="Выбор корня аккорда"><div className="chord-step-heading"><span>Шаг 1</span><strong>Выбери корень</strong></div><div className="root-button-grid">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={!chordDraft.noChord && chordDraft.root === root ? 'selected' : ''} aria-pressed={!chordDraft.noChord && chordDraft.root === root} onClick={() => chooseRoot(root)}>{root}</button>)}<button className={`no-chord-root ${chordDraft.noChord ? 'selected' : ''}`} type="button" aria-pressed={chordDraft.noChord} onClick={() => { setChordDraft((current) => ({ ...current, noChord: true, bass: '' })); closeChordPicker() }}><strong>N</strong><span>нет аккорда</span></button></div></section>}
+          {chordPickerStep === 'root' && <section className="chord-step" aria-label="Выбор корня аккорда"><div className="chord-step-heading"><span>Шаг 1</span><strong>Выбери корень</strong></div><div className="root-button-grid">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={!chordDraft.noChord && chordDraft.root === root ? 'selected' : ''} aria-pressed={!chordDraft.noChord && chordDraft.root === root} onClick={() => chooseRoot(root)}>{root}</button>)}<button className={`no-chord-root ${chordDraft.noChord ? 'selected' : ''}`} type="button" aria-pressed={chordDraft.noChord} onClick={() => { applyChordDraft({ ...chordDraft, noChord: true, bass: '' }); closeChordPicker() }}><strong>N</strong><span>нет аккорда</span></button></div></section>}
           {chordPickerStep === 'quality' && <section className="chord-step" aria-label={`Выбор варианта аккорда ${chordDraft.root}`}><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('root')}><ArrowLeft size={13} aria-hidden="true" />Корень</button></div><div className="chord-step-heading"><span>Шаг 2 · корень {chordDraft.root}</span><strong>Какой это аккорд?</strong></div><div className="primary-quality-grid">{CHORD_TYPES.slice(0, 2).map((type) => <button key={type.id} type="button" className={chordDraft.type === type.id ? 'selected' : ''} onClick={() => chooseQuality(type.id)}><strong>{chordDraft.root}{type.suffix}</strong><span>{type.label}</span></button>)}</div><span className="other-quality-label">Другие варианты</span><div className="other-quality-grid">{CHORD_TYPES.slice(2).map((type) => <button key={type.id} type="button" className={chordDraft.type === type.id ? 'selected' : ''} onClick={() => chooseQuality(type.id)}>{chordDraft.root}{type.suffix}</button>)}</div></section>}
-          {chordPickerStep === 'bass' && <section className="chord-step" aria-label="Выбор баса для slash-аккорда"><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('quality')}><ArrowLeft size={13} aria-hidden="true" />Вариант</button></div><div className="chord-step-heading"><span>Шаг 3 · {chordSymbol({ ...chordDraft, bass: '' })}</span><strong>Добавить отдельный бас?</strong></div><button type="button" className="finish-without-bass" onClick={() => { setChordDraft((current) => ({ ...current, bass: '' })); closeChordPicker() }}><Check size={15} aria-hidden="true" /><strong>Без баса</strong><span>{chordSymbol({ ...chordDraft, bass: '' })}</span></button><span className="other-quality-label">Или выбери бас для slash-аккорда</span><div className="bass-button-grid">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={chordDraft.bass === root ? 'selected' : ''} onClick={() => { setChordDraft((current) => ({ ...current, bass: root })); closeChordPicker() }}>{root}</button>)}</div></section>}
+          {chordPickerStep === 'bass' && <section className="chord-step" aria-label="Выбор баса для slash-аккорда"><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('quality')}><ArrowLeft size={13} aria-hidden="true" />Вариант</button></div><div className="chord-step-heading"><span>Шаг 3 · {chordSymbol({ ...chordDraft, bass: '' })}</span><strong>Добавить отдельный бас?</strong></div><button type="button" className="finish-without-bass" onClick={() => { applyChordDraft({ ...chordDraft, bass: '' }); closeChordPicker() }}><Check size={15} aria-hidden="true" /><strong>Без баса</strong><span>{chordSymbol({ ...chordDraft, bass: '' })}</span></button><span className="other-quality-label">Или выбери бас для slash-аккорда</span><div className="bass-button-grid">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={chordDraft.bass === root ? 'selected' : ''} onClick={() => { applyChordDraft({ ...chordDraft, bass: root }); closeChordPicker() }}>{root}</button>)}</div></section>}
         </div>
       </details>
         <fieldset className="duration-control"><legend><Clock3 size={12} aria-hidden="true" />Длительность</legend><div>{durationOptionsForBar(bar).map((option) => <button key={option.units} type="button" className={event.duration === option.units ? 'selected' : ''} aria-pressed={event.duration === option.units} onClick={() => dispatch({ type: 'updateEvent', patch: { duration: option.units } })}>{option.label}</button>)}</div></fieldset>
         <div className="editor-meta" role="status"><span><LocateFixed size={12} aria-hidden="true" />{start + 1}/16</span><span className={valid ? 'valid' : 'invalid'}>{valid ? <><CheckCircle2 size={12} aria-hidden="true" />{used}/{capacity}</> : delta > 0 ? <><AlertTriangle size={12} aria-hidden="true" />−{delta}/16</> : <><AlertTriangle size={12} aria-hidden="true" />+{-delta}/16</>}</span></div>
       </div>
-      <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid}><Save size={14} aria-hidden="true" />Сохранить</button><button className="icon-action danger" type="button" aria-label="Удалить выбранный аккорд" title="Удалить аккорд" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}><Trash2 size={15} aria-hidden="true" /></button></div>
+      <div className="button-pair"><button className="primary-button" type="submit" disabled={!valid || !dirty}><Save size={14} aria-hidden="true" />Сохранить</button><button className="reset-draft-button" type="button" disabled={!dirty} onClick={() => dispatch({ type: 'resetBar' })}><RotateCcw size={15} aria-hidden="true" />Отменить правки</button><button className="icon-action danger" type="button" aria-label="Удалить выбранный аккорд" title="Удалить аккорд" disabled={bar.events.length === 1} onClick={() => dispatch({ type: 'deleteEvent' })}><Trash2 size={15} aria-hidden="true" /></button></div>
     </form>
-    <p className="original-note">{state.dirtyBarIds.includes(bar.id) ? 'Есть несохранённые изменения.' : 'Раскладка сохранена. Original остаётся отдельно.'}</p>
+    <p className="original-note">{dirty ? 'Черновик виден только в редакторе. Таймлайн и текст изменятся после сохранения.' : 'Раскладка сохранена. Original остаётся отдельно.'}</p>
   </aside>
 }
 
@@ -631,8 +633,10 @@ function Shortcuts({ onClose }) { const closeRef = useRef(null); useEffect(() =>
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const [variant, cycleVariant] = useVariant()
-  const selectedBar = useMemo(() => state.bars.find((bar) => bar.id === state.activeBarId), [state.bars, state.activeBarId])
-  const selectedEvent = useMemo(() => selectedBar.events.find((event) => event.id === state.activeEventId), [selectedBar, state.activeEventId])
+  const savedBar = useMemo(() => state.bars.find((bar) => bar.id === state.activeBarId), [state.bars, state.activeBarId])
+  const editorBar = state.draftBars?.[state.activeBarId] ?? savedBar
+  const savedEvent = savedBar.events.find((event) => event.id === state.activeEventId) ?? savedBar.events[0]
+  const editorEvent = editorBar.events.find((event) => event.id === state.activeEventId) ?? editorBar.events[0]
   const positionRef = useRef(state.positionUnits)
   useEffect(() => { positionRef.current = state.positionUnits }, [state.positionUnits])
   const loopBounds = useMemo(() => {
@@ -671,5 +675,5 @@ export function App() {
     document.addEventListener('keydown', onKeyDown); return () => document.removeEventListener('keydown', onKeyDown)
   }, [cycleVariant, state.modal])
 
-  return <><a className="skip-link" href="#workspace-main">Перейти к рабочей области</a>{variant === 'A' && <VariantA state={state} dispatch={dispatch} bar={selectedBar} event={selectedEvent} />}{variant === 'B' && <VariantB state={state} dispatch={dispatch} bar={selectedBar} event={selectedEvent} />}{variant === 'C' && <VariantC state={state} dispatch={dispatch} bar={selectedBar} event={selectedEvent} />}<PrototypeSwitcher variant={variant} cycle={cycleVariant} />{state.modal && <Shortcuts onClose={() => dispatch({ type: 'setModal', open: false })} />}</>
+  return <><a className="skip-link" href="#workspace-main">Перейти к рабочей области</a>{variant === 'A' && <VariantA state={state} dispatch={dispatch} bar={editorBar} event={editorEvent} />}{variant === 'B' && <VariantB state={state} dispatch={dispatch} bar={savedBar} event={savedEvent} />}{variant === 'C' && <VariantC state={state} dispatch={dispatch} bar={savedBar} event={savedEvent} />}<PrototypeSwitcher variant={variant} cycle={cycleVariant} />{state.modal && <Shortcuts onClose={() => dispatch({ type: 'setModal', open: false })} />}</>
 }
