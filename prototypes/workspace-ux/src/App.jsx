@@ -394,27 +394,36 @@ function Timeline({ state, dispatch, simple = false }) {
 
 function EventEditor({ state, bar, event, dispatch }) {
   const [chordDraft, setChordDraft] = useState(() => parseChord(event.chord))
+  const [chordPickerStep, setChordPickerStep] = useState('root')
   const chordPickerRef = useRef(null)
-  useEffect(() => setChordDraft(parseChord(event.chord)), [event.id, event.chord])
+  useEffect(() => { setChordDraft(parseChord(event.chord)); setChordPickerStep('root') }, [event.id, event.chord])
   const activeIndex = bar.events.findIndex((item) => item.id === event.id)
   const start = bar.events.slice(0, activeIndex).reduce((sum, item) => sum + item.duration, 0)
   const capacity = barCapacity(bar); const used = barUsed(bar); const delta = used - capacity
   const valid = delta === 0
   const name = chordSymbol(chordDraft)
   const save = (submitEvent) => { submitEvent.preventDefault(); if (!valid) return; dispatch({ type: 'updateEvent', patch: { chord: name } }); dispatch({ type: 'saveBar' }) }
+  const closeChordPicker = () => chordPickerRef.current?.removeAttribute('open')
+  const chooseRoot = (root) => {
+    setChordDraft((current) => ({ ...current, noChord: false, root, bass: current.root === root ? current.bass : '' }))
+    setChordPickerStep('quality')
+  }
+  const chooseQuality = (type) => {
+    setChordDraft((current) => ({ ...current, noChord: false, type }))
+    closeChordPicker()
+  }
   return <aside className="inspector panel" aria-label="Редактор выбранного события аккорда">
     <div className="panel-heading"><div><span className="eyebrow">Редактор события</span><strong>Такт {bar.number}</strong></div><span className="event-counter">{activeIndex + 1} из {bar.events.length}</span></div>
     <div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item) => <button key={item.id} className={`event-option ${item.id === event.id ? 'selected' : ''}`} aria-pressed={item.id === event.id} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id })}><strong>{item.chord}</strong><span>{durationLabel(item.duration, bar)}</span></button>)}</div>
     {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><div><strong>Автоанализ не уверен</strong><span>Проверь все аккорды в такте. Если всё правильно — подтверди его.</span></div><button className="primary-button" type="button" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}>✓ Подтвердить такт</button></section>}
     {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><div><strong>✓ Проверено вручную</strong><span>Предупреждение снято после твоего подтверждения.</span></div><button className="quiet-button" type="button" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}>Вернуть на проверку</button></section>}
     <form onSubmit={save}>
-      <div className="field-group"><details ref={chordPickerRef} className="chord-picker-dropdown">
+      <div className="field-group"><details ref={chordPickerRef} className="chord-picker-dropdown" onToggle={(toggleEvent) => { if (toggleEvent.currentTarget.open) setChordPickerStep('root') }}>
         <summary><span>Аккорд</span><strong aria-live="polite">{name}</strong><span>Изменить⌄</span></summary>
         <div className="chord-picker-menu">
-          <div className="chord-mode" role="group" aria-label="Аккорд или участок без аккорда"><button type="button" className={!chordDraft.noChord ? 'selected' : ''} aria-pressed={!chordDraft.noChord} onClick={() => setChordDraft((current) => ({ ...current, noChord: false }))}>Аккорд</button><button type="button" className={chordDraft.noChord ? 'selected' : ''} aria-pressed={chordDraft.noChord} onClick={() => setChordDraft((current) => ({ ...current, noChord: true, bass: '' }))}>N · нет аккорда</button></div>
-          <div className="chord-select-grid"><label>Корень<select value={chordDraft.root} disabled={chordDraft.noChord} onChange={(selectEvent) => setChordDraft((current) => ({ ...current, root: selectEvent.target.value }))}>{CHORD_ROOTS.map((root) => <option key={root} value={root}>{root}</option>)}</select></label><label>Тип<select value={chordDraft.type} disabled={chordDraft.noChord} onChange={(selectEvent) => setChordDraft((current) => ({ ...current, type: selectEvent.target.value }))}>{CHORD_TYPES.map((type) => <option key={type.id} value={type.id}>{type.suffix || 'maj'} · {type.label}</option>)}</select></label></div>
-          <label>Бас / обращение<select value={chordDraft.bass} disabled={chordDraft.noChord} onChange={(selectEvent) => setChordDraft((current) => ({ ...current, bass: selectEvent.target.value }))}><option value="">Без отдельного баса</option>{CHORD_ROOTS.map((root) => <option key={root} value={root}>{root}</option>)}</select></label>
-          <div className="chord-picker-footer"><span>Результат: <strong>{name}</strong></span><button className="primary-button" type="button" onClick={() => chordPickerRef.current?.removeAttribute('open')}>Готово</button></div>
+          {chordPickerStep === 'root' && <section className="chord-step" aria-label="Выбор корня аккорда"><div className="chord-step-heading"><span>Шаг 1</span><strong>Выбери корень</strong></div><div className="root-button-grid">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={!chordDraft.noChord && chordDraft.root === root ? 'selected' : ''} aria-pressed={!chordDraft.noChord && chordDraft.root === root} onClick={() => chooseRoot(root)}>{root}</button>)}<button className={`no-chord-root ${chordDraft.noChord ? 'selected' : ''}`} type="button" aria-pressed={chordDraft.noChord} onClick={() => { setChordDraft((current) => ({ ...current, noChord: true, bass: '' })); closeChordPicker() }}><strong>N</strong><span>нет аккорда</span></button></div></section>}
+          {chordPickerStep === 'quality' && <section className="chord-step" aria-label={`Выбор варианта аккорда ${chordDraft.root}`}><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('root')}>← Назад к корню</button><button type="button" onClick={() => setChordPickerStep('bass')}>{chordDraft.bass ? `Бас: ${chordDraft.bass}` : '＋ Добавить бас'}</button></div><div className="chord-step-heading"><span>Шаг 2 · корень {chordDraft.root}</span><strong>Какой это аккорд?</strong></div><div className="primary-quality-grid">{CHORD_TYPES.slice(0, 2).map((type) => <button key={type.id} type="button" className={chordDraft.type === type.id ? 'selected' : ''} onClick={() => chooseQuality(type.id)}><strong>{chordDraft.root}{type.suffix}</strong><span>{type.label}</span></button>)}</div><span className="other-quality-label">Другие варианты</span><div className="other-quality-grid">{CHORD_TYPES.slice(2).map((type) => <button key={type.id} type="button" className={chordDraft.type === type.id ? 'selected' : ''} onClick={() => chooseQuality(type.id)}>{chordDraft.root}{type.suffix}</button>)}</div></section>}
+          {chordPickerStep === 'bass' && <section className="chord-step" aria-label="Выбор баса для slash-аккорда"><div className="chord-step-nav"><button type="button" onClick={() => setChordPickerStep('quality')}>← Назад к варианту</button></div><div className="chord-step-heading"><span>Необязательно</span><strong>Выбери бас</strong></div><div className="bass-button-grid"><button type="button" className={!chordDraft.bass ? 'selected' : ''} onClick={() => { setChordDraft((current) => ({ ...current, bass: '' })); setChordPickerStep('quality') }}>Без баса</button>{CHORD_ROOTS.map((root) => <button key={root} type="button" className={chordDraft.bass === root ? 'selected' : ''} onClick={() => { setChordDraft((current) => ({ ...current, bass: root })); setChordPickerStep('quality') }}>{root}</button>)}</div></section>}
         </div>
       </details>
         <fieldset className="duration-control"><legend>Длительность аккорда</legend><div>{durationOptionsForBar(bar).map((option) => <button key={option.units} type="button" className={event.duration === option.units ? 'selected' : ''} aria-pressed={event.duration === option.units} onClick={() => dispatch({ type: 'updateEvent', patch: { duration: option.units } })}>{option.label}</button>)}</div></fieldset>
