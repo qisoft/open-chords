@@ -33,7 +33,7 @@ Timeline interaction in the current checkpoint:
 - edit duration with fixed note values plus a meter-derived `весь такт` choice (`3/4 · весь такт`, `4/4 · весь такт`, etc.); manual time inputs are intentionally absent;
 - meter capacity uses both numerator and denominator, so 6/8 spans twelve sixteenth-note units rather than twenty-four;
 - beat divisions are unlabeled vertical guides behind translucent chord events; the selected-range border stays above header hover;
-- short 1/16 and 1/8 events keep a compact in-segment label and show the complete chord symbol in an anchored badge when selected, hovered, or keyboard-focused;
+- all chord events keep the same lane height regardless of duration; short 1/16 and 1/8 events use a compact in-segment label and show the complete symbol in an anchored badge when selected, hovered, or keyboard-focused;
 - gaps and overlaps disable saving until the bar is exactly filled.
 - a low-confidence bar exposes an explicit `Подтвердить такт` action; confirmation becomes a visible manual-review state and can be reverted;
 - lyrics highlight only the currently timed word and label that visual meaning in the UI.
