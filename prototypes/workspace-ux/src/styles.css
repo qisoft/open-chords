@@ -685,19 +685,60 @@ html, body, #root { height: 100%; }
   overflow: hidden;
   padding-bottom: 0;
 }
-.variant-a .studio-grid { height: 100%; min-height: 0; overflow: hidden; }
+.variant-a .studio-grid { grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
 .variant-a .studio-main {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
 .variant-a .inspector {
-  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(520px, .9fr);
+  grid-template-areas: "events form" "review note";
+  align-items: start;
+  gap: 8px 14px;
+  height: auto;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-color: #393941 transparent;
+  overflow: visible;
+  border: 0;
+  border-radius: 9px;
+  background: #111115;
+  padding: 12px 14px;
+}
+.variant-a .inspector .event-picker-shell { grid-area: events; margin: 0; padding: 10px; }
+.variant-a .editor-dock .event-option { min-width: 96px; }
+.variant-a .editor-dock .event-add-option { min-width: 138px; }
+.variant-a .inspector form {
+  grid-area: form;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 9px;
+}
+.variant-a .inspector .field-group {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 140px minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 0;
+}
+.variant-a .inspector .button-pair { grid-column: 1 / -1; justify-content: flex-end; padding: 0; }
+.variant-a .inspector .review-status {
+  grid-area: review;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  margin: 0;
+  padding: 4px 6px 4px 10px;
+}
+.variant-a .inspector .original-note {
+  grid-area: note;
+  align-self: center;
+  margin: 0;
+  padding: 0 2px;
 }
 .variant-a .lyrics-strip {
   display: flex;
@@ -789,7 +830,12 @@ html, body, #root { height: 100%; }
   .variant-a .studio-grid { height: auto; overflow: visible; }
   .variant-a .studio-main { display: flex; overflow: visible; }
   .variant-a .lyrics-strip { min-height: 520px; }
-  .variant-a .inspector { height: auto; overflow: visible; }
+  .variant-a .inspector { display: block; height: auto; overflow: visible; }
+  .variant-a .inspector form { display: block; }
+  .variant-a .inspector .field-group { grid-template-columns: 1fr; padding: 12px 0; }
+  .variant-a .inspector .button-pair { justify-content: flex-start; }
+  .variant-a .inspector .review-status { margin-top: 10px; }
+  .variant-a .inspector .original-note { margin-top: 10px; }
   .studio-grid { grid-template-columns: 1fr; min-height: 0; align-items: start; }
   .variant-a .inspector { border: 0; }
   .variant-a .field-group { grid-template-columns: minmax(0, 1fr) minmax(300px, .85fr); align-items: start; }
