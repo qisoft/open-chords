@@ -728,9 +728,9 @@ html, body, #root { height: 100%; }
 .variant-a .inspector form {
   grid-area: form;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: end;
-  gap: 16px;
+  gap: 10px;
   border-radius: 8px;
   background: #17171c;
   padding: 10px 12px;
@@ -744,7 +744,7 @@ html, body, #root { height: 100%; }
 }
 .variant-a .inspector .chord-control { display: grid; gap: 7px; min-width: 0; }
 .variant-a .inspector .chord-control-label { display: inline-flex; align-items: center; gap: 5px; color: #aaaab4; font-size: 14px; }
-.variant-a .inspector .button-pair { justify-content: flex-end; padding: 0; flex-wrap: nowrap; }
+.variant-a .inspector .button-pair { grid-column: 1; justify-content: flex-end; padding: 0; flex-wrap: nowrap; }
 .variant-a .inspector .review-status {
   grid-area: review;
   display: flex;
