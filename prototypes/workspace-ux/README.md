@@ -42,7 +42,7 @@ Timeline interaction in the current checkpoint:
 - each timed Chord Event is projected above the lyric word it overlaps, so the chord track remains visible while reading and playing from lyrics.
 - the lyrics sample spans four explicit lines; a chord already sounding at a line boundary is repeated above that line's first overlapping word so the player never loses harmonic context;
 - variant A uses a flat Linear-inspired hierarchy rather than card containers: open timeline and lyrics sections, tab-like event selection, inline metadata, compact typography, and Lucide icon actions with accessible labels/tooltips; violet is reserved for selection and semantic colour for status meaning.
-- the readability checkpoint gives every primary icon control at least a 40 px hit target, raises important metadata to 14 px and lyric chord labels to 16 px, and replaces stacked divider lines with a few borderless background groups; the inspector names the selected chord explicitly and mirrors it with a filled, checked event tile.
+- the readability checkpoint gives every primary icon control at least a 40 px hit target, raises important metadata to 14 px and lyric chord labels to 16 px, and replaces stacked divider lines with a few borderless background groups; the bar context and event choices share one compact block, while the active event is indicated once by its filled tile without a redundant heading or checkmark.
 
 Try these checks in every variant:
 

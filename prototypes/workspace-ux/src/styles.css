@@ -524,22 +524,14 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .selection-toolbar > div span { font-size: 12px; }
 .variant-a .toolbar-action { flex-basis: 40px; }
 .variant-a .inspector { border-left: 0; background: #101014; }
-.variant-a .panel-heading {
-  min-height: 105px;
-  border: 0;
-  background: #17171c;
-  padding: 16px 18px;
-}
-.variant-a .inspector-current { display: grid; gap: 9px; }
-.variant-a .inspector-current > span { display: inline-flex; align-items: center; gap: 7px; color: #aaaab4; font-size: 14px; }
-.variant-a .inspector-current > strong { color: #e5e3ff; font-size: 32px; font-weight: 660; line-height: 1; }
-.variant-a .event-counter { color: #aaaab4; font-size: 14px; }
-.variant-a .event-picker-shell { margin: 12px 14px 2px; border-radius: 8px; background: #17171c; padding: 12px; }
-.variant-a .event-picker-label { display: block; margin-bottom: 9px; color: #a4a4ae; font-size: 14px; font-weight: 560; }
+.variant-a .event-picker-shell { margin: 14px 14px 2px; border-radius: 8px; background: #17171c; padding: 12px; }
+.variant-a .event-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; color: #c7c7cf; }
+.variant-a .event-picker-heading strong { font-size: 15px; font-weight: 620; }
+.variant-a .event-picker-heading span { min-width: 24px; border-radius: 999px; background: #24242b; padding: 3px 7px; color: #aaaab4; font-size: 12px; line-height: 18px; text-align: center; }
 .variant-a .event-picker { gap: 8px; overflow-x: auto; border: 0; padding: 0 8px; scroll-padding-inline: 8px; }
 .variant-a .event-option {
   display: grid;
-  grid-template-columns: 18px minmax(38px, auto) 18px;
+  grid-template-columns: 18px minmax(48px, auto);
   grid-template-rows: auto auto;
   align-items: center;
   column-gap: 6px;
@@ -558,7 +550,6 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .event-drag-handle { grid-column: 1; grid-row: 1 / span 2; color: #777781; }
 .variant-a .event-option strong { grid-column: 2; font-size: 20px; }
 .variant-a .event-option span { grid-column: 2; color: #aaaab4; font-size: 13px; }
-.variant-a .event-selected-check { grid-column: 3; grid-row: 1 / span 2; color: #c9c6ff; }
 .variant-a .event-option.selected { border: 0; background: rgba(141,134,255,.2); color: #f0efff; padding: 9px 12px; }
 .variant-a .event-option.selected::after { display: none; }
 .variant-a .event-option.dragging { opacity: .38; }
