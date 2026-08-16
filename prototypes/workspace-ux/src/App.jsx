@@ -50,13 +50,29 @@ const CHORD_TYPES = [
   { id: 'nine', suffix: '9', label: 'с ноною' },
 ]
 
-const LYRIC_WORDS = [
-  { text: 'Я', start: 18, end: 20 }, { text: 'хотел', start: 20, end: 23 },
-  { text: 'бы', start: 23, end: 25 }, { text: 'остаться', start: 25, end: 28 },
-  { text: 'с', start: 28, end: 29 }, { text: 'тобой,', start: 29, end: 32 },
-  { text: 'просто', start: 32, end: 36 }, { text: 'остаться', start: 36, end: 40 },
-  { text: 'с', start: 40, end: 42 }, { text: 'тобой', start: 42, end: 46 },
+const LYRIC_LINES = [
+  [
+    { id: 'l1-1', text: 'Я', start: 18, end: 20 }, { id: 'l1-2', text: 'хотел', start: 20, end: 23 },
+    { id: 'l1-3', text: 'бы', start: 23, end: 25 }, { id: 'l1-4', text: 'остаться', start: 25, end: 28 },
+    { id: 'l1-5', text: 'с', start: 28, end: 29 }, { id: 'l1-6', text: 'тобой,', start: 29, end: 32 },
+  ],
+  [
+    { id: 'l2-1', text: 'этот', start: 32, end: 35 }, { id: 'l2-2', text: 'ритм', start: 35, end: 38 },
+    { id: 'l2-3', text: 'ведёт', start: 38, end: 41 }, { id: 'l2-4', text: 'нас', start: 41, end: 43 },
+    { id: 'l2-5', text: 'дальше.', start: 43, end: 48 },
+  ],
+  [
+    { id: 'l3-1', text: 'Город', start: 48, end: 51 }, { id: 'l3-2', text: 'тихо', start: 51, end: 54 },
+    { id: 'l3-3', text: 'светится', start: 54, end: 58 }, { id: 'l3-4', text: 'в', start: 58, end: 59 },
+    { id: 'l3-5', text: 'окне,', start: 59, end: 64 },
+  ],
+  [
+    { id: 'l4-1', text: 'и', start: 64, end: 66 }, { id: 'l4-2', text: 'новая', start: 66, end: 70 },
+    { id: 'l4-3', text: 'песня', start: 70, end: 74 }, { id: 'l4-4', text: 'начинается', start: 74, end: 80 },
+    { id: 'l4-5', text: 'сейчас.', start: 80, end: 84 },
+  ],
 ]
+const LYRIC_WORDS = LYRIC_LINES.flat()
 
 const STATES = [
   { label: 'Готово', title: 'Проект готов', detail: 'Все данные доступны. Правок: 3.', tone: 'good', symbol: '✓' },
@@ -199,11 +215,16 @@ function timedChordEvents(bars) {
   })
   return result
 }
-function chordLabelsForLyrics(bars, words) {
-  const labels = Array(words.length).fill('')
-  timedChordEvents(bars).forEach((event) => {
-    const wordIndex = words.findIndex((word) => event.start < word.end && event.end > word.start)
-    if (wordIndex >= 0 && !labels[wordIndex]) labels[wordIndex] = event.chord
+function chordLabelsForLyricLines(bars, lines) {
+  const labels = Array(lines.flat().length).fill('')
+  const chordEvents = timedChordEvents(bars)
+  let lineOffset = 0
+  lines.forEach((line) => {
+    chordEvents.forEach((event) => {
+      const wordIndex = line.findIndex((word) => event.start < word.end && event.end > word.start)
+      if (wordIndex >= 0 && !labels[lineOffset + wordIndex]) labels[lineOffset + wordIndex] = event.chord
+    })
+    lineOffset += line.length
   })
   return labels
 }
@@ -454,9 +475,9 @@ function Transport({ state, dispatch }) {
 
 function VariantA({ state, dispatch, bar, event }) {
   const currentLyricIndex = LYRIC_WORDS.findIndex((word) => state.positionUnits >= word.start && state.positionUnits < word.end)
-  const lyricChordLabels = useMemo(() => chordLabelsForLyrics(state.bars, LYRIC_WORDS), [state.bars])
+  const lyricChordLabels = useMemo(() => chordLabelsForLyricLines(state.bars, LYRIC_LINES), [state.bars])
   return <div className="shell variant-a"><Header state={state} dispatch={dispatch} /><div className="studio-grid">
-    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. У края выделение продолжится с автоскроллом. Тяни playhead для перемотки.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip" aria-label="Текст песни с аккордами и таймингом"><div className="lyrics-heading"><span className="eyebrow">Текст и аккорды</span><span className="lyrics-key"><b>Am</b> аккорд по таймингу <i aria-hidden="true" /> текущее слово</span></div><p>{LYRIC_WORDS.map((word, index) => <span className="lyric-token" key={`${word.text}-${index}`}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span>)}</p></section></main>
+    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. У края выделение продолжится с автоскроллом. Тяни playhead для перемотки.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip" aria-label="Многострочный текст песни с аккордами и таймингом"><div className="lyrics-heading"><span className="eyebrow">Текст и аккорды</span><span className="lyrics-key"><b>Am</b> аккорд по таймингу <i aria-hidden="true" /> текущее слово</span></div><div className="lyrics-lines">{LYRIC_LINES.map((line, lineIndex) => { const lineOffset = LYRIC_LINES.slice(0, lineIndex).reduce((sum, item) => sum + item.length, 0); return <p className="lyric-line" key={`line-${lineIndex}`}>{line.map((word, wordIndex) => { const index = lineOffset + wordIndex; return <span className="lyric-token" key={word.id}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span> })}</p> })}</div></section></main>
     <EventEditor state={state} bar={bar} event={event} dispatch={dispatch} />
   </div><footer className="studio-footer"><Transport state={state} dispatch={dispatch} /></footer></div>
 }
