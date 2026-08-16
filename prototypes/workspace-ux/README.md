@@ -14,9 +14,11 @@ python3 prototypes/workspace-ux/run_ui.py
 
 The browser opens variant A. Use the floating arrows at the bottom or keyboard `←` / `→` to compare:
 
-- **A — Студия:** library, timeline, inspector, and transport visible together;
-- **B — Одна задача:** Edit and Practice are explicit modes with one primary surface;
-- **C — Линейно:** vertically ordered landmarks and a non-spatial timeline for keyboard and screen-reader use.
+- **A — Редактор:** focused chord-event timeline and inspector; every chord inside a bar is selected and edited independently;
+- **B — Режимы:** Edit and Practice are explicit modes with one primary surface;
+- **C — Список:** vertically ordered landmarks and a non-spatial event list for keyboard and screen-reader use.
+
+In the editor, select `C` or `G7` separately inside bar 3. The inspector must identify the exact event and let you rename, add, or delete it without silently changing the other chord in the bar.
 
 Try these checks in every variant:
 
