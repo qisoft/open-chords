@@ -328,7 +328,7 @@ function Timeline({ state, dispatch, simple = false }) {
             </div>{bar.events.map((chordEvent) => {
               const start = eventStart; eventStart += chordEvent.duration
               const compact = chordEvent.duration <= 2
-              return <button key={chordEvent.id} title={`${chordEvent.chord} · ${durationLabel(chordEvent.duration, bar)}`} aria-label={`${chordEvent.chord}, длительность ${durationLabel(chordEvent.duration, bar)}`} className={`chord-event ${chordEvent.id === state.activeEventId ? 'selected' : ''} ${compact ? 'compact-event' : ''}`} style={{ left: start * PX_PER_UNIT, width: chordEvent.duration * PX_PER_UNIT }} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: chordEvent.id })}><b>{chordEvent.chord}</b></button>
+              return <button key={chordEvent.id} data-chord={chordEvent.chord} title={`${chordEvent.chord} · ${durationLabel(chordEvent.duration, bar)}`} aria-label={`${chordEvent.chord}, длительность ${durationLabel(chordEvent.duration, bar)}`} className={`chord-event ${chordEvent.id === state.activeEventId ? 'selected' : ''} ${compact ? 'compact-event' : ''}`} style={{ left: start * PX_PER_UNIT, width: chordEvent.duration * PX_PER_UNIT }} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: chordEvent.id })}><b>{chordEvent.chord}</b></button>
             })}</div>
             {bar.confidence === 'low' && <span className="confidence-label">! проверить</span>}
             {bar.confidence === 'reviewed' && <span className="confidence-label reviewed">✓ проверено вручную</span>}
