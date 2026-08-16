@@ -18,7 +18,7 @@ The browser opens variant A. Use the floating arrows at the bottom or keyboard `
 - **B — Режимы:** Edit and Practice are explicit modes with one primary surface;
 - **C — Список:** vertically ordered landmarks and a non-spatial event list for keyboard and screen-reader use.
 
-In the editor, select `C` or `G7` separately inside bar 3. The inspector must identify the exact event and let you rename, add, or delete it without silently changing the other chord in the bar.
+In the editor, select `C` or `G7` separately inside bar 3. The inspector must identify the exact event and let you rename it, change its time boundaries, add another event, or delete it without silently changing the other chord in the bar.
 
 Try these checks in every variant:
 

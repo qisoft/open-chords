@@ -116,8 +116,7 @@ button { cursor: pointer; }
 .field-group label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
 .button-pair { gap: 8px; padding: 0 18px 18px; flex-wrap: wrap; }
 .timing-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.timing-summary span { display: flex; flex-direction: column; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; }
-.timing-summary strong { color: var(--text); font-size: 13px; }
+.timing-summary label { display: grid; gap: 5px; }
 .original-note { margin: -6px 18px 16px; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .inspector h3 { padding: 0 18px; }
 .diagram { display: grid; grid-template-columns: repeat(6, 1fr); margin: 18px; padding: 18px 8px; border-top: 4px solid var(--text); background: repeating-linear-gradient(to bottom, transparent 0 20px, var(--line) 20px 22px); text-align: center; }

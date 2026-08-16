@@ -156,8 +156,8 @@ function inspector() {
     <div class="event-picker" role="group" aria-label="Аккорды в такте ${bar.number}">${bar.chords.map((item, index) => `<button class="event-option ${index === state.activeChordIndex ? "selected" : ""}" data-chord-bar="${bar.number}" data-chord-index="${index}" aria-pressed="${index === state.activeChordIndex ? "true" : "false"}"><strong>${item}</strong><span>${eventBeatLabel(bar, index)}</span></button>`).join("")}</div>
     <button class="add-event-button" data-action="add-chord">＋ Добавить смену аккорда</button>
     <div class="selected-chord"><span>Позиция: ${eventBeatLabel(bar, state.activeChordIndex)}</span><strong>${chord}</strong><small>${bar.confidence === "low" ? "Низкая уверенность · проверь на слух" : "Событие можно изменить без удаления остальных"}</small></div>
-    <div class="field-group"><label>Название аккорда<input id="chord-name" value="${chord}" autocomplete="off"></label><div class="timing-summary"><span>Начало<strong>${start}</strong></span><span>Конец<strong>${end}</strong></span></div></div>
-    <div class="button-pair"><button class="primary-button" data-action="apply-chord">Сохранить аккорд</button><button class="danger-button" data-action="delete-chord" ${bar.chords.length === 1 ? "disabled" : ""}>Удалить этот аккорд</button></div>
+    <div class="field-group"><label>Название аккорда<input id="chord-name" value="${chord}" autocomplete="off"></label><div class="timing-summary"><label>Начало<input id="event-start" value="${start}" aria-label="Начало события"></label><label>Конец<input id="event-end" value="${end}" aria-label="Конец события"></label></div></div>
+    <div class="button-pair"><button class="primary-button" data-action="apply-chord">Сохранить событие</button><button class="danger-button" data-action="delete-chord" ${bar.chords.length === 1 ? "disabled" : ""}>Удалить этот аккорд</button></div>
     <p class="original-note">Original сохранён отдельно; удалить последний аккорд в такте нельзя.</p>
     <hr><h3>Диаграмма · гитара</h3><div class="diagram" role="img" aria-label="Диаграмма аккорда ${chord}"><span>●</span><span>○</span><span>●</span><span>○</span><span>●</span><span>○</span></div>
   </aside>`;
@@ -230,6 +230,9 @@ function act(type, source) {
   if (type === "apply-chord") {
     const value = document.querySelector("#chord-name")?.value.trim();
     if (value) activeBar().chords[state.activeChordIndex] = value;
+    const start = document.querySelector("#event-start")?.value.trim();
+    const end = document.querySelector("#event-end")?.value.trim();
+    if (start && end) EVENT_TIMES[activeBar().number][state.activeChordIndex] = [start, end];
   }
   if (type === "add-chord") {
     activeBar().chords.splice(state.activeChordIndex + 1, 0, "N");
@@ -245,7 +248,7 @@ function act(type, source) {
   if (type === "shortcuts") { state.modal = true; state.returnFocusAction = source.dataset.action; }
   if (type === "close-modal") { state.modal = false; }
   const returnAction = type === "close-modal" ? state.returnFocusAction : null;
-  const actionAnnouncement = type === "apply-chord" ? `Аккорд сохранён: ${activeChord()}` : type === "add-chord" ? "Добавлено новое событие аккорда" : type === "delete-chord" ? "Событие аккорда удалено" : "Рабочая область обновлена";
+  const actionAnnouncement = type === "apply-chord" ? `Событие сохранено: ${activeChord()}` : type === "add-chord" ? "Добавлено новое событие аккорда" : type === "delete-chord" ? "Событие аккорда удалено" : "Рабочая область обновлена";
   announce(type === "cycle-status" ? `${status().title}. ${status().detail}` : actionAnnouncement);
   render();
   if (returnAction) { document.querySelector(`[data-action="${returnAction}"]`)?.focus(); state.returnFocusAction = null; }
