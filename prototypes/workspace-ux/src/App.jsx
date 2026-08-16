@@ -32,6 +32,14 @@ const DURATION_OPTIONS = [
   { units: 8, label: '1/2' }, { units: 16, label: 'Целая' },
 ]
 
+const LYRIC_WORDS = [
+  { text: 'Я', start: 18, end: 20 }, { text: 'хотел', start: 20, end: 23 },
+  { text: 'бы', start: 23, end: 25 }, { text: 'остаться', start: 25, end: 28 },
+  { text: 'с', start: 28, end: 29 }, { text: 'тобой,', start: 29, end: 32 },
+  { text: 'просто', start: 32, end: 36 }, { text: 'остаться', start: 36, end: 40 },
+  { text: 'с', start: 40, end: 42 }, { text: 'тобой', start: 42, end: 46 },
+]
+
 const STATES = [
   { label: 'Готово', title: 'Проект готов', detail: 'Все данные доступны. Правок: 3.', tone: 'good', symbol: '✓' },
   { label: 'Анализ', title: 'Анализируем гармонию', detail: 'Этап 3 из 5. Предыдущая ревизия доступна.', tone: 'busy', symbol: '◌' },
@@ -110,6 +118,10 @@ function reducer(state, action) {
         bars: state.bars.map((item) => item.id === bar.id ? { ...item, events } : item),
       }
     }
+    case 'confirmBar':
+      return { ...state, bars: state.bars.map((bar) => bar.id === action.barId ? { ...bar, confidence: 'reviewed' } : bar) }
+    case 'flagBarForReview':
+      return { ...state, bars: state.bars.map((bar) => bar.id === action.barId ? { ...bar, confidence: 'low' } : bar) }
     case 'saveBar':
       return { ...state, dirtyBarIds: state.dirtyBarIds.filter((id) => id !== state.activeBarId) }
     case 'moveBar': {
@@ -312,6 +324,7 @@ function Timeline({ state, dispatch, simple = false }) {
               return <button key={chordEvent.id} title={`${chordEvent.chord} · ${durationLabel(chordEvent.duration)}`} aria-label={`${chordEvent.chord}, длительность ${durationLabel(chordEvent.duration)}`} className={`chord-event ${chordEvent.id === state.activeEventId ? 'selected' : ''} ${compact ? 'compact-event' : ''}`} style={{ left: start * PX_PER_UNIT, width: chordEvent.duration * PX_PER_UNIT }} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: chordEvent.id })}><b>{chordEvent.chord}</b></button>
             })}</div>
             {bar.confidence === 'low' && <span className="confidence-label">! проверить</span>}
+            {bar.confidence === 'reviewed' && <span className="confidence-label reviewed">✓ проверено вручную</span>}
           </article>
         })}
         </div>
@@ -331,6 +344,8 @@ function EventEditor({ state, bar, event, dispatch }) {
   return <aside className="inspector panel" aria-label="Редактор выбранного события аккорда">
     <div className="panel-heading"><div><span className="eyebrow">Редактор события</span><strong>Такт {bar.number}</strong></div><span className="event-counter">{activeIndex + 1} из {bar.events.length}</span></div>
     <div className="event-picker" role="group" aria-label={`Аккорды в такте ${bar.number}`}>{bar.events.map((item) => <button key={item.id} className={`event-option ${item.id === event.id ? 'selected' : ''}`} aria-pressed={item.id === event.id} onClick={() => dispatch({ type: 'selectEvent', barId: bar.id, eventId: item.id })}><strong>{item.chord}</strong><span>{durationLabel(item.duration)}</span></button>)}</div>
+    {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><div><strong>Автоанализ не уверен</strong><span>Проверь все аккорды в такте. Если всё правильно — подтверди его.</span></div><button className="primary-button" type="button" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}>✓ Подтвердить такт</button></section>}
+    {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><div><strong>✓ Проверено вручную</strong><span>Предупреждение снято после твоего подтверждения.</span></div><button className="quiet-button" type="button" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}>Вернуть на проверку</button></section>}
     <form onSubmit={save}>
       <div className="field-group"><label>Аккорд<input value={name} onChange={(e) => setName(e.target.value)} /></label>
         <fieldset className="duration-control"><legend>Длительность</legend><div>{DURATION_OPTIONS.map((option) => <button key={option.units} type="button" className={event.duration === option.units ? 'selected' : ''} aria-pressed={event.duration === option.units} onClick={() => dispatch({ type: 'updateEvent', patch: { duration: option.units } })}>{option.label}</button>)}</div></fieldset>
@@ -360,8 +375,9 @@ function Transport({ state, dispatch }) {
 }
 
 function VariantA({ state, dispatch, bar, event }) {
+  const currentLyricIndex = LYRIC_WORDS.findIndex((word) => state.positionUnits >= word.start && state.positionUnits < word.end)
   return <div className="shell variant-a"><Header state={state} dispatch={dispatch} /><div className="studio-grid">
-    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. У края выделение продолжится с автоскроллом. Тяни playhead для перемотки.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip"><span className="eyebrow">Текст</span><p>Я хотел бы остаться с тобой, <mark>просто остаться с тобой</mark></p></section></main>
+    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. У края выделение продолжится с автоскроллом. Тяни playhead для перемотки.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip" aria-label="Текст песни с таймингом"><div className="lyrics-heading"><span className="eyebrow">Текст</span><span className="lyrics-key"><i aria-hidden="true" />Текущее слово по таймингу</span></div><p>{LYRIC_WORDS.map((word, index) => <span key={`${word.text}-${index}`}>{index > 0 && ' '}{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span>)}</p></section></main>
     <EventEditor state={state} bar={bar} event={event} dispatch={dispatch} />
   </div><footer className="studio-footer"><Transport state={state} dispatch={dispatch} /></footer></div>
 }
@@ -372,7 +388,7 @@ function VariantB({ state, dispatch, bar, event }) {
 }
 
 function VariantC({ state, dispatch, bar, event }) {
-  return <div className="shell variant-c"><Header state={state} dispatch={dispatch} /><main id="workspace-main" className="linear-main"><section className="linear-section"><span className="eyebrow">Текущее событие</span><div className="section-heading"><h1>Такт {bar.number}</h1><span className="big-chord">{event.chord}</span></div><Transport state={state} dispatch={dispatch} /></section><section className="linear-section"><span className="eyebrow">Список событий</span><ol className="linear-bars">{state.bars.map((item) => <li key={item.id} className={item.id === bar.id ? 'active' : ''}><div className="linear-bar-row"><button className="linear-bar-name" onClick={() => dispatch({ type: 'selectBar', barId: item.id })}><span className="linear-number">{item.number}</span><span><strong>Такт {item.number} · {item.meter}</strong><small>{item.section}</small></span></button><div className="linear-event-list">{item.events.map((chordEvent) => <button key={chordEvent.id} className={`linear-event ${chordEvent.id === event.id ? 'selected' : ''}`} onClick={() => dispatch({ type: 'selectEvent', barId: item.id, eventId: chordEvent.id })}><strong>{chordEvent.chord}</strong><small>{durationLabel(chordEvent.duration)}</small></button>)}</div><span className="linear-status">{item.confidence === 'low' ? '! Проверить' : 'Проверено'}</span></div></li>)}</ol></section></main></div>
+  return <div className="shell variant-c"><Header state={state} dispatch={dispatch} /><main id="workspace-main" className="linear-main"><section className="linear-section"><span className="eyebrow">Текущее событие</span><div className="section-heading"><h1>Такт {bar.number}</h1><span className="big-chord">{event.chord}</span></div><Transport state={state} dispatch={dispatch} /></section><section className="linear-section"><span className="eyebrow">Список событий</span><ol className="linear-bars">{state.bars.map((item) => <li key={item.id} className={item.id === bar.id ? 'active' : ''}><div className="linear-bar-row"><button className="linear-bar-name" onClick={() => dispatch({ type: 'selectBar', barId: item.id })}><span className="linear-number">{item.number}</span><span><strong>Такт {item.number} · {item.meter}</strong><small>{item.section}</small></span></button><div className="linear-event-list">{item.events.map((chordEvent) => <button key={chordEvent.id} className={`linear-event ${chordEvent.id === event.id ? 'selected' : ''}`} onClick={() => dispatch({ type: 'selectEvent', barId: item.id, eventId: chordEvent.id })}><strong>{chordEvent.chord}</strong><small>{durationLabel(chordEvent.duration)}</small></button>)}</div><span className="linear-status">{item.confidence === 'low' ? '! Проверить' : item.confidence === 'reviewed' ? '✓ Вручную' : 'Проверено'}</span></div></li>)}</ol></section></main></div>
 }
 
 function PrototypeSwitcher({ variant, cycle }) { if (!import.meta.env.DEV) return null; return <nav className="prototype-switcher"><button onClick={() => cycle(-1)} aria-label="Предыдущий вариант">←</button><strong>{VARIANTS[variant]}</strong><button onClick={() => cycle(1)} aria-label="Следующий вариант">→</button></nav> }

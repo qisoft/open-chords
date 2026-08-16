@@ -32,6 +32,8 @@ Timeline interaction in the current checkpoint:
 - chord widths use 20 px sixteenth-note units (40 px per eighth) and align to four beat intervals in 4/4;
 - edit duration with 1/16, 1/8, 1/4, 1/2, or whole-note controls; manual time inputs are intentionally absent;
 - gaps and overlaps disable saving until the bar is exactly filled.
+- a low-confidence bar exposes an explicit `Подтвердить такт` action; confirmation becomes a visible manual-review state and can be reverted;
+- lyrics highlight only the currently timed word and label that visual meaning in the UI.
 
 Try these checks in every variant:
 
