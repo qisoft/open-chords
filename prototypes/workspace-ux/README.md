@@ -30,7 +30,9 @@ Timeline interaction in the current checkpoint:
 - press Space to play or pause; playback moves the bars under the fixed playhead;
 - when loop is enabled, every transition from pause to playback starts at the first bar in the latched loop range;
 - chord widths use 20 px sixteenth-note units (40 px per eighth) and align to four beat intervals in 4/4;
-- edit duration with 1/16, 1/8, 1/4, 1/2, or whole-note controls; manual time inputs are intentionally absent;
+- edit duration with fixed note values plus a meter-derived `весь такт` choice (`3/4 · весь такт`, `4/4 · весь такт`, etc.); manual time inputs are intentionally absent;
+- meter capacity uses both numerator and denominator, so 6/8 spans twelve sixteenth-note units rather than twenty-four;
+- beat divisions are unlabeled vertical guides behind translucent chord events; the selected-range border stays above header hover;
 - gaps and overlaps disable saving until the bar is exactly filled.
 - a low-confidence bar exposes an explicit `Подтвердить такт` action; confirmation becomes a visible manual-review state and can be reverted;
 - lyrics highlight only the currently timed word and label that visual meaning in the UI.

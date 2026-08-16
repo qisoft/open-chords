@@ -168,6 +168,10 @@ _Avoid_: Chord sheet, waveform
 A contiguous metered interval in Project Time containing an ordered set of Beats. A Bar may be complete, a pickup, or truncated; meter changes occur only between Bars.
 _Avoid_: Measure boundary, downbeat interval
 
+**Full-Bar Chord Event**:
+A Chord Event whose interval exactly spans one complete Bar. Full-bar duration is derived from that Bar's meter (for example, three quarter-note beats in 3/4 or six eighth-note beats in 6/8) and must not be presented as a whole-note duration.
+_Avoid_: Whole-note chord, fixed 4/4 duration, whole duration
+
 **Beat**:
 An ordered pulse belonging to exactly one Bar. The first Beat of a Bar has the downbeat role; downbeat is not an independent Timeline Entity.
 _Avoid_: Beat timestamp, independent downbeat

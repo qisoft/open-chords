@@ -71,10 +71,11 @@ button { cursor: pointer; }
 .playhead-handle { position: absolute; left: 50%; top: 8px; display: grid; place-items: center; width: 30px; height: 30px; border: 2px solid #ffd5da; border-radius: 50%; background: var(--danger); color: #16070a; font-size: 15px; font-weight: 900; cursor: ew-resize; pointer-events: auto; transform: translateX(-50%); touch-action: none; }
 .playhead-handle:focus-visible { outline-color: white; }
 .timeline-viewport.scrubbing .playhead-handle { box-shadow: 0 0 0 5px rgba(255,139,148,.24); cursor: grabbing; }
-.bar { position: relative; flex: none; min-height: 158px; border: 0; border-right: 1px solid var(--line); background: transparent; text-align: left; }
+.bar { position: relative; flex: none; min-height: 112px; border: 0; border-right: 1px solid var(--line); background: transparent; text-align: left; }
 .bar:hover { background: var(--surface-2); }
 .bar.active { background: #1d2022; }
-.bar.range-selected { box-shadow: inset 0 0 0 3px var(--focus); background-color: #132532; }
+.bar.range-selected { background-color: #132532; }
+.bar.range-selected::before { content: ""; position: absolute; z-index: 5; inset: 0; border: 3px solid var(--focus); pointer-events: none; }
 .bar.looped::after { content: ""; position: absolute; z-index: 6; inset: 0; border-top: 3px solid var(--good); border-bottom: 3px solid var(--good); pointer-events: none; }
 .bar.loop-start::after { border-left: 3px solid var(--good); border-radius: 8px 0 0 8px; }
 .bar.loop-end::after { border-right: 3px solid var(--good); border-radius: 0 8px 8px 0; }
@@ -85,12 +86,11 @@ button { cursor: pointer; }
 .bar-select { display: flex; align-items: flex-start; justify-content: space-between; width: 100%; min-height: 44px; border: 0; border-radius: 0; background: transparent; padding: 6px 9px; text-align: left; cursor: crosshair; }
 .bar-select > span { display: flex; flex-direction: column; gap: 2px; }
 .bar-select:hover { background: var(--surface-3); }
-.beat-grid { display: flex; height: 32px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(255,255,255,.018); }
-.beat-grid span { position: relative; flex: 1; border-left: 1px solid #6d7787; }
+.beat-grid { position: absolute; z-index: 0; inset: 0; display: flex; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(255,255,255,.018); pointer-events: none; }
+.beat-grid span { flex: 1; border-left: 1px solid #6d7787; }
 .beat-grid span:last-child { border-right: 1px solid #6d7787; }
-.beat-grid b { position: absolute; top: 4px; left: 7px; color: var(--muted); font-size: 10px; }
-.event-lane { position: relative; height: 58px; overflow: visible; }
-.chord-event { position: absolute; top: 6px; bottom: 6px; display: flex; align-items: center; min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: #11151b; padding: 8px; text-align: left; overflow: hidden; }
+.event-lane { position: relative; height: 64px; overflow: visible; }
+.chord-event { position: absolute; z-index: 1; top: 10px; bottom: 7px; display: flex; align-items: center; min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: rgba(17,21,27,.88); padding: 8px; text-align: left; overflow: hidden; }
 .chord-event:hover { border-color: var(--muted); background: var(--surface-3); }
 .chord-event.selected { z-index: 2; border: 3px solid var(--accent); background: #302b12; padding: 6px; }
 .chord-event b { min-width: 0; overflow: hidden; color: var(--text); font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
@@ -138,8 +138,9 @@ button { cursor: pointer; }
 .button-pair { gap: 8px; padding: 0 18px 18px; flex-wrap: wrap; }
 .duration-control { margin: 0; border: 0; padding: 0; }
 .duration-control legend { margin-bottom: 6px; color: var(--muted); font-size: 12px; }
-.duration-control > div { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
-.duration-control button { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.duration-control > div { display: flex; gap: 5px; }
+.duration-control button { flex: 1 1 0; min-width: 0; min-height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); padding: 6px; }
+.duration-control button:last-child { flex-grow: 2.3; }
 .duration-control button.selected { border: 2px solid var(--accent); background: #302b12; color: var(--accent); font-weight: 900; }
 .event-position { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
 .event-position span { color: var(--muted); font-size: 11px; }
