@@ -186,6 +186,27 @@ function parseChord(symbol) {
   const type = CHORD_TYPES.find((item) => item.suffix === suffix)?.id || 'major'
   return { noChord: false, root, type, bass: CHORD_ROOTS.includes(bass) ? bass : '' }
 }
+function timedChordEvents(bars) {
+  const result = []
+  let barStart = 0
+  bars.forEach((bar) => {
+    let eventStart = barStart
+    bar.events.forEach((event) => {
+      result.push({ chord: event.chord, start: eventStart, end: eventStart + event.duration })
+      eventStart += event.duration
+    })
+    barStart += barCapacity(bar)
+  })
+  return result
+}
+function chordLabelsForLyrics(bars, words) {
+  const labels = Array(words.length).fill('')
+  timedChordEvents(bars).forEach((event) => {
+    const wordIndex = words.findIndex((word) => event.start < word.end && event.end > word.start)
+    if (wordIndex >= 0 && !labels[wordIndex]) labels[wordIndex] = event.chord
+  })
+  return labels
+}
 function rangesEqual(left, right) { return Boolean(left && right && left.start === right.start && left.end === right.end) }
 function formatTime(positionUnits) {
   const seconds = SOURCE_START_SECONDS + positionUnits / UNITS_PER_SECOND
@@ -373,6 +394,7 @@ function Timeline({ state, dispatch, simple = false }) {
 
 function EventEditor({ state, bar, event, dispatch }) {
   const [chordDraft, setChordDraft] = useState(() => parseChord(event.chord))
+  const chordPickerRef = useRef(null)
   useEffect(() => setChordDraft(parseChord(event.chord)), [event.id, event.chord])
   const activeIndex = bar.events.findIndex((item) => item.id === event.id)
   const start = bar.events.slice(0, activeIndex).reduce((sum, item) => sum + item.duration, 0)
@@ -386,13 +408,15 @@ function EventEditor({ state, bar, event, dispatch }) {
     {bar.confidence === 'low' && <section className="review-status warn" aria-label="Такт требует проверки"><div><strong>Автоанализ не уверен</strong><span>Проверь все аккорды в такте. Если всё правильно — подтверди его.</span></div><button className="primary-button" type="button" onClick={() => dispatch({ type: 'confirmBar', barId: bar.id })}>✓ Подтвердить такт</button></section>}
     {bar.confidence === 'reviewed' && <section className="review-status good" aria-label="Такт проверен вручную"><div><strong>✓ Проверено вручную</strong><span>Предупреждение снято после твоего подтверждения.</span></div><button className="quiet-button" type="button" onClick={() => dispatch({ type: 'flagBarForReview', barId: bar.id })}>Вернуть на проверку</button></section>}
     <form onSubmit={save}>
-      <div className="field-group"><section className="chord-picker-control" aria-labelledby="chord-picker-title">
-        <div className="chord-preview"><span id="chord-picker-title">Будет сохранено</span><strong aria-live="polite">{name}</strong></div>
-        <fieldset><legend>Корень аккорда</legend><div className="chord-choice-grid root-choices">{CHORD_ROOTS.map((root) => <button key={root} type="button" className={!chordDraft.noChord && chordDraft.root === root ? 'selected' : ''} aria-pressed={!chordDraft.noChord && chordDraft.root === root} onClick={() => setChordDraft((current) => ({ ...current, noChord: false, root }))}>{root}</button>)}</div></fieldset>
-        <fieldset><legend>Тип аккорда</legend><div className="chord-choice-grid type-choices">{CHORD_TYPES.map((type) => <button key={type.id} type="button" className={!chordDraft.noChord && chordDraft.type === type.id ? 'selected' : ''} aria-pressed={!chordDraft.noChord && chordDraft.type === type.id} onClick={() => setChordDraft((current) => ({ ...current, noChord: false, type: type.id }))}><strong>{type.suffix || 'maj'}</strong><span>{type.label}</span></button>)}</div></fieldset>
-        <label className="bass-choice">Бас / обращение<select value={chordDraft.bass} disabled={chordDraft.noChord} onChange={(selectEvent) => setChordDraft((current) => ({ ...current, bass: selectEvent.target.value }))}><option value="">Без отдельного баса</option>{CHORD_ROOTS.map((root) => <option key={root} value={root}>{root}</option>)}</select></label>
-        <button className={`no-chord-choice ${chordDraft.noChord ? 'selected' : ''}`} type="button" aria-pressed={chordDraft.noChord} onClick={() => setChordDraft((current) => ({ ...current, noChord: true, bass: '' }))}><strong>N</strong><span>Нет определённого аккорда</span></button>
-      </section>
+      <div className="field-group"><details ref={chordPickerRef} className="chord-picker-dropdown">
+        <summary><span>Аккорд</span><strong aria-live="polite">{name}</strong><span>Изменить⌄</span></summary>
+        <div className="chord-picker-menu">
+          <div className="chord-mode" role="group" aria-label="Аккорд или участок без аккорда"><button type="button" className={!chordDraft.noChord ? 'selected' : ''} aria-pressed={!chordDraft.noChord} onClick={() => setChordDraft((current) => ({ ...current, noChord: false }))}>Аккорд</button><button type="button" className={chordDraft.noChord ? 'selected' : ''} aria-pressed={chordDraft.noChord} onClick={() => setChordDraft((current) => ({ ...current, noChord: true, bass: '' }))}>N · нет аккорда</button></div>
+          <div className="chord-select-grid"><label>Корень<select value={chordDraft.root} disabled={chordDraft.noChord} onChange={(selectEvent) => setChordDraft((current) => ({ ...current, root: selectEvent.target.value }))}>{CHORD_ROOTS.map((root) => <option key={root} value={root}>{root}</option>)}</select></label><label>Тип<select value={chordDraft.type} disabled={chordDraft.noChord} onChange={(selectEvent) => setChordDraft((current) => ({ ...current, type: selectEvent.target.value }))}>{CHORD_TYPES.map((type) => <option key={type.id} value={type.id}>{type.suffix || 'maj'} · {type.label}</option>)}</select></label></div>
+          <label>Бас / обращение<select value={chordDraft.bass} disabled={chordDraft.noChord} onChange={(selectEvent) => setChordDraft((current) => ({ ...current, bass: selectEvent.target.value }))}><option value="">Без отдельного баса</option>{CHORD_ROOTS.map((root) => <option key={root} value={root}>{root}</option>)}</select></label>
+          <div className="chord-picker-footer"><span>Результат: <strong>{name}</strong></span><button className="primary-button" type="button" onClick={() => chordPickerRef.current?.removeAttribute('open')}>Готово</button></div>
+        </div>
+      </details>
         <fieldset className="duration-control"><legend>Длительность аккорда</legend><div>{durationOptionsForBar(bar).map((option) => <button key={option.units} type="button" className={event.duration === option.units ? 'selected' : ''} aria-pressed={event.duration === option.units} onClick={() => dispatch({ type: 'updateEvent', patch: { duration: option.units } })}>{option.label}</button>)}</div></fieldset>
         <div className="event-position"><span>Начало вычислено автоматически</span><strong>{start + 1}-я шестнадцатая такта</strong></div>
         <div className={`validation-banner ${valid ? 'valid' : 'invalid'}`} role="status">
@@ -421,8 +445,9 @@ function Transport({ state, dispatch }) {
 
 function VariantA({ state, dispatch, bar, event }) {
   const currentLyricIndex = LYRIC_WORDS.findIndex((word) => state.positionUnits >= word.start && state.positionUnits < word.end)
+  const lyricChordLabels = useMemo(() => chordLabelsForLyrics(state.bars, LYRIC_WORDS), [state.bars])
   return <div className="shell variant-a"><Header state={state} dispatch={dispatch} /><div className="studio-grid">
-    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. У края выделение продолжится с автоскроллом. Тяни playhead для перемотки.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip" aria-label="Текст песни с таймингом"><div className="lyrics-heading"><span className="eyebrow">Текст</span><span className="lyrics-key"><i aria-hidden="true" />Текущее слово по таймингу</span></div><p>{LYRIC_WORDS.map((word, index) => <span key={`${word.text}-${index}`}>{index > 0 && ' '}{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span>)}</p></section></main>
+    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. У края выделение продолжится с автоскроллом. Тяни playhead для перемотки.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip" aria-label="Текст песни с аккордами и таймингом"><div className="lyrics-heading"><span className="eyebrow">Текст и аккорды</span><span className="lyrics-key"><b>Am</b> аккорд по таймингу <i aria-hidden="true" /> текущее слово</span></div><p>{LYRIC_WORDS.map((word, index) => <span className="lyric-token" key={`${word.text}-${index}`}><strong className="lyric-chord" aria-hidden={lyricChordLabels[index] ? undefined : true}>{lyricChordLabels[index] || '\u00a0'}</strong><span>{index === currentLyricIndex ? <mark title="Сейчас звучит это слово">{word.text}</mark> : word.text}</span></span>)}</p></section></main>
     <EventEditor state={state} bar={bar} event={event} dispatch={dispatch} />
   </div><footer className="studio-footer"><Transport state={state} dispatch={dispatch} /></footer></div>
 }
