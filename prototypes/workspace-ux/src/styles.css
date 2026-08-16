@@ -75,6 +75,11 @@ button { cursor: pointer; }
 .bar:hover { background: var(--surface-2); }
 .bar.active { background: #1d2022; }
 .bar.range-selected { box-shadow: inset 0 0 0 3px var(--focus); background-color: #132532; }
+.bar.looped::after { content: ""; position: absolute; z-index: 6; inset: 0; border-top: 3px solid var(--good); border-bottom: 3px solid var(--good); pointer-events: none; }
+.bar.loop-start::after { border-left: 3px solid var(--good); border-radius: 8px 0 0 8px; }
+.bar.loop-end::after { border-right: 3px solid var(--good); border-radius: 0 8px 8px 0; }
+.bar.loop-start.loop-end::after { border-radius: 8px; }
+.loop-badge { position: absolute; z-index: 7; top: -10px; left: 8px; border-radius: 5px; background: var(--good); padding: 2px 6px; color: #07130f; font-size: 9px; font-weight: 900; letter-spacing: .08em; pointer-events: none; }
 .bar.invalid { box-shadow: inset 0 0 0 3px var(--danger); }
 .bar.low { background-image: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255,199,107,.08) 8px 12px); }
 .bar-select { display: flex; align-items: flex-start; justify-content: space-between; width: 100%; min-height: 44px; border: 0; border-radius: 0; background: transparent; padding: 6px 9px; text-align: left; cursor: crosshair; }
@@ -95,6 +100,7 @@ button { cursor: pointer; }
 .selection-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--focus); border-radius: 11px; background: #11202a; }
 .selection-toolbar > div { display: flex; flex: 1; flex-direction: column; gap: 2px; }
 .selection-toolbar > div span { color: var(--muted); font-size: 11px; }
+.chip-button[aria-pressed="true"] { border-color: var(--good); background: #123126; color: var(--good); }
 
 /* Variant A */
 .studio-grid { display: grid; grid-template-columns: minmax(560px, 1fr) 370px; min-height: calc(100vh - 152px); }

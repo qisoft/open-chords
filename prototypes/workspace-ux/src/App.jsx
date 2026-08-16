@@ -42,7 +42,7 @@ const STATES = [
 const initialState = {
   bars: INITIAL_BARS,
   activeBarId: 'bar-3', activeEventId: '3-c',
-  selectedRange: null, loopEnabled: false, positionUnits: 32,
+  selectedRange: null, loopRange: null, loopEnabled: false, positionUnits: 32,
   statusIndex: 0, playing: false, reducedMotion: false, mode: 'Редактор', modal: false,
   dirtyBarIds: [],
 }
@@ -64,16 +64,18 @@ function reducer(state, action) {
     case 'setRange':
       return { ...state, selectedRange: { start: Math.min(action.anchor, action.focus), end: Math.max(action.anchor, action.focus) } }
     case 'clearRange':
-      return { ...state, selectedRange: null, loopEnabled: false }
-    case 'toggleLoop':
-      return state.selectedRange ? { ...state, loopEnabled: !state.loopEnabled } : state
+      return { ...state, selectedRange: null }
+    case 'setLoopFromSelection':
+      return state.selectedRange ? { ...state, loopEnabled: true, loopRange: { ...state.selectedRange } } : state
+    case 'disableLoop':
+      return { ...state, loopEnabled: false, loopRange: null }
     case 'deleteRange': {
       if (!state.selectedRange) return state
       const { start, end } = state.selectedRange
       if (end - start + 1 >= state.bars.length) return state
       const bars = state.bars.filter((_, index) => index < start || index > end).map((bar, index) => ({ ...bar, number: index + 1 }))
       const target = bars[Math.min(start, bars.length - 1)]
-      return { ...state, bars, activeBarId: target.id, activeEventId: target.events[0].id, selectedRange: null, loopEnabled: false, positionUnits: 0 }
+      return { ...state, bars, activeBarId: target.id, activeEventId: target.events[0].id, selectedRange: null, loopRange: null, loopEnabled: false, positionUnits: 0 }
     }
     case 'updateEvent':
       return {
@@ -120,8 +122,8 @@ function reducer(state, action) {
     case 'setPlaying': return { ...state, playing: action.value }
     case 'togglePlayback': {
       if (state.playing) return { ...state, playing: false }
-      if (!state.loopEnabled || !state.selectedRange) return { ...state, playing: true }
-      const loopStart = barOffsets(state.bars)[state.selectedRange.start]
+      if (!state.loopEnabled || !state.loopRange) return { ...state, playing: true }
+      const loopStart = barOffsets(state.bars)[state.loopRange.start]
       return { ...state, playing: true, positionUnits: loopStart }
     }
     case 'cycleStatus': return { ...state, statusIndex: (state.statusIndex + 1) % STATES.length }
@@ -133,6 +135,7 @@ function reducer(state, action) {
 }
 
 function durationLabel(units) { return DURATION_OPTIONS.find((item) => item.units === units)?.label || `${units}/16` }
+function rangesEqual(left, right) { return Boolean(left && right && left.start === right.start && left.end === right.end) }
 function formatTime(positionUnits) {
   const seconds = SOURCE_START_SECONDS + positionUnits / UNITS_PER_SECOND
   const minutes = Math.floor(seconds / 60)
@@ -172,9 +175,11 @@ function SelectionToolbar({ state, dispatch }) {
   const count = state.selectedRange.end - state.selectedRange.start + 1
   const first = state.bars[state.selectedRange.start]?.number
   const last = state.bars[state.selectedRange.end]?.number
+  const selectionIsLoop = state.loopEnabled && rangesEqual(state.selectedRange, state.loopRange)
+  const loopActionLabel = selectionIsLoop ? 'Выключить loop' : state.loopEnabled ? 'Перенести loop на выбранное' : 'Зациклить выбранное'
   return <section className="selection-toolbar" aria-label="Действия с выбранными тактами">
     <div><strong>{count === 1 ? `Такт ${first}` : `Такты ${first}–${last}`}</strong><span>Выбрано мышью</span></div>
-    <button className="primary-button" aria-pressed={state.loopEnabled} onClick={() => dispatch({ type: 'toggleLoop' })}>{state.loopEnabled ? 'Выключить loop' : 'Зациклить выбранное'}</button>
+    <button className="primary-button" aria-pressed={selectionIsLoop} onClick={() => dispatch({ type: selectionIsLoop ? 'disableLoop' : 'setLoopFromSelection' })}>{loopActionLabel}</button>
     <button className="danger-button" disabled={count === state.bars.length} onClick={() => dispatch({ type: 'deleteRange' })}>Удалить такты</button>
     <button className="quiet-button" onClick={() => dispatch({ type: 'clearRange' })}>Снять выделение</button>
   </section>
@@ -271,7 +276,10 @@ function Timeline({ state, dispatch, simple = false }) {
         {state.bars.map((bar, barIndex) => {
           const capacity = barCapacity(bar); const used = barUsed(bar); let eventStart = 0
           const selected = state.selectedRange && barIndex >= state.selectedRange.start && barIndex <= state.selectedRange.end
-          return <article key={bar.id} data-bar-index={barIndex} className={`bar ${bar.id === state.activeBarId ? 'active' : ''} ${selected ? 'range-selected' : ''} ${bar.confidence === 'low' ? 'low' : ''} ${used > capacity ? 'invalid' : ''}`} style={{ width: capacity * PX_PER_UNIT }} aria-label={`Такт ${bar.number}, размер ${bar.meter}`}>
+          const looped = state.loopEnabled && state.loopRange && barIndex >= state.loopRange.start && barIndex <= state.loopRange.end
+          const loopEdge = looped ? `${barIndex === state.loopRange.start ? ' loop-start' : ''}${barIndex === state.loopRange.end ? ' loop-end' : ''}` : ''
+          return <article key={bar.id} data-bar-index={barIndex} className={`bar ${bar.id === state.activeBarId ? 'active' : ''} ${selected ? 'range-selected' : ''} ${looped ? `looped${loopEdge}` : ''} ${bar.confidence === 'low' ? 'low' : ''} ${used > capacity ? 'invalid' : ''}`} style={{ width: capacity * PX_PER_UNIT }} aria-label={`Такт ${bar.number}, размер ${bar.meter}${looped ? ', в активном loop' : ''}`}>
+            {looped && barIndex === state.loopRange.start && <span className="loop-badge">LOOP</span>}
             <button className="bar-select" onPointerDown={(event) => startRange(event, barIndex)} onPointerMove={moveRange} onPointerUp={endRange} onPointerCancel={endRange} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); dispatch({ type: 'setRange', anchor: barIndex, focus: barIndex }) } }}>
               <span><b>Такт {bar.number}</b><small>{bar.section}</small></span><small>{bar.meter}</small>
             </button>
@@ -318,14 +326,15 @@ function EventEditor({ state, bar, event, dispatch }) {
 }
 
 function Transport({ state, dispatch }) {
-  const range = state.selectedRange
-  const loopLabel = !range ? 'Луп: выбери такты' : `Луп: ${state.bars[range.start].number}${range.start === range.end ? '' : `–${state.bars[range.end].number}`}`
+  const selected = state.selectedRange
+  const loop = state.loopRange
+  const loopLabel = state.loopEnabled && loop ? `Луп: ${state.bars[loop.start].number}${loop.start === loop.end ? '' : `–${state.bars[loop.end].number}`}` : !selected ? 'Луп: выбери такты' : `Зациклить: ${state.bars[selected.start].number}${selected.start === selected.end ? '' : `–${state.bars[selected.end].number}`}`
   return <section className="transport" aria-label="Проигрывание">
     <button className="transport-key" aria-label="Предыдущий такт" onClick={() => dispatch({ type: 'moveBar', delta: -1 })}>‹</button>
     <button className="play-button" aria-label={state.playing ? 'Пауза' : 'Воспроизвести'} aria-pressed={state.playing} onClick={() => dispatch({ type: 'togglePlayback' })}>{state.playing ? 'Ⅱ' : '▶'}</button>
     <button className="transport-key" aria-label="Следующий такт" onClick={() => dispatch({ type: 'moveBar', delta: 1 })}>›</button>
     <div className="time-readout"><strong>{formatTime(state.positionUnits)}</strong><span>/ {formatTime(totalUnits(state.bars))}</span></div>
-    <button className="chip-button" disabled={!range} aria-pressed={state.loopEnabled} onClick={() => dispatch({ type: 'toggleLoop' })}>{loopLabel}</button>
+    <button className="chip-button" disabled={!state.loopEnabled && !selected} aria-pressed={state.loopEnabled} onClick={() => dispatch({ type: state.loopEnabled ? 'disableLoop' : 'setLoopFromSelection' })}>{loopLabel}</button>
     <button className="chip-button">Скорость 1×</button><button className="chip-button">Метроном</button>
   </section>
 }
@@ -357,10 +366,10 @@ export function App() {
   const positionRef = useRef(state.positionUnits)
   useEffect(() => { positionRef.current = state.positionUnits }, [state.positionUnits])
   const loopBounds = useMemo(() => {
-    if (!state.selectedRange) return null
-    const offsets = barOffsets(state.bars); const start = offsets[state.selectedRange.start]; const endBar = state.bars[state.selectedRange.end]
-    return { start, end: offsets[state.selectedRange.end] + barCapacity(endBar) }
-  }, [state.bars, state.selectedRange])
+    if (!state.loopRange) return null
+    const offsets = barOffsets(state.bars); const start = offsets[state.loopRange.start]; const endBar = state.bars[state.loopRange.end]
+    return { start, end: offsets[state.loopRange.end] + barCapacity(endBar) }
+  }, [state.bars, state.loopRange])
 
   useEffect(() => {
     if (!state.playing) return
