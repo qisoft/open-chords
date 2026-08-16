@@ -61,7 +61,9 @@ button { cursor: pointer; }
 .timeline-shell { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .timeline-heading, .section-heading, .focus-context { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .timeline-heading h2, .section-heading h2 { margin: 0; font-size: 20px; }
-.legend { display: flex; flex-wrap: wrap; gap: 16px; color: var(--muted); font-size: 12px; }
+.legend { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; color: var(--muted); font-size: 12px; }
+.review-summary { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; border: 0; border-radius: 7px; background: transparent; color: var(--warn); padding: 5px 7px; font: inherit; }
+.review-summary:hover { background: rgba(199,166,106,.1); }
 .legend-low::before { content: "!"; display: inline-grid; place-items: center; width: 17px; height: 17px; margin-right: 6px; border: 1px dashed var(--warn); border-radius: 3px; color: var(--warn); }
 .timeline-viewport { position: relative; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; background: #0d1015; overflow: hidden; }
 .timeline-scroll { position: relative; overflow-x: auto; scrollbar-color: var(--line) transparent; touch-action: none; user-select: none; }
@@ -509,6 +511,7 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .lyrics-heading h2 svg { width: 18px; height: 18px; }
 .variant-a .legend { gap: 16px; color: #9b9ba5; font-size: 14px; }
 .variant-a .legend svg { width: 15px; height: 15px; }
+.variant-a .review-summary { min-height: 40px; color: #c7a66a; font-size: 14px; }
 .variant-a .timeline-viewport { margin-top: 14px; border: 0; border-radius: 7px; background: #0b0b0e; }
 .variant-a .timeline-control-bar {
   display: flex;
@@ -632,6 +635,10 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 }
 .variant-a .review-status.good { background: rgba(101,184,154,.08); }
 .variant-a .review-status span { color: #c5c2b9; font-size: 14px; }
+.variant-a .review-status-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; border: 0; border-radius: 6px; background: rgba(199,166,106,.14); color: #e2c58e; padding: 7px 10px; font-size: 13px; font-weight: 620; }
+.variant-a .review-status.good .review-status-action { background: rgba(101,184,154,.12); color: #94d3bb; }
+.variant-a .review-status-action:hover { background: rgba(199,166,106,.22); }
+.variant-a .review-status.good .review-status-action:hover { background: rgba(101,184,154,.2); }
 .variant-a .field-group { gap: 14px; padding: 14px; }
 .variant-a .chord-picker-dropdown summary {
   min-height: 50px;
@@ -652,9 +659,11 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .primary-button { min-height: 42px; border-radius: 7px; font-size: 14px; }
 .variant-a .original-note { padding-bottom: 16px; color: #92929c; font-size: 12px; }
 .variant-a .lyrics-strip { padding: 16px 18px 20px; }
-.variant-a .lyrics-key { gap: 14px; }
-.variant-a .lyrics-key > span { display: inline-flex; width: auto; min-height: 40px; align-items: center; gap: 6px; color: #aaaab4; font-size: 12px; }
-.variant-a .lyrics-key svg { width: 17px; height: 17px; }
+.variant-a .lyrics-guide { display: flex; align-items: center; gap: 10px 18px; margin-top: 12px; border-radius: 7px; background: #17171c; padding: 10px 12px; color: #aaaab4; font-size: 13px; }
+.variant-a .lyrics-guide > span { display: inline-flex; align-items: center; gap: 5px; }
+.variant-a .lyrics-guide > svg { flex: 0 0 auto; color: #85858f; }
+.variant-a .lyrics-guide strong { color: #a8a3ff; font-size: 15px; }
+.variant-a .lyrics-guide mark { font-size: 14px; }
 .variant-a .lyrics-lines { gap: 15px; margin-top: 16px; }
 .variant-a .lyric-line { gap: 3px 10px; font-size: clamp(21px, 2.1vw, 29px); line-height: 1.4; }
 .variant-a .lyric-token { grid-template-rows: 23px auto; }
