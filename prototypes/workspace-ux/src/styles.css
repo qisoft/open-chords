@@ -694,10 +694,10 @@ html, body, #root { height: 100%; }
 }
 .variant-a .inspector {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(520px, .9fr);
-  grid-template-areas: "events form" "review note";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "events" "form" "review" "note";
   align-items: start;
-  gap: 8px 14px;
+  gap: 10px;
   height: auto;
   min-height: 0;
   overflow: visible;
@@ -706,25 +706,45 @@ html, body, #root { height: 100%; }
   background: #111115;
   padding: 12px 14px;
 }
-.variant-a .inspector .event-picker-shell { grid-area: events; margin: 0; padding: 10px; }
-.variant-a .editor-dock .event-option { min-width: 96px; }
-.variant-a .editor-dock .event-add-option { min-width: 138px; }
+.variant-a .inspector .event-picker-shell {
+  grid-area: events;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  margin: 0;
+  padding: 10px 12px;
+}
+.variant-a .inspector .event-picker-heading { min-width: 160px; margin: 0; }
+.variant-a .inspector .event-picker {
+  min-width: 0;
+  padding: 0 2px;
+  border: 0;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: #393941 transparent;
+}
+.variant-a .editor-dock .event-option { min-width: 110px; }
+.variant-a .editor-dock .event-add-option { min-width: 126px; padding-inline: 8px; }
 .variant-a .inspector form {
   grid-area: form;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
-  gap: 9px;
+  gap: 16px;
+  border-radius: 8px;
+  background: #17171c;
+  padding: 10px 12px;
 }
 .variant-a .inspector .field-group {
-  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 140px minmax(260px, 1fr) auto;
+  grid-template-columns: 180px minmax(300px, 1fr) auto;
   align-items: end;
   gap: 10px;
   padding: 0;
 }
-.variant-a .inspector .button-pair { grid-column: 1 / -1; justify-content: flex-end; padding: 0; }
+.variant-a .inspector .chord-control { display: grid; gap: 7px; min-width: 0; }
+.variant-a .inspector .chord-control-label { display: inline-flex; align-items: center; gap: 5px; color: #aaaab4; font-size: 14px; }
+.variant-a .inspector .button-pair { justify-content: flex-end; padding: 0; flex-wrap: nowrap; }
 .variant-a .inspector .review-status {
   grid-area: review;
   display: flex;
@@ -738,7 +758,7 @@ html, body, #root { height: 100%; }
   grid-area: note;
   align-self: center;
   margin: 0;
-  padding: 0 2px;
+  padding: 0 2px 2px;
 }
 .variant-a .lyrics-strip {
   display: flex;
@@ -833,6 +853,7 @@ html, body, #root { height: 100%; }
   .variant-a .inspector { display: block; height: auto; overflow: visible; }
   .variant-a .inspector form { display: block; }
   .variant-a .inspector .field-group { grid-template-columns: 1fr; padding: 12px 0; }
+  .variant-a .inspector .event-picker-shell { grid-template-columns: 1fr; }
   .variant-a .inspector .button-pair { justify-content: flex-start; }
   .variant-a .inspector .review-status { margin-top: 10px; }
   .variant-a .inspector .original-note { margin-top: 10px; }
