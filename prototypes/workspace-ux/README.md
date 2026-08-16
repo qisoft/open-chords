@@ -23,10 +23,10 @@ In the editor, select `C` or `G7` separately inside bar 3. The inspector must id
 
 Timeline interaction in the current checkpoint:
 
-- drag across bar headers to select a contiguous range; loop and delete actions use that range;
-- drag empty timeline space to scrub while the playhead stays centered;
+- drag across bar headers to select a contiguous range; holding at either edge auto-scrolls and extends selection;
+- drag the fixed center playhead to scrub; only the bars move beneath it;
 - press Space to play or pause; playback moves the bars under the fixed playhead;
-- chord widths use sixteenth-note units and align to four beat intervals in 4/4;
+- chord widths use 20 px sixteenth-note units (40 px per eighth) and align to four beat intervals in 4/4;
 - edit duration with 1/16, 1/8, 1/4, 1/2, or whole-note controls; manual time inputs are intentionally absent;
 - gaps and overlaps disable saving until the bar is exactly filled.
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 const VARIANTS = { A: 'A — Редактор', B: 'B — Режимы', C: 'C — Список' }
-const PX_PER_UNIT = 35
+const PX_PER_UNIT = 20
 const UNITS_PER_BEAT = 4
 const UNITS_PER_SECOND = 88 / 48
 const SOURCE_START_SECONDS = 0
@@ -179,13 +179,17 @@ function Timeline({ state, dispatch, simple = false }) {
   const scrollRef = useRef(null)
   const trackRef = useRef(null)
   const rangeDrag = useRef(null)
-  const panDrag = useRef(null)
-  const offsets = useMemo(() => barOffsets(state.bars), [state.bars])
+  const scrubDrag = useRef(null)
+  const autoScrollFrame = useRef(null)
 
   useEffect(() => {
-    if (!scrollRef.current || panDrag.current) return
+    if (!scrollRef.current || scrubDrag.current) return
     scrollRef.current.scrollLeft = state.positionUnits * PX_PER_UNIT
   }, [state.positionUnits])
+
+  useEffect(() => () => {
+    if (autoScrollFrame.current) cancelAnimationFrame(autoScrollFrame.current)
+  }, [])
 
   const rangeIndexAt = (clientX) => {
     const nodes = [...trackRef.current.querySelectorAll('[data-bar-index]')]
@@ -196,31 +200,69 @@ function Timeline({ state, dispatch, simple = false }) {
   const startRange = (event, index) => {
     if (event.button !== 0) return
     event.preventDefault(); try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* synthetic QA events do not own a native pointer */ }
-    rangeDrag.current = { pointerId: event.pointerId, anchor: index }
+    rangeDrag.current = { pointerId: event.pointerId, anchor: index, lastX: event.clientX }
     dispatch({ type: 'setRange', anchor: index, focus: index })
   }
-  const moveRange = (event) => { if (!rangeDrag.current) return; dispatch({ type: 'setRange', anchor: rangeDrag.current.anchor, focus: rangeIndexAt(event.clientX) }) }
-  const endRange = (event) => { if (!rangeDrag.current) return; try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* see startRange */ } rangeDrag.current = null }
-  const startPan = (event) => {
-    if (event.button !== 0 || event.target.closest('button')) return
-    event.preventDefault(); try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* synthetic QA events do not own a native pointer */ }
-    panDrag.current = { pointerId: event.pointerId, x: event.clientX, scrollLeft: event.currentTarget.scrollLeft }
-    event.currentTarget.classList.add('dragging')
+  const runEdgeAutoScroll = () => {
+    if (autoScrollFrame.current || !rangeDrag.current) return
+    const tick = () => {
+      const drag = rangeDrag.current; const scroller = scrollRef.current
+      if (!drag || !scroller) { autoScrollFrame.current = null; return }
+      const rect = scroller.getBoundingClientRect(); const edge = Math.min(80, rect.width * .16)
+      let delta = 0
+      if (drag.lastX > rect.right - edge) delta = 4 + 20 * Math.min(1, (drag.lastX - (rect.right - edge)) / edge)
+      if (drag.lastX < rect.left + edge) delta = -(4 + 20 * Math.min(1, ((rect.left + edge) - drag.lastX) / edge))
+      if (delta) {
+        const previous = scroller.scrollLeft
+        scroller.scrollLeft = Math.max(0, Math.min(scroller.scrollWidth - scroller.clientWidth, previous + delta))
+        if (scroller.scrollLeft !== previous) {
+          dispatch({ type: 'setPosition', value: scroller.scrollLeft / PX_PER_UNIT })
+          dispatch({ type: 'setRange', anchor: drag.anchor, focus: rangeIndexAt(drag.lastX) })
+        }
+      }
+      autoScrollFrame.current = requestAnimationFrame(tick)
+    }
+    autoScrollFrame.current = requestAnimationFrame(tick)
   }
-  const movePan = (event) => {
-    if (!panDrag.current) return
-    const scroller = event.currentTarget
-    scroller.scrollLeft = Math.max(0, Math.min(scroller.scrollWidth - scroller.clientWidth, panDrag.current.scrollLeft - (event.clientX - panDrag.current.x)))
+  const moveRange = (event) => {
+    if (!rangeDrag.current) return
+    rangeDrag.current.lastX = event.clientX
+    dispatch({ type: 'setRange', anchor: rangeDrag.current.anchor, focus: rangeIndexAt(event.clientX) })
+    runEdgeAutoScroll()
+  }
+  const endRange = (event) => {
+    if (!rangeDrag.current) return
+    try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* see startRange */ }
+    rangeDrag.current = null
+    if (autoScrollFrame.current) cancelAnimationFrame(autoScrollFrame.current)
+    autoScrollFrame.current = null
+  }
+  const startScrub = (event) => {
+    if (event.button !== 0) return
+    event.preventDefault(); try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* synthetic QA events do not own a native pointer */ }
+    scrubDrag.current = { pointerId: event.pointerId, x: event.clientX, scrollLeft: scrollRef.current.scrollLeft }
+    event.currentTarget.closest('.timeline-viewport')?.classList.add('scrubbing')
+  }
+  const moveScrub = (event) => {
+    if (!scrubDrag.current) return
+    const scroller = scrollRef.current
+    scroller.scrollLeft = Math.max(0, Math.min(scroller.scrollWidth - scroller.clientWidth, scrubDrag.current.scrollLeft + (event.clientX - scrubDrag.current.x)))
     dispatch({ type: 'setPosition', value: scroller.scrollLeft / PX_PER_UNIT })
   }
-  const endPan = (event) => { if (!panDrag.current) return; try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* see startPan */ } event.currentTarget.classList.remove('dragging'); panDrag.current = null }
+  const endScrub = (event) => {
+    if (!scrubDrag.current) return
+    try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* see startScrub */ }
+    event.currentTarget.closest('.timeline-viewport')?.classList.remove('scrubbing')
+    scrubDrag.current = null
+  }
 
   return <section className={`timeline-shell ${simple ? 'simple' : ''}`} aria-label="Музыкальный таймлайн">
-    <div className="timeline-heading"><div><span className="eyebrow">Таймлайн</span><h2>Тяни пустую шкалу для перемотки</h2></div><div className="legend"><span className="legend-low">Низкая уверенность</span><span>Playhead {formatTime(state.positionUnits)}</span></div></div>
+    <div className="timeline-heading"><div><span className="eyebrow">Таймлайн</span><h2>Тяни playhead для перемотки</h2></div><div className="legend"><span className="legend-low">Низкая уверенность</span><span>Playhead {formatTime(state.positionUnits)}</span></div></div>
     <SelectionToolbar state={state} dispatch={dispatch} />
-    <div ref={scrollRef} className="timeline-scroll" tabIndex="0" aria-label="Такты и отдельные события аккордов" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}>
-      <div className="center-line" aria-hidden="true"><span /></div>
-      <div ref={trackRef} className="bars-track">
+    <div className="timeline-viewport">
+      <div className="center-line"><button className="playhead-handle" aria-label="Перемотка за playhead" onPointerDown={startScrub} onPointerMove={moveScrub} onPointerUp={endScrub} onPointerCancel={endScrub} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'setPosition', value: state.positionUnits + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 4 : 1) }) } }}><span aria-hidden="true">↔</span></button></div>
+      <div ref={scrollRef} className="timeline-scroll" tabIndex="0" aria-label="Такты и отдельные события аккордов">
+        <div ref={trackRef} className="bars-track">
         {state.bars.map((bar, barIndex) => {
           const capacity = barCapacity(bar); const used = barUsed(bar); let eventStart = 0
           const selected = state.selectedRange && barIndex >= state.selectedRange.start && barIndex <= state.selectedRange.end
@@ -239,6 +281,7 @@ function Timeline({ state, dispatch, simple = false }) {
             {bar.confidence === 'low' && <span className="confidence-label">! проверить</span>}
           </article>
         })}
+        </div>
       </div>
     </div>
   </section>
@@ -284,7 +327,7 @@ function Transport({ state, dispatch }) {
 
 function VariantA({ state, dispatch, bar, event }) {
   return <div className="shell variant-a"><Header state={state} dispatch={dispatch} /><div className="studio-grid">
-    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. Тяни пустое место шкалы для перемотки. Space запускает playback.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip"><span className="eyebrow">Текст</span><p>Я хотел бы остаться с тобой, <mark>просто остаться с тобой</mark></p></section></main>
+    <main id="workspace-main" className="studio-main" tabIndex="-1"><div className="editor-intro"><div><span className="eyebrow">Редактор</span><h1>Такты, доли и аккорды</h1><p>Тяни заголовки тактов для диапазона. У края выделение продолжится с автоскроллом. Тяни playhead для перемотки.</p></div><StatusBanner state={state} /></div><Timeline state={state} dispatch={dispatch} /><section className="lyrics-strip"><span className="eyebrow">Текст</span><p>Я хотел бы остаться с тобой, <mark>просто остаться с тобой</mark></p></section></main>
     <EventEditor state={state} bar={bar} event={event} dispatch={dispatch} />
   </div><footer className="studio-footer"><Transport state={state} dispatch={dispatch} /></footer></div>
 }
@@ -299,7 +342,7 @@ function VariantC({ state, dispatch, bar, event }) {
 }
 
 function PrototypeSwitcher({ variant, cycle }) { if (!import.meta.env.DEV) return null; return <nav className="prototype-switcher"><button onClick={() => cycle(-1)} aria-label="Предыдущий вариант">←</button><strong>{VARIANTS[variant]}</strong><button onClick={() => cycle(1)} aria-label="Следующий вариант">→</button></nav> }
-function Shortcuts({ onClose }) { const closeRef = useRef(null); useEffect(() => closeRef.current?.focus(), []); return <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="shortcut-title"><div className="panel-heading"><h2 id="shortcut-title">Клавиши</h2><button ref={closeRef} className="icon-button" onClick={onClose}>×</button></div><dl className="shortcut-list"><div><dt>Space</dt><dd>Play / pause</dd></div><div><dt>[ / ]</dt><dd>Предыдущий / следующий такт</dd></div><div><dt>Drag тактов</dt><dd>Выбрать диапазон</dd></div><div><dt>Drag шкалы</dt><dd>Перемотка</dd></div><div><dt>Esc</dt><dd>Закрыть окно</dd></div></dl></section></div> }
+function Shortcuts({ onClose }) { const closeRef = useRef(null); useEffect(() => closeRef.current?.focus(), []); return <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="shortcut-title"><div className="panel-heading"><h2 id="shortcut-title">Клавиши</h2><button ref={closeRef} className="icon-button" onClick={onClose}>×</button></div><dl className="shortcut-list"><div><dt>Space</dt><dd>Play / pause</dd></div><div><dt>[ / ]</dt><dd>Предыдущий / следующий такт</dd></div><div><dt>Drag тактов</dt><dd>Выбрать диапазон; у края включается автоскролл</dd></div><div><dt>Drag playhead</dt><dd>Перемотка при неподвижной центральной линии</dd></div><div><dt>Esc</dt><dd>Закрыть окно</dd></div></dl></section></div> }
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
