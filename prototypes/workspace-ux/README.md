@@ -41,7 +41,7 @@ Timeline interaction in the current checkpoint:
 - `Добавить аккорд` is the final control inside `Аккорды в этом такте` and appends a selected `N` event; event tiles can be pointer-dragged into insertion slots before, between, or after events (including visible, unclipped gutters beyond the first and last tile; the marker crosses an event at its horizontal midpoint and the result is mirrored immediately on the timeline) or moved with `Alt + ←/→` from the keyboard;
 - gaps and overlaps disable saving until the bar is exactly filled.
 - the timeline header derives `N такта требуют проверки` from unresolved low-confidence bars and navigates to the next one; the badge disappears at zero, while the inspector exposes explicit `Аккорды верны` and `Вернуть на проверку` actions;
-- lyrics highlight only the currently timed word; a visual guide demonstrates the actual notation with `Am над словом — здесь начинается аккорд` and a highlighted sample word for the current playhead position.
+- lyrics use standard chord-above-word notation and highlight the currently timed word without an explanatory legend.
 - each timed Chord Event is projected above the lyric word it overlaps, so the chord track remains visible while reading and playing from lyrics.
 - the lyrics sample spans four explicit lines; a chord already sounding at a line boundary is repeated above that line's first overlapping word so the player never loses harmonic context;
 - variant A uses a flat Linear-inspired hierarchy rather than card containers: open timeline and lyrics sections, tab-like event selection, inline metadata, compact typography, and Lucide icon actions with accessible labels/tooltips; violet is reserved for selection and semantic colour for status meaning.

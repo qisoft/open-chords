@@ -659,11 +659,6 @@ mark { border-radius: 4px; background: #564a16; color: var(--text); padding: 0 3
 .variant-a .primary-button { min-height: 42px; border-radius: 7px; font-size: 14px; }
 .variant-a .original-note { padding-bottom: 16px; color: #92929c; font-size: 12px; }
 .variant-a .lyrics-strip { padding: 16px 18px 20px; }
-.variant-a .lyrics-guide { display: flex; align-items: center; gap: 10px 18px; margin-top: 12px; border-radius: 7px; background: #17171c; padding: 10px 12px; color: #aaaab4; font-size: 13px; }
-.variant-a .lyrics-guide > span { display: inline-flex; align-items: center; gap: 5px; }
-.variant-a .lyrics-guide > svg { flex: 0 0 auto; color: #85858f; }
-.variant-a .lyrics-guide strong { color: #a8a3ff; font-size: 15px; }
-.variant-a .lyrics-guide mark { font-size: 14px; }
 .variant-a .lyrics-lines { gap: 15px; margin-top: 16px; }
 .variant-a .lyric-line { gap: 3px 10px; font-size: clamp(21px, 2.1vw, 29px); line-height: 1.4; }
 .variant-a .lyric-token { grid-template-rows: 23px auto; }
