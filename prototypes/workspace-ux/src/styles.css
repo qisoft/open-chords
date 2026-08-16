@@ -165,7 +165,9 @@ button { cursor: pointer; }
 .primary-quality-grid button span { color: var(--muted); font-size: 11px; }
 .other-quality-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
 .other-quality-grid button { min-height: 38px; font-size: 11px; }
-.bass-button-grid button:first-child { grid-column: span 2; }
+.finish-without-bass { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; border: 2px solid var(--accent); border-radius: 10px; background: #302b12; color: var(--accent); padding: 9px 12px; text-align: left; }
+.finish-without-bass strong { font-size: 15px; }
+.finish-without-bass span { color: var(--text); font-size: 22px; font-weight: 900; }
 .button-pair { gap: 8px; padding: 0 18px 18px; flex-wrap: wrap; }
 .duration-control { margin: 0; border: 0; padding: 0; }
 .duration-control legend { margin-bottom: 6px; color: var(--muted); font-size: 12px; }

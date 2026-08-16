@@ -34,7 +34,7 @@ Timeline interaction in the current checkpoint:
 - meter capacity uses both numerator and denominator, so 6/8 spans twelve sixteenth-note units rather than twenty-four;
 - beat divisions are unlabeled vertical guides behind translucent chord events; the selected-range border stays above header hover;
 - all chord events keep the same lane height regardless of duration; short 1/16 and 1/8 events use a compact in-segment label and show the complete symbol in an anchored badge when selected, hovered, or keyboard-focused;
-- chord names are never free-form: a collapsed chord row opens a two-step button picker — root or `N`, then large major/minor choices with rare qualities separated below; an optional bass branch returns to the quality step, and every non-root screen has an explicit Back action;
+- chord names are never free-form: a collapsed chord row opens a linear button picker — root or `N`, then large major/minor choices with rare qualities separated below, then optional bass or `Готово без баса`; the entire root → quality → bass result is completed in one opening and every later step has an explicit Back action;
 - gaps and overlaps disable saving until the bar is exactly filled.
 - a low-confidence bar exposes an explicit `Подтвердить такт` action; confirmation becomes a visible manual-review state and can be reverted;
 - lyrics highlight only the currently timed word and label that visual meaning in the UI.
