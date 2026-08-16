@@ -26,7 +26,7 @@ Timeline interaction in the current checkpoint:
 - drag across bar headers to select a contiguous range; holding at either edge auto-scrolls and extends selection;
 - selection is transient; enabling loop snapshots that range until the user explicitly disables or moves the loop;
 - the active loop keeps a green frame while the current selection remains blue;
-- drag the fixed center playhead to scrub; only the bars move beneath it;
+- drag the fixed center playhead to scrub; only the bars move beneath it, and one gesture from centre to either viewport edge reaches the corresponding track boundary;
 - press Space to play or pause; playback moves the bars under the fixed playhead;
 - when loop is enabled, every transition from pause to playback starts at the first bar in the latched loop range;
 - chord widths use 20 px sixteenth-note units (40 px per eighth) and align to four beat intervals in 4/4;

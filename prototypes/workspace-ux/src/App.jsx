@@ -250,27 +250,47 @@ function Timeline({ state, dispatch, simple = false }) {
   const startScrub = (event) => {
     if (event.button !== 0) return
     event.preventDefault(); try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* synthetic QA events do not own a native pointer */ }
-    scrubDrag.current = { pointerId: event.pointerId, x: event.clientX, scrollLeft: scrollRef.current.scrollLeft }
+    const viewport = event.currentTarget.closest('.timeline-viewport').getBoundingClientRect()
+    scrubDrag.current = { pointerId: event.pointerId, x: event.clientX, minX: viewport.left, maxX: viewport.right, scrollLeft: scrollRef.current.scrollLeft }
     event.currentTarget.closest('.timeline-viewport')?.classList.add('scrubbing')
   }
   const moveScrub = (event) => {
     if (!scrubDrag.current) return
-    const scroller = scrollRef.current
-    scroller.scrollLeft = Math.max(0, Math.min(scroller.scrollWidth - scroller.clientWidth, scrubDrag.current.scrollLeft + (event.clientX - scrubDrag.current.x)))
+    const drag = scrubDrag.current; const scroller = scrollRef.current
+    if (drag.pointerId != null && event.pointerId !== drag.pointerId) return
+    event.preventDefault()
+    const maxScroll = scroller.scrollWidth - scroller.clientWidth
+    const delta = event.clientX - drag.x
+    const availablePointerTravel = delta >= 0 ? drag.maxX - drag.x : drag.x - drag.minX
+    const progress = Math.max(-1, Math.min(1, delta / Math.max(1, availablePointerTravel)))
+    const remainingScroll = progress >= 0 ? maxScroll - drag.scrollLeft : drag.scrollLeft
+    scroller.scrollLeft = drag.scrollLeft + progress * remainingScroll
     dispatch({ type: 'setPosition', value: scroller.scrollLeft / PX_PER_UNIT })
   }
   const endScrub = (event) => {
     if (!scrubDrag.current) return
-    try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* see startScrub */ }
-    event.currentTarget.closest('.timeline-viewport')?.classList.remove('scrubbing')
+    if (scrubDrag.current.pointerId != null && event.pointerId !== scrubDrag.current.pointerId) return
+    try { event.target.releasePointerCapture(event.pointerId) } catch { /* pointer may finish outside the handle */ }
+    scrollRef.current?.closest('.timeline-viewport')?.classList.remove('scrubbing')
     scrubDrag.current = null
   }
+
+  useEffect(() => {
+    window.addEventListener('pointermove', moveScrub, { passive: false })
+    window.addEventListener('pointerup', endScrub)
+    window.addEventListener('pointercancel', endScrub)
+    return () => {
+      window.removeEventListener('pointermove', moveScrub)
+      window.removeEventListener('pointerup', endScrub)
+      window.removeEventListener('pointercancel', endScrub)
+    }
+  }, [])
 
   return <section className={`timeline-shell ${simple ? 'simple' : ''}`} aria-label="Музыкальный таймлайн">
     <div className="timeline-heading"><div><span className="eyebrow">Таймлайн</span><h2>Тяни playhead для перемотки</h2></div><div className="legend"><span className="legend-low">Низкая уверенность</span><span>Playhead {formatTime(state.positionUnits)}</span></div></div>
     <SelectionToolbar state={state} dispatch={dispatch} />
     <div className="timeline-viewport">
-      <div className="center-line"><button className="playhead-handle" aria-label="Перемотка за playhead" onPointerDown={startScrub} onPointerMove={moveScrub} onPointerUp={endScrub} onPointerCancel={endScrub} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'setPosition', value: state.positionUnits + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 4 : 1) }) } }}><span aria-hidden="true">↔</span></button></div>
+      <div className="center-line"><button className="playhead-handle" aria-label="Перемотка за playhead" onPointerDown={startScrub} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'setPosition', value: state.positionUnits + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 4 : 1) }) } }}><span aria-hidden="true">↔</span></button></div>
       <div ref={scrollRef} className="timeline-scroll" tabIndex="0" aria-label="Такты и отдельные события аккордов">
         <div ref={trackRef} className="bars-track">
         {state.bars.map((bar, barIndex) => {
