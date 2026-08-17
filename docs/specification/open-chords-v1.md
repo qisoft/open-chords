@@ -16,6 +16,7 @@ When older evidence conflicts with a later accepted decision, the later decision
 - update checks are user-initiated, superseding the earlier proposal for automatic daily polling;
 - the export policy in section 14 supersedes earlier lyrics rights-confirmation or provider-based export gates;
 - local-file analysis is guaranteed, while YouTube media acquisition remains credential-free best effort.
+- the production frontend decision in section 12 supersedes the exploratory Radix, CSS Modules, i18next, reducer-only draft, ESLint, and Prettier recommendations in the frontend-stack research.
 
 ## 2. Product boundary
 
@@ -328,19 +329,44 @@ V1 uses Electron 43.x and stable Electron Forge 7.11.x as the validated starting
 
 One primary BrowserWindow and at most one sidecar session are supported. Multi-window is deferred.
 
-### 12.2 Renderer and IPC
+### 12.2 Production frontend and tooling
+
+The production renderer uses React 19 and strict TypeScript project references. Project-owned Vite 8 builds compile renderer, main, and preload directly; Electron Forge owns packaging, makers, ASAR/fuses, and stable lifecycle hooks but not the experimental Forge Vite plugin. The packaged renderer is static and does not require SSR, a production HTTP server, or a full-stack web framework.
+
+pnpm is the only JavaScript package manager. The repository pins one exact pnpm version in `packageManager`, commits `pnpm-workspace.yaml` and one `pnpm-lock.yaml`, rejects npm/yarn lockfiles, uses frozen clean installs in CI, and permits dependency lifecycle scripts only through a reviewed allowlist.
+
+The renderer stack is fixed as follows:
+
+- Base UI (`@base-ui/react`) provides unstyled ordinary accessible primitives; domain-specific timeline behavior remains project-owned.
+- Tailwind CSS 4 uses the official Vite integration, CSS-first semantic tokens, explicit source registration, and statically discoverable class names. Output is static CSP-compatible CSS; runtime style injection, remote stylesheets, and dynamically constructed class strings are prohibited.
+- Lucide supplies icons, with an independent accessible name and visible tooltip for every icon-only control.
+- V1 product UI, validation, announcements, fixtures, and screenshot baselines are English-only. There is no i18next, locale routing, runtime translation loading, or parallel UI translation bundle. Lyrics and metadata remain original-language content; EN/RU alignment support is unchanged.
+- Zustand 5 owns only one scoped unsaved Editor Draft store per open editor session. It never owns canonical Project data, persistence, IPC, playback clock, practice state, or durable undo. Save sends one validated domain transaction to main; Cancel/Reset restores the last committed base; a Project or revision identity change cannot silently carry a draft forward.
+- Stable Effect v3 is restricted to Electron main orchestration. One `ManagedRuntime` may coordinate scoped services, typed failures, cancellation, timeout, resource cleanup, jobs, persistence, downloads, and adapters. Effect does not cross into React, Zustand, preload, IPC DTOs, or pure domain projections; Zod remains the wire-schema library. Adoption beyond a vertical slice requires a sidecar launch → cancel/timeout → cleanup → typed-result proof against an equivalent Promise implementation.
+- The timeline and lyrics use semantic DOM. A dedicated external playback clock drives frame-level position through `requestAnimationFrame`; React receives only bounded semantic changes. TanStack Virtual is added only after representative profiling records a DOM/layout/accessibility threshold, while current, focused, selected, loop-edge, and drag-adjacent items remain mounted.
+- Atlassian Pragmatic Drag and Drop is limited to Chord Event reordering inside the Editor Draft list. Timeline seek, range selection, edge autoscroll, fixed-playhead scrubbing, and boundary resize/nudge use Pointer Events plus equivalent keyboard commands.
+
+Static quality gates use **Oxlint + `oxlint-tsgolint` + Oxfmt**, with exact versions pinned by pnpm. Oxlint owns TypeScript, React, React Hooks, JSX accessibility, Vitest, Promise, and Node lint rules; type-aware linting supplements but never replaces the TypeScript compiler, so CI also runs the strict project-reference typecheck. Oxfmt owns formatting, native import sorting, and Tailwind 4 class sorting using the renderer stylesheet and the project's `cn`/`clsx` helpers. ESLint and Prettier are not baseline dependencies. Because Oxfmt and the Oxlint JavaScript-plugin API have less mature stability guarantees than the core compiler, implementation must pin exact versions and keep formatter/linter fixture gates; a narrowly scoped ESLint fallback is allowed only for a documented mandatory rule that the pinned Oxlint cannot enforce.
+
+The automated test layers are Vitest Node for domain/contracts/Effect workflows, Vitest Browser Mode with its Playwright provider for Base UI/Zustand/focus/layout behavior, Playwright for renderer journeys and deterministic visual baselines, and a packaged-Electron Playwright feasibility gate with WebdriverIO permitted only as the packaged-harness fallback. Axe automation supplements, but does not replace, keyboard-only and native VoiceOver/Narrator release passes.
+
+The accepted prototype remains behavioral evidence only. Its fixture state, simulated clock, hand-built dialog/DnD, and build layout are not production dependencies.
+
+### 12.3 Renderer and IPC
 
 The renderer has `nodeIntegration: false`, `contextIsolation: true`, sandbox enabled, no host paths, no generic IPC/fetch, and no Project persistence authority. Preload exposes versioned method-per-capability operations only. Main revalidates sender, generation, payload, expected Project revision, and limits.
 
 Privileged IPC accepts only the exact top-level app frame/origin. Events are sequenced; gaps trigger a snapshot refresh. Mutations serialize per Project and fail on stale `expectedProjectRevisionId` rather than overwriting state.
 
-### 12.3 Sidecar protocol and acceptance
+Every renderer/preload/main request, response, event, snapshot envelope, and bounded error is defined by a strict discriminated Zod 4 schema. Preload validates both directions and main always revalidates commands, sender, authority, expected Project revision, protocol version, sizes, finite values, and domain invariants. No generic invoke client or raw Electron IPC object crosses preload.
+
+### 12.4 Sidecar protocol and acceptance
 
 Main launches an exact manifest-verified executable with minimal environment, declared pipes, job-local staging, and no listening port. The private protocol is length-prefixed UTF-8 JSON with bounded frames, a version/capability/hash handshake, session nonce, monotonic sequence, and stable job/request IDs.
 
 Sidecar candidate output is untrusted. Main reopens and validates file identity, size/hash, schema, finite values, time ranges, IDs, invariants, provenance, and forbidden content before constructing and atomically publishing an Analysis Revision. Invalid output is not repaired or partially imported.
 
-### 12.4 Player and media
+### 12.5 Player and media
 
 Local playback uses an opaque read-only media capability/protocol with bounded byte ranges and no exposed file paths. Remote YouTube code runs only in a dedicated sandboxed unprivileged surface with player-specific commands/events and no Project, filesystem, sidecar, or generic IPC authority.
 
@@ -474,6 +500,7 @@ Implementation planning may now decompose work, but must preserve the following 
 |---|---|
 | Domain/schema | `CONTEXT.md`; Project/Source/Timeline identities; canonical sample-frame time; schema compatibility; atomic Project Revision/Head; fixtures for invariants and migration |
 | Desktop shell | Electron/Forge pins; app protocol/CSP; single-instance lifecycle; typed preload and stale-revision IPC; packaged YouTube identity smoke test |
+| Frontend platform | React/strict TypeScript; direct Vite builds; pnpm-only workspace; Base UI/Tailwind/Lucide; scoped Zustand drafts; main-only Effect proof; Zod IPC; semantic DOM/external clock; constrained DnD; Oxlint/Oxfmt/typecheck; browser, packaged, visual, accessibility, and native-AT gates |
 | Persistence/library | Project Library, Trash, Source relink/fingerprints, content-addressed Model Store, atomic saves, cache/retention, hostile archive import |
 | Native containment | XPC App Sandbox; AppContainer + Job Object; Ubuntu Landlock/seccomp/cgroup; adversarial packaged tests; fail-closed launch |
 | Local ingestion/playback | opaque file capabilities, media ranges, Source Snapshot validation, Project Range selection, unavailable/relink behavior |
@@ -520,6 +547,7 @@ Each is produced by an explicit calibration, build, or release-gate activity. Un
 | Corpus rights, annotations, metrics, thresholds and release verdict | 17 | [Benchmark and release gate](https://github.com/qisoft/open-chords/issues/14) |
 | Accepted workspace, chord editing, lyrics/instrumentals, accessibility | 9–11 | [Workspace UX and accessibility](https://github.com/qisoft/open-chords/issues/15) |
 | Platforms, unsigned packages, models, updates, migration and uninstall | 8, 15–16 | [Packaging, updates, models, and migrations](https://github.com/qisoft/open-chords/issues/16) |
+| Renderer/build/state/UI/tooling/test architecture | 9, 11–12, 18 | [Production frontend architecture and tooling](https://github.com/qisoft/open-chords/issues/24) |
 
 All confirmed decisions are represented above. Section 19 is the complete list of evidence-dependent values still unavailable before implementation/build work; none is treated elsewhere as already known.
 
@@ -540,6 +568,7 @@ All confirmed decisions are represented above. Section 19 is the complete list o
 - [Benchmark and release gate](https://github.com/qisoft/open-chords/issues/14)
 - [Workspace UX and accessibility](https://github.com/qisoft/open-chords/issues/15)
 - [Packaging, updates, models, and migrations](https://github.com/qisoft/open-chords/issues/16)
+- [Production frontend architecture and tooling](https://github.com/qisoft/open-chords/issues/24)
 
 ### Research and prototypes
 
@@ -552,5 +581,6 @@ All confirmed decisions are represented above. Section 19 is the complete list o
 - [`docs/research/export-formats.md`](../research/export-formats.md)
 - [`docs/research/workspace-accessibility.md`](../research/workspace-accessibility.md)
 - [`docs/research/benchmark-release-gate.md`](../research/benchmark-release-gate.md)
+- [Production frontend stack research](https://github.com/qisoft/open-chords/blob/research/frontend-stack/docs/research/frontend-stack.md)
 - [YouTube acquisition prototype evidence](https://github.com/qisoft/open-chords/blob/6a74199/prototypes/youtube-acquisition/EVIDENCE.md)
 - [Accepted workspace prototype](https://github.com/qisoft/open-chords/tree/ebb82bbc242c6a10be07bedcadae3357d3d5046f/prototypes/workspace-ux)
