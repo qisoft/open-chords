@@ -1,0 +1,21 @@
+{
+  "ignorePatterns": [
+    "CONTEXT.md",
+    "README.md",
+    "dist/**",
+    "docs/**",
+    "node_modules/**",
+    "out/**",
+    "playwright-report/**",
+    "test-results/**"
+  ],
+  "printWidth": 100,
+  "sortImports": {},
+  "sortPackageJson": {
+    "sortScripts": true
+  },
+  "sortTailwindcss": {
+    "stylesheet": "./apps/desktop/src/renderer/styles.css",
+    "functions": ["cn", "clsx"]
+  }
+}

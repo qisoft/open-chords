@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "plugins": ["typescript", "react", "jsx-a11y", "vitest", "promise", "node"],
+  "options": {
+    "typeAware": true,
+    "maxWarnings": 0
+  },
+  "rules": {
+    "promise/catch-or-return": "error",
+    "react/react-in-jsx-scope": "off",
+    "typescript/no-floating-promises": "error"
+  },
+  "overrides": [
+    {
+      "files": ["apps/desktop/src/renderer/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": ["electron", "effect", "node:*"]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/desktop/src/main/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": ["@base-ui/react", "lucide-react", "react", "react-dom", "zustand"]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/desktop/src/preload/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              "@base-ui/react",
+              "effect",
+              "lucide-react",
+              "react",
+              "react-dom",
+              "zustand"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
