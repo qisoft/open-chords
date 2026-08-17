@@ -152,22 +152,28 @@ Enharmonic spelling and visible text are presentation choices. Transpose and Beg
 
 The Project Library is local and single-user. It contains Projects, Project/Analysis revisions, Edit Layers, selected Lyrics Documents/Alignments, manifests, receipts, practice/presentation state, and safe provenance. Source media remains externally referenced unless explicitly cached.
 
+One local Library is active at a time. It defaults to OS application data and may move only to another local-disk directory through copy, complete validation, and atomic switch; the previous copy is retained until the user removes it. Network and cloud-synchronized directories are unsupported as the active v1 Library. Main acknowledges a mutation only after validated staging, durable commit, fsync, and atomic Project Head replacement. Startup discards incomplete staging; a corrupt active Head is quarantined and the last verified Project Revision opens with an explicit loss report, while a Project with no verified revision remains visible as damaged rather than being silently repaired.
+
 Project deletion first moves owned records into recoverable Library Trash for 30 days. Permanent deletion is separate and explicit.
 
-### 6.2 Local Sources
+### 6.2 Sources and metadata
 
 Moving or renaming a verified local file updates or adds a Source Locator without changing Source identity. A changed file at an old path is not accepted as the old Source. An unavailable Source retains its Projects and may be relinked to matching verified content.
+
+Local import begins with a native picker and opaque capability; renderer never receives a host path. Main accepts only a regular readable media file after bounded probe, full SHA-256, and file-identity/size/timestamp verification before and after reading. Concurrent change aborts without partial Library mutation. A verified duplicate adds a Locator to the existing Source; original media is neither copied nor modified unless the user separately enables range-only caching.
+
+YouTube title, uploader/channel, thumbnail, and declared duration are immutable timestamped Source Metadata Observations, not Source identity and not evidence that analysis media is available. **Refresh Source Metadata** is an explicit network action that creates another observation; there is no background refresh, Offline Mode/import refresh, or provider overwrite of a user Project name. Reacquiring identical canonical PCM may reuse the Snapshot; different PCM under the same video ID creates another Source Snapshot and requires confirmation before reanalysis. Existing Analysis Revisions and immutable Project Ranges never change.
 
 ### 6.3 Temporary data and offline cache
 
 - Decode/analysis workspaces and temporary WAV/audio are removed after success, failure, or cancellation under bounded cleanup rules.
 - Offline Media Cache is opt-in, range-only, inspectable, and removable.
-- It is not silently enabled or evicted by recency; loss/corruption falls back to an available verified Source.
-- Model Store data is global, immutable, content-addressed, shared between Projects, and not embedded in each Project.
+- It is not silently enabled or evicted by recency. A visible quota and free-disk reserve block new entries until the user explicitly changes capacity or removes data. Loss/corruption is isolated without automatic network access and falls back to an available verified Source.
+- Model Store data is global, immutable, content-addressed, shared between Projects, and not embedded in each Project. Exact versions coexist; updates never replace or delete dependencies silently. Removing a pack shows affected Projects and may make exact reanalysis unavailable without invalidating existing results.
 
 ### 6.4 Portable archives
 
-Portable Project Archive is a hostile-input, hash-manifested ZIP package. It excludes Source media by default; an explicit option may include only the verified Project Range. Import validates paths, normalization collisions, links, compression/expansion, hashes, declarations, schema compatibility, and active content before atomic publication. Identity conflict creates an Imported Project Copy rather than overwriting or merging histories.
+Portable Project Archive is a hostile-input, hash-manifested ZIP package containing complete retained Project history, safe provenance, and exact external model/runtime requirements while excluding credentials, private paths, signed URLs, caches, temporary data, diagnostics, and executable extensions. It excludes Source media by default; an explicit option may include only the verified Project Range, which imports as verified Offline Media Cache rather than becoming a new original Source. Import performs no automatic network/model operation and validates paths, normalization collisions, links, compression/expansion, hashes, declarations, schema compatibility, references, invariants, and active content before atomic publication. Identity conflict creates an Imported Project Copy rather than overwriting or merging histories.
 
 ## 7. Analysis pipeline
 
@@ -190,7 +196,7 @@ The declared DAG is:
 
 `preflight → canonical decode → shared features → rhythm/harmony/sections → assemble → main validation → publish`
 
-The Recipe fixes requested capabilities, pipeline graph, exact component/model/calibration hashes, settings, seeds, numerical backend, and resource profile. One CPU-heavy job runs globally. The queue is durable, FIFO by default, and user-reorderable; queued work requires confirmation after restart.
+The Recipe fixes requested capabilities, pipeline graph, exact component/model/calibration hashes, settings, seeds, numerical backend, and release-versioned `Eco`, `Balanced` (default), or `Fast` resource profile. The normal UI exposes supported Presets plus these profiles, not arbitrary analyzer knobs, executable/model paths, plugins, environments, or CLI flags. One CPU-heavy job runs globally. The queue is durable, FIFO by default, and user-reorderable; queued work requires confirmation after restart. Missing verified media, models, dictionaries, licenses, or consent leaves a Job blocked before an Attempt starts. Progress exposes stage, elapsed time, resource profile, and an explicitly approximate monotonic benchmark-derived estimate rather than an invented countdown.
 
 Failure of a requested stage publishes no partial Analysis Revision. Validated non-media stage Checkpoints may be reused only when every identity-bearing upstream input still matches. PCM, media fragments, temporary audio, and arbitrary runtime state are never terminal Checkpoints.
 
@@ -202,6 +208,7 @@ Failure of a requested stage publishes no partial Analysis Revision. Validated n
 - Interrupted and failed Attempts are never retried automatically.
 - User Retry creates another Attempt of the same immutable Job/Recipe.
 - Failed/interrupted operational evidence and reusable non-media Checkpoints expire under the seven-day policy; permanent reproducibility evidence remains with successful Revisions.
+- Stable failure classes distinguish blocked input/dependency, unsupported input, resource/deadline failure, component/invalid output, interruption/cancellation, containment/protocol/integrity violation, and internal error. No failure retries automatically; security/integrity failures open the circuit breaker until repair/restart.
 
 ### 7.4 Confidence
 
@@ -209,11 +216,15 @@ Machine assertions are `asserted`, `low_confidence`, or `abstained`, with named 
 
 Quality thresholds and calibrations are per capability, class, analyzer, model, and release. Abstention remains in coverage denominators and cannot improve a release score by deleting difficult regions.
 
+### 7.5 Revision activation
+
+The first successful Revision for a new Project receives an empty Edit Layer and becomes active atomically. Later success creates a Reviewable Revision and never changes Active View automatically. Activation explicitly compares coverage, warnings, confidence, Recipe/models, and edit-mapping consequences; it creates an empty Edit Layer by default, and existing edits move only through the separately reviewable mapping contract.
+
 ## 8. Lyrics and alignment
 
 ### 8.1 Discovery and provenance
 
-Lyrics lookup is explicit; there is no background retrieval or refresh. User-supplied text wins. Otherwise the suggested candidate order is LRCLIB, YouTube subtitle tracks, then the user-supplied flow. Provider results remain candidates until selected.
+Lyrics lookup is explicit; there is no background retrieval or refresh. User-supplied text wins. Otherwise the suggested candidate order is LRCLIB, YouTube subtitle tracks, then the user-supplied flow. Provider results remain candidates until selected, ambiguity is shown rather than resolved from title alone, and human versus automatically generated subtitle tracks remain distinct provenance. Unselected full-text and failed response bodies are discarded; selected text is retained only in the user's Project data.
 
 Genius is metadata/link only. Musixmatch and LyricFind are disabled until written terms explicitly cover self-hosted clients, caching, derived alignment, display, export, attribution, tracking, territories, and deletion.
 
@@ -226,6 +237,8 @@ Alignment uses a versioned normalization/tokenization projection mapped back to 
 A Lyrics Alignment belongs to exactly one Lyrics Document and Analysis Revision. It is monotonic for one selected primary lyric sequence. Tokens may be asserted, low-confidence, or unmatched. Unmatched tokens have no invented interval.
 
 Instrumental markers, annotations, punctuation-only spans, OOVs, unsupported language, anchor conflicts, absent/repeated lines, melisma, and overlapping/backing vocals remain explicit reasons or coverage gaps. Concurrent lyric streams are unsupported in v1.
+
+An Alignment Job publishes one immutable Alignment object or no object; a technically successful object may contain low-confidence or unmatched occurrences. Line coverage and word coverage remain distinct. Users can correct available line/word intervals, mark occurrences unmatched, and add scoped Lyrics Anchors nondestructively, but v1 is not required to provide full-song manual timing from zero when plain Reference Lyrics remain untimed.
 
 ### 8.3 Alignment packs
 
@@ -360,9 +373,13 @@ Privileged IPC accepts only the exact top-level app frame/origin. Events are seq
 
 Every renderer/preload/main request, response, event, snapshot envelope, and bounded error is defined by a strict discriminated Zod 4 schema. Preload validates both directions and main always revalidates commands, sender, authority, expected Project revision, protocol version, sizes, finite values, and domain invariants. No generic invoke client or raw Electron IPC object crosses preload.
 
+The initial bounded IPC profile caps a renderer command at 256 KiB, allows at most 32 concurrent reads and one mutation per Project, and applies bounded queues/backpressure. Playback time may coalesce to 10 Hz while state, terminal, and semantic-boundary events are retained. Repeated invalid payloads invalidate/reload that renderer generation; any privileged message from an unauthorized frame destroys the untrusted surface.
+
 ### 12.4 Sidecar protocol and acceptance
 
 Main launches an exact manifest-verified executable with minimal environment, declared pipes, job-local staging, and no listening port. The private protocol is length-prefixed UTF-8 JSON with bounded frames, a version/capability/hash handshake, session nonce, monotonic sequence, and stable job/request IDs.
+
+The starting protocol profile caps frames at 1 MiB, requires the handshake within 10 seconds, emits a heartbeat every five seconds, and treats 20 seconds without heartbeat as unresponsive before a bounded health/termination escalation. Cancel intent is persisted first; acknowledgement is expected within one second, followed by ten seconds for cooperative cleanup, five seconds for graceful process-domain termination, then force termination. Sleep/resume invalidates the session, and repeated process failure opens a circuit breaker rather than creating an automatic analysis retry loop.
 
 Sidecar candidate output is untrusted. Main reopens and validates file identity, size/hash, schema, finite values, time ranges, IDs, invariants, provenance, and forbidden content before constructing and atomically publishing an Analysis Revision. Invalid output is not repaired or partially imported.
 
@@ -394,13 +411,15 @@ The worker receives one canonical public video URL and cannot use playlists, cha
 
 Bot checks or unsupported delivery fail closed, retain only bounded redacted provenance, remove partial media, and offer local-file import. No broad-network compatibility fallback exists.
 
+Failed or cancelled Acquisition Attempts retain only a clearable redacted local record for seven days: provider/video identity, component/policy hashes, bounded counters, terminal state, and reason. Signed URLs, titles, response bodies, paths, and tokens are excluded. Successful Source Snapshot provenance remains while referenced.
+
 ### 13.3 Diagnostics
 
 Logs exclude lyrics, Project JSON, titles/filenames, URLs/query data, absolute paths, environment, credentials, response bodies, and raw model inputs/outputs. Local logs are bounded and expire. Diagnostic upload is off by default, explicit, previewable, and redacted.
 
 ## 14. Export semantics
 
-Every export consumes one immutable Active View snapshot under a versioned Export Profile, validates output, publishes atomically, and records an Export Receipt with output hash and every omission/degradation.
+Every export consumes one immutable Active View snapshot under a versioned Export Profile, validates output, publishes atomically, and records a Project-owned Export Receipt with output hash and every omission/degradation. Human-facing formats default to the current presentation, with an explicit Original option; transpose, capo guidance, enharmonic spelling, and Beginner View never mutate Original Chord Identities.
 
 ### 14.1 Open Chords JSON Snapshot
 
@@ -504,7 +523,7 @@ Implementation planning may now decompose work, but must preserve the following 
 | Persistence/library | Project Library, Trash, Source relink/fingerprints, content-addressed Model Store, atomic saves, cache/retention, hostile archive import |
 | Native containment | XPC App Sandbox; AppContainer + Job Object; Ubuntu Landlock/seccomp/cgroup; adversarial packaged tests; fail-closed launch |
 | Local ingestion/playback | opaque file capabilities, media ranges, Source Snapshot validation, Project Range selection, unavailable/relink behavior |
-| YouTube | oEmbed card, dedicated iframe surface, brokered credential-free acquisition, bot-check/local-file fallback, final endpoint/resource policy |
+| YouTube | oEmbed card, dedicated iframe surface, brokered credential-free acquisition, custom-handler streaming/range/retry/cancel and packaged-containment proof, bot-check/local-file fallback, final endpoint/resource policy |
 | Analysis | frozen sidecar protocol, immutable Recipe/Job/Attempt/Checkpoint, one-job scheduler, FFmpeg decode, DSP stages, confidence/evidence, main-owned publication |
 | Lyrics | explicit provider adapters, immutable documents/token mapping, on-demand EN/RU packs, Alignment Job, coverage/mismatch, timing corrections |
 | Editor/practice | accepted workspace behavior, committed/draft split, typed edit transactions, meter-relative duration, persistent loops, transport/presentation separation, accessibility |
@@ -547,6 +566,11 @@ Each is produced by an explicit calibration, build, or release-gate activity. Un
 | Corpus rights, annotations, metrics, thresholds and release verdict | 17 | [Benchmark and release gate](https://github.com/qisoft/open-chords/issues/14) |
 | Accepted workspace, chord editing, lyrics/instrumentals, accessibility | 9–11 | [Workspace UX and accessibility](https://github.com/qisoft/open-chords/issues/15) |
 | Platforms, unsigned packages, models, updates, migration and uninstall | 8, 15–16 | [Packaging, updates, models, and migrations](https://github.com/qisoft/open-chords/issues/16) |
+| OS-specific analysis containment and fail-closed limits | 12, 15–16 | [Cross-platform sidecar containment](https://github.com/qisoft/open-chords/issues/19) |
+| Brokered YouTube worker, endpoint policy, budgets, and offline handoff | 3, 6, 13, 15, 17–19 | [YouTube Acquisition Job containment](https://github.com/qisoft/open-chords/issues/20) |
+| Credential-free YouTube acquisition narrowing and local-file fallback | 3, 6, 13, 19 | [Brokered YouTube acquisition proof](https://github.com/qisoft/open-chords/issues/21) |
+| Model sources, licenses, exact pack sizes, and exclusions | 7–8, 16, 19 | [Model source and size inventory](https://github.com/qisoft/open-chords/issues/22) |
+| Framework/library feasibility and residual production proofs | 9, 11–12, 18 | [Production frontend stack research](https://github.com/qisoft/open-chords/issues/23) |
 | Renderer/build/state/UI/tooling/test architecture | 9, 11–12, 18 | [Production frontend architecture and tooling](https://github.com/qisoft/open-chords/issues/24) |
 
 All confirmed decisions are represented above. Section 19 is the complete list of evidence-dependent values still unavailable before implementation/build work; none is treated elsewhere as already known.
@@ -572,6 +596,13 @@ All confirmed decisions are represented above. Section 19 is the complete list o
 
 ### Research and prototypes
 
+- [Desktop and local-sidecar stack research decision](https://github.com/qisoft/open-chords/issues/5)
+- [CPU-first analysis and lyrics stack research decision](https://github.com/qisoft/open-chords/issues/6)
+- [Cross-platform sidecar containment research decision](https://github.com/qisoft/open-chords/issues/19)
+- [YouTube Acquisition Job containment research decision](https://github.com/qisoft/open-chords/issues/20)
+- [Brokered YouTube acquisition prototype decision](https://github.com/qisoft/open-chords/issues/21)
+- [Model source/license/size inventory decision](https://github.com/qisoft/open-chords/issues/22)
+- [Production frontend stack research decision](https://github.com/qisoft/open-chords/issues/23)
 - [`docs/research/chordify-algorithms.md`](../research/chordify-algorithms.md)
 - [`docs/research/desktop-sidecar-stack.md`](../research/desktop-sidecar-stack.md)
 - [`docs/research/cpu-analysis-stack.md`](../research/cpu-analysis-stack.md)

@@ -10,6 +10,8 @@ The consolidated planning baseline is [`docs/specification/open-chords-v1.md`](d
 
 ## Research
 
+Research documents preserve point-in-time evidence and exploratory recommendations. Where they conflict with a later accepted decision, the consolidated v1 specification is authoritative.
+
 - [`docs/research/chordify-algorithms.md`](docs/research/chordify-algorithms.md)
 - [`docs/research/cpu-analysis-stack.md`](docs/research/cpu-analysis-stack.md)
 - [`docs/research/desktop-sidecar-stack.md`](docs/research/desktop-sidecar-stack.md)
