@@ -1,0 +1,15 @@
+@import "tailwindcss" source(none);
+@source "./**/*.{ts,tsx,html}";
+
+@theme {
+  --color-canvas: oklch(0.98 0.01 255);
+  --color-foreground: oklch(0.2 0.02 255);
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+}

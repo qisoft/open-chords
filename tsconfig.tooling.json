@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM"],
+    "tsBuildInfoFile": "./node_modules/.cache/typescript/tooling.tsbuildinfo",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["playwright.config.ts", "tests/**/*.ts", "vitest.config.ts"]
+}
