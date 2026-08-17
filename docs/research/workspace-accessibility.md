@@ -1,238 +1,238 @@
-# Open Chords v1: проверяемые требования к доступности desktop workspace
+# Open Chords v1: testable desktop workspace accessibility requirements
 
-> Исследование для Wayfinder ticket `Fix workspace UX and accessibility behavior`. Источники проверены 2026-08-16. Использованы только спецификации W3C и официальные материалы W3C WAI, Apple, Microsoft, Chromium и Electron. Документ задаёт ограничения и проверяемые acceptance criteria, но не выбирает layout или визуальный стиль продукта.
+> Research for the Wayfinder ticket `Fix workspace UX and accessibility behavior`. Sources were verified on 2026-08-16. Only W3C specifications and official W3C WAI, Apple, Microsoft, Chromium, and Electron materials were used. This document establishes constraints and testable acceptance criteria; it does not choose the product's layout or visual style.
 
-## Краткий итог
+## Summary
 
-1. **Практичная базовая цель для renderer — WCAG 2.2 Level AA.** WCAG — W3C Recommendation с technology-neutral проверяемыми success criteria. Для Electron это применимо к HTML workspace как к web content, но утверждение о соответствии всего desktop-приложения потребует явно заданного scope и прохождения complete processes, а не только автоматического аудита ([WCAG 2.2: status and conformance](https://www.w3.org/TR/WCAG22/#conformance)).
-2. **WAI-ARIA APG не является вторым стандартом соответствия.** APG сам называет свои patterns информативной guidance и предупреждает, что примерный код не предназначен для production без адаптации. Нормативны WCAG и WAI-ARIA semantics; APG полезен как исходная keyboard/focus модель для composite widgets ([APG Introduction: APG is Not a Normative Standard](https://www.w3.org/WAI/ARIA/apg/about/introduction/), [WAI-ARIA 1.2](https://www.w3.org/TR/wai-aria-1.2/)).
-3. **Музыкальный timeline нельзя оставлять только нарисованным canvas и drag-жестами.** Его информация, текущие значения и действия должны быть доступны через accessibility tree; все операции должны иметь keyboard path, а drag — single-pointer alternative. Цвет не может быть единственным носителем confidence, selection, error или playback state ([WCAG 1.3.1, 1.4.1, 2.1.1, 2.5.7, 4.1.2](https://www.w3.org/TR/WCAG22/)).
-4. **Динамический playhead не должен превращаться в речевой поток.** Текущее время можно представить как именованный slider/timer, но live region должен сообщать только значимые результаты, ошибки и изменения режима. `status` имеет polite live semantics, `alert` — assertive; перенос фокуса для обычного статуса не требуется ([WAI-ARIA `status`](https://www.w3.org/TR/wai-aria-1.2/#status), [`alert`](https://www.w3.org/TR/wai-aria-1.2/#alert), [WCAG 4.1.3](https://www.w3.org/TR/WCAG22/#status-messages)).
-5. **Проверка должна быть нативной на обеих ОС.** Electron передаёт HTML accessibility tree платформенным assistive technologies; релизная проверка должна включать VoiceOver + Accessibility Inspector на macOS и Narrator + Accessibility Insights/UI Automation tree на Windows. DOM-аудит сам по себе этого не доказывает ([Electron accessibility](https://www.electronjs.org/docs/latest/tutorial/accessibility), [Apple Accessibility Inspector](https://developer.apple.com/documentation/accessibility/accessibility-inspector), [Microsoft accessibility testing](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessibility-testing)).
+1. **WCAG 2.2 Level AA is a practical baseline target for the renderer.** WCAG is a W3C Recommendation with technology-neutral, testable success criteria. It applies to an Electron HTML workspace as web content, but claiming conformance for the complete desktop application requires an explicit scope and complete-process coverage, not only an automated audit ([WCAG 2.2: status and conformance](https://www.w3.org/TR/WCAG22/#conformance)).
+2. **WAI-ARIA APG is not a second conformance standard.** APG describes its patterns as informative guidance and warns that example code is not production-ready without adaptation. WCAG and WAI-ARIA semantics are normative; APG is useful as a starting keyboard/focus model for composite widgets ([APG Introduction: APG is Not a Normative Standard](https://www.w3.org/WAI/ARIA/apg/about/introduction/), [WAI-ARIA 1.2](https://www.w3.org/TR/wai-aria-1.2/)).
+3. **The musical timeline cannot exist only as a painted canvas operated by drag gestures.** Its information, current values, and actions must be exposed through the accessibility tree. Every operation needs a keyboard path, and every drag action needs a single-pointer alternative. Color cannot be the sole carrier of confidence, selection, error, or playback state ([WCAG 1.3.1, 1.4.1, 2.1.1, 2.5.7, 4.1.2](https://www.w3.org/TR/WCAG22/)).
+4. **A moving playhead must not become a continuous stream of speech.** Current time may be represented by a named slider or timer, but live regions should announce only meaningful results, errors, and mode changes. `status` has polite live semantics and `alert` is assertive; ordinary status updates do not require moving focus ([WAI-ARIA `status`](https://www.w3.org/TR/wai-aria-1.2/#status), [`alert`](https://www.w3.org/TR/wai-aria-1.2/#alert), [WCAG 4.1.3](https://www.w3.org/TR/WCAG22/#status-messages)).
+5. **Validation must be native on both operating systems.** Electron exposes the HTML accessibility tree to platform assistive technologies. Release validation must include VoiceOver plus Accessibility Inspector on macOS and Narrator plus Accessibility Insights/UI Automation inspection on Windows. A DOM audit alone does not prove this ([Electron accessibility](https://www.electronjs.org/docs/latest/tutorial/accessibility), [Apple Accessibility Inspector](https://developer.apple.com/documentation/accessibility/accessibility-inspector), [Microsoft accessibility testing](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessibility-testing)).
 
-## 1. Нормативная граница
+## 1. Normative boundary
 
-### 1.1 Что считать обязательным
+### 1.1 What is mandatory
 
-Ниже слово **требование** означает: критерий становится release requirement, если Open Chords принимает **WCAG 2.2 AA для всего Electron renderer и завершённых пользовательских сценариев** как целевой профиль. WCAG требует удовлетворить все критерии A и AA, применимые к выбранному scope, и отдельно требует охватить complete processes ([conformance levels and complete processes](https://www.w3.org/TR/WCAG22/#conformance-reqs)).
+Below, **requirement** means that a criterion becomes a release requirement if Open Chords adopts **WCAG 2.2 AA for the entire Electron renderer and complete user journeys** as its target profile. WCAG requires every applicable Level A and AA criterion within the chosen scope and separately requires complete-process coverage ([conformance levels and complete processes](https://www.w3.org/TR/WCAG22/#conformance-reqs)).
 
-WCAG создан для web content. Он не сертифицирует автоматически native shell, системные file dialogs, embedded YouTube player или содержимое, которое пользователь импортировал и которым Open Chords не управляет. Такие границы надо перечислить в будущем conformance statement; third-party content имеет отдельную модель partial conformance и не освобождает собственные controls от non-interference ([WCAG conformance](https://www.w3.org/TR/WCAG22/#conformance), [partial conformance for third-party content](https://www.w3.org/TR/WCAG22/#cc3)).
+WCAG is written for web content. It does not automatically certify the native shell, system file dialogs, an embedded YouTube player, or user-imported content outside Open Chords' control. A future conformance statement must enumerate these boundaries. Third-party content has a separate partial-conformance model and does not exempt first-party controls from non-interference requirements ([WCAG conformance](https://www.w3.org/TR/WCAG22/#conformance), [partial conformance for third-party content](https://www.w3.org/TR/WCAG22/#cc3)).
 
-### 1.2 Что является рекомендацией
+### 1.2 What is guidance
 
-- APG patterns и их key bindings — **design recommendations**, а не нормативные success criteria. APG отмечает, что устоявшиеся keyboard conventions всё же разумно рассматривать как engineering requirements, если pattern выбран ([APG Introduction](https://www.w3.org/WAI/ARIA/apg/about/introduction/)).
-- Apple Human Interface Guidelines, VoiceOver workflows и Microsoft app guidance — platform guidance и проверочные сценарии; они не заменяют WCAG conformance.
-- AAA-критерии WCAG, отмеченные ниже, — усиленная рекомендация для длительного desktop workspace, но не часть AA gate.
+- APG patterns and their key bindings are **design recommendations**, not normative success criteria. APG notes that established keyboard conventions can reasonably become engineering requirements once a pattern is chosen ([APG Introduction](https://www.w3.org/WAI/ARIA/apg/about/introduction/)).
+- Apple Human Interface Guidelines, VoiceOver workflows, and Microsoft application guidance provide platform guidance and test scenarios; they do not replace WCAG conformance.
+- The WCAG AAA criteria identified below are stronger recommendations for a long-running desktop workspace, not part of the AA gate.
 
-## 2. WCAG 2.2 AA: требования, применимые к workspace
+## 2. WCAG 2.2 AA requirements applicable to the workspace
 
-Официальный источник для всех строк — [WCAG 2.2](https://www.w3.org/TR/WCAG22/). Таблица переводит критерии в проверяемые условия Open Chords, не меняя их нормативный смысл.
+The official source for every row is [WCAG 2.2](https://www.w3.org/TR/WCAG22/). This table maps the criteria to testable Open Chords conditions without changing their normative meaning.
 
-| WCAG | Нормативное условие | Проверка в Open Chords |
+| WCAG | Normative condition | Open Chords verification |
 |---|---|---|
-| 1.1.1 Non-text Content (A) | Значимое non-text content имеет equivalent text alternative; input/control имеет name, описывающий purpose. | Chord/instrument diagrams, waveform-only markers и icon-only controls имеют доступные имена или эквивалентную структурированную текстовую информацию. Декор скрыт от accessibility tree. |
-| 1.3.1 Info and Relationships (A) | Визуальные structure/relationships доступны программно или в тексте. | Bars, beats, chord events, sections, selection, Current/Original и edit state имеют semantic structure; координаты canvas не являются единственным источником связи. |
-| 1.3.2 Meaningful Sequence (A) | Если порядок влияет на смысл, он programmatically determinable. | Accessibility/DOM order воспроизводит музыкальную и рабочую последовательность, а не случайный порядок слоёв canvas/CSS. |
-| 1.3.3 Sensory Characteristics (A) | Инструкция не зависит только от формы, цвета, размера, позиции, ориентации или звука. | Нет команд вида «красный блок слева» без programmatic/text identity; metronome/count-in имеет не только звуковой способ восприятия, если он передаёт рабочее состояние. |
-| 1.4.1 Use of Color (A) | Цвет не единственное средство передать информацию, action или distinguishable state. | Low-confidence, abstained, error, selected/current chord и edited boundary дополнительно различаются текстом, символом, pattern/shape или programmatic state. |
-| 1.4.2 Audio Control (A) | Для автоматически проигрываемого более 3 секунд аудио есть pause/stop либо независимая громкость. | Источник не начинает звучать сам; если autoplay когда-либо появится, нужны эти controls. |
-| 1.4.3 Contrast (Minimum) (AA) | Обычный текст ≥ 4.5:1, large text ≥ 3:1, кроме перечисленных исключений. | Проверяется для default, hover, selected, disabled-readable и warning/error presentations во всех поддержанных темах. |
-| 1.4.4 Resize Text (AA) | Текст увеличивается до 200% без потери content/functionality. | При 200% нет обрезанных chord names, labels, dialogs, status/error text; все controls остаются доступны. |
-| 1.4.10 Reflow (AA) | При эквиваленте 320 CSS px width или 256 CSS px height нет потери информации/functionality и двухмерного scroll, кроме частей, которым 2D layout нужен для usage/meaning. | Сам timeline может обосновать 2D exception, но transport, editor commands, errors и inspector не получают исключение автоматически. Они остаются достижимыми при 400% zoom; timeline предоставляет доступный последовательный путь. |
-| 1.4.11 Non-text Contrast (AA) | Visual information, необходимая для UI components/states и meaningful graphics, имеет ≥ 3:1 к соседним цветам, с исключениями. | Границы bars/beats, focus/selection, playhead, loop handles и error indicators проходят contrast check там, где они нужны для понимания/управления. |
-| 1.4.12 Text Spacing (AA) | Заданные text spacing overrides не вызывают потери content/functionality. | Labels/chord text не обрезаются при параметрах из критерия; высота строк и контейнеров не захардкожена против текста. |
-| 1.4.13 Content on Hover or Focus (AA) | Дополнительный hover/focus content dismissible, hoverable и persistent, если применимо. | Tooltips для chord/confidence/shortcut закрываются без перемещения указателя, доступны наведением на сам tooltip и не исчезают до dismiss/focus change. |
-| 2.1.1 Keyboard (A) | Вся functionality доступна с keyboard interface; путь движения pointer не должен быть единственным способом. | Создание/изменение chord, boundary, beat/downbeat, bar/meter, lyrics timing, loop и seek выполняется без мыши. Простого наличия глобального shortcut недостаточно, если нельзя выбрать target. |
-| 2.1.2 No Keyboard Trap (A) | Keyboard focus можно вывести из любого component стандартным способом либо пользователь уведомлён о нестандартном. | Timeline, embedded player, diagram picker, toolbar и modal не захватывают Tab/arrows/Escape без выхода. |
-| 2.1.4 Character Key Shortcuts (A) | Single-character shortcut можно отключить/remap либо он работает только при focus соответствующего component. | Одноклавишные play/practice команды контекстны или настраиваемы; shortcut не срабатывает при вводе lyrics/text. |
-| 2.2.2 Pause, Stop, Hide (A) | Для автоматически начавшегося moving/blinking/scrolling >5s или auto-updating content рядом с другим content есть pause/stop/hide/frequency control, если движение не essential. | Playback можно паузить; moving-bars view не запускается без действия пользователя. Никакое вторичное auto-scroll/animation не продолжает движение без доступного управления. |
-| 2.3.1 Three Flashes or Below Threshold (A) | Нет content, flashing >3 раза в секунду, кроме безопасных порогов. | Metronome/count-in/playhead/error animations не используют опасное мигание. |
-| 2.4.1 Bypass Blocks (A) | Есть механизм обходить повторяющиеся blocks. | Landmarks/regions и быстрый keyboard route позволяют перейти между library, timeline, inspector/lyrics и transport без Tab через каждый event. |
-| 2.4.2 Page Titled (A) | Документ имеет descriptive topic/purpose. | Window/document title сообщает проект и активный workspace context без раскрытия лишних приватных данных. |
-| 2.4.3 Focus Order (A) | Последовательный focus order сохраняет meaning/operability. | Tab order стабилен, логичен и не следует визуально перемещённым CSS-слоям; opening/closing panel/dialog имеет предсказуемое focus destination. |
-| 2.4.6 Headings and Labels (AA) | Headings/labels описывают topic/purpose. | Повторяющиеся `Edit`, `Reset`, time values и icon actions имеют контекстные accessible labels; секции workspace программно названы. |
-| 2.4.7 Focus Visible (AA) | Keyboard-operable UI показывает mode of operation, где focus indicator видим. | Focus не скрыт на canvas, dark theme, selected row или custom control. |
-| 2.4.11 Focus Not Obscured (Minimum) (AA) | Focused component не полностью скрыт author-created content. | Sticky transport, popover, toast и bottom bar не закрывают focused timeline item/control; component прокручивается в видимую область. |
-| 2.5.1 Pointer Gestures (A) | Multipoint/path-based gestures имеют single-pointer alternative, если gesture не essential. | Ни pinch, ни нарисованный жест не являются единственным zoom/edit route. |
-| 2.5.2 Pointer Cancellation (A) | Для single-pointer есть cancel/abort/undo либо action завершается на up-event с возможностью отменить. | Boundary/chord/loop edit не коммитится необратимо на pointer-down; сохраняется nondestructive undo. |
-| 2.5.3 Label in Name (A) | Accessible name содержит видимый label. | Voice Control/Narrator может активировать `Play`, `Undo`, `Low confidence` и instrument labels теми словами, которые видит пользователь. |
-| 2.5.7 Dragging Movements (AA) | Любая drag functionality имеет single-pointer non-drag alternative, кроме essential/system-controlled случаев. | Boundary, beat, loop handle и reorder получают click/select + numeric/nudge/action alternative. |
-| 2.5.8 Target Size (Minimum) (AA) | Pointer target ≥ 24×24 CSS px или выполняет одно из нормативных исключений/spacing conditions. | Icon buttons и плотные timeline handles проверяются по target box и spacing, а не только по видимой glyph. |
-| 3.1.1 Language of Page (A), 3.1.2 Language of Parts (AA) | Default language и смены языка programmatically determinable. | UI locale задан; user lyrics/metadata с известным другим языком маркируются, когда это возможно. |
-| 3.2.1 On Focus (A), 3.2.2 On Input (A) | Focus или изменение value само по себе не вызывает неожиданную смену context без уведомления. | Focus на chord/event не seek'ает и не запускает playback; выбор значения не закрывает/заменяет workspace неожиданно. |
-| 3.2.3 Consistent Navigation (AA), 3.2.4 Consistent Identification (AA) | Повторяющиеся navigation/actions сохраняют порядок и идентификацию. | Transport, Undo/Redo, Original/Beginner и confidence states названы и ведут себя одинаково между editor/practice contexts. |
-| 3.3.1 Error Identification (A) | Обнаруженная input error идентифицируется и описывается текстом. | Invalid meter, overlapping boundary, unsupported chord и failed edit имеют конкретное text/programmatic описание, не только красную рамку. |
-| 3.3.2 Labels or Instructions (A), 3.3.3 Error Suggestion (AA) | Input имеет labels/instructions; известное исправление ошибки предлагается, если это не ставит под угрозу purpose/security. | Time/chord/meter editors сообщают формат, unit/range и исправление; ошибка связана с соответствующим field/event. |
-| 4.1.2 Name, Role, Value (A) | UI component имеет programmatically determinable name/role; settable states/values доступны AT; изменения уведомляются. | Custom timeline controls экспортируют role, label, value, selected/expanded/invalid/disabled и действия. Canvas bitmap без параллельной semantic model не проходит. |
-| 4.1.3 Status Messages (AA) | Status message доступен AT без получения focus. | Save, export, analysis progress/result, undo/reset, loop-invalid и nonblocking errors публикуются через подходящий live/status mechanism без focus theft. |
+| 1.1.1 Non-text Content (A) | Meaningful non-text content has an equivalent text alternative; an input/control has a name describing its purpose. | Chord/instrument diagrams, waveform-only markers, and icon-only controls have accessible names or equivalent structured text. Decoration is hidden from the accessibility tree. |
+| 1.3.1 Info and Relationships (A) | Visual structure and relationships are available programmatically or in text. | Bars, beats, chord events, sections, selection, Current/Original, and edit state have semantic structure; canvas coordinates are not the sole source of relationships. |
+| 1.3.2 Meaningful Sequence (A) | When order affects meaning, it is programmatically determinable. | Accessibility/DOM order follows the musical and task sequence, not an incidental canvas/CSS layer order. |
+| 1.3.3 Sensory Characteristics (A) | Instructions do not depend only on shape, color, size, position, orientation, or sound. | No instruction relies on “the red block on the left” without programmatic/text identity; a metronome/count-in is not conveyed only through sound when it represents task state. |
+| 1.4.1 Use of Color (A) | Color is not the only way to communicate information, an action, or a distinguishable state. | Low-confidence, abstained, error, selected/current chord, and edited-boundary states also differ through text, symbols, patterns/shapes, or programmatic state. |
+| 1.4.2 Audio Control (A) | Audio that starts automatically and lasts more than three seconds has pause/stop or independent volume control. | Source audio does not start by itself; if autoplay is ever added, these controls are required. |
+| 1.4.3 Contrast (Minimum) (AA) | Normal text is at least 4.5:1 and large text at least 3:1, subject to listed exceptions. | Verify default, hover, selected, readable-disabled, warning, and error presentations in every supported theme. |
+| 1.4.4 Resize Text (AA) | Text scales to 200% without loss of content or functionality. | At 200%, chord names, labels, dialogs, status/error text, and controls remain visible and operable. |
+| 1.4.10 Reflow (AA) | At the equivalent of 320 CSS px width or 256 CSS px height, there is no loss of information/functionality or two-dimensional scrolling except where a 2D layout is essential to use or meaning. | The timeline may justify the 2D exception, but transport, editor commands, errors, and the inspector do not receive it automatically. They remain reachable at 400% zoom, and the timeline provides an accessible sequential path. |
+| 1.4.11 Non-text Contrast (AA) | Visual information required for UI components/states and meaningful graphics has at least 3:1 contrast against adjacent colors, subject to exceptions. | Bar/beat boundaries, focus/selection, playhead, loop handles, and error indicators pass contrast checks wherever they are necessary for understanding or operation. |
+| 1.4.12 Text Spacing (AA) | Prescribed text-spacing overrides do not cause loss of content or functionality. | Labels and chord text do not clip under the criterion's settings; line and container heights are not hard-coded against text. |
+| 1.4.13 Content on Hover or Focus (AA) | Additional hover/focus content is dismissible, hoverable, and persistent where applicable. | Chord/confidence/shortcut tooltips can be dismissed without moving the pointer, remain visible while hovered, and persist until dismissal or focus change. |
+| 2.1.1 Keyboard (A) | All functionality is available through a keyboard interface; a pointer path cannot be the only method. | Creating or changing chords, boundaries, beats/downbeats, bars/meters, lyric timing, loops, and seeking works without a mouse. A global shortcut alone is insufficient if its target cannot be selected. |
+| 2.1.2 No Keyboard Trap (A) | Keyboard focus can leave every component by a standard method, or the user is informed of a non-standard method. | The timeline, embedded player, diagram picker, toolbar, and modal do not capture Tab/arrows/Escape without an exit. |
+| 2.1.4 Character Key Shortcuts (A) | A single-character shortcut can be disabled/remapped or works only while the relevant component has focus. | Single-key playback/practice commands are contextual or configurable and do not fire while editing lyrics/text. |
+| 2.2.2 Pause, Stop, Hide (A) | Automatically started moving/blinking/scrolling content lasting more than five seconds, or auto-updating content beside other content, has pause/stop/hide/frequency controls unless essential. | Playback can be paused; moving-bars view does not start without user action; no secondary auto-scroll or animation continues without accessible control. |
+| 2.3.1 Three Flashes or Below Threshold (A) | Content does not flash more than three times per second except within safe thresholds. | Metronome, count-in, playhead, and error animations avoid hazardous flashing. |
+| 2.4.1 Bypass Blocks (A) | A mechanism bypasses repeated blocks. | Landmarks/regions and fast keyboard routes move among library, timeline, inspector/lyrics, and transport without tabbing through every event. |
+| 2.4.2 Page Titled (A) | The document has a descriptive topic or purpose. | The window/document title identifies the project and active workspace context without exposing unnecessary private data. |
+| 2.4.3 Focus Order (A) | Sequential focus order preserves meaning and operability. | Tab order is stable and logical rather than following visually rearranged CSS layers; opening/closing panels and dialogs has a predictable focus destination. |
+| 2.4.6 Headings and Labels (AA) | Headings and labels describe their topic or purpose. | Repeated `Edit`, `Reset`, time values, and icon actions have contextual accessible labels; workspace sections are programmatically named. |
+| 2.4.7 Focus Visible (AA) | Keyboard-operable UI has a visible focus indicator. | Focus remains visible on the canvas, dark theme, selected rows, and custom controls. |
+| 2.4.11 Focus Not Obscured (Minimum) (AA) | Author-created content does not completely hide the focused component. | Sticky transport, popovers, toasts, and bottom bars do not cover the focused timeline item/control; it scrolls into view. |
+| 2.5.1 Pointer Gestures (A) | Multipoint or path-based gestures have a single-pointer alternative unless essential. | Neither pinch nor a drawn gesture is the only zoom/edit route. |
+| 2.5.2 Pointer Cancellation (A) | Single-pointer actions support cancel/abort/undo, or complete on the up-event with an opportunity to cancel. | Boundary/chord/loop edits do not commit irreversibly on pointer-down; nondestructive undo remains available. |
+| 2.5.3 Label in Name (A) | The accessible name contains the visible label. | Voice Control/Narrator can activate `Play`, `Undo`, `Low confidence`, and instrument labels using the words visible to the user. |
+| 2.5.7 Dragging Movements (AA) | Every drag action has a single-pointer non-drag alternative unless essential or system-controlled. | Boundaries, beats, loop handles, and reordering offer click/select plus numeric, nudge, or action alternatives. |
+| 2.5.8 Target Size (Minimum) (AA) | Pointer targets are at least 24×24 CSS px or meet a normative exception/spacing condition. | Icon buttons and dense timeline handles are tested by target box and spacing, not only visible glyph size. |
+| 3.1.1 Language of Page (A), 3.1.2 Language of Parts (AA) | Default language and language changes are programmatically determinable. | The UI locale is declared; user lyrics/metadata in another known language are marked where possible. |
+| 3.2.1 On Focus (A), 3.2.2 On Input (A) | Focus or a value change alone does not cause an unexpected context change without warning. | Focusing a chord/event does not seek or start playback; selecting a value does not unexpectedly close or replace the workspace. |
+| 3.2.3 Consistent Navigation (AA), 3.2.4 Consistent Identification (AA) | Repeated navigation and actions preserve order and identification. | Transport, Undo/Redo, Original/Beginner, and confidence states are named and behave consistently across editor/practice contexts. |
+| 3.3.1 Error Identification (A) | A detected input error is identified and described in text. | Invalid meter, overlapping boundary, unsupported chord, and failed edit states have specific text/programmatic descriptions, not only a red outline. |
+| 3.3.2 Labels or Instructions (A), 3.3.3 Error Suggestion (AA) | Inputs have labels/instructions; a known correction is suggested unless that compromises purpose or security. | Time/chord/meter editors state format, units/range, and corrections; the error is associated with its field/event. |
+| 4.1.2 Name, Role, Value (A) | A UI component has programmatically determinable name/role; settable states/values are exposed to assistive technology and changes are announced. | Custom timeline controls expose role, label, value, selected/expanded/invalid/disabled state, and actions. A canvas bitmap without a parallel semantic model fails. |
+| 4.1.3 Status Messages (AA) | Status messages are available to assistive technology without receiving focus. | Save, export, analysis progress/result, undo/reset, invalid-loop, and nonblocking errors use appropriate live/status mechanisms without stealing focus. |
 
-### 2.1 Усиленные рекомендации, не AA gate
+### 2.1 Stronger recommendations outside the AA gate
 
-- **2.4.13 Focus Appearance (AAA):** использовать измеримый indicator не меньше площади 2 CSS px perimeter и с изменением contrast ≥ 3:1. Это делает custom timeline focus проверяемым, хотя AA требует только видимости ([WCAG 2.4.13](https://www.w3.org/TR/WCAG22/#focus-appearance)).
-- **2.5.5 Target Size (Enhanced) (AAA):** стремиться к 44×44 CSS px для primary transport и частых practice controls; плотная timeline может использовать меньшие targets только вместе с эквивалентным управлением ([WCAG 2.5.5](https://www.w3.org/TR/WCAG22/#target-size-enhanced)).
-- **2.3.3 Animation from Interactions (AAA):** interaction motion можно отключить, если она не essential. Дополнительно CSS Media Queries определяет `prefers-reduced-motion: reduce` как системный запрос на удаление/замену несущественного motion ([WCAG 2.3.3](https://www.w3.org/TR/WCAG22/#animation-from-interactions), [Media Queries Level 5 §12.1](https://www.w3.org/TR/mediaqueries-5/#prefers-reduced-motion)).
+- **2.4.13 Focus Appearance (AAA):** use a measurable indicator with at least the area of a 2 CSS px perimeter and a contrast change of at least 3:1. This makes custom timeline focus testable even though AA requires only visibility ([WCAG 2.4.13](https://www.w3.org/TR/WCAG22/#focus-appearance)).
+- **2.5.5 Target Size (Enhanced) (AAA):** aim for 44×44 CSS px for primary transport and frequent practice controls. A dense timeline may use smaller targets only alongside equivalent controls ([WCAG 2.5.5](https://www.w3.org/TR/WCAG22/#target-size-enhanced)).
+- **2.3.3 Animation from Interactions (AAA):** interaction motion can be disabled unless essential. CSS Media Queries additionally defines `prefers-reduced-motion: reduce` as a system request to remove or replace non-essential motion ([WCAG 2.3.3](https://www.w3.org/TR/WCAG22/#animation-from-interactions), [Media Queries Level 5 §12.1](https://www.w3.org/TR/mediaqueries-5/#prefers-reduced-motion)).
 
-## 3. WAI-ARIA APG: рекомендуемые модели взаимодействия
+## 3. WAI-ARIA APG recommended interaction models
 
-APG keyboard conventions уменьшают число Tab stops: Tab входит в composite widget, стрелки двигают focus внутри, а Tab выходит. Автор composite обязан управлять focus; disabled items внутри composite иногда остаются arrow-focusable для discoverability. Это guidance, и каждый выбранный pattern всё равно должен пройти WCAG и native AT testing ([APG Keyboard Interface](https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/)).
+APG keyboard conventions reduce the number of Tab stops: Tab enters a composite widget, arrow keys move focus within it, and Tab exits. The composite's author must manage focus; disabled items sometimes remain arrow-focusable for discoverability. This is guidance, and every selected pattern must still pass WCAG and native assistive-technology testing ([APG Keyboard Interface](https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/)).
 
 ### Toolbar
 
-Для группы transport/edit actions применим [`toolbar` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/):
+The [`toolbar` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/) applies to a group of transport/edit actions:
 
-- один Tab stop на toolbar; Left/Right перемещают focus, Home/End опциональны;
-- при вертикальном toolbar используются Up/Down, а `aria-orientation` сообщает ориентацию;
-- toolbar имеет accessible label; если toolbar несколько, каждый получает уникальный label;
-- controls с собственными Left/Right interactions (например, text field или horizontal slider) требуют согласованного размещения/обработки, чтобы toolbar navigation не блокировала control.
+- one Tab stop for the toolbar; Left/Right move focus, with optional Home/End;
+- a vertical toolbar uses Up/Down and reports orientation through `aria-orientation`;
+- the toolbar has an accessible label, unique when multiple toolbars exist;
+- controls with their own Left/Right interactions, such as text fields or horizontal sliders, need deliberate placement/handling so toolbar navigation does not block the control.
 
 ### Tabs
 
-Для переключаемых workspace views применим [`tabs` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/):
+The [`tabs` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/) applies to switchable workspace views:
 
-- `tablist`, `tab`, `tabpanel` связаны через accessible names/relationships; выбранный tab сообщает `aria-selected=true`;
-- Left/Right (или Up/Down при vertical orientation) перемещают focus между tabs; Home/End опциональны;
-- automatic activation рекомендуется только если panel появляется без заметной latency; иначе Space/Enter выполняют manual activation;
-- после удаления tab focus переходит на логичный соседний tab либо другой логичный control.
+- `tablist`, `tab`, and `tabpanel` are connected by accessible names/relationships; the selected tab reports `aria-selected=true`;
+- Left/Right, or Up/Down for vertical orientation, move focus among tabs; Home/End are optional;
+- automatic activation is recommended only when the panel appears without noticeable latency; otherwise Space/Enter performs manual activation;
+- after deleting a tab, focus moves to a logical neighboring tab or another logical control.
 
-### List, listbox и grid
+### List, listbox, and grid
 
-- Семантический список проектов/events без выбора/внутренних actions остаётся native list, а не ARIA composite.
-- Одномерный selectable set может следовать [`listbox` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/): arrows меняют option focus/selection, Home/End и type-ahead рекомендуются для длинных наборов. APG предупреждает, что option content не должен содержать самостоятельные interactive elements; для строк с actions нужен другой pattern.
-- Интерактивная таблица событий может следовать [`grid` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/grid/): один Tab stop входит в grid; arrows перемещают cell focus, Home/End и Ctrl+Home/End двигают к границам, Page Up/Down опциональны. Автор должен обеспечить focusability содержимого cell и не превращать Tab в обход каждой ячейки. Для cell с editor/control нужен явный переход между navigation и edit mode (APG приводит Enter/F2 для входа и Escape для возврата как распространённую модель).
-- Визуальная CSS grid не означает `role=grid`. Весь chord timeline нельзя автоматически объявлять одним grid: стрелки могут конфликтовать между playhead, selection, boundary movement и embedded sliders. Сначала определяется keyboard mode model, затем выбирается native structure, grid или несколько меньших composites.
+- A semantic list of projects/events without selection or internal actions remains a native list, not an ARIA composite.
+- A one-dimensional selectable set can follow the [`listbox` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/): arrows change option focus/selection, with Home/End and type-ahead recommended for long sets. APG warns that option content must not contain independent interactive elements; rows with actions require another pattern.
+- An interactive event table can follow the [`grid` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/grid/): one Tab stop enters the grid; arrows move cell focus; Home/End and Ctrl+Home/End move to boundaries; Page Up/Down are optional. The author must make cell content focusable without turning Tab into traversal of every cell. Cells containing editors/controls need an explicit navigation/edit mode transition; APG gives Enter/F2 to enter and Escape to return as a common model.
+- A visual CSS grid does not imply `role=grid`. The entire chord timeline must not automatically become one grid: arrows may conflict among playhead movement, selection, boundary movement, and embedded sliders. Define the keyboard mode model first, then choose native structure, a grid, or several smaller composites.
 
-### Timeline, playhead, speed и loop range
+### Timeline, playhead, speed, and loop range
 
-- Одномерное числовое значение может следовать [`slider` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/): Right/Up увеличивают, Left/Down уменьшают, Home/End ставят minimum/maximum, Page Up/Down — optional larger step. Нужны `aria-valuemin`, `aria-valuemax`, `aria-valuenow` и понятный `aria-valuetext`, если число само по себе не объясняет musical position.
-- Loop start/end может следовать [`multi-thumb slider` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider-multithumb/), если каждый thumb имеет отдельный label, tab order остаётся постоянным, а допустимые ranges обновляются программно. Это не отменяет отдельные поля/nudge-команды как альтернативу drag.
-- APG отдельно предупреждает, что touch assistive technologies могут не синтезировать нужные arrow events для sliders; desktop v1 всё равно должен проверить VoiceOver/Narrator фактическим AT, а не считать ARIA достаточным.
-- Timeline должен давать `aria-valuetext`, понятный в домене, например section/bar/beat + elapsed time; частые playback ticks не должны быть assertive live announcements. Точный формат — отдельное product decision.
+- A one-dimensional numeric value can follow the [`slider` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/): Right/Up increase, Left/Down decrease, Home/End set minimum/maximum, and Page Up/Down optionally make a larger step. Provide `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, and meaningful `aria-valuetext` when the number alone does not explain musical position.
+- Loop start/end can follow the [`multi-thumb slider` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider-multithumb/) when each thumb has a separate label, tab order remains stable, and allowable ranges update programmatically. Separate fields or nudge commands are still required as drag alternatives.
+- APG warns that touch assistive technologies may not synthesize the required arrow events for sliders. Desktop v1 must test VoiceOver/Narrator with actual assistive technology rather than treating ARIA as sufficient.
+- The timeline must provide domain-meaningful `aria-valuetext`, for example section/bar/beat plus elapsed time. Frequent playback ticks must not become assertive live announcements. The exact format is a separate product decision.
 
 ### Dialogs
 
-[`Modal dialog` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) рекомендует:
+The [`Modal dialog` pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) recommends:
 
-- при открытии focus переходит внутрь dialog; Tab/Shift+Tab остаются внутри, Escape закрывает;
-- dialog имеет visible title, связанный через `aria-labelledby`, и visible close/cancel button в Tab order;
-- при закрытии focus обычно возвращается на opener, либо на следующий логичный target, если opener исчез;
-- initial focus выбирается по содержимому и риску: для необратимого действия — на least destructive action, для длинного structured content — на статический heading с `tabindex=-1`;
-- `aria-modal=true` ставится только когда внешний content действительно inert и visually obscured. Неправильная modal semantics может сделать interface недоступным для AT.
+- on open, focus moves inside the dialog; Tab/Shift+Tab remain within it, and Escape closes it;
+- the dialog has a visible title connected through `aria-labelledby` and a visible close/cancel button in Tab order;
+- on close, focus normally returns to the opener or to the next logical target if the opener no longer exists;
+- initial focus follows content and risk: use the least destructive action for irreversible operations and a static heading with `tabindex=-1` for long structured content;
+- set `aria-modal=true` only when outside content is genuinely inert and visually obscured. Incorrect modal semantics can make the interface inaccessible to assistive technology.
 
 ### Shortcuts
 
-Нормативный [`aria-keyshortcuts`](https://www.w3.org/TR/wai-aria-1.2/#aria-keyshortcuts) только **объявляет** реализованный shortcut; он не создаёт поведение. Значение использует DOM key names, а platform conventions могут требовать разные modifiers. Поэтому:
+The normative [`aria-keyshortcuts`](https://www.w3.org/TR/wai-aria-1.2/#aria-keyshortcuts) property only **declares** an implemented shortcut; it does not create behavior. Its value uses DOM key names, and platform conventions may require different modifiers. Therefore:
 
-- shortcut должен реально работать с указанного context и не конфликтовать с text input, AT или системными сочетаниями;
-- частые команды дополнительно доступны через menu/control и видимую searchable help surface;
-- single-character shortcuts выполняют WCAG 2.1.4: disable/remap либо только focused-context;
-- на macOS нельзя переназначать ожидаемые system shortcuts; Apple рекомендует Full Keyboard Access и сохранение standard shortcuts ([Apple Keyboards HIG](https://developer.apple.com/design/human-interface-guidelines/keyboards)).
+- the shortcut must actually work in the stated context and must not conflict with text input, assistive technology, or system shortcuts;
+- frequent commands are also available through menus/controls and a visible, searchable help surface;
+- single-character shortcuts satisfy WCAG 2.1.4 through disable/remap support or focused-context-only behavior;
+- expected system shortcuts must not be reassigned on macOS; Apple recommends Full Keyboard Access and preserving standard shortcuts ([Apple Keyboards HIG](https://developer.apple.com/design/human-interface-guidelines/keyboards)).
 
-### Live regions, progress и errors
+### Live regions, progress, and errors
 
-- `role=status` имеет implicit `aria-live=polite` и `aria-atomic=true`; подходит для результата save/edit/export и noncritical state ([WAI-ARIA `status`](https://www.w3.org/TR/wai-aria-1.2/#status)).
-- `role=alert` имеет assertive/atomic semantics и предназначен для важного time-sensitive message; APG подчёркивает, что alert не обязан получать focus и не должен исчезать слишком быстро ([APG Alert Pattern](https://www.w3.org/WAI/ARIA/apg/patterns/alert/)).
-- `role=log` подходит для последовательности meaningful additions, `role=timer` имеет implicit `aria-live=off`, а `progressbar` сообщает bounded progress. Их semantics определены WAI-ARIA; обновления не должны затоплять speech ([WAI-ARIA roles](https://www.w3.org/TR/wai-aria-1.2/#role_definitions)).
-- Ошибка формы дополнительно должна быть связана с invalid field (`aria-invalid` и accessible description); live announcement не заменяет persistent visible error и correction path.
+- `role=status` has implicit `aria-live=polite` and `aria-atomic=true`; it suits save/edit/export results and noncritical state ([WAI-ARIA `status`](https://www.w3.org/TR/wai-aria-1.2/#status)).
+- `role=alert` has assertive, atomic semantics for important time-sensitive messages. APG emphasizes that an alert need not receive focus and must not disappear too quickly ([APG Alert Pattern](https://www.w3.org/WAI/ARIA/apg/patterns/alert/)).
+- `role=log` suits a sequence of meaningful additions, `role=timer` has implicit `aria-live=off`, and `progressbar` reports bounded progress. WAI-ARIA defines their semantics; updates must not flood speech output ([WAI-ARIA roles](https://www.w3.org/TR/wai-aria-1.2/#role_definitions)).
+- A form error must also be associated with the invalid field through `aria-invalid` and an accessible description. A live announcement does not replace a persistent visible error and correction path.
 
 ## 4. Platform/Electron constraints
 
-### 4.1 Electron и Chromium
+### 4.1 Electron and Chromium
 
-Electron говорит, что его accessibility concerns аналогичны websites, потому что renderer — HTML. При обнаружении assistive technology Electron автоматически включает accessibility features; `app.setAccessibilitySupportEnabled` может принудительно раскрыть Chrome accessibility tree, но system assistive utilities имеют приоритет ([Electron accessibility](https://www.electronjs.org/docs/latest/tutorial/accessibility)). API reference предупреждает о performance cost постоянного принудительного tree и не рекомендует включать его по умолчанию ([Electron `app.accessibilitySupportEnabled`](https://www.electronjs.org/docs/latest/api/app#appaccessibilitysupportenabled-macos-windows)).
+Electron states that its accessibility concerns are similar to those of websites because the renderer is HTML. Electron automatically enables accessibility features when it detects assistive technology. `app.setAccessibilitySupportEnabled` can force exposure of the Chrome accessibility tree, but system assistive utilities take precedence ([Electron accessibility](https://www.electronjs.org/docs/latest/tutorial/accessibility)). The API reference warns about the performance cost of permanently forcing the tree and does not recommend enabling it by default ([Electron `app.accessibilitySupportEnabled`](https://www.electronjs.org/docs/latest/api/app#appaccessibilitysupportenabled-macos-windows)).
 
-Проверяемые следствия:
+Testable implications:
 
-- не отключать accessibility support и не делать отдельный урезанный accessibility mode;
-- в automated/manual test harness можно явно включать tree, но production default должен полагаться на AT detection либо осознанную preference;
-- record Electron и bundled Chromium versions в evidence, потому что platform bridge меняется независимо от DOM;
-- проверять получившееся platform tree/events, а не только DOM/ARIA. Chromium предоставляет `chrome://accessibility` и AX inspection tools для tree/events ([Chromium accessibility technical documentation](https://www.chromium.org/developers/design-documents/accessibility/), [AX inspect tools](https://www.chromium.org/developers/accessibility/testing/automated-testing/ax-inspect/)).
+- do not disable accessibility support or create a separate, reduced accessibility mode;
+- automated/manual test harnesses may explicitly enable the tree, but production defaults should rely on assistive-technology detection or an intentional preference;
+- record Electron and bundled Chromium versions in evidence because the platform bridge changes independently of the DOM;
+- test the resulting platform tree and events, not only DOM/ARIA. Chromium provides `chrome://accessibility` and AX inspection tools for trees/events ([Chromium accessibility technical documentation](https://www.chromium.org/developers/design-documents/accessibility/), [AX inspect tools](https://www.chromium.org/developers/accessibility/testing/automated-testing/ax-inspect/)).
 
-С Chrome 138 Chromium-based browsers на Windows включают native UI Automation provider по умолчанию; UIA используется Narrator, Magnifier и Voice Access. Это подтверждает правильную target surface для современного bundled Chromium, но не доказывает корректность конкретного Electron build — её всё равно надо тестировать ([Chrome: Native UI Automation for Windows in Chromium](https://developer.chrome.com/blog/windows-uia-support-update)).
+Starting with Chrome 138, Chromium-based browsers on Windows enable the native UI Automation provider by default; Narrator, Magnifier, and Voice Access use UIA. This confirms the correct target surface for modern bundled Chromium, but it does not prove that a particular Electron build is correct; that build still requires testing ([Chrome: Native UI Automation for Windows in Chromium](https://developer.chrome.com/blog/windows-uia-support-update)).
 
-### 4.2 macOS: VoiceOver и keyboard
+### 4.2 macOS: VoiceOver and keyboard
 
-Apple описывает VoiceOver navigation как иерархию areas/groups: пользователь может взаимодействовать с group, затем выйти из него; rotor позволяет быстро перейти к категориям controls/headings/links. Поэтому избыточная вложенность без названий и тысячи плоских timeline nodes одинаково вредны; platform test должен проверить осмысленные named regions и достижимость вложенных действий ([Apple: Get started with VoiceOver](https://support.apple.com/guide/voiceover/get-started-with-voiceover-vo4be8816d70/mac), [advanced navigation](https://support.apple.com/guide/voiceover/intro-to-advanced-navigation-vo27974/mac)).
+Apple describes VoiceOver navigation as a hierarchy of areas and groups: users enter a group, interact with it, then leave it; the rotor provides fast access to categories such as controls, headings, and links. Excessive unnamed nesting and thousands of flat timeline nodes are therefore equally harmful. Platform testing must verify meaningful named regions and reachability of nested actions ([Apple: Get started with VoiceOver](https://support.apple.com/guide/voiceover/get-started-with-voiceover-vo4be8816d70/mac), [advanced navigation](https://support.apple.com/guide/voiceover/intro-to-advanced-navigation-vo27974/mac)).
 
-Apple рекомендует:
+Apple recommends:
 
-- keyboard-only navigation и взаимодействие через Full Keyboard Access;
-- не переопределять standard keyboard shortcuts;
-- показывать platform-consistent focus appearance;
-- тестировать VoiceOver и Accessibility Inspector; Inspector раскрывает hierarchy, attributes/actions и common issues, но дополняет, а не заменяет реальное AT testing ([Apple Accessibility HIG](https://developer.apple.com/design/human-interface-guidelines/accessibility), [Keyboards HIG](https://developer.apple.com/design/human-interface-guidelines/keyboards), [Focus and selection](https://developer.apple.com/design/human-interface-guidelines/focus-and-selection/), [Accessibility Inspector](https://developer.apple.com/documentation/accessibility/accessibility-inspector)).
+- keyboard-only navigation and interaction through Full Keyboard Access;
+- preserving standard keyboard shortcuts;
+- platform-consistent focus appearance;
+- testing with VoiceOver and Accessibility Inspector. Inspector exposes hierarchy, attributes/actions, and common issues, but supplements rather than replaces real assistive-technology testing ([Apple Accessibility HIG](https://developer.apple.com/design/human-interface-guidelines/accessibility), [Keyboards HIG](https://developer.apple.com/design/human-interface-guidelines/keyboards), [Focus and selection](https://developer.apple.com/design/human-interface-guidelines/focus-and-selection/), [Accessibility Inspector](https://developer.apple.com/documentation/accessibility/accessibility-inspector)).
 
-Минимальный macOS evidence run:
+Minimum macOS evidence run:
 
-1. Включить VoiceOver (`Command-F5`), пройти project open → playback/seek → chord/boundary edit → undo → loop → error recovery → export только клавиатурой.
-2. Проверить имена, roles, states/values, group entry/exit, focus restoration и отсутствие речевого потока от playhead.
-3. Accessibility Inspector: audit на unlabeled/clipped/contrast issues и ручная проверка hierarchy/actions.
-4. Включить Reduce Motion и убедиться, что workspace не теряет информацию/functionality; Apple отдельно требует проверять приложение с этой setting ([Apple: Testing system accessibility features](https://developer.apple.com/documentation/accessibility/testing-system-accessibility-features-in-your-app)).
+1. Enable VoiceOver (`Command-F5`) and complete project open → playback/seek → chord/boundary edit → undo → loop → error recovery → export using only the keyboard.
+2. Verify names, roles, states/values, group entry/exit, focus restoration, and the absence of a continuous spoken stream from the playhead.
+3. Use Accessibility Inspector to audit unlabeled, clipped, and contrast issues and manually inspect hierarchy/actions.
+4. Enable Reduce Motion and confirm that the workspace loses no information or functionality. Apple separately requires testing the application with this setting ([Apple: Testing system accessibility features](https://developer.apple.com/documentation/accessibility/testing-system-accessibility-features-in-your-app)).
 
-### 4.3 Windows: UI Automation и Narrator
+### 4.3 Windows: UI Automation and Narrator
 
-Microsoft называет UI Automation основной accessibility integration для Windows apps: accessibility-relevant content top-level window должно быть доступно UIA clients, а каждому element нужен корректный accessible name/role/state. Keyboard и screen-reader support должны проверяться фактическими tools, потому что не все readers одинаково используют automation properties ([Microsoft Accessibility overview](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessibility-overview)).
+Microsoft identifies UI Automation as the primary accessibility integration for Windows applications: accessibility-relevant content in the top-level window must be available to UIA clients, and every element needs the correct accessible name, role, and state. Keyboard and screen-reader support must be tested with real tools because readers do not all use automation properties in the same way ([Microsoft Accessibility overview](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessibility-overview)).
 
-Минимальный Windows evidence run:
+Minimum Windows evidence run:
 
-1. Пройти тот же end-to-end путь только keyboard + Narrator; Narrator должен читать visible name, role и state/value и вызывать каждое действие.
-2. Проверить logical Tab sequence, arrows внутри composites и Enter/Space activation.
-3. Проверить Windows high-contrast theme и DPI/display scaling.
-4. Accessibility Insights for Windows: FastPass/Live Inspect; проверить UIA tree, patterns и events. Microsoft рекомендует автоматические checks в CI и manual screen-reader/keyboard validation для critical journeys ([Microsoft accessibility testing](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessibility-testing), [Accessibility Insights](https://accessibilityinsights.io/docs/windows/overview/)).
+1. Complete the same end-to-end journey using only keyboard and Narrator. Narrator must read visible names, roles, and states/values and invoke every action.
+2. Verify logical Tab order, arrows within composites, and Enter/Space activation.
+3. Test Windows high-contrast themes and DPI/display scaling.
+4. Use Accessibility Insights for Windows FastPass/Live Inspect to inspect the UIA tree, patterns, and events. Microsoft recommends automated checks in CI plus manual screen-reader/keyboard validation for critical journeys ([Microsoft accessibility testing](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/accessibility-testing), [Accessibility Insights](https://accessibilityinsights.io/docs/windows/overview/)).
 
-## 5. Проверяемый accessibility contract для prototype и будущей реализации
+## 5. Testable accessibility contract for the prototype and future implementation
 
-Это ограничения, а не layout decisions.
+These are constraints, not layout decisions.
 
 ### 5.1 Semantic model
 
-- Каждый visible interactive object имеет один понятный accessible name, role, current value/state и action.
-- Bars, beats, chord events, sections, lyrics tokens и confidence/error states имеют stable semantic representation независимо от визуального renderer.
-- Chord diagram имеет text equivalent: structured chord name и play instructions/notes, если diagram передаёт их.
-- `asserted`, `low confidence`, `abstained`, `N`, user-edited и technical error не схлопываются в один цвет или одно слово `warning`.
+- Every visible interactive object has one clear accessible name, role, current value/state, and action.
+- Bars, beats, chord events, sections, lyric tokens, and confidence/error states have stable semantic representations independent of the visual renderer.
+- A chord diagram has a text equivalent: a structured chord name and playing instructions/notes when conveyed by the diagram.
+- `asserted`, `low confidence`, `abstained`, `N`, user-edited, and technical-error states do not collapse into one color or the single word `warning`.
 
 ### 5.2 Keyboard and focus
 
-- Полный путь open project → choose target → edit → undo/reset → practice loop → export выполняется без pointer.
-- Tab двигается между regions/composites, arrows — внутри выбранного APG composite; есть быстрый route к timeline и transport.
-- Boundary/beat/loop drag имеет nudge/numeric/action alternative с тем же результатом.
-- Focus сохраняется после timeline rerender/playhead update; modal/popover возвращает его по объявленному правилу; sticky content его не скрывает.
-- Shortcut help показывает фактические platform bindings; single-key actions контекстны/remappable.
+- The complete open project → choose target → edit → undo/reset → practice loop → export journey works without a pointer.
+- Tab moves among regions/composites, while arrows move within the selected APG composite; fast routes reach the timeline and transport.
+- Boundary, beat, and loop dragging has nudge, numeric, or action alternatives with the same result.
+- Focus survives timeline rerenders and playhead updates; modals/popovers restore it according to a declared rule; sticky content does not hide it.
+- Shortcut help shows actual platform bindings; single-key actions are contextual or remappable.
 
 ### 5.3 Playback and timeline
 
-- Play/pause, seek, previous/next chord/bar, speed, transpose, metronome, count-in и loop имеют keyboard-operable named controls.
-- Position сообщает elapsed time и музыкальную позицию в текстовом/programmatic виде; scrub value имеет unit и range.
-- Playback tick и moving bars не публикуются как assertive live updates. Meaningful changes — loop invalid, edit applied, analysis/export completion, error — публикуются один раз подходящей priority.
-- Pause останавливает media и связанное необязательное движение; Reduce Motion убирает smooth/animated transitions, сохраняя position/state.
+- Play/pause, seek, previous/next chord/bar, speed, transpose, metronome, count-in, and loop have named, keyboard-operable controls.
+- Position reports elapsed time and musical position in textual/programmatic form; scrub values include units and range.
+- Playback ticks and moving bars are not published as assertive live updates. Meaningful changes—invalid loop, applied edit, analysis/export completion, and errors—are announced once at an appropriate priority.
+- Pause stops media and associated nonessential movement; Reduce Motion removes smooth/animated transitions while preserving position/state.
 
 ### 5.4 Visual resilience
 
-- 200% text zoom без clipping/loss; 400% browser zoom/320 CSS px equivalent без потери controls и двухмерного scroll вне обоснованного timeline fragment.
-- Текст соответствует 4.5:1/3:1, meaningful UI/graphic boundaries — 3:1; target size — 24×24 CSS px или нормативное исключение/spacing.
-- Confidence, current/selected, invalid и edit state распознаются без цвета и без motion.
-- High contrast/forced colors сохраняют focus, selection, playhead, loop и error distinctions.
+- 200% text zoom causes no clipping or loss; 400% browser zoom/320 CSS px equivalent preserves controls and avoids two-dimensional scrolling outside a justified timeline fragment.
+- Text meets 4.5:1/3:1 contrast, meaningful UI/graphic boundaries meet 3:1, and target size is 24×24 CSS px or satisfies a normative exception/spacing condition.
+- Confidence, current/selected, invalid, and edit states remain recognizable without color or motion.
+- High contrast/forced colors preserve focus, selection, playhead, loop, and error distinctions.
 
 ### 5.5 Release evidence
 
-- Automated DOM accessibility checks — на каждый critical renderer view, но не как единственный gate.
-- Keyboard сценарии — автоматизированные там, где возможно, плюс manual no-pointer pass.
+- Automated DOM accessibility checks cover every critical renderer view, but are not the only gate.
+- Keyboard scenarios are automated where possible and supplemented by a manual no-pointer pass.
 - macOS: VoiceOver + Accessibility Inspector; Windows: Narrator + Accessibility Insights/UIA inspection.
-- Matrix содержит OS, Electron, Chromium, screen reader и tool versions; blockers не закрываются одним DOM snapshot.
-- Проверяются EN и RU UI strings, длинные project/chord labels, low-confidence/abstention, invalid edit, empty/no-lyrics и analysis-progress states.
+- The matrix records OS, Electron, Chromium, screen-reader, and tool versions; one DOM snapshot cannot close blockers.
+- Test English and Russian UI strings, long project/chord labels, low-confidence/abstention, invalid-edit, empty/no-lyrics, and analysis-progress states.
 
-## 6. Concise implications for следующего prototype
+## 6. Concise implications for the next prototype
 
-1. Prototype должен доказывать **две эквивалентные поверхности одного state model**: визуальную timeline и последовательную semantic/keyboard модель. Отдельный «accessible mode» не нужен.
-2. До выбора layout достаточно проверить четыре seams: region navigation, timeline target selection/edit without drag, focus preservation при playback/rerender и restrained announcements динамических state changes.
-3. Confidence/error prototype обязан показывать visible word/icon/pattern и соответствующий programmatic state; изменение одного цвета не считается вариантом.
-4. Reflow prototype может оставить сам timeline двухмерным, но должен доказать доступ к transport, editor actions и выбранному event при 200% text и 400% zoom.
-5. Prototype acceptance требует короткого VoiceOver и Narrator walkthrough. AX/DOM screenshot без реального screen reader — только промежуточное evidence.
+1. The prototype must prove **two equivalent surfaces over one state model**: a visual timeline and a sequential semantic/keyboard model. A separate “accessible mode” is unnecessary.
+2. Before choosing a layout, validate four seams: region navigation, timeline target selection/editing without drag, focus preservation during playback/rerender, and restrained announcements of dynamic state changes.
+3. The confidence/error prototype must show a visible word, icon, or pattern plus corresponding programmatic state; changing only color is not an alternative.
+4. The reflow prototype may keep the timeline itself two-dimensional, but must prove access to transport, editor actions, and the selected event at 200% text and 400% zoom.
+5. Prototype acceptance requires short VoiceOver and Narrator walkthroughs. An AX/DOM screenshot without a real screen reader is only intermediate evidence.
 
-## 7. Открытые продуктовые решения, которые источники не выбирают
+## 7. Open product decisions not resolved by the sources
 
-- Какая конкретно information architecture и grouping лучше для library/editor/practice.
-- Представлять ли event timeline как grid, listbox, treegrid или собственную комбинацию native elements; роль выбирается после task prototype, не по внешнему виду.
-- Exact shortcut map, nudge increments и формат `aria-valuetext` для bar/beat/seconds при variable meter/tempo.
-- Какие playback changes достойны live announcement и какая verbosity настраивается пользователем.
-- Требуется ли formal WCAG conformance claim или WCAG 2.2 AA остаётся внутренним release gate.
+- Which information architecture and grouping best serve library, editor, and practice workflows.
+- Whether to represent the event timeline as a grid, listbox, treegrid, or custom composition of native elements. Choose the role after a task prototype, not by appearance.
+- The exact shortcut map, nudge increments, and `aria-valuetext` format for bar/beat/seconds under variable meter/tempo.
+- Which playback changes deserve live announcements and what verbosity the user can configure.
+- Whether a formal WCAG conformance claim is required or WCAG 2.2 AA remains an internal release gate.
 
-Ни один из этих вопросов не меняет обязательные свойства: keyboard equivalence, stable focus, programmatic semantics, non-color state, zoom/reflow resilience и проверка native assistive technologies.
+None of these questions changes the required properties: keyboard equivalence, stable focus, programmatic semantics, non-color state, zoom/reflow resilience, and validation with native assistive technologies.
