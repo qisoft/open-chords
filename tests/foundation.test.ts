@@ -45,6 +45,12 @@ describe("repository foundation contract", () => {
     ).toEqual([]);
   });
 
+  it("keeps formatter inputs on LF across native checkouts", () => {
+    const attributes = readFileSync(join(repositoryRoot, ".gitattributes"), "utf8");
+
+    expect(attributes).toContain("* text=auto eol=lf");
+  });
+
   it("denies dependency build scripts unless explicitly reviewed", () => {
     const workspace = readFileSync(join(repositoryRoot, "pnpm-workspace.yaml"), "utf8");
 
