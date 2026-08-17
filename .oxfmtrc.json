@@ -6,6 +6,7 @@
     "docs/**",
     "node_modules/**",
     "out/**",
+    "packages/testkit/contracts/v1/schema/**",
     "playwright-report/**",
     "test-results/**"
   ],

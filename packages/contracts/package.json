@@ -1,0 +1,13 @@
+{
+  "name": "@open-chords/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@open-chords/domain": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

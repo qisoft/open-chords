@@ -5,5 +5,13 @@
     "tsBuildInfoFile": "./node_modules/.cache/typescript/tooling.tsbuildinfo",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["playwright.config.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "packages/contracts/src/**/*.ts",
+    "packages/domain/src/**/*.ts",
+    "packages/testkit/src/**/*.ts",
+    "playwright.config.ts",
+    "tests/**/*.ts",
+    "tools/**/*.ts",
+    "vitest.config.ts"
+  ]
 }

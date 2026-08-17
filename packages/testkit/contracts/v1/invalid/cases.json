@@ -1,0 +1,106 @@
+[
+  {
+    "name": "chord overlap",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 1, "startSample"],
+    "value": 7000
+  },
+  {
+    "name": "chord gap",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 1, "startSample"],
+    "value": 9000
+  },
+  {
+    "name": "unstable chord ordering",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents"],
+    "operation": "reverse"
+  },
+  {
+    "name": "unknown core section semantics",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "sectionRegions", 0, "label"],
+    "value": "drop"
+  },
+  {
+    "name": "unknown core field",
+    "path": ["payload", "activeView", "latestWins"],
+    "value": true
+  },
+  {
+    "name": "unsafe sample frame",
+    "path": ["payload", "durationSamples"],
+    "value": 9007199254740992
+  },
+  {
+    "name": "invalid committed projection",
+    "path": ["payload", "activeView", "editHistoryPosition"],
+    "value": 2
+  },
+  {
+    "name": "unknown nested chord field",
+    "path": [
+      "payload",
+      "analysisRevisions",
+      0,
+      "timeline",
+      "chordEvents",
+      0,
+      "value",
+      "confidencePercentage"
+    ],
+    "value": 91
+  },
+  {
+    "name": "unknown chord quality semantics",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 0, "value", "quality"],
+    "value": "power"
+  },
+  {
+    "name": "transaction parent is not earlier",
+    "path": ["payload", "editLayers", 0, "transactions", 0, "parentTransactionId"],
+    "value": "transaction_future"
+  },
+  {
+    "name": "matched lyric cannot abstain",
+    "path": ["payload", "lyricsAlignments", 0, "occurrences", 0, "timing", "assertion", "state"],
+    "value": "abstained"
+  },
+  {
+    "name": "unknown Support Claim capability",
+    "path": ["payload", "supportClaims", 0, "capability"],
+    "value": "universal_music_truth"
+  },
+  {
+    "name": "unknown Lyrics Token reference",
+    "path": ["payload", "lyricsAlignments", 0, "occurrences", 0, "tokenId"],
+    "value": "token_missing"
+  },
+  {
+    "name": "Edit Operation references unknown entity",
+    "path": ["payload", "editLayers", 0, "transactions", 0, "operations", 0, "eventId"],
+    "value": "chord_missing"
+  },
+  {
+    "name": "Beat ID is duplicated across Bars",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "bars", 1, "beats", 0, "id"],
+    "value": "beat_pickup_1"
+  },
+  {
+    "name": "Lyrics Token Occurrences are not one-to-one in Document order",
+    "path": ["payload", "lyricsAlignments", 0, "occurrences"],
+    "operation": "reverse"
+  },
+  {
+    "name": "positive JSON Schema bound",
+    "path": ["payload", "sampleRate"],
+    "value": 0
+  },
+  {
+    "name": "Active View references unknown Lyrics Document",
+    "path": ["payload", "activeView", "lyricsDocumentId"],
+    "value": "lyrics_missing"
+  },
+  {
+    "name": "Active View Lyrics Alignment belongs to another Revision",
+    "path": ["payload", "lyricsAlignments", 0, "analysisRevisionId"],
+    "value": "revision_reviewable"
+  }
+]

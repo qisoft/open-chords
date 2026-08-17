@@ -1,0 +1,1511 @@
+{
+  "$defs": {
+    "__schema0": {
+      "pattern": "^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$",
+      "type": "string"
+    },
+    "__schema1": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "manifestHash": {
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "projectId": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "supportClaimIds": {
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "type": "array"
+        },
+        "timeline": {
+          "additionalProperties": false,
+          "properties": {
+            "bars": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "beats": {
+                    "items": {
+                      "$ref": "#/$defs/__schema4"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "endSample": {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  "meter": {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  "startSample": {
+                    "$ref": "#/$defs/__schema3"
+                  },
+                  "status": {
+                    "$ref": "#/$defs/__schema6"
+                  }
+                },
+                "required": [
+                  "endSample",
+                  "startSample",
+                  "beats",
+                  "id",
+                  "meter",
+                  "status"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "chordEvents": {
+              "items": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "keyRegions": {
+              "items": {
+                "$ref": "#/$defs/__schema15"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "sectionRegions": {
+              "items": {
+                "$ref": "#/$defs/__schema16"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "unmeteredRegions": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "endSample": {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  "reasonCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "startSample": {
+                    "$ref": "#/$defs/__schema3"
+                  }
+                },
+                "required": [
+                  "endSample",
+                  "startSample",
+                  "id",
+                  "reasonCode"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "bars",
+            "chordEvents",
+            "keyRegions",
+            "sectionRegions",
+            "unmeteredRegions"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "createdAt",
+        "id",
+        "manifestHash",
+        "projectId",
+        "supportClaimIds",
+        "timeline"
+      ],
+      "type": "object"
+    },
+    "__schema10": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "scale": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "scale",
+        "value"
+      ],
+      "type": "object"
+    },
+    "__schema11": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "__schema12": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "__schema13": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "additions": {
+              "items": {
+                "pattern": "^add(?:2|4|6|9|11|13)$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "alterations": {
+              "items": {
+                "pattern": "^(?:b|#)(?:5|9|11|13)$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "bass": {
+              "$ref": "#/$defs/__schema14"
+            },
+            "extensions": {
+              "items": {
+                "enum": [
+                  "6",
+                  "7",
+                  "9",
+                  "11",
+                  "13"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "chord",
+              "type": "string"
+            },
+            "omissions": {
+              "items": {
+                "pattern": "^no(?:3|5)$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "quality": {
+              "enum": [
+                "major",
+                "minor",
+                "diminished",
+                "augmented",
+                "sus2",
+                "sus4",
+                "major7",
+                "minor7",
+                "diminished7",
+                "half_diminished"
+              ],
+              "type": "string"
+            },
+            "root": {
+              "$ref": "#/$defs/__schema14"
+            }
+          },
+          "required": [
+            "additions",
+            "alterations",
+            "extensions",
+            "kind",
+            "omissions",
+            "quality",
+            "root"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "no_chord",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "__schema14": {
+      "enum": [
+        "A",
+        "A#",
+        "Ab",
+        "B",
+        "Bb",
+        "C",
+        "C#",
+        "D",
+        "D#",
+        "Db",
+        "E",
+        "Eb",
+        "F",
+        "F#",
+        "G",
+        "G#",
+        "Gb"
+      ],
+      "type": "string"
+    },
+    "__schema15": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "endSample": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "id": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "startSample": {
+          "$ref": "#/$defs/__schema3"
+        },
+        "value": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "key",
+                  "type": "string"
+                },
+                "mode": {
+                  "enum": [
+                    "major",
+                    "minor",
+                    "dorian",
+                    "mixolydian",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "tonic": {
+                  "$ref": "#/$defs/__schema14"
+                }
+              },
+              "required": [
+                "kind",
+                "mode",
+                "tonic"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "unknown",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "value"
+      ],
+      "type": "object"
+    },
+    "__schema16": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "endSample": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "id": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema17"
+        },
+        "startSample": {
+          "$ref": "#/$defs/__schema3"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "__schema17": {
+      "enum": [
+        "intro",
+        "verse",
+        "pre_chorus",
+        "chorus",
+        "bridge",
+        "solo",
+        "interlude",
+        "outro",
+        "neutral",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "__schema18": {
+      "additionalProperties": false,
+      "properties": {
+        "analysisRevisionId": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "id": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "transactions": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "operations": {
+                "items": {
+                  "$ref": "#/$defs/__schema19"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "parentTransactionId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "operations",
+              "parentTransactionId"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "id",
+        "transactions"
+      ],
+      "type": "object"
+    },
+    "__schema19": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "eventId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "type": {
+              "const": "replace_chord_value",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/__schema13"
+            }
+          },
+          "required": [
+            "eventId",
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "atSample": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "leftEventId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "rightEventId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "type": {
+              "const": "move_chord_boundary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "atSample",
+            "leftEventId",
+            "rightEventId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "atSample": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "beatId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "type": {
+              "const": "move_beat",
+              "type": "string"
+            }
+          },
+          "required": [
+            "atSample",
+            "beatId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "atSample": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "leftBarId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "rightBarId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "type": {
+              "const": "move_bar_boundary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "atSample",
+            "leftBarId",
+            "rightBarId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "barId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "meter": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "type": {
+              "const": "set_bar_meter",
+              "type": "string"
+            }
+          },
+          "required": [
+            "barId",
+            "meter",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "atSample": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "barId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "leftStatus": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "newBarId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "newDownbeatId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "rightMeter": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "rightStatus": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "type": {
+              "const": "split_bar",
+              "type": "string"
+            }
+          },
+          "required": [
+            "atSample",
+            "barId",
+            "leftStatus",
+            "newBarId",
+            "newDownbeatId",
+            "rightMeter",
+            "rightStatus",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "leftBarId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "meter": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "rightBarId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "status": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "type": {
+              "const": "merge_bars",
+              "type": "string"
+            }
+          },
+          "required": [
+            "leftBarId",
+            "meter",
+            "rightBarId",
+            "status",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "alignmentId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "timing": {
+              "$ref": "#/$defs/__schema20"
+            },
+            "tokenId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "type": {
+              "const": "set_lyrics_timing",
+              "type": "string"
+            }
+          },
+          "required": [
+            "alignmentId",
+            "timing",
+            "tokenId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "alignmentId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "lineId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "timing": {
+              "$ref": "#/$defs/__schema20"
+            },
+            "type": {
+              "const": "set_lyrics_line_timing",
+              "type": "string"
+            }
+          },
+          "required": [
+            "alignmentId",
+            "lineId",
+            "timing",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "$ref": "#/$defs/__schema17"
+            },
+            "regionId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "type": {
+              "const": "replace_section_label",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "regionId",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "__schema2": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
+    "__schema20": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "assertion": {
+              "additionalProperties": false,
+              "properties": {
+                "evidence": {
+                  "prefixItems": [],
+                  "type": "array"
+                },
+                "reasonCodes": {
+                  "prefixItems": [
+                    {
+                      "const": "user_authored",
+                      "type": "string"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "state": {
+                  "const": "asserted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "evidence",
+                "reasonCodes",
+                "state"
+              ],
+              "type": "object"
+            },
+            "endSample": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "startSample": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "state": {
+              "const": "matched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "endSample",
+            "startSample",
+            "assertion",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reasonCode": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "unmatched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reasonCode",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "__schema21": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "assertion": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "evidence": {
+                      "$ref": "#/$defs/__schema9"
+                    },
+                    "reasonCodes": {
+                      "$ref": "#/$defs/__schema11"
+                    },
+                    "state": {
+                      "const": "asserted",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "evidence",
+                    "reasonCodes",
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "evidence": {
+                      "$ref": "#/$defs/__schema9"
+                    },
+                    "reasonCodes": {
+                      "$ref": "#/$defs/__schema11"
+                    },
+                    "state": {
+                      "const": "low_confidence",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "evidence",
+                    "reasonCodes",
+                    "state"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "endSample": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "startSample": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "state": {
+              "const": "matched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "endSample",
+            "startSample",
+            "assertion",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reasonCode": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "unmatched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reasonCode",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "__schema22": {
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer"
+    },
+    "__schema23": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "__schema24": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "__schema25": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "__schema3": {
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer"
+    },
+    "__schema4": {
+      "additionalProperties": false,
+      "properties": {
+        "atSample": {
+          "$ref": "#/$defs/__schema3"
+        },
+        "id": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "role": {
+          "enum": [
+            "downbeat",
+            "beat"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "atSample",
+        "id",
+        "role"
+      ],
+      "type": "object"
+    },
+    "__schema5": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "anyOf": [
+            {
+              "const": 2,
+              "type": "number"
+            },
+            {
+              "const": 4,
+              "type": "number"
+            },
+            {
+              "const": 8,
+              "type": "number"
+            },
+            {
+              "const": 16,
+              "type": "number"
+            }
+          ]
+        },
+        "numerator": {
+          "maximum": 32,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "type": "object"
+    },
+    "__schema6": {
+      "enum": [
+        "complete",
+        "pickup",
+        "truncated"
+      ],
+      "type": "string"
+    },
+    "__schema7": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "endSample": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "id": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "startSample": {
+          "$ref": "#/$defs/__schema3"
+        },
+        "value": {
+          "$ref": "#/$defs/__schema13"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "value"
+      ],
+      "type": "object"
+    },
+    "__schema8": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "reasonCodes": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "state": {
+              "const": "asserted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "reasonCodes": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "state": {
+              "const": "low_confidence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/__schema10"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "state": {
+              "const": "abstained",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "__schema9": {
+      "items": {
+        "$ref": "#/$defs/__schema10"
+      },
+      "type": "array"
+    }
+  },
+  "$id": "https://openchords.dev/contracts/v1/project-envelope.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "extensions": {
+      "additionalProperties": {},
+      "propertyNames": {
+        "pattern": "^[a-z0-9]+(?:\\.[a-z0-9-]+)+$",
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "payload": {
+      "additionalProperties": false,
+      "properties": {
+        "activeView": {
+          "additionalProperties": false,
+          "properties": {
+            "analysisRevisionId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "editHistoryPosition": {
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            },
+            "editLayerId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "lyricsAlignmentId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "lyricsDocumentId": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "presentation": {
+              "additionalProperties": false,
+              "properties": {
+                "beginnerView": {
+                  "type": "boolean"
+                },
+                "enharmonicPreference": {
+                  "enum": [
+                    "sharp",
+                    "flat",
+                    "contextual"
+                  ],
+                  "type": "string"
+                },
+                "transposeSemitones": {
+                  "maximum": 11,
+                  "minimum": -11,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "beginnerView",
+                "enharmonicPreference",
+                "transposeSemitones"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "analysisRevisionId",
+            "editHistoryPosition",
+            "editLayerId",
+            "presentation"
+          ],
+          "type": "object"
+        },
+        "analysisRevisions": {
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "durationSamples": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "editLayers": {
+          "items": {
+            "$ref": "#/$defs/__schema18"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "extensions": {
+          "additionalProperties": {},
+          "propertyNames": {
+            "pattern": "^[a-z0-9]+(?:\\.[a-z0-9-]+)+$",
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "format": {
+          "const": "open-chords/project",
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "lyricsAlignments": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "analysisRevisionId": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "id": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "lineOccurrences": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "lineId": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "timing": {
+                      "$ref": "#/$defs/__schema21"
+                    }
+                  },
+                  "required": [
+                    "lineId",
+                    "timing"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "lyricsDocumentId": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "occurrences": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "timing": {
+                      "$ref": "#/$defs/__schema21"
+                    },
+                    "tokenId": {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  },
+                  "required": [
+                    "timing",
+                    "tokenId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "analysisRevisionId",
+              "id",
+              "lineOccurrences",
+              "lyricsDocumentId",
+              "occurrences"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "lyricsDocuments": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "attribution": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "id": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "language": {
+                "minLength": 2,
+                "type": "string"
+              },
+              "lines": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "endOffset": {
+                      "$ref": "#/$defs/__schema22"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "startOffset": {
+                      "$ref": "#/$defs/__schema22"
+                    }
+                  },
+                  "required": [
+                    "endOffset",
+                    "id",
+                    "startOffset"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "notices": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "provenance": {
+                "additionalProperties": false,
+                "properties": {
+                  "provider": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "reference": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "reference"
+                ],
+                "type": "object"
+              },
+              "suppliedTimingKind": {
+                "enum": [
+                  "untimed",
+                  "line",
+                  "word"
+                ],
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "tokenization": {
+                "additionalProperties": false,
+                "properties": {
+                  "scheme": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scheme",
+                  "version"
+                ],
+                "type": "object"
+              },
+              "tokens": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "endOffset": {
+                      "$ref": "#/$defs/__schema22"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "lineId": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "startOffset": {
+                      "$ref": "#/$defs/__schema22"
+                    },
+                    "text": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "endOffset",
+                    "id",
+                    "lineId",
+                    "startOffset",
+                    "text"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "attribution",
+              "id",
+              "language",
+              "lines",
+              "notices",
+              "provenance",
+              "suppliedTimingKind",
+              "text",
+              "tokenization",
+              "tokens"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "sampleRate": {
+          "exclusiveMinimum": 0,
+          "maximum": 384000,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "pattern": "^\\d+\\.\\d+$",
+          "type": "string"
+        },
+        "supportClaims": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "benchmarkPolicyHash": {
+                "pattern": "^sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "capability": {
+                "enum": [
+                  "rhythm",
+                  "meter",
+                  "key",
+                  "chords",
+                  "sections",
+                  "lyrics_alignment"
+                ],
+                "type": "string"
+              },
+              "evidenceStatus": {
+                "enum": [
+                  "supported",
+                  "insufficient_evidence"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "inputs": {
+                "items": {
+                  "$ref": "#/$defs/__schema23"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "operatingConditions": {
+                "items": {
+                  "$ref": "#/$defs/__schema24"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "platformProfiles": {
+                "items": {
+                  "$ref": "#/$defs/__schema25"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "releaseVersion": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "slices": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "benchmarkPolicyHash",
+              "capability",
+              "evidenceStatus",
+              "id",
+              "inputs",
+              "operatingConditions",
+              "platformProfiles",
+              "releaseVersion",
+              "slices"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "activeView",
+        "analysisRevisions",
+        "durationSamples",
+        "editLayers",
+        "extensions",
+        "format",
+        "id",
+        "lyricsAlignments",
+        "lyricsDocuments",
+        "sampleRate",
+        "schemaVersion",
+        "supportClaims"
+      ],
+      "type": "object"
+    },
+    "protocol": {
+      "const": "open-chords/contracts",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "pattern": "^\\d+\\.\\d+$",
+      "type": "string"
+    },
+    "type": {
+      "const": "project_snapshot",
+      "type": "string"
+    }
+  },
+  "required": [
+    "extensions",
+    "payload",
+    "protocol",
+    "schemaVersion",
+    "type"
+  ],
+  "title": "Open Chords project contract envelope v1.0",
+  "type": "object"
+}
