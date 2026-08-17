@@ -6,8 +6,10 @@ const { FuseV1Options, FuseVersion } = require("@electron/fuses");
 
 function buildApplication() {
   return new Promise((resolve, reject) => {
-    const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-    const child = spawn(command, ["run", "build"], {
+    const command = process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : "pnpm";
+    const commandArguments =
+      process.platform === "win32" ? ["/d", "/s", "/c", "pnpm", "run", "build"] : ["run", "build"];
+    const child = spawn(command, commandArguments, {
       stdio: "inherit",
       shell: false,
     });

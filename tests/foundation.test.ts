@@ -53,6 +53,7 @@ describe("repository foundation contract", () => {
 
   it("denies dependency build scripts unless explicitly reviewed", () => {
     const workspace = readFileSync(join(repositoryRoot, "pnpm-workspace.yaml"), "utf8");
+    const lockfile = readFileSync(join(repositoryRoot, "pnpm-lock.yaml"), "utf8");
 
     expect(workspace).toContain("strictDepBuilds: true");
     expect(workspace).toContain("nodeLinker: hoisted");
@@ -64,9 +65,12 @@ describe("repository foundation contract", () => {
       "electron",
       "esbuild",
     ]);
+    expect(workspace).toContain('"@electron/node-gyp": 10.2.0-electron.2');
     expect(workspace).toContain("extract-zip: npm:@electron-internal/extract-zip@1.0.1");
     expect(workspace).toContain("tar: 7.5.22");
     expect(workspace).toContain("tmp: 0.2.7");
+    expect(lockfile).toContain("'@electron/node-gyp@10.2.0-electron.2'");
+    expect(lockfile).not.toContain("codeload.github.com/electron/node-gyp");
   });
 
   it("uses exact dependency versions and excludes superseded tooling", () => {

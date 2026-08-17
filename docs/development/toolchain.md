@@ -17,7 +17,7 @@ The renderer ships a restrictive CSP and external JavaScript/CSS only. The initi
 
 ## Dependency installation
 
-Use the exact pnpm version declared in `package.json`. The workspace has one lockfile. Dependency lifecycle scripts are denied by default; only Electron and esbuild are explicitly reviewed in `pnpm-workspace.yaml`. Security overrides keep Forge's archive/temp build dependencies on patched implementations while Forge 7.11 remains pinned. Electron 43 downloads its checksum-verified binary through the explicit `pnpm electron:install` command.
+Use the exact pnpm version declared in `package.json`. The workspace has one lockfile. Dependency lifecycle scripts are denied by default; only Electron and esbuild are explicitly reviewed in `pnpm-workspace.yaml`. Security overrides keep Forge's archive/temp build dependencies on patched implementations while Forge 7.11 remains pinned; the published Electron node-gyp fork avoids a rate-limited git tarball during frozen installs. Electron 43 downloads its checksum-verified binary through the explicit `pnpm electron:install` command.
 
 ## Gates
 
