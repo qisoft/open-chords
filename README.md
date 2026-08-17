@@ -6,11 +6,19 @@ The project is currently in product and technical specification work. Implementa
 
 Planning is tracked in GitHub Issues. See the canonical [Open Chords v1 Wayfinder map](https://github.com/qisoft/open-chords/issues/1).
 
+The consolidated planning baseline is [`docs/specification/open-chords-v1.md`](docs/specification/open-chords-v1.md).
+
 ## Research
 
 - [`docs/research/chordify-algorithms.md`](docs/research/chordify-algorithms.md)
 - [`docs/research/cpu-analysis-stack.md`](docs/research/cpu-analysis-stack.md)
 - [`docs/research/desktop-sidecar-stack.md`](docs/research/desktop-sidecar-stack.md)
+- [`docs/research/sidecar-containment.md`](docs/research/sidecar-containment.md)
+- [`docs/research/youtube-acquisition-containment.md`](docs/research/youtube-acquisition-containment.md)
+- [`docs/research/model-artifact-inventory.md`](docs/research/model-artifact-inventory.md)
+- [`docs/research/export-formats.md`](docs/research/export-formats.md)
+- [`docs/research/workspace-accessibility.md`](docs/research/workspace-accessibility.md)
+- [`docs/research/benchmark-release-gate.md`](docs/research/benchmark-release-gate.md)
 
 ## License
 

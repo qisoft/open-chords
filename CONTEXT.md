@@ -68,6 +68,10 @@ _Avoid_: Project data, model cache, application bundle
 One immutable data-only model, dictionary, or calibration dependency identified by exact version, content hash, source, license, model card, and compatible runtime. A newer Artifact never silently substitutes for one named by a Recipe.
 _Avoid_: Latest model, executable plugin, Model Store
 
+**Alignment Language Pack**:
+The user-installable, versioned pair of acoustic Model Artifact and pronunciation-dictionary Model Artifact required to align untimed Reference Lyrics for one supported language. The executable MFA/Kaldi runtime belongs to the application sidecar, not the Pack.
+_Avoid_: Language model, MFA runtime, generic model bundle
+
 **Unavailable Source**:
 A Source for which no current Locator yields its verified content. It retains its identity and Projects rather than being replaced by whatever occupies an old location.
 _Avoid_: Deleted Project, changed Source
