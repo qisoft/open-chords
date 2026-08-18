@@ -13,7 +13,7 @@ Issue [#35](https://github.com/qisoft/open-chords/issues/35) establishes one pur
 
 Project Time is a non-negative safe integer sample-frame coordinate at the Project's declared canonical sample rate. All intervals are half-open `[startSample, endSample)`. Chord, Section, and Key tracks cover `[0, durationSamples)` without overlap or gaps. Bars plus Unmetered Regions provide the same coverage; Bars may be complete, pickup, or truncated, and a meter change is represented only by adjacent Bars with different meters.
 
-All domain references use stable opaque IDs. Arrays with Project Time meaning are stored in increasing Project Time order and duplicate IDs are rejected. Chord component sets are sorted and unique. `N` is the explicit `no_chord` musical value; machine `abstained` is an Assertion State and remains distinct even when an analyzer retained a candidate Chord Identity.
+All domain references use stable opaque IDs. Arrays with Project Time meaning are stored in increasing Project Time order and duplicate IDs are rejected. Chord component sets are sorted and unique using strict JavaScript UTF-16 code-unit string ordering, not numeric or musical ordering; canonical serialization preserves this validated array order. `N` is the explicit `no_chord` musical value; machine `abstained` is an Assertion State and remains distinct even when an analyzer retained a candidate Chord Identity.
 
 Unknown fields in core objects and unknown core enum semantics are rejected. Experimental or newer-minor data must live under a reverse-domain namespaced `extensions` key so it can round-trip without becoming silently interpreted core state.
 

@@ -102,5 +102,67 @@
     "name": "Active View Lyrics Alignment belongs to another Revision",
     "path": ["payload", "lyricsAlignments", 0, "analysisRevisionId"],
     "value": "revision_reviewable"
+  },
+  {
+    "name": "Chord components use unstable UTF-16 ordering",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 0, "value", "additions"],
+    "operation": "reverse"
+  },
+  {
+    "name": "Lyrics Line offsets overlap",
+    "path": ["payload", "lyricsDocuments", 0, "lines", 1, "startOffset"],
+    "value": 4
+  },
+  {
+    "name": "non-initial Beat uses downbeat role",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "bars", 1, "beats", 1, "role"],
+    "value": "downbeat"
+  },
+  {
+    "name": "truncated Bar exceeds its meter numerator",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "bars", 2, "meter", "numerator"],
+    "value": 1
+  },
+  {
+    "name": "user-authored timing evidence tuple has an extra item",
+    "path": ["payload", "editLayers", 0, "transactions", 0, "operations"],
+    "value": [
+      {
+        "type": "set_lyrics_timing",
+        "alignmentId": "alignment_repeated",
+        "tokenId": "token_go_1",
+        "timing": {
+          "state": "matched",
+          "startSample": 1000,
+          "endSample": 3000,
+          "assertion": {
+            "state": "asserted",
+            "evidence": ["not_allowed"],
+            "reasonCodes": ["user_authored"]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "user-authored timing reason tuple has an extra item",
+    "path": ["payload", "editLayers", 0, "transactions", 0, "operations"],
+    "value": [
+      {
+        "type": "set_lyrics_timing",
+        "alignmentId": "alignment_repeated",
+        "tokenId": "token_go_1",
+        "timing": {
+          "state": "matched",
+          "startSample": 1000,
+          "endSample": 3000,
+          "assertion": {
+            "state": "asserted",
+            "evidence": [],
+            "reasonCodes": ["user_authored", "user_authored"]
+          }
+        }
+      }
+    ]
   }
 ]

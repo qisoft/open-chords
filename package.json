@@ -22,7 +22,7 @@
     "start": "pnpm build && electron .",
     "test": "pnpm build && vitest run",
     "test:fixtures": "node tools/validate-contract-fixtures.ts",
-    "test:python": "python3 sidecar/open_chords_analysis/validate_contract_fixtures.py",
+    "test:python": "node tools/run-python.ts sidecar/open_chords_analysis/validate_contract_fixtures.py",
     "test:renderer": "pnpm electron:install && pnpm build && playwright test tests/renderer",
     "test:unit": "vitest run",
     "typecheck": "tsc -b",

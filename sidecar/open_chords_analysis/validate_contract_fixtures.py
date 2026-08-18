@@ -127,6 +127,15 @@ def unique_ids(items: list[dict[str, Any]], label: str) -> None:
         raise ContractError(f"{label} has duplicate IDs")
 
 
+def utf16_sort_key(value: str) -> bytes:
+    return value.encode("utf-16-be", errors="surrogatepass")
+
+
+def validate_sorted_unique(values: list[str], label: str) -> None:
+    if any(utf16_sort_key(left) >= utf16_sort_key(right) for left, right in zip(values, values[1:])):
+        raise ContractError(f"{label} is not sorted and unique")
+
+
 def validate_cover(track: list[dict[str, Any]], duration: int, label: str) -> None:
     cursor = 0
     if not track:
@@ -156,10 +165,18 @@ def validate_timeline(timeline: dict[str, Any], duration: int) -> None:
             raise ContractError("Bar does not start with its downbeat")
         if any(right["atSample"] <= left["atSample"] for left, right in zip(beats, beats[1:])):
             raise ContractError("Beats are unstably ordered")
+        if any(beat["role"] != "beat" for beat in beats[1:]):
+            raise ContractError("Bar has a non-initial downbeat")
         if any(beat["atSample"] < bar["startSample"] or beat["atSample"] >= bar["endSample"] for beat in beats):
             raise ContractError("Beat lies outside its Bar")
         if bar["status"] == "complete" and len(beats) != bar["meter"]["numerator"]:
             raise ContractError("Complete Bar has the wrong beat count")
+        if len(beats) > bar["meter"]["numerator"]:
+            raise ContractError("Bar has more beats than its meter numerator")
+    for event in timeline["chordEvents"]:
+        if event["value"]["kind"] == "chord":
+            for component in ("additions", "alterations", "extensions", "omissions"):
+                validate_sorted_unique(event["value"][component], f"Chord {component}")
 
 
 def validate_timing_sequence(occurrences: list[dict[str, Any]], duration: int, label: str) -> None:
@@ -306,6 +323,11 @@ def validate_domain(envelope: dict[str, Any]) -> None:
         unique_ids(document["lines"], "Lyrics lines")
         unique_ids(document["tokens"], "Lyrics tokens")
         line_ids = {line["id"] for line in document["lines"]}
+        line_cursor = 0
+        for line in document["lines"]:
+            if line["startOffset"] < line_cursor or line["endOffset"] <= line["startOffset"] or line["endOffset"] > len(document["text"]):
+                raise ContractError("invalid Lyrics Line Occurrence")
+            line_cursor = line["endOffset"]
         cursor = 0
         for token in document["tokens"]:
             if token["lineId"] not in line_ids or token["startOffset"] < cursor or document["text"][token["startOffset"]:token["endOffset"]] != token["text"]:
@@ -346,15 +368,21 @@ def mutate(base: Any, case: dict[str, Any]) -> Any:
 def main() -> None:
     schema = json.loads((ROOT / "schema" / "project-envelope.schema.json").read_text(encoding="utf-8"))
     golden = json.loads((ROOT / "valid" / "project-envelope.json").read_text(encoding="utf-8"))
-    validate_envelope(golden, schema)
+    valid_count = 0
+    for path in (ROOT / "valid").glob("*envelope.json"):
+        validate_envelope(json.loads(path.read_text(encoding="utf-8")), schema)
+        valid_count += 1
+    if valid_count == 0:
+        raise ContractError("No valid contract fixtures were found")
     cases = json.loads((ROOT / "invalid" / "cases.json").read_text(encoding="utf-8"))
     for case in cases:
+        mutated = mutate(golden, case)
         try:
-            validate_envelope(mutate(golden, case), schema)
+            validate_envelope(mutated, schema)
         except (ContractError, KeyError, TypeError, ValueError):
             continue
         raise ContractError(f"Python accepted invalid fixture: {case['name']}")
-    print(f"Python contract fixtures: 1 valid, {len(cases)} invalid")
+    print(f"Python contract fixtures: {valid_count} valid, {len(cases)} invalid")
 
 
 if __name__ == "__main__":

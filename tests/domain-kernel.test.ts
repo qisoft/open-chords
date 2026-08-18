@@ -64,6 +64,8 @@ describe("canonical domain kernel", () => {
 
   it("rejects unsupported values instead of silently deleting them", () => {
     expect(() => canonicalSerialize({ missing: undefined })).toThrow(/unsupported/);
+    expect(() => canonicalSerialize(new Date(0))).toThrow(/non-plain/);
+    expect(() => canonicalSerialize(new Map())).toThrow(/non-plain/);
   });
 
   it("parses the strict versioned envelope", () => {
@@ -268,9 +270,8 @@ describe("canonical domain kernel", () => {
   it.each(parseMutationCases(readFixture("invalid/cases.json")))(
     "rejects shared invalid fixture: $name",
     (mutation) => {
-      expect(() => parseContractEnvelope(mutateFixture(readGoldenEnvelope(), mutation))).toThrow(
-        /./,
-      );
+      const mutated = mutateFixture(readGoldenEnvelope(), mutation);
+      expect(() => parseContractEnvelope(mutated)).toThrow(/./);
     },
   );
 

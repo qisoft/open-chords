@@ -103,7 +103,7 @@
                 "root": "A",
                 "quality": "minor7",
                 "extensions": ["9"],
-                "additions": ["add9"],
+                "additions": ["add11", "add9"],
                 "alterations": [],
                 "omissions": [],
                 "bass": "E"

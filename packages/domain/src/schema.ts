@@ -209,8 +209,8 @@ const UserLyricsTimingSchema = z.discriminatedUnion("state", [
   z.strictObject({
     ...intervalShape,
     assertion: z.strictObject({
-      evidence: z.tuple([]),
-      reasonCodes: z.tuple([z.literal("user_authored")]),
+      evidence: z.array(z.never()).length(0),
+      reasonCodes: z.array(z.literal("user_authored")).length(1),
       state: z.literal("asserted"),
     }),
     state: z.literal("matched"),

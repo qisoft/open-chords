@@ -7,6 +7,9 @@ function canonicalize(value: unknown, path: string): unknown {
   if (Array.isArray(value))
     return value.map((item, index) => canonicalize(item, `${path}[${String(index)}]`));
   if (typeof value === "object") {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      throw new TypeError(`${path} contains a non-plain object`);
     return Object.fromEntries(
       Object.entries(value)
         .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))

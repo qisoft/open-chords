@@ -722,16 +722,19 @@
               "additionalProperties": false,
               "properties": {
                 "evidence": {
-                  "prefixItems": [],
+                  "items": {
+                    "$ref": "#/$defs/__schema21"
+                  },
+                  "maxItems": 0,
+                  "minItems": 0,
                   "type": "array"
                 },
                 "reasonCodes": {
-                  "prefixItems": [
-                    {
-                      "const": "user_authored",
-                      "type": "string"
-                    }
-                  ],
+                  "items": {
+                    "$ref": "#/$defs/__schema22"
+                  },
+                  "maxItems": 1,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "state": {
@@ -786,6 +789,13 @@
       ]
     },
     "__schema21": {
+      "not": {}
+    },
+    "__schema22": {
+      "const": "user_authored",
+      "type": "string"
+    },
+    "__schema23": {
       "oneOf": [
         {
           "additionalProperties": false,
@@ -875,20 +885,20 @@
         }
       ]
     },
-    "__schema22": {
+    "__schema24": {
       "maximum": 9007199254740991,
       "minimum": -9007199254740991,
       "type": "integer"
     },
-    "__schema23": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "__schema24": {
-      "minLength": 1,
-      "type": "string"
-    },
     "__schema25": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "__schema26": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "__schema27": {
       "minLength": 1,
       "type": "string"
     },
@@ -1194,7 +1204,7 @@
                       "$ref": "#/$defs/__schema0"
                     },
                     "timing": {
-                      "$ref": "#/$defs/__schema21"
+                      "$ref": "#/$defs/__schema23"
                     }
                   },
                   "required": [
@@ -1213,7 +1223,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "timing": {
-                      "$ref": "#/$defs/__schema21"
+                      "$ref": "#/$defs/__schema23"
                     },
                     "tokenId": {
                       "$ref": "#/$defs/__schema0"
@@ -1262,13 +1272,13 @@
                   "additionalProperties": false,
                   "properties": {
                     "endOffset": {
-                      "$ref": "#/$defs/__schema22"
+                      "$ref": "#/$defs/__schema24"
                     },
                     "id": {
                       "$ref": "#/$defs/__schema0"
                     },
                     "startOffset": {
-                      "$ref": "#/$defs/__schema22"
+                      "$ref": "#/$defs/__schema24"
                     }
                   },
                   "required": [
@@ -1339,7 +1349,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "endOffset": {
-                      "$ref": "#/$defs/__schema22"
+                      "$ref": "#/$defs/__schema24"
                     },
                     "id": {
                       "$ref": "#/$defs/__schema0"
@@ -1348,7 +1358,7 @@
                       "$ref": "#/$defs/__schema0"
                     },
                     "startOffset": {
-                      "$ref": "#/$defs/__schema22"
+                      "$ref": "#/$defs/__schema24"
                     },
                     "text": {
                       "minLength": 1,
@@ -1423,21 +1433,21 @@
               },
               "inputs": {
                 "items": {
-                  "$ref": "#/$defs/__schema23"
+                  "$ref": "#/$defs/__schema25"
                 },
                 "minItems": 1,
                 "type": "array"
               },
               "operatingConditions": {
                 "items": {
-                  "$ref": "#/$defs/__schema24"
+                  "$ref": "#/$defs/__schema26"
                 },
                 "minItems": 1,
                 "type": "array"
               },
               "platformProfiles": {
                 "items": {
-                  "$ref": "#/$defs/__schema25"
+                  "$ref": "#/$defs/__schema27"
                 },
                 "minItems": 1,
                 "type": "array"
