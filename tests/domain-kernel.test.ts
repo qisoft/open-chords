@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { parseContractEnvelope, ProjectEnvelopeSchema } from "@open-chords/contracts";
+import {
+  generateContractJsonSchema,
+  parseContractEnvelope,
+  ProjectEnvelopeSchema,
+} from "@open-chords/contracts";
 import {
   canonicalSerialize,
   materializeEffectiveTimeline,
@@ -70,6 +74,21 @@ describe("canonical domain kernel", () => {
 
   it("parses the strict versioned envelope", () => {
     expect(parseContractEnvelope(readGoldenEnvelope()).compatibility).toBe("writable");
+  });
+
+  it("generates stable named JSON Schema definitions", () => {
+    const definitions = generateContractJsonSchema().$defs;
+    expect(definitions).toBeDefined();
+    expect(Object.keys(definitions ?? {})).not.toContain("__schema0");
+    expect(Object.keys(definitions ?? {}).every((name) => !name.startsWith("__schema"))).toBe(true);
+    expect(definitions).toHaveProperty("ProjectContract");
+    expect(definitions).toHaveProperty("UserLyricsTiming");
+  });
+
+  it("rejects mutation cases that define neither a value nor an operation", () => {
+    expect(() => parseMutationCases([{ name: "stale", path: ["payload"] }])).toThrow(
+      /value or operation/,
+    );
   });
 
   it("keeps N distinct from machine abstention and repeated lyric occurrences distinct by ID", () => {

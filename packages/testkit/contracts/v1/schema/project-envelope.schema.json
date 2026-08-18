@@ -1,10 +1,120 @@
 {
   "$defs": {
-    "__schema0": {
-      "pattern": "^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$",
-      "type": "string"
+    "ActiveView": {
+      "additionalProperties": false,
+      "properties": {
+        "analysisRevisionId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "editHistoryPosition": {
+          "$ref": "#/$defs/HistoryPosition"
+        },
+        "editLayerId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "lyricsAlignmentId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "lyricsDocumentId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "presentation": {
+          "additionalProperties": false,
+          "properties": {
+            "beginnerView": {
+              "type": "boolean"
+            },
+            "enharmonicPreference": {
+              "enum": [
+                "sharp",
+                "flat",
+                "contextual"
+              ],
+              "type": "string"
+            },
+            "transposeSemitones": {
+              "maximum": 11,
+              "minimum": -11,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "beginnerView",
+            "enharmonicPreference",
+            "transposeSemitones"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "editHistoryPosition",
+        "editLayerId",
+        "presentation"
+      ],
+      "type": "object"
     },
-    "__schema1": {
+    "AlignedAssertion": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "asserted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "low_confidence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AnalysisRevision": {
       "additionalProperties": false,
       "properties": {
         "createdAt": {
@@ -13,121 +123,23 @@
           "type": "string"
         },
         "id": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/StableId"
         },
         "manifestHash": {
           "pattern": "^sha256:[a-f0-9]{64}$",
           "type": "string"
         },
         "projectId": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/StableId"
         },
         "supportClaimIds": {
           "items": {
-            "$ref": "#/$defs/__schema0"
+            "$ref": "#/$defs/StableId"
           },
           "type": "array"
         },
         "timeline": {
-          "additionalProperties": false,
-          "properties": {
-            "bars": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "beats": {
-                    "items": {
-                      "$ref": "#/$defs/__schema4"
-                    },
-                    "minItems": 1,
-                    "type": "array"
-                  },
-                  "endSample": {
-                    "$ref": "#/$defs/__schema2"
-                  },
-                  "id": {
-                    "$ref": "#/$defs/__schema0"
-                  },
-                  "meter": {
-                    "$ref": "#/$defs/__schema5"
-                  },
-                  "startSample": {
-                    "$ref": "#/$defs/__schema3"
-                  },
-                  "status": {
-                    "$ref": "#/$defs/__schema6"
-                  }
-                },
-                "required": [
-                  "endSample",
-                  "startSample",
-                  "beats",
-                  "id",
-                  "meter",
-                  "status"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "chordEvents": {
-              "items": {
-                "$ref": "#/$defs/__schema7"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "keyRegions": {
-              "items": {
-                "$ref": "#/$defs/__schema15"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "sectionRegions": {
-              "items": {
-                "$ref": "#/$defs/__schema16"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "unmeteredRegions": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "endSample": {
-                    "$ref": "#/$defs/__schema2"
-                  },
-                  "id": {
-                    "$ref": "#/$defs/__schema0"
-                  },
-                  "reasonCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "startSample": {
-                    "$ref": "#/$defs/__schema3"
-                  }
-                },
-                "required": [
-                  "endSample",
-                  "startSample",
-                  "id",
-                  "reasonCode"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "bars",
-            "chordEvents",
-            "keyRegions",
-            "sectionRegions",
-            "unmeteredRegions"
-          ],
-          "type": "object"
+          "$ref": "#/$defs/MusicalTimeline"
         }
       },
       "required": [
@@ -140,114 +152,269 @@
       ],
       "type": "object"
     },
-    "__schema10": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "scale": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "value": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "name",
-        "scale",
-        "value"
-      ],
-      "type": "object"
-    },
-    "__schema11": {
-      "items": {
-        "minLength": 1,
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "__schema12": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "__schema13": {
+    "Assertion": {
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
-            "additions": {
+            "evidence": {
               "items": {
-                "pattern": "^add(?:2|4|6|9|11|13)$",
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
                 "type": "string"
               },
               "type": "array"
             },
-            "alterations": {
-              "items": {
-                "pattern": "^(?:b|#)(?:5|9|11|13)$",
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "bass": {
-              "$ref": "#/$defs/__schema14"
-            },
-            "extensions": {
-              "items": {
-                "enum": [
-                  "6",
-                  "7",
-                  "9",
-                  "11",
-                  "13"
-                ],
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "kind": {
-              "const": "chord",
+            "state": {
+              "const": "asserted",
               "type": "string"
-            },
-            "omissions": {
-              "items": {
-                "pattern": "^no(?:3|5)$",
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "quality": {
-              "enum": [
-                "major",
-                "minor",
-                "diminished",
-                "augmented",
-                "sus2",
-                "sus4",
-                "major7",
-                "minor7",
-                "diminished7",
-                "half_diminished"
-              ],
-              "type": "string"
-            },
-            "root": {
-              "$ref": "#/$defs/__schema14"
             }
           },
           "required": [
-            "additions",
-            "alterations",
-            "extensions",
-            "kind",
-            "omissions",
-            "quality",
-            "root"
+            "evidence",
+            "reasonCodes",
+            "state"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "low_confidence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "state": {
+              "const": "abstained",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Bar": {
+      "additionalProperties": false,
+      "properties": {
+        "beats": {
+          "items": {
+            "$ref": "#/$defs/Beat"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "meter": {
+          "$ref": "#/$defs/Meter"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        },
+        "status": {
+          "$ref": "#/$defs/BarStatus"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "beats",
+        "id",
+        "meter",
+        "status"
+      ],
+      "type": "object"
+    },
+    "BarStatus": {
+      "enum": [
+        "complete",
+        "pickup",
+        "truncated"
+      ],
+      "type": "string"
+    },
+    "Beat": {
+      "additionalProperties": false,
+      "properties": {
+        "atSample": {
+          "$ref": "#/$defs/SampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "role": {
+          "enum": [
+            "downbeat",
+            "beat"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "atSample",
+        "id",
+        "role"
+      ],
+      "type": "object"
+    },
+    "ChordEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/Assertion"
+        },
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        },
+        "value": {
+          "$ref": "#/$defs/ChordValue"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ChordIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "additions": {
+          "items": {
+            "pattern": "^add(?:2|4|6|9|11|13)$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "alterations": {
+          "items": {
+            "pattern": "^(?:b|#)(?:5|9|11|13)$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bass": {
+          "$ref": "#/$defs/PitchClass"
+        },
+        "extensions": {
+          "items": {
+            "enum": [
+              "6",
+              "7",
+              "9",
+              "11",
+              "13"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "chord",
+          "type": "string"
+        },
+        "omissions": {
+          "items": {
+            "pattern": "^no(?:3|5)$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "quality": {
+          "enum": [
+            "major",
+            "minor",
+            "diminished",
+            "augmented",
+            "sus2",
+            "sus4",
+            "major7",
+            "minor7",
+            "diminished7",
+            "half_diminished"
+          ],
+          "type": "string"
+        },
+        "root": {
+          "$ref": "#/$defs/PitchClass"
+        }
+      },
+      "required": [
+        "additions",
+        "alterations",
+        "extensions",
+        "kind",
+        "omissions",
+        "quality",
+        "root"
+      ],
+      "type": "object"
+    },
+    "ChordValue": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ChordIdentity"
         },
         {
           "additionalProperties": false,
@@ -264,181 +431,18 @@
         }
       ]
     },
-    "__schema14": {
-      "enum": [
-        "A",
-        "A#",
-        "Ab",
-        "B",
-        "Bb",
-        "C",
-        "C#",
-        "D",
-        "D#",
-        "Db",
-        "E",
-        "Eb",
-        "F",
-        "F#",
-        "G",
-        "G#",
-        "Gb"
-      ],
-      "type": "string"
-    },
-    "__schema15": {
-      "additionalProperties": false,
-      "properties": {
-        "assertion": {
-          "$ref": "#/$defs/__schema8"
-        },
-        "endSample": {
-          "$ref": "#/$defs/__schema2"
-        },
-        "id": {
-          "$ref": "#/$defs/__schema0"
-        },
-        "startSample": {
-          "$ref": "#/$defs/__schema3"
-        },
-        "value": {
-          "oneOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "kind": {
-                  "const": "key",
-                  "type": "string"
-                },
-                "mode": {
-                  "enum": [
-                    "major",
-                    "minor",
-                    "dorian",
-                    "mixolydian",
-                    "other"
-                  ],
-                  "type": "string"
-                },
-                "tonic": {
-                  "$ref": "#/$defs/__schema14"
-                }
-              },
-              "required": [
-                "kind",
-                "mode",
-                "tonic"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "kind": {
-                  "const": "unknown",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "type": "object"
-            }
-          ]
-        }
-      },
-      "required": [
-        "endSample",
-        "startSample",
-        "assertion",
-        "id",
-        "value"
-      ],
-      "type": "object"
-    },
-    "__schema16": {
-      "additionalProperties": false,
-      "properties": {
-        "assertion": {
-          "$ref": "#/$defs/__schema8"
-        },
-        "endSample": {
-          "$ref": "#/$defs/__schema2"
-        },
-        "id": {
-          "$ref": "#/$defs/__schema0"
-        },
-        "label": {
-          "$ref": "#/$defs/__schema17"
-        },
-        "startSample": {
-          "$ref": "#/$defs/__schema3"
-        }
-      },
-      "required": [
-        "endSample",
-        "startSample",
-        "assertion",
-        "id",
-        "label"
-      ],
-      "type": "object"
-    },
-    "__schema17": {
-      "enum": [
-        "intro",
-        "verse",
-        "pre_chorus",
-        "chorus",
-        "bridge",
-        "solo",
-        "interlude",
-        "outro",
-        "neutral",
-        "unknown"
-      ],
-      "type": "string"
-    },
-    "__schema18": {
+    "EditLayer": {
       "additionalProperties": false,
       "properties": {
         "analysisRevisionId": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/StableId"
         },
         "id": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/StableId"
         },
         "transactions": {
           "items": {
-            "additionalProperties": false,
-            "properties": {
-              "id": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "operations": {
-                "items": {
-                  "$ref": "#/$defs/__schema19"
-                },
-                "minItems": 1,
-                "type": "array"
-              },
-              "parentTransactionId": {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/__schema0"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "operations",
-              "parentTransactionId"
-            ],
-            "type": "object"
+            "$ref": "#/$defs/EditTransaction"
           },
           "type": "array"
         }
@@ -450,20 +454,20 @@
       ],
       "type": "object"
     },
-    "__schema19": {
+    "EditOperation": {
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
             "eventId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "type": {
               "const": "replace_chord_value",
               "type": "string"
             },
             "value": {
-              "$ref": "#/$defs/__schema13"
+              "$ref": "#/$defs/ChordValue"
             }
           },
           "required": [
@@ -477,13 +481,13 @@
           "additionalProperties": false,
           "properties": {
             "atSample": {
-              "$ref": "#/$defs/__schema2"
+              "$ref": "#/$defs/PositiveSampleFrame"
             },
             "leftEventId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "rightEventId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "type": {
               "const": "move_chord_boundary",
@@ -502,10 +506,10 @@
           "additionalProperties": false,
           "properties": {
             "atSample": {
-              "$ref": "#/$defs/__schema3"
+              "$ref": "#/$defs/SampleFrame"
             },
             "beatId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "type": {
               "const": "move_beat",
@@ -523,13 +527,13 @@
           "additionalProperties": false,
           "properties": {
             "atSample": {
-              "$ref": "#/$defs/__schema2"
+              "$ref": "#/$defs/PositiveSampleFrame"
             },
             "leftBarId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "rightBarId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "type": {
               "const": "move_bar_boundary",
@@ -548,10 +552,10 @@
           "additionalProperties": false,
           "properties": {
             "barId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "meter": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/Meter"
             },
             "type": {
               "const": "set_bar_meter",
@@ -569,25 +573,25 @@
           "additionalProperties": false,
           "properties": {
             "atSample": {
-              "$ref": "#/$defs/__schema2"
+              "$ref": "#/$defs/PositiveSampleFrame"
             },
             "barId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "leftStatus": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/BarStatus"
             },
             "newBarId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "newDownbeatId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "rightMeter": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/Meter"
             },
             "rightStatus": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/BarStatus"
             },
             "type": {
               "const": "split_bar",
@@ -610,16 +614,16 @@
           "additionalProperties": false,
           "properties": {
             "leftBarId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "meter": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/Meter"
             },
             "rightBarId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "status": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/BarStatus"
             },
             "type": {
               "const": "merge_bars",
@@ -639,13 +643,13 @@
           "additionalProperties": false,
           "properties": {
             "alignmentId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "timing": {
-              "$ref": "#/$defs/__schema20"
+              "$ref": "#/$defs/UserLyricsTiming"
             },
             "tokenId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "type": {
               "const": "set_lyrics_timing",
@@ -664,13 +668,13 @@
           "additionalProperties": false,
           "properties": {
             "alignmentId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "lineId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "timing": {
-              "$ref": "#/$defs/__schema20"
+              "$ref": "#/$defs/UserLyricsTiming"
             },
             "type": {
               "const": "set_lyrics_line_timing",
@@ -689,10 +693,22 @@
           "additionalProperties": false,
           "properties": {
             "label": {
-              "$ref": "#/$defs/__schema17"
+              "enum": [
+                "intro",
+                "verse",
+                "pre_chorus",
+                "chorus",
+                "bridge",
+                "solo",
+                "interlude",
+                "outro",
+                "neutral",
+                "unknown"
+              ],
+              "type": "string"
             },
             "regionId": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/StableId"
             },
             "type": {
               "const": "replace_section_label",
@@ -708,230 +724,386 @@
         }
       ]
     },
-    "__schema2": {
-      "exclusiveMinimum": 0,
-      "maximum": 9007199254740991,
-      "type": "integer"
-    },
-    "__schema20": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "assertion": {
-              "additionalProperties": false,
-              "properties": {
-                "evidence": {
-                  "items": {
-                    "$ref": "#/$defs/__schema21"
-                  },
-                  "maxItems": 0,
-                  "minItems": 0,
-                  "type": "array"
-                },
-                "reasonCodes": {
-                  "items": {
-                    "$ref": "#/$defs/__schema22"
-                  },
-                  "maxItems": 1,
-                  "minItems": 1,
-                  "type": "array"
-                },
-                "state": {
-                  "const": "asserted",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "evidence",
-                "reasonCodes",
-                "state"
-              ],
-              "type": "object"
-            },
-            "endSample": {
-              "$ref": "#/$defs/__schema2"
-            },
-            "startSample": {
-              "$ref": "#/$defs/__schema3"
-            },
-            "state": {
-              "const": "matched",
-              "type": "string"
-            }
-          },
-          "required": [
-            "endSample",
-            "startSample",
-            "assertion",
-            "state"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "reasonCode": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "state": {
-              "const": "unmatched",
-              "type": "string"
-            }
-          },
-          "required": [
-            "reasonCode",
-            "state"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "__schema21": {
-      "not": {}
-    },
-    "__schema22": {
-      "const": "user_authored",
-      "type": "string"
-    },
-    "__schema23": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "assertion": {
-              "oneOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "evidence": {
-                      "$ref": "#/$defs/__schema9"
-                    },
-                    "reasonCodes": {
-                      "$ref": "#/$defs/__schema11"
-                    },
-                    "state": {
-                      "const": "asserted",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "evidence",
-                    "reasonCodes",
-                    "state"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "evidence": {
-                      "$ref": "#/$defs/__schema9"
-                    },
-                    "reasonCodes": {
-                      "$ref": "#/$defs/__schema11"
-                    },
-                    "state": {
-                      "const": "low_confidence",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "evidence",
-                    "reasonCodes",
-                    "state"
-                  ],
-                  "type": "object"
-                }
-              ]
-            },
-            "endSample": {
-              "$ref": "#/$defs/__schema2"
-            },
-            "startSample": {
-              "$ref": "#/$defs/__schema3"
-            },
-            "state": {
-              "const": "matched",
-              "type": "string"
-            }
-          },
-          "required": [
-            "endSample",
-            "startSample",
-            "assertion",
-            "state"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "reasonCode": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "state": {
-              "const": "unmatched",
-              "type": "string"
-            }
-          },
-          "required": [
-            "reasonCode",
-            "state"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "__schema24": {
-      "maximum": 9007199254740991,
-      "minimum": -9007199254740991,
-      "type": "integer"
-    },
-    "__schema25": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "__schema26": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "__schema27": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "__schema3": {
-      "maximum": 9007199254740991,
-      "minimum": -9007199254740991,
-      "type": "integer"
-    },
-    "__schema4": {
+    "EditTransaction": {
       "additionalProperties": false,
       "properties": {
-        "atSample": {
-          "$ref": "#/$defs/__schema3"
-        },
         "id": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/StableId"
         },
-        "role": {
-          "enum": [
-            "downbeat",
-            "beat"
-          ],
-          "type": "string"
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/EditOperation"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "parentTransactionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StableId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "atSample",
         "id",
-        "role"
+        "operations",
+        "parentTransactionId"
       ],
       "type": "object"
     },
-    "__schema5": {
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "scale": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "scale",
+        "value"
+      ],
+      "type": "object"
+    },
+    "HistoryPosition": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "KeyRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/Assertion"
+        },
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        },
+        "value": {
+          "$ref": "#/$defs/KeyValue"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "value"
+      ],
+      "type": "object"
+    },
+    "KeyValue": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "key",
+              "type": "string"
+            },
+            "mode": {
+              "enum": [
+                "major",
+                "minor",
+                "dorian",
+                "mixolydian",
+                "other"
+              ],
+              "type": "string"
+            },
+            "tonic": {
+              "$ref": "#/$defs/PitchClass"
+            }
+          },
+          "required": [
+            "kind",
+            "mode",
+            "tonic"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LyricsAlignment": {
+      "additionalProperties": false,
+      "properties": {
+        "analysisRevisionId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "lineOccurrences": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "lineId": {
+                "$ref": "#/$defs/StableId"
+              },
+              "timing": {
+                "$ref": "#/$defs/LyricsTiming"
+              }
+            },
+            "required": [
+              "lineId",
+              "timing"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "lyricsDocumentId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "occurrences": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "timing": {
+                "$ref": "#/$defs/LyricsTiming"
+              },
+              "tokenId": {
+                "$ref": "#/$defs/StableId"
+              }
+            },
+            "required": [
+              "timing",
+              "tokenId"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "id",
+        "lineOccurrences",
+        "lyricsDocumentId",
+        "occurrences"
+      ],
+      "type": "object"
+    },
+    "LyricsDocument": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "language": {
+          "minLength": 2,
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "endOffset": {
+                "$ref": "#/$defs/TextOffset"
+              },
+              "id": {
+                "$ref": "#/$defs/StableId"
+              },
+              "startOffset": {
+                "$ref": "#/$defs/TextOffset"
+              }
+            },
+            "required": [
+              "endOffset",
+              "id",
+              "startOffset"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "notices": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "reference": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "reference"
+          ],
+          "type": "object"
+        },
+        "suppliedTimingKind": {
+          "enum": [
+            "untimed",
+            "line",
+            "word"
+          ],
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "tokenization": {
+          "additionalProperties": false,
+          "properties": {
+            "scheme": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "scheme",
+            "version"
+          ],
+          "type": "object"
+        },
+        "tokens": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "endOffset": {
+                "$ref": "#/$defs/TextOffset"
+              },
+              "id": {
+                "$ref": "#/$defs/StableId"
+              },
+              "lineId": {
+                "$ref": "#/$defs/StableId"
+              },
+              "startOffset": {
+                "$ref": "#/$defs/TextOffset"
+              },
+              "text": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "endOffset",
+              "id",
+              "lineId",
+              "startOffset",
+              "text"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "attribution",
+        "id",
+        "language",
+        "lines",
+        "notices",
+        "provenance",
+        "suppliedTimingKind",
+        "text",
+        "tokenization",
+        "tokens"
+      ],
+      "type": "object"
+    },
+    "LyricsTiming": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "assertion": {
+              "$ref": "#/$defs/AlignedAssertion"
+            },
+            "endSample": {
+              "$ref": "#/$defs/PositiveSampleFrame"
+            },
+            "startSample": {
+              "$ref": "#/$defs/SampleFrame"
+            },
+            "state": {
+              "const": "matched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "endSample",
+            "startSample",
+            "assertion",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reasonCode": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "unmatched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reasonCode",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Meter": {
       "additionalProperties": false,
       "properties": {
         "denominator": {
@@ -966,207 +1138,98 @@
       ],
       "type": "object"
     },
-    "__schema6": {
-      "enum": [
-        "complete",
-        "pickup",
-        "truncated"
-      ],
-      "type": "string"
-    },
-    "__schema7": {
+    "MusicalTimeline": {
       "additionalProperties": false,
       "properties": {
-        "assertion": {
-          "$ref": "#/$defs/__schema8"
+        "bars": {
+          "items": {
+            "$ref": "#/$defs/Bar"
+          },
+          "type": "array"
         },
-        "endSample": {
-          "$ref": "#/$defs/__schema2"
+        "chordEvents": {
+          "items": {
+            "$ref": "#/$defs/ChordEvent"
+          },
+          "minItems": 1,
+          "type": "array"
         },
-        "id": {
-          "$ref": "#/$defs/__schema0"
+        "keyRegions": {
+          "items": {
+            "$ref": "#/$defs/KeyRegion"
+          },
+          "minItems": 1,
+          "type": "array"
         },
-        "startSample": {
-          "$ref": "#/$defs/__schema3"
+        "sectionRegions": {
+          "items": {
+            "$ref": "#/$defs/SectionRegion"
+          },
+          "minItems": 1,
+          "type": "array"
         },
-        "value": {
-          "$ref": "#/$defs/__schema13"
+        "unmeteredRegions": {
+          "items": {
+            "$ref": "#/$defs/UnmeteredRegion"
+          },
+          "type": "array"
         }
       },
       "required": [
-        "endSample",
-        "startSample",
-        "assertion",
-        "id",
-        "value"
+        "bars",
+        "chordEvents",
+        "keyRegions",
+        "sectionRegions",
+        "unmeteredRegions"
       ],
       "type": "object"
     },
-    "__schema8": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "evidence": {
-              "$ref": "#/$defs/__schema9"
-            },
-            "reasonCodes": {
-              "$ref": "#/$defs/__schema11"
-            },
-            "state": {
-              "const": "asserted",
-              "type": "string"
-            }
-          },
-          "required": [
-            "evidence",
-            "reasonCodes",
-            "state"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "evidence": {
-              "$ref": "#/$defs/__schema9"
-            },
-            "reasonCodes": {
-              "$ref": "#/$defs/__schema11"
-            },
-            "state": {
-              "const": "low_confidence",
-              "type": "string"
-            }
-          },
-          "required": [
-            "evidence",
-            "reasonCodes",
-            "state"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "evidence": {
-              "items": {
-                "$ref": "#/$defs/__schema10"
-              },
-              "type": "array"
-            },
-            "reasonCodes": {
-              "items": {
-                "$ref": "#/$defs/__schema12"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "state": {
-              "const": "abstained",
-              "type": "string"
-            }
-          },
-          "required": [
-            "evidence",
-            "reasonCodes",
-            "state"
-          ],
-          "type": "object"
-        }
-      ]
+    "PitchClass": {
+      "enum": [
+        "A",
+        "A#",
+        "Ab",
+        "B",
+        "Bb",
+        "C",
+        "C#",
+        "D",
+        "D#",
+        "Db",
+        "E",
+        "Eb",
+        "F",
+        "F#",
+        "G",
+        "G#",
+        "Gb"
+      ],
+      "type": "string"
     },
-    "__schema9": {
-      "items": {
-        "$ref": "#/$defs/__schema10"
-      },
-      "type": "array"
-    }
-  },
-  "$id": "https://openchords.dev/contracts/v1/project-envelope.schema.json",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "extensions": {
-      "additionalProperties": {},
-      "propertyNames": {
-        "pattern": "^[a-z0-9]+(?:\\.[a-z0-9-]+)+$",
-        "type": "string"
-      },
-      "type": "object"
+    "PositiveSampleFrame": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
     },
-    "payload": {
+    "ProjectContract": {
       "additionalProperties": false,
       "properties": {
         "activeView": {
-          "additionalProperties": false,
-          "properties": {
-            "analysisRevisionId": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "editHistoryPosition": {
-              "maximum": 9007199254740991,
-              "minimum": -9007199254740991,
-              "type": "integer"
-            },
-            "editLayerId": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "lyricsAlignmentId": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "lyricsDocumentId": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "presentation": {
-              "additionalProperties": false,
-              "properties": {
-                "beginnerView": {
-                  "type": "boolean"
-                },
-                "enharmonicPreference": {
-                  "enum": [
-                    "sharp",
-                    "flat",
-                    "contextual"
-                  ],
-                  "type": "string"
-                },
-                "transposeSemitones": {
-                  "maximum": 11,
-                  "minimum": -11,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "beginnerView",
-                "enharmonicPreference",
-                "transposeSemitones"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "analysisRevisionId",
-            "editHistoryPosition",
-            "editLayerId",
-            "presentation"
-          ],
-          "type": "object"
+          "$ref": "#/$defs/ActiveView"
         },
         "analysisRevisions": {
           "items": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/AnalysisRevision"
           },
           "minItems": 1,
           "type": "array"
         },
         "durationSamples": {
-          "$ref": "#/$defs/__schema2"
+          "$ref": "#/$defs/PositiveSampleFrame"
         },
         "editLayers": {
           "items": {
-            "$ref": "#/$defs/__schema18"
+            "$ref": "#/$defs/EditLayer"
           },
           "minItems": 1,
           "type": "array"
@@ -1184,212 +1247,17 @@
           "type": "string"
         },
         "id": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/StableId"
         },
         "lyricsAlignments": {
           "items": {
-            "additionalProperties": false,
-            "properties": {
-              "analysisRevisionId": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "id": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "lineOccurrences": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "lineId": {
-                      "$ref": "#/$defs/__schema0"
-                    },
-                    "timing": {
-                      "$ref": "#/$defs/__schema23"
-                    }
-                  },
-                  "required": [
-                    "lineId",
-                    "timing"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "lyricsDocumentId": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "occurrences": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "timing": {
-                      "$ref": "#/$defs/__schema23"
-                    },
-                    "tokenId": {
-                      "$ref": "#/$defs/__schema0"
-                    }
-                  },
-                  "required": [
-                    "timing",
-                    "tokenId"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              }
-            },
-            "required": [
-              "analysisRevisionId",
-              "id",
-              "lineOccurrences",
-              "lyricsDocumentId",
-              "occurrences"
-            ],
-            "type": "object"
+            "$ref": "#/$defs/LyricsAlignment"
           },
           "type": "array"
         },
         "lyricsDocuments": {
           "items": {
-            "additionalProperties": false,
-            "properties": {
-              "attribution": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "id": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "language": {
-                "minLength": 2,
-                "type": "string"
-              },
-              "lines": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "endOffset": {
-                      "$ref": "#/$defs/__schema24"
-                    },
-                    "id": {
-                      "$ref": "#/$defs/__schema0"
-                    },
-                    "startOffset": {
-                      "$ref": "#/$defs/__schema24"
-                    }
-                  },
-                  "required": [
-                    "endOffset",
-                    "id",
-                    "startOffset"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "notices": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "provenance": {
-                "additionalProperties": false,
-                "properties": {
-                  "provider": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "reference": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "provider",
-                  "reference"
-                ],
-                "type": "object"
-              },
-              "suppliedTimingKind": {
-                "enum": [
-                  "untimed",
-                  "line",
-                  "word"
-                ],
-                "type": "string"
-              },
-              "text": {
-                "type": "string"
-              },
-              "tokenization": {
-                "additionalProperties": false,
-                "properties": {
-                  "scheme": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "version": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "scheme",
-                  "version"
-                ],
-                "type": "object"
-              },
-              "tokens": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "endOffset": {
-                      "$ref": "#/$defs/__schema24"
-                    },
-                    "id": {
-                      "$ref": "#/$defs/__schema0"
-                    },
-                    "lineId": {
-                      "$ref": "#/$defs/__schema0"
-                    },
-                    "startOffset": {
-                      "$ref": "#/$defs/__schema24"
-                    },
-                    "text": {
-                      "minLength": 1,
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "endOffset",
-                    "id",
-                    "lineId",
-                    "startOffset",
-                    "text"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              }
-            },
-            "required": [
-              "attribution",
-              "id",
-              "language",
-              "lines",
-              "notices",
-              "provenance",
-              "suppliedTimingKind",
-              "text",
-              "tokenization",
-              "tokens"
-            ],
-            "type": "object"
+            "$ref": "#/$defs/LyricsDocument"
           },
           "type": "array"
         },
@@ -1404,78 +1272,7 @@
         },
         "supportClaims": {
           "items": {
-            "additionalProperties": false,
-            "properties": {
-              "benchmarkPolicyHash": {
-                "pattern": "^sha256:[a-f0-9]{64}$",
-                "type": "string"
-              },
-              "capability": {
-                "enum": [
-                  "rhythm",
-                  "meter",
-                  "key",
-                  "chords",
-                  "sections",
-                  "lyrics_alignment"
-                ],
-                "type": "string"
-              },
-              "evidenceStatus": {
-                "enum": [
-                  "supported",
-                  "insufficient_evidence"
-                ],
-                "type": "string"
-              },
-              "id": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "inputs": {
-                "items": {
-                  "$ref": "#/$defs/__schema25"
-                },
-                "minItems": 1,
-                "type": "array"
-              },
-              "operatingConditions": {
-                "items": {
-                  "$ref": "#/$defs/__schema26"
-                },
-                "minItems": 1,
-                "type": "array"
-              },
-              "platformProfiles": {
-                "items": {
-                  "$ref": "#/$defs/__schema27"
-                },
-                "minItems": 1,
-                "type": "array"
-              },
-              "releaseVersion": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "slices": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "type": "array"
-              }
-            },
-            "required": [
-              "benchmarkPolicyHash",
-              "capability",
-              "evidenceStatus",
-              "id",
-              "inputs",
-              "operatingConditions",
-              "platformProfiles",
-              "releaseVersion",
-              "slices"
-            ],
-            "type": "object"
+            "$ref": "#/$defs/SupportClaim"
           },
           "type": "array"
         }
@@ -1495,6 +1292,254 @@
         "supportClaims"
       ],
       "type": "object"
+    },
+    "SampleFrame": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "SectionRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/Assertion"
+        },
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "label": {
+          "enum": [
+            "intro",
+            "verse",
+            "pre_chorus",
+            "chorus",
+            "bridge",
+            "solo",
+            "interlude",
+            "outro",
+            "neutral",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "StableId": {
+      "pattern": "^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$",
+      "type": "string"
+    },
+    "SupportClaim": {
+      "additionalProperties": false,
+      "properties": {
+        "benchmarkPolicyHash": {
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "capability": {
+          "enum": [
+            "rhythm",
+            "meter",
+            "key",
+            "chords",
+            "sections",
+            "lyrics_alignment"
+          ],
+          "type": "string"
+        },
+        "evidenceStatus": {
+          "enum": [
+            "supported",
+            "insufficient_evidence"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "inputs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "operatingConditions": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "platformProfiles": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "releaseVersion": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "slices": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "benchmarkPolicyHash",
+        "capability",
+        "evidenceStatus",
+        "id",
+        "inputs",
+        "operatingConditions",
+        "platformProfiles",
+        "releaseVersion",
+        "slices"
+      ],
+      "type": "object"
+    },
+    "TextOffset": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "UnmeteredRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "reasonCode": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "id",
+        "reasonCode"
+      ],
+      "type": "object"
+    },
+    "UserLyricsTiming": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "assertion": {
+              "additionalProperties": false,
+              "properties": {
+                "evidence": {
+                  "items": {
+                    "not": {}
+                  },
+                  "maxItems": 0,
+                  "minItems": 0,
+                  "type": "array"
+                },
+                "reasonCodes": {
+                  "items": {
+                    "const": "user_authored",
+                    "type": "string"
+                  },
+                  "maxItems": 1,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "state": {
+                  "const": "asserted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "evidence",
+                "reasonCodes",
+                "state"
+              ],
+              "type": "object"
+            },
+            "endSample": {
+              "$ref": "#/$defs/PositiveSampleFrame"
+            },
+            "startSample": {
+              "$ref": "#/$defs/SampleFrame"
+            },
+            "state": {
+              "const": "matched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "endSample",
+            "startSample",
+            "assertion",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reasonCode": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "unmatched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reasonCode",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://openchords.dev/contracts/v1/project-envelope.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "extensions": {
+      "additionalProperties": {},
+      "propertyNames": {
+        "pattern": "^[a-z0-9]+(?:\\.[a-z0-9-]+)+$",
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "payload": {
+      "$ref": "#/$defs/ProjectContract"
     },
     "protocol": {
       "const": "open-chords/contracts",

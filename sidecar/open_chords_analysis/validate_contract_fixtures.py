@@ -7,6 +7,7 @@ import copy
 import json
 import math
 import re
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -163,7 +164,7 @@ def validate_timeline(timeline: dict[str, Any], duration: int) -> None:
         unique_ids(beats, f"beats in {bar['id']}")
         if not beats or beats[0]["role"] != "downbeat" or beats[0]["atSample"] != bar["startSample"]:
             raise ContractError("Bar does not start with its downbeat")
-        if any(right["atSample"] <= left["atSample"] for left, right in zip(beats, beats[1:])):
+        if any(right["atSample"] <= left["atSample"] for left, right in pairwise(beats)):
             raise ContractError("Beats are unstably ordered")
         if any(beat["role"] != "beat" for beat in beats[1:]):
             raise ContractError("Bar has a non-initial downbeat")
@@ -247,7 +248,7 @@ def apply_operations(project: dict[str, Any], layer: dict[str, Any], history_pos
                 bar["beats"] = [beat for beat in bar["beats"] if beat["atSample"] < operation["atSample"]]
                 bar["endSample"], bar["status"] = operation["atSample"], operation["leftStatus"]
                 timeline["bars"].insert(index + 1, {
-                    "beats": [{"atSample": operation["atSample"], "id": operation["newDownbeatId"], "role": "downbeat"}] + right_beats,
+                    "beats": [{"atSample": operation["atSample"], "id": operation["newDownbeatId"], "role": "downbeat"}, *right_beats],
                     "endSample": original_end, "id": operation["newBarId"], "meter": operation["rightMeter"],
                     "startSample": operation["atSample"], "status": operation["rightStatus"],
                 })
@@ -379,7 +380,7 @@ def main() -> None:
         mutated = mutate(golden, case)
         try:
             validate_envelope(mutated, schema)
-        except (ContractError, KeyError, TypeError, ValueError):
+        except ContractError:
             continue
         raise ContractError(f"Python accepted invalid fixture: {case['name']}")
     print(f"Python contract fixtures: {valid_count} valid, {len(cases)} invalid")

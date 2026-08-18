@@ -22,13 +22,13 @@ describe("domain package dependency boundary", () => {
     if (typeof dependencies !== "object" || dependencies === null) {
       throw new Error("Domain package dependencies must be an object");
     }
-    expect(Object.keys(dependencies)).toEqual(["zod"]);
+    expect(Object.keys(dependencies).toSorted()).toEqual(["zod"]);
 
     const source = files(join(root, "src"))
       .map((path) => readFileSync(path, "utf8"))
       .join("\n");
     expect(source).not.toMatch(
-      /from ["'](?:electron|effect|react|node:fs|node:http|node:https|node:net)/,
+      /(?:from\s*|import\s*\(\s*|import\s+|require\s*\(\s*)["'](?:electron|effect|react|node:child_process|node:dns|node:fs|node:http|node:https|node:net|node:tls|node:worker_threads)(?:["'/])/,
     );
     expect(source).not.toContain("fetch(");
   });

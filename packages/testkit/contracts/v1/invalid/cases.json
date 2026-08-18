@@ -164,5 +164,25 @@
         }
       }
     ]
+  },
+  {
+    "name": "envelope extension key is not namespaced",
+    "path": ["extensions", "fixture"],
+    "value": {}
+  },
+  {
+    "name": "envelope protocol is incorrect",
+    "path": ["protocol"],
+    "value": "open-chords/unknown"
+  },
+  {
+    "name": "envelope schema version violates the contract pattern",
+    "path": ["schemaVersion"],
+    "value": "1"
+  },
+  {
+    "name": "Chord Event starts before Project Time zero",
+    "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 0, "startSample"],
+    "value": -1
   }
 ]

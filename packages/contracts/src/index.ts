@@ -9,13 +9,15 @@ export const CONTRACT_MAJOR = 1;
 export const CONTRACT_MINOR = 0;
 export const CONTRACT_VERSION = `${String(CONTRACT_MAJOR)}.${String(CONTRACT_MINOR)}`;
 
-export const ProjectEnvelopeSchema = z.strictObject({
-  extensions: z.record(z.string().regex(/^[a-z0-9]+(?:\.[a-z0-9-]+)+$/), z.unknown()),
-  payload: ProjectContractSchema,
-  protocol: z.literal("open-chords/contracts"),
-  schemaVersion: z.string().regex(/^\d+\.\d+$/),
-  type: z.literal("project_snapshot"),
-});
+export const ProjectEnvelopeSchema = z
+  .strictObject({
+    extensions: z.record(z.string().regex(/^[a-z0-9]+(?:\.[a-z0-9-]+)+$/), z.unknown()),
+    payload: ProjectContractSchema,
+    protocol: z.literal("open-chords/contracts"),
+    schemaVersion: z.string().regex(/^\d+\.\d+$/),
+    type: z.literal("project_snapshot"),
+  })
+  .meta({ id: "ProjectEnvelope" });
 
 export type ContractCompatibility = "writable" | "read_only";
 export type ParsedProjectEnvelope = {
@@ -42,7 +44,10 @@ export function parseContractEnvelope(input: unknown): ParsedProjectEnvelope {
 }
 
 export function generateContractJsonSchema(): z.core.JSONSchema.BaseSchema {
-  const schema = z.toJSONSchema(ProjectEnvelopeSchema, { reused: "ref", target: "draft-2020-12" });
+  const schema = z.toJSONSchema(ProjectEnvelopeSchema, {
+    reused: "inline",
+    target: "draft-2020-12",
+  });
   return {
     ...schema,
     $id: `https://openchords.dev/contracts/v${CONTRACT_MAJOR}/project-envelope.schema.json`,

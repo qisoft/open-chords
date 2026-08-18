@@ -1,11 +1,15 @@
 import { z } from "zod";
 
-const MutationCaseSchema = z.strictObject({
-  name: z.string(),
-  operation: z.literal("reverse").optional(),
-  path: z.array(z.union([z.string(), z.number().int().nonnegative()])),
-  value: z.unknown().optional(),
-});
+const MutationCaseSchema = z
+  .strictObject({
+    name: z.string(),
+    operation: z.literal("reverse").optional(),
+    path: z.array(z.union([z.string(), z.number().int().nonnegative()])),
+    value: z.unknown().optional(),
+  })
+  .refine((mutation) => mutation.operation !== undefined || "value" in mutation, {
+    message: "Mutation case must define a value or operation",
+  });
 
 export type MutationCase = z.infer<typeof MutationCaseSchema>;
 
