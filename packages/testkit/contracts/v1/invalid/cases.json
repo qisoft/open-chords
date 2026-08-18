@@ -1,40 +1,48 @@
 [
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "chord overlap",
     "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 1, "startSample"],
     "value": 7000
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "chord gap",
     "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 1, "startSample"],
     "value": 9000
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "unstable chord ordering",
     "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents"],
     "operation": "reverse"
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "unknown core section semantics",
     "path": ["payload", "analysisRevisions", 0, "timeline", "sectionRegions", 0, "label"],
     "value": "drop"
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "unknown core field",
     "path": ["payload", "activeView", "latestWins"],
     "value": true
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "unsafe sample frame",
     "path": ["payload", "durationSamples"],
     "value": 9007199254740992
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "invalid committed projection",
     "path": ["payload", "activeView", "editHistoryPosition"],
     "value": 2
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "unknown nested chord field",
     "path": [
       "payload",
@@ -49,81 +57,97 @@
     "value": 91
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "unknown chord quality semantics",
     "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 0, "value", "quality"],
     "value": "power"
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "transaction parent is not earlier",
     "path": ["payload", "editLayers", 0, "transactions", 0, "parentTransactionId"],
     "value": "transaction_future"
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "matched lyric cannot abstain",
     "path": ["payload", "lyricsAlignments", 0, "occurrences", 0, "timing", "assertion", "state"],
     "value": "abstained"
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "unknown Support Claim capability",
     "path": ["payload", "supportClaims", 0, "capability"],
     "value": "universal_music_truth"
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "unknown Lyrics Token reference",
     "path": ["payload", "lyricsAlignments", 0, "occurrences", 0, "tokenId"],
     "value": "token_missing"
   },
   {
+    "expectedErrorType": "Error",
     "name": "Edit Operation references unknown entity",
     "path": ["payload", "editLayers", 0, "transactions", 0, "operations", 0, "eventId"],
     "value": "chord_missing"
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "Beat ID is duplicated across Bars",
     "path": ["payload", "analysisRevisions", 0, "timeline", "bars", 1, "beats", 0, "id"],
     "value": "beat_pickup_1"
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "Lyrics Token Occurrences are not one-to-one in Document order",
     "path": ["payload", "lyricsAlignments", 0, "occurrences"],
     "operation": "reverse"
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "positive JSON Schema bound",
     "path": ["payload", "sampleRate"],
     "value": 0
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "Active View references unknown Lyrics Document",
     "path": ["payload", "activeView", "lyricsDocumentId"],
     "value": "lyrics_missing"
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "Active View Lyrics Alignment belongs to another Revision",
     "path": ["payload", "lyricsAlignments", 0, "analysisRevisionId"],
     "value": "revision_reviewable"
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "Chord components use unstable UTF-16 ordering",
     "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 0, "value", "additions"],
     "operation": "reverse"
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "Lyrics Line offsets overlap",
     "path": ["payload", "lyricsDocuments", 0, "lines", 1, "startOffset"],
     "value": 4
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "non-initial Beat uses downbeat role",
     "path": ["payload", "analysisRevisions", 0, "timeline", "bars", 1, "beats", 1, "role"],
     "value": "downbeat"
   },
   {
+    "expectedErrorType": "DomainInvariantError",
     "name": "truncated Bar exceeds its meter numerator",
     "path": ["payload", "analysisRevisions", 0, "timeline", "bars", 2, "meter", "numerator"],
     "value": 1
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "user-authored timing evidence tuple has an extra item",
     "path": ["payload", "editLayers", 0, "transactions", 0, "operations"],
     "value": [
@@ -145,6 +169,7 @@
     ]
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "user-authored timing reason tuple has an extra item",
     "path": ["payload", "editLayers", 0, "transactions", 0, "operations"],
     "value": [
@@ -166,23 +191,44 @@
     ]
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "envelope extension key is not namespaced",
     "path": ["extensions", "fixture"],
     "value": {}
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "envelope protocol is incorrect",
     "path": ["protocol"],
     "value": "open-chords/unknown"
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "envelope schema version violates the contract pattern",
     "path": ["schemaVersion"],
     "value": "1"
   },
   {
+    "expectedErrorType": "ZodError",
     "name": "Chord Event starts before Project Time zero",
     "path": ["payload", "analysisRevisions", 0, "timeline", "chordEvents", 0, "startSample"],
     "value": -1
+  },
+  {
+    "expectedErrorType": "Error",
+    "name": "Bar split collides with an existing Beat identity",
+    "path": ["payload", "editLayers", 0, "transactions", 0, "operations"],
+    "value": [
+      {
+        "type": "split_bar",
+        "barId": "bar_three_four",
+        "atSample": 24000,
+        "leftStatus": "truncated",
+        "newBarId": "bar_collision_split",
+        "newDownbeatId": "beat_collision_split",
+        "rightMeter": { "numerator": 1, "denominator": 4 },
+        "rightStatus": "complete"
+      }
+    ]
   }
 ]

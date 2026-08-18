@@ -244,6 +244,8 @@ def apply_operations(project: dict[str, Any], layer: dict[str, Any], history_pos
                 index = next(index for index, item in enumerate(timeline["bars"]) if item["id"] == operation["barId"])
                 bar = timeline["bars"][index]
                 original_end = bar["endSample"]
+                if any(beat["atSample"] == operation["atSample"] for beat in bar["beats"]):
+                    raise ContractError("Split point collides with an existing Beat")
                 right_beats = [dict(beat, role="beat") for beat in bar["beats"] if beat["atSample"] > operation["atSample"]]
                 bar["beats"] = [beat for beat in bar["beats"] if beat["atSample"] < operation["atSample"]]
                 bar["endSample"], bar["status"] = operation["atSample"], operation["leftStatus"]

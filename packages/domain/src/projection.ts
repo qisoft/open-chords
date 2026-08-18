@@ -71,6 +71,8 @@ function applyOperation(
     const bar = timeline.bars[index];
     if (bar === undefined) throw new Error(`Edit references unknown Bar ${operation.barId}`);
     const originalEnd = bar.endSample;
+    if (bar.beats.some(({ atSample }) => atSample === operation.atSample))
+      throw new Error(`Split point collides with an existing Beat in ${bar.id}`);
     const rightBeats = bar.beats.filter(({ atSample }) => atSample > operation.atSample);
     bar.beats = bar.beats.filter(({ atSample }) => atSample < operation.atSample);
     bar.endSample = operation.atSample;

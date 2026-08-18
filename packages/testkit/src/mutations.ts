@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const MutationCaseSchema = z
   .strictObject({
+    expectedErrorType: z.enum(["DomainInvariantError", "Error", "ZodError"]),
     name: z.string(),
     operation: z.literal("reverse").optional(),
     path: z.array(z.union([z.string(), z.number().int().nonnegative()])),

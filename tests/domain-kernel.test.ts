@@ -86,9 +86,9 @@ describe("canonical domain kernel", () => {
   });
 
   it("rejects mutation cases that define neither a value nor an operation", () => {
-    expect(() => parseMutationCases([{ name: "stale", path: ["payload"] }])).toThrow(
-      /value or operation/,
-    );
+    expect(() =>
+      parseMutationCases([{ expectedErrorType: "ZodError", name: "stale", path: ["payload"] }]),
+    ).toThrow(/value or operation/);
   });
 
   it("keeps N distinct from machine abstention and repeated lyric occurrences distinct by ID", () => {
@@ -257,12 +257,12 @@ describe("canonical domain kernel", () => {
   it("projects Bar split and merge as invariant-preserving structural edits", () => {
     const split = materializeEffectiveTimeline(
       projectWithOperation({
-        atSample: 24000,
+        atSample: 20000,
         barId: "bar_three_four",
         leftStatus: "truncated",
         newBarId: "bar_split",
         newDownbeatId: "beat_split",
-        rightMeter: { denominator: 4, numerator: 1 },
+        rightMeter: { denominator: 4, numerator: 2 },
         rightStatus: "complete",
         type: "split_bar",
       }),
@@ -273,6 +273,19 @@ describe("canonical domain kernel", () => {
       "bar_split",
       "bar_truncated",
     ]);
+
+    expect(() =>
+      projectWithOperation({
+        atSample: 24000,
+        barId: "bar_three_four",
+        leftStatus: "truncated",
+        newBarId: "bar_collision_split",
+        newDownbeatId: "beat_collision_split",
+        rightMeter: { denominator: 4, numerator: 1 },
+        rightStatus: "complete",
+        type: "split_bar",
+      }),
+    ).toThrow(/collides with an existing Beat/);
 
     const merged = materializeEffectiveTimeline(
       projectWithOperation({
@@ -290,7 +303,14 @@ describe("canonical domain kernel", () => {
     "rejects shared invalid fixture: $name",
     (mutation) => {
       const mutated = mutateFixture(readGoldenEnvelope(), mutation);
-      expect(() => parseContractEnvelope(mutated)).toThrow(/./);
+      let errorType: string | undefined;
+      try {
+        parseContractEnvelope(mutated);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        errorType = error.constructor.name;
+      }
+      expect(errorType).toBe(mutation.expectedErrorType);
     },
   );
 
