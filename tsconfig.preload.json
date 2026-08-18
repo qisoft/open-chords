@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM"],
+    "tsBuildInfoFile": "./node_modules/.cache/typescript/preload.tsbuildinfo",
+    "types": ["node", "electron"]
+  },
+  "include": ["apps/desktop/src/preload/**/*.ts", "vite.preload.config.ts"]
+}

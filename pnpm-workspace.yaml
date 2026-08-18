@@ -1,0 +1,16 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+strictDepBuilds: true
+nodeLinker: hoisted
+
+allowBuilds:
+  electron: true
+  esbuild: true
+
+overrides:
+  "@electron/node-gyp": 10.2.0-electron.2
+  extract-zip: npm:@electron-internal/extract-zip@1.0.1
+  tar: 7.5.22
+  tmp: 0.2.7

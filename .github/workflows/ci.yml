@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feature/implementation-plan
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS 15 arm64
+            os: macos-15
+            arch: arm64
+          - name: Windows 11 x64
+            os: windows-2025
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Activate exact pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.30.1 --activate
+      - name: Verify native architecture
+        shell: bash
+        run: test "$(node -p process.arch)" = "${{ matrix.arch }}"
+      - name: Install reviewed dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install checksum-verified Electron binary
+        run: pnpm electron:install
+      - name: Check formatting
+        run: pnpm format:check
+      - name: Lint with type information
+        run: pnpm lint
+      - name: Check strict TypeScript projects
+        run: pnpm typecheck
+      - name: Run foundation tests
+        run: pnpm test
+      - name: Run isolated renderer smoke test
+        run: pnpm test:renderer
+      - name: Exercise Forge packaging hooks
+        run: pnpm package -- --arch=${{ matrix.arch }}
