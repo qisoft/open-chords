@@ -207,7 +207,10 @@ def validate_alignment(alignment: dict[str, Any], document: dict[str, Any], dura
 def apply_operations(project: dict[str, Any], layer: dict[str, Any], history_position: int) -> None:
     revision = next(item for item in project["analysisRevisions"] if item["id"] == layer["analysisRevisionId"])
     timeline = copy.deepcopy(revision["timeline"])
-    alignments = copy.deepcopy(project["lyricsAlignments"])
+    alignments = copy.deepcopy([
+        item for item in project["lyricsAlignments"]
+        if item["analysisRevisionId"] == layer["analysisRevisionId"]
+    ])
     transactions = layer["transactions"]
     by_id = {item["id"]: item for item in transactions}
     selected = transactions[history_position - 1] if history_position else None
@@ -275,8 +278,7 @@ def apply_operations(project: dict[str, Any], layer: dict[str, Any], history_pos
     validate_timeline(timeline, project["durationSamples"])
     documents = {item["id"]: item for item in project["lyricsDocuments"]}
     for alignment in alignments:
-        if alignment["analysisRevisionId"] == layer["analysisRevisionId"]:
-            validate_alignment(alignment, documents[alignment["lyricsDocumentId"]], project["durationSamples"])
+        validate_alignment(alignment, documents[alignment["lyricsDocumentId"]], project["durationSamples"])
 
 
 def validate_domain(envelope: dict[str, Any]) -> None:
@@ -333,7 +335,13 @@ def validate_domain(envelope: dict[str, Any]) -> None:
             line_cursor = line["endOffset"]
         cursor = 0
         for token in document["tokens"]:
-            if token["lineId"] not in line_ids or token["startOffset"] < cursor or document["text"][token["startOffset"]:token["endOffset"]] != token["text"]:
+            if (
+                token["lineId"] not in line_ids
+                or token["startOffset"] < cursor
+                or token["endOffset"] <= token["startOffset"]
+                or token["endOffset"] > len(document["text"])
+                or document["text"][token["startOffset"]:token["endOffset"]] != token["text"]
+            ):
                 raise ContractError("invalid Lyrics Token Occurrence")
             cursor = token["endOffset"]
     for alignment in alignments.values():

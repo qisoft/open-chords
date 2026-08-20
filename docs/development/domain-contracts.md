@@ -7,7 +7,7 @@ Issue [#35](https://github.com/qisoft/open-chords/issues/35) establishes one pur
 - `parseProjectContract(value)` performs strict Zod shape validation, schema-major compatibility checks, stable-reference checks, complete timeline invariant validation, and validation of every committed Edit Layer projection.
 - `materializeEffectiveTimeline(project)` selects exactly the Analysis Revision, Edit Layer, and committed history position named by Active View. It returns a fresh derived timeline and never mutates machine output.
 - `parseContractEnvelope(value)` validates the named `project_snapshot` envelope. Contract `1.0` is writable; structurally understood later `1.x` envelopes are read-only; another major is rejected.
-- `canonicalSerialize(value)` recursively orders object keys by Unicode code-unit order, preserves already validated semantic array order, normalizes negative zero, rejects non-finite/unsupported values, uses two-space JSON indentation, and ends with one LF.
+- `canonicalSerialize(value)` recursively orders object keys by Unicode code-unit order, preserves already validated semantic array order, normalizes negative zero, rejects sparse arrays and non-finite/unsupported values, uses two-space JSON indentation, and ends with one LF.
 
 ## Time, identity, and ordering
 
@@ -25,9 +25,11 @@ Typed operations cover Chord Identity/`N`, Chord boundaries, Beat positions, sha
 
 A later Analysis Revision remains Reviewable until Active View explicitly selects it. The golden fixture intentionally keeps a newer Revision while selecting the older Revision to protect this stale-revision behavior.
 
+A `supported` Support Claim must identify the content-addressed sealed Benchmark Run that earned it. A claim with insufficient evidence carries no Benchmark Run hash, so PR fixtures and canary CI cannot promote an automatic capability by changing only a status string.
+
 ## Versioned cross-language corpus
 
-`packages/testkit/contracts/v1` is shared by TypeScript and Python. Its golden envelope covers pickup and truncated Bars, meter changes, an Unmetered Region, rich Chord Identities, `N`, abstention, repeated lyric occurrences, Support Claim evidence status, and explicit stale Revision selection. The invalid mutation corpus covers overlap, gaps, unstable ordering, unsafe numbers, unknown core semantics/fields, invalid stable references, invalid lyric assertion states, transaction ancestry, and invalid history selection. The Python validator evaluates the committed generated JSON Schema before applying the same reference, timeline, alignment, ancestry, and projection invariants.
+`packages/testkit/contracts/v1` is shared by TypeScript and Python. Its golden envelope covers pickup and truncated Bars, meter changes, an Unmetered Region, rich Chord Identities, `N`, abstention, repeated lyric occurrences, Support Claim evidence status, and explicit stale Revision selection. The invalid mutation corpus covers overlap, gaps, unstable ordering, unsafe numbers, unknown core semantics/fields, invalid stable references, cross-Revision edit/alignment references, out-of-range lyric text offsets, invalid lyric assertion states, transaction ancestry, invalid history selection, and unsupported claims without sealed evidence. The Python validator evaluates the committed generated JSON Schema before applying the same reference, timeline, alignment, ancestry, and projection invariants.
 
 `pnpm contracts:schema` generates the committed Draft 2020-12 JSON Schema from Zod 4. `pnpm contracts:schema:check` proves the generated artifact is current. JSON Schema captures the cross-language structural contract; domain-wide coverage, references, ordering, projection validity, and compatibility policy remain executable invariants in both validators because those relationships are not faithfully expressible as portable JSON Schema keywords.
 

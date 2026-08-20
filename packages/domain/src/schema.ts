@@ -346,18 +346,29 @@ export const EditLayerSchema = z
   })
   .meta({ id: "EditLayer" });
 
+const supportClaimShape = {
+  benchmarkPolicyHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  capability: z.enum(["rhythm", "meter", "key", "chords", "sections", "lyrics_alignment"]),
+  id: StableIdSchema,
+  inputs: z.array(z.string().min(1)).min(1),
+  operatingConditions: z.array(z.string().min(1)).min(1),
+  platformProfiles: z.array(z.string().min(1)).min(1),
+  releaseVersion: z.string().min(1),
+  slices: z.array(z.string().min(1)),
+};
+
 export const SupportClaimSchema = z
-  .strictObject({
-    benchmarkPolicyHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    capability: z.enum(["rhythm", "meter", "key", "chords", "sections", "lyrics_alignment"]),
-    evidenceStatus: z.enum(["supported", "insufficient_evidence"]),
-    id: StableIdSchema,
-    inputs: z.array(z.string().min(1)).min(1),
-    operatingConditions: z.array(z.string().min(1)).min(1),
-    platformProfiles: z.array(z.string().min(1)).min(1),
-    releaseVersion: z.string().min(1),
-    slices: z.array(z.string().min(1)),
-  })
+  .discriminatedUnion("evidenceStatus", [
+    z.strictObject({
+      ...supportClaimShape,
+      benchmarkRunHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+      evidenceStatus: z.literal("supported"),
+    }),
+    z.strictObject({
+      ...supportClaimShape,
+      evidenceStatus: z.literal("insufficient_evidence"),
+    }),
+  ])
   .meta({ id: "SupportClaim" });
 
 export const ActiveViewSchema = z

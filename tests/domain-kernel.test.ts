@@ -70,6 +70,7 @@ describe("canonical domain kernel", () => {
     expect(() => canonicalSerialize({ missing: undefined })).toThrow(/unsupported/);
     expect(() => canonicalSerialize(new Date(0))).toThrow(/non-plain/);
     expect(() => canonicalSerialize(new Map())).toThrow(/non-plain/);
+    expect(() => canonicalSerialize(Array(1))).toThrow(/sparse/);
   });
 
   it("parses the strict versioned envelope", () => {
@@ -105,6 +106,39 @@ describe("canonical domain kernel", () => {
     expect(
       project.lyricsDocuments[0]?.tokens.filter(({ text }) => text === "go").map(({ id }) => id),
     ).toEqual(["token_go_1", "token_go_2", "token_go_3"]);
+  });
+
+  it("requires sealed Benchmark Run evidence before publishing a supported Support Claim", () => {
+    const envelope = readGoldenEnvelope();
+    const claim = envelope.payload.supportClaims[0];
+    if (claim === undefined) throw new Error("Golden fixture Support Claim is missing");
+    const unsupportedPromotion = {
+      ...envelope,
+      payload: {
+        ...envelope.payload,
+        supportClaims: [{ ...claim, evidenceStatus: "supported" }],
+      },
+    };
+    expect(() => parseContractEnvelope(unsupportedPromotion)).toThrow(/benchmarkRunHash/);
+
+    const supported = {
+      ...unsupportedPromotion,
+      payload: {
+        ...unsupportedPromotion.payload,
+        supportClaims: [
+          {
+            ...claim,
+            benchmarkRunHash:
+              "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            evidenceStatus: "supported",
+          },
+        ],
+      },
+    };
+    expect(parseContractEnvelope(supported).project.supportClaims[0]).toMatchObject({
+      benchmarkRunHash: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      evidenceStatus: "supported",
+    });
   });
 
   it("projects only the selected committed Edit Layer history position without mutating machine output", () => {

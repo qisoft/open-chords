@@ -230,5 +230,39 @@
         "rightStatus": "complete"
       }
     ]
+  },
+  {
+    "expectedErrorType": "DomainInvariantError",
+    "name": "Lyrics Token range exceeds immutable Document text",
+    "path": ["payload", "lyricsDocuments", 0, "tokens", 3, "endOffset"],
+    "value": 100
+  },
+  {
+    "expectedErrorType": "DomainInvariantError",
+    "name": "Edit Layer targets Lyrics Alignment from another Analysis Revision",
+    "path": ["payload", "editLayers", 1, "transactions"],
+    "value": [
+      {
+        "id": "transaction_cross_revision_alignment",
+        "parentTransactionId": null,
+        "operations": [
+          {
+            "type": "set_lyrics_timing",
+            "alignmentId": "alignment_repeated",
+            "tokenId": "token_go_1",
+            "timing": {
+              "state": "unmatched",
+              "reasonCode": "user_authored"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "expectedErrorType": "ZodError",
+    "name": "supported Support Claim lacks sealed Benchmark Run evidence",
+    "path": ["payload", "supportClaims", 0, "evidenceStatus"],
+    "value": "supported"
   }
 ]
