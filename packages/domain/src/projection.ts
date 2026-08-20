@@ -7,10 +7,6 @@ export type EffectiveTimeline = MusicalTimeline & {
   lyricsAlignment?: LyricsAlignment;
 };
 
-function cloneTimeline(timeline: MusicalTimeline): MusicalTimeline {
-  return structuredClone(timeline);
-}
-
 type EditOperation =
   ProjectContract["editLayers"][number]["transactions"][number]["operations"][number];
 
@@ -129,7 +125,7 @@ export function materializeEffectiveTimeline(project: ProjectContract): Effectiv
   if (revision === undefined || layer === undefined)
     throw new Error("Active View references were not validated");
 
-  const timeline = cloneTimeline(revision.timeline);
+  const timeline = structuredClone(revision.timeline);
   const selectedAlignment = project.lyricsAlignments.find(
     ({ id }) => id === project.activeView.lyricsAlignmentId,
   );
@@ -182,7 +178,7 @@ export function validateCommittedEditLayerProjections(project: ProjectContract):
           ({ analysisRevisionId }) => analysisRevisionId === layer.analysisRevisionId,
         ),
       ),
-      timeline: cloneTimeline(revision.timeline),
+      timeline: structuredClone(revision.timeline),
     };
     const projections = new Map<string, CommittedProjectionState>();
     for (const transaction of layer.transactions) {
