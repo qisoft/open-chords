@@ -86,7 +86,7 @@ const eventStream = new ProjectEventStream<ProjectSnapshotResponse>(async (proje
 const listeners = new Set<Parameters<OpenChordsDesktopApi["project"]["subscribe"]>[0]>();
 
 ipcRenderer.on(DESKTOP_IPC_CHANNELS.projectChanged, (_event, rawEvent: unknown) => {
-  void dispatchProjectEvent(rawEvent).catch(() => undefined);
+  void dispatchProjectEvent(rawEvent).catch(reportDispatchError);
 });
 
 async function dispatchProjectEvent(rawEvent: unknown): Promise<void> {
@@ -94,7 +94,19 @@ async function dispatchProjectEvent(rawEvent: unknown): Promise<void> {
   if (event.generationId !== generationId) throw new Error("Project event generation is stale");
   const update = await eventStream.accept(event);
   if (update.kind === "ignored") return;
-  for (const listener of listeners) listener(update);
+  for (const listener of listeners) {
+    try {
+      listener(update);
+    } catch (error) {
+      reportDispatchError(error);
+    }
+  }
+}
+
+function reportDispatchError(error: unknown): void {
+  queueMicrotask(() => {
+    throw error;
+  });
 }
 
 const api: OpenChordsDesktopApi = {

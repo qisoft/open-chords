@@ -37,6 +37,9 @@ export function loadRendererAssetManifest(rendererRoot: string): RendererAssetMa
   );
   const chunks = RendererManifestSchema.parse(manifest);
   const allowed = new Set(["index.html"]);
+  if (!existsSync(join(rendererRoot, "index.html"))) {
+    throw new Error("Missing renderer asset: index.html");
+  }
 
   for (const chunk of Object.values(chunks)) {
     for (const path of [chunk.file, ...(chunk.css ?? []), ...(chunk.assets ?? [])]) {
@@ -64,7 +67,13 @@ export function loadRendererAssetManifest(rendererRoot: string): RendererAssetMa
       ) {
         return null;
       }
-      const path = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+      let path: string;
+      try {
+        path = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
+      } catch {
+        return null;
+      }
+      if (!isSafeRelativeAsset(path)) return null;
       return allowed.has(path) ? join(rendererRoot, path) : null;
     },
   };

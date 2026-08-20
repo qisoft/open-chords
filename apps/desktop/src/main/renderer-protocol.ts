@@ -58,7 +58,12 @@ export function installRendererProtocol(rendererRoot: string): void {
       if (file === null)
         return new Response("Not Found", { status: 404, headers: responseHeaders });
 
-      const response = await net.fetch(pathToFileURL(file).toString(), { method: request.method });
+      let response: Response;
+      try {
+        response = await net.fetch(pathToFileURL(file).toString(), { method: request.method });
+      } catch {
+        return new Response("Internal Server Error", { status: 500, headers: responseHeaders });
+      }
       const headers = new Headers(response.headers);
       for (const [name, value] of Object.entries(responseHeaders)) headers.set(name, value);
       return new Response(response.body, { headers, status: response.status });

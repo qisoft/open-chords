@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { join } from "node:path";
 
 import { _electron as electron, expect, test } from "@playwright/test";
@@ -5,6 +6,22 @@ import { _electron as electron, expect, test } from "@playwright/test";
 const repositoryRoot = join(import.meta.dirname, "../..");
 
 test("the primary renderer runs only through the hardened application origin", async () => {
+  let requestCount = 0;
+  const server = createServer((_request, response) => {
+    requestCount += 1;
+    response.end("unexpected");
+  });
+  const externalUrl = await new Promise<string>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        reject(new Error("Could not start the external request probe"));
+        return;
+      }
+      resolve(`http://127.0.0.1:${String(address.port)}/probe`);
+    });
+  });
   const environment: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env)) {
     if (name !== "ELECTRON_RUN_AS_NODE" && value !== undefined) environment[name] = value;
@@ -17,17 +34,20 @@ test("the primary renderer runs only through the hardened application origin", a
     await expect.poll(() => page.evaluate(() => document.readyState)).toBe("complete");
 
     expect(
-      await page.evaluate(async () => ({
-        externalFetchDenied: await fetch("https://example.invalid").then(
-          () => false,
-          () => true,
-        ),
-        nodeProcess: "process" in window,
-        nodeRequire: "require" in window,
-        notificationPermission: await Notification.requestPermission(),
-        protocol: window.location.protocol,
-        windowOpenDenied: window.open("https://example.invalid") === null,
-      })),
+      await page.evaluate(
+        async (url) => ({
+          externalFetchDenied: await fetch(url).then(
+            () => false,
+            () => true,
+          ),
+          nodeProcess: "process" in window,
+          nodeRequire: "require" in window,
+          notificationPermission: await Notification.requestPermission(),
+          protocol: window.location.protocol,
+          windowOpenDenied: window.open("https://example.invalid") === null,
+        }),
+        externalUrl,
+      ),
     ).toEqual({
       externalFetchDenied: true,
       nodeProcess: false,
@@ -36,6 +56,7 @@ test("the primary renderer runs only through the hardened application origin", a
       protocol: "open-chords:",
       windowOpenDenied: true,
     });
+    expect(requestCount).toBe(0);
 
     await page.evaluate(() => {
       window.location.href = "https://example.invalid";
@@ -43,5 +64,11 @@ test("the primary renderer runs only through the hardened application origin", a
     await expect.poll(() => page.url()).toBe("open-chords://app/index.html");
   } finally {
     await application.close();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
   }
 });

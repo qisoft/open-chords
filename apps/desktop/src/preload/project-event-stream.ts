@@ -11,6 +11,10 @@ export type ProjectStreamUpdate<TSnapshot extends EventSnapshot> =
 
 export class ProjectEventStream<TSnapshot extends EventSnapshot> {
   readonly #lastSequences = new Map<string, number>();
+  readonly #recoveries = new Map<
+    string,
+    { delivered: boolean; promise: Promise<{ applied: boolean; snapshot: TSnapshot }> }
+  >();
   readonly #refresh: (projectId: string) => Promise<TSnapshot>;
 
   constructor(refresh: (projectId: string) => Promise<TSnapshot>) {
@@ -33,8 +37,35 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
       return { event, kind: "event" };
     }
 
-    const snapshot = await this.#refresh(event.projectId);
-    this.synchronize(event.projectId, snapshot.eventSequence);
-    return { kind: "snapshot", snapshot };
+    let recovery = this.#recoveries.get(event.projectId);
+    if (recovery === undefined) {
+      const promise = this.#refresh(event.projectId).then((snapshot) => {
+        const currentSequence = this.#lastSequences.get(event.projectId) ?? 0;
+        const applied = snapshot.eventSequence > currentSequence;
+        if (applied) this.synchronize(event.projectId, snapshot.eventSequence);
+        return { applied, snapshot };
+      });
+      recovery = { delivered: false, promise };
+      this.#recoveries.set(event.projectId, recovery);
+      const cleanup = () => {
+        if (this.#recoveries.get(event.projectId) === recovery) {
+          this.#recoveries.delete(event.projectId);
+        }
+      };
+      void promise.then(cleanup, cleanup);
+    }
+
+    const result = await recovery.promise;
+    if (result.applied && !recovery.delivered) {
+      recovery.delivered = true;
+      return { kind: "snapshot", snapshot: result.snapshot };
+    }
+    const recoveredSequence = this.#lastSequences.get(event.projectId) ?? 0;
+    if (event.sequence <= recoveredSequence) return { kind: "ignored" };
+    if (event.sequence === recoveredSequence + 1) {
+      this.#lastSequences.set(event.projectId, event.sequence);
+      return { event, kind: "event" };
+    }
+    return this.accept(event);
   }
 }

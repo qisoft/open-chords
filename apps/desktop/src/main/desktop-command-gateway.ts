@@ -3,6 +3,7 @@ import {
   DESKTOP_IPC_VERSION,
   DesktopCommandSchema,
   DesktopErrorResponseSchema,
+  DesktopMessageIdSchema,
   DesktopResponseSchema,
   type DesktopCommand,
   type DesktopResponse,
@@ -13,6 +14,7 @@ const APP_ENTRY_URL = "open-chords://app/index.html";
 const MAX_COMMAND_BYTES = 256 * 1024;
 const MAX_CONCURRENT_READS = 32;
 const MAX_INVALID_COMMANDS = 3;
+const MAX_TRACKED_INVALID_SENDERS = 1_024;
 const MAX_MUTATIONS_PER_PROJECT = 32;
 
 export type DesktopSenderContext = {
@@ -53,7 +55,11 @@ export class DesktopCommandGateway {
     this.#authority = authority;
   }
 
-  async execute(rawCommand: unknown, sender: DesktopSenderContext): Promise<DesktopGatewayResult> {
+  async execute(
+    rawCommand: unknown,
+    sender: DesktopSenderContext,
+    expectedType?: DesktopCommand["type"],
+  ): Promise<DesktopGatewayResult> {
     if (!sender.isMainFrame || sender.frameUrl !== APP_ENTRY_URL) {
       return {
         action: "destroy_sender",
@@ -62,12 +68,15 @@ export class DesktopCommandGateway {
     }
 
     if (encodedSize(rawCommand) > MAX_COMMAND_BYTES) {
-      return this.#invalid(sender, "Command exceeds the size limit");
+      return this.#invalid(rawCommand, sender, "Command exceeds the size limit");
     }
 
     const parsed = DesktopCommandSchema.safeParse(rawCommand);
-    if (!parsed.success) return this.#invalid(sender, "Command does not match its capability");
+    if (!parsed.success || (expectedType !== undefined && parsed.data.type !== expectedType)) {
+      return this.#invalid(rawCommand, sender, "Command does not match its capability");
+    }
     const command = parsed.data;
+    this.#invalidCounts.delete(invalidCountKey(sender));
 
     if (command.generationId !== sender.generationId) {
       return {
@@ -212,14 +221,43 @@ export class DesktopCommandGateway {
     }
   }
 
-  #invalid(sender: DesktopSenderContext, message: string): DesktopGatewayResult {
-    const key = `${String(sender.senderId)}:${sender.generationId}`;
+  #invalid(
+    rawCommand: unknown,
+    sender: DesktopSenderContext,
+    message: string,
+  ): DesktopGatewayResult {
+    const key = invalidCountKey(sender);
     const count = (this.#invalidCounts.get(key) ?? 0) + 1;
     this.#invalidCounts.set(key, count);
+    while (this.#invalidCounts.size > MAX_TRACKED_INVALID_SENDERS) {
+      const oldestKey = this.#invalidCounts.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.#invalidCounts.delete(oldestKey);
+    }
+    const action = count >= MAX_INVALID_COMMANDS ? "reload_generation" : "none";
+    if (action === "reload_generation") this.#invalidCounts.delete(key);
     return {
-      action: count >= MAX_INVALID_COMMANDS ? "reload_generation" : "none",
-      response: errorResponse("invalid_command", message, false),
+      action,
+      response: errorResponse("invalid_command", message, false, correlationEnvelope(rawCommand)),
     };
+  }
+}
+
+function invalidCountKey(sender: DesktopSenderContext): string {
+  return `${String(sender.senderId)}:${sender.generationId}`;
+}
+
+function correlationEnvelope(
+  value: unknown,
+): Pick<DesktopCommand, "generationId" | "requestId"> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  try {
+    const generationId = DesktopMessageIdSchema.safeParse(Reflect.get(value, "generationId"));
+    const requestId = DesktopMessageIdSchema.safeParse(Reflect.get(value, "requestId"));
+    if (!generationId.success || !requestId.success) return undefined;
+    return { generationId: generationId.data, requestId: requestId.data };
+  } catch {
+    return undefined;
   }
 }
 
@@ -247,7 +285,7 @@ function errorResponse(
   code: Extract<DesktopResponse, { type: "desktop.error" }>["code"],
   message: string,
   retryable: boolean,
-  command?: DesktopCommand,
+  command?: Pick<DesktopCommand, "generationId" | "requestId">,
 ): Extract<DesktopResponse, { type: "desktop.error" }> {
   return DesktopErrorResponseSchema.parse({
     code,

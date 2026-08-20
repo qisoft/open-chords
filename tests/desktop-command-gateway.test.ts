@@ -54,6 +54,8 @@ describe("DesktopCommandGateway", () => {
 
     expect((await gateway.execute(oversized, sender)).response).toMatchObject({
       code: "invalid_command",
+      generationId: sender.generationId,
+      requestId: "request_security",
     });
     expect((await gateway.execute({ ...shellCommand(), unknown: true }, sender)).action).toBe(
       "none",
@@ -61,6 +63,24 @@ describe("DesktopCommandGateway", () => {
     expect((await gateway.execute({ ...shellCommand(), unknown: true }, sender)).action).toBe(
       "reload_generation",
     );
+    expect((await gateway.execute({ ...shellCommand(), unknown: true }, sender)).action).toBe(
+      "none",
+    );
+  });
+
+  it("rejects commands sent over a different capability channel without losing correlation", async () => {
+    const gateway = new DesktopCommandGateway(createAuthority());
+    const result = await gateway.execute(
+      shellCommand("request_wrong_channel"),
+      sender,
+      "project.get_snapshot",
+    );
+
+    expect(result.response).toMatchObject({
+      code: "invalid_command",
+      generationId: sender.generationId,
+      requestId: "request_wrong_channel",
+    });
   });
 
   it("rejects a stale renderer generation", async () => {

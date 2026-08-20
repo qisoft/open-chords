@@ -37,7 +37,7 @@ export const CommitEditTransactionCommandSchema = z.strictObject({
   ...commandEnvelope,
   expectedProjectRevisionId: DesktopMessageIdSchema,
   projectId: DesktopMessageIdSchema,
-  transaction: EditTransactionSchema,
+  transaction: EditTransactionSchema.extend({ id: DesktopMessageIdSchema }),
   type: z.literal("project.commit_edit_transaction"),
 });
 

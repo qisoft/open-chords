@@ -53,6 +53,12 @@ describe("desktop IPC contracts", () => {
 
     expect(DesktopCommandSchema.parse(snapshot)).toEqual(snapshot);
     expect(DesktopCommandSchema.parse(mutation)).toEqual(mutation);
+    expect(() =>
+      DesktopCommandSchema.parse({
+        ...mutation,
+        transaction: { ...mutation.transaction, id: `transaction_${"a".repeat(117)}` },
+      }),
+    ).toThrow(/too big|maximum|<=128/i);
     expect(
       ProjectEventSchema.parse({
         generationId: "generation_fixture",

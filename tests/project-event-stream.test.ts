@@ -36,4 +36,25 @@ describe("ProjectEventStream", () => {
     expect(await stream.accept(event(8))).toEqual({ kind: "ignored" });
     expect(await stream.accept(event(9))).toMatchObject({ kind: "event" });
   });
+
+  it("serializes concurrent gap recovery and never moves the sequence backwards", async () => {
+    let resolveRefresh!: (snapshot: { eventSequence: number }) => void;
+    const refresh = vi.fn<() => Promise<{ eventSequence: number }>>(
+      () =>
+        new Promise<{ eventSequence: number }>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const stream = new ProjectEventStream(refresh);
+    stream.synchronize("project_fixture", 4);
+
+    const first = stream.accept(event(7));
+    const second = stream.accept(event(9));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    resolveRefresh({ eventSequence: 8 });
+
+    expect(await first).toEqual({ kind: "snapshot", snapshot: { eventSequence: 8 } });
+    expect(await second).toMatchObject({ event: { sequence: 9 }, kind: "event" });
+    expect(await stream.accept(event(8))).toEqual({ kind: "ignored" });
+  });
 });

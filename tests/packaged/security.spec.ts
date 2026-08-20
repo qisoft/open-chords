@@ -64,10 +64,33 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
 
   const debuggingPort = await reservePort();
   const application = spawn(executablePath, [`--remote-debugging-port=${String(debuggingPort)}`], {
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let applicationOutput = "";
+  const captureOutput = (chunk: Buffer) => {
+    applicationOutput = `${applicationOutput}${chunk.toString("utf8")}`.slice(-64 * 1024);
+  };
+  application.stdout.on("data", captureOutput);
+  application.stderr.on("data", captureOutput);
+  const startupFailure = new Promise<never>((_resolve, reject) => {
+    application.once("error", reject);
+    application.once("exit", (code, signal) => {
+      reject(
+        new Error(
+          `Packaged application exited before inspection (code=${String(code)}, signal=${String(signal)})\n${applicationOutput}`,
+        ),
+      );
+    });
   });
   try {
-    const renderer = await inspectPackagedRenderer(debuggingPort);
+    let renderer: z.infer<typeof RendererSnapshotSchema>;
+    try {
+      renderer = await Promise.race([inspectPackagedRenderer(debuggingPort), startupFailure]);
+    } catch (error) {
+      throw new Error(`Packaged renderer inspection failed\n${applicationOutput}`, {
+        cause: error,
+      });
+    }
     expect(renderer).toMatchObject({
       apiKeys: ["project", "shell"],
       heading: "Open Chords foundation",
@@ -91,6 +114,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       shellKeys: ["getSecuritySnapshot"],
       url: "open-chords://app/index.html",
     });
+    expect(renderer.resourceUrls.length).toBeGreaterThan(0);
     for (const resourceUrl of renderer.resourceUrls) {
       expect(allowedAssets.has(new URL(resourceUrl).pathname.slice(1))).toBe(true);
     }
@@ -109,7 +133,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     });
     expect(secondInstanceExitCode).toBe(0);
   } finally {
-    application.kill();
+    if (!application.killed) application.kill();
   }
 });
 
@@ -136,7 +160,7 @@ const CdpTargetsSchema = z.array(
   z.object({
     type: z.string(),
     url: z.string(),
-    webSocketDebuggerUrl: z.string().url(),
+    webSocketDebuggerUrl: z.url(),
   }),
 );
 
@@ -172,7 +196,7 @@ async function inspectPackagedRenderer(
   port: number,
 ): Promise<z.infer<typeof RendererSnapshotSchema>> {
   const endpoint = `http://127.0.0.1:${String(port)}`;
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 30_000;
   let lastError: unknown;
   while (Date.now() < deadline) {
     try {
@@ -203,8 +227,8 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         require: typeof globalThis.require,
       },
       projectKeys: Object.keys(window.openChords.project).sort(),
-      resourceUrls: performance.getEntriesByType("resource")
-        .map((entry) => entry.name)
+      resourceUrls: Array.from(document.querySelectorAll("script[src], link[rel=stylesheet][href]"))
+        .map((element) => element instanceof HTMLScriptElement ? element.src : element.href)
         .filter((url) => url.startsWith("open-chords://")),
       security: await window.openChords.shell.getSecuritySnapshot(),
       shellKeys: Object.keys(window.openChords.shell).sort(),

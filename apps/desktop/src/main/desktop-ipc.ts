@@ -32,8 +32,7 @@ export function installDesktopIpc(authority: ProjectAuthority, options: DesktopI
     ipcMain.handle(channel, async (event, rawCommand: unknown) => {
       const generationId = options.generationFor(event.sender);
       const sender = senderContext(event, generationId);
-      const command = hasCommandType(rawCommand, expectedType) ? rawCommand : { invalid: true };
-      const result = await gateway.execute(command, sender);
+      const result = await gateway.execute(rawCommand, sender, expectedType);
       if (result.action !== "none") options.onSenderAction(result.action, event.sender);
       return result.response;
     });
@@ -46,17 +45,12 @@ export function publishProjectEvent(sender: WebContents, rawEvent: ProjectEvent)
 }
 
 function senderContext(event: IpcMainInvokeEvent, generationId: string | null) {
-  const isMainFrame = event.senderFrame === event.sender.mainFrame;
+  const senderFrame = event.senderFrame;
+  const isMainFrame = senderFrame !== null && senderFrame === event.sender.mainFrame;
   return {
-    frameUrl: isMainFrame ? event.senderFrame.url : "",
+    frameUrl: isMainFrame ? senderFrame.url : "",
     generationId: generationId ?? "generation_missing",
     isMainFrame,
     senderId: event.sender.id,
   };
-}
-
-function hasCommandType(value: unknown, expectedType: CommandType): boolean {
-  return (
-    typeof value === "object" && value !== null && "type" in value && value.type === expectedType
-  );
 }

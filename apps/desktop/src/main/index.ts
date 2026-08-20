@@ -51,14 +51,15 @@ if (!ownsSingleInstance) {
 function createOrFocusWindow() {
   if (mainWindow === null || mainWindow.isDestroyed()) {
     const generationId = `generation_${randomUUID().replaceAll("-", "")}`;
-    mainWindow = createDesktopWindow(generationId);
-    const webContentsId = mainWindow.webContents.id;
+    const window = createDesktopWindow(generationId);
+    mainWindow = window;
+    const webContentsId = window.webContents.id;
     rendererGenerations.set(webContentsId, generationId);
-    mainWindow.webContents.once("destroyed", () => {
+    window.webContents.once("destroyed", () => {
       rendererGenerations.delete(webContentsId);
     });
-    mainWindow.once("closed", () => {
-      mainWindow = null;
+    window.once("closed", () => {
+      if (mainWindow === window) mainWindow = null;
     });
   }
   return mainWindow;
