@@ -1,0 +1,418 @@
+{
+  "protocol": "open-chords/contracts",
+  "schemaVersion": "1.0",
+  "type": "project_snapshot",
+  "extensions": {
+    "org.openchords.fixture": {
+      "purpose": "golden cross-language corpus"
+    }
+  },
+  "payload": {
+    "format": "open-chords/project",
+    "schemaVersion": "1.0",
+    "id": "project_golden",
+    "sampleRate": 48000,
+    "durationSamples": 48000,
+    "extensions": {
+      "org.openchords.fixture": {
+        "covers": [
+          "pickup",
+          "truncated_bar",
+          "meter_change",
+          "unmetered",
+          "rich_chord",
+          "no_chord",
+          "abstention",
+          "repeated_lyrics",
+          "stale_revision"
+        ]
+      }
+    },
+    "supportClaims": [
+      {
+        "benchmarkPolicyHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "id": "claim_fixture",
+        "releaseVersion": "fixture-1",
+        "capability": "chords",
+        "inputs": ["synthetic fixture"],
+        "operatingConditions": ["deterministic fixture runtime"],
+        "slices": ["rich chords", "N", "abstention"],
+        "platformProfiles": ["contract-test"],
+        "evidenceStatus": "insufficient_evidence"
+      }
+    ],
+    "analysisRevisions": [
+      {
+        "id": "revision_original",
+        "projectId": "project_golden",
+        "createdAt": "2026-08-17T10:00:00Z",
+        "manifestHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "supportClaimIds": ["claim_fixture"],
+        "timeline": {
+          "bars": [
+            {
+              "id": "bar_pickup",
+              "startSample": 0,
+              "endSample": 8000,
+              "status": "pickup",
+              "meter": { "numerator": 4, "denominator": 4 },
+              "beats": [
+                { "id": "beat_pickup_1", "atSample": 0, "role": "downbeat" },
+                { "id": "beat_pickup_2", "atSample": 4000, "role": "beat" }
+              ]
+            },
+            {
+              "id": "bar_three_four",
+              "startSample": 8000,
+              "endSample": 32000,
+              "status": "complete",
+              "meter": { "numerator": 3, "denominator": 4 },
+              "beats": [
+                { "id": "beat_three_1", "atSample": 8000, "role": "downbeat" },
+                { "id": "beat_three_2", "atSample": 16000, "role": "beat" },
+                { "id": "beat_three_3", "atSample": 24000, "role": "beat" }
+              ]
+            },
+            {
+              "id": "bar_truncated",
+              "startSample": 40000,
+              "endSample": 48000,
+              "status": "truncated",
+              "meter": { "numerator": 6, "denominator": 8 },
+              "beats": [
+                { "id": "beat_truncated_1", "atSample": 40000, "role": "downbeat" },
+                { "id": "beat_truncated_2", "atSample": 44000, "role": "beat" }
+              ]
+            }
+          ],
+          "unmeteredRegions": [
+            {
+              "id": "unmetered_bridge",
+              "startSample": 32000,
+              "endSample": 40000,
+              "reasonCode": "meter_abstained"
+            }
+          ],
+          "chordEvents": [
+            {
+              "id": "chord_am7_e",
+              "startSample": 0,
+              "endSample": 8000,
+              "value": {
+                "kind": "chord",
+                "root": "A",
+                "quality": "minor7",
+                "extensions": ["9"],
+                "additions": ["add11", "add9"],
+                "alterations": [],
+                "omissions": [],
+                "bass": "E"
+              },
+              "assertion": {
+                "state": "asserted",
+                "evidence": [{ "name": "chroma", "scale": "cosine", "value": 0.91 }],
+                "reasonCodes": []
+              }
+            },
+            {
+              "id": "chord_c_sharp",
+              "startSample": 8000,
+              "endSample": 20000,
+              "value": {
+                "kind": "chord",
+                "root": "C#",
+                "quality": "major7",
+                "extensions": ["13"],
+                "additions": [],
+                "alterations": ["#11"],
+                "omissions": ["no5"]
+              },
+              "assertion": {
+                "state": "abstained",
+                "evidence": [{ "name": "margin", "scale": "logit", "value": -0.2 }],
+                "reasonCodes": ["insufficient_harmonic_evidence"]
+              }
+            },
+            {
+              "id": "chord_n",
+              "startSample": 20000,
+              "endSample": 32000,
+              "value": { "kind": "no_chord" },
+              "assertion": {
+                "state": "asserted",
+                "evidence": [{ "name": "energy", "scale": "dbfs", "value": -72.5 }],
+                "reasonCodes": ["asserted_no_chord"]
+              }
+            },
+            {
+              "id": "chord_g7",
+              "startSample": 32000,
+              "endSample": 48000,
+              "value": {
+                "kind": "chord",
+                "root": "G",
+                "quality": "major",
+                "extensions": ["7"],
+                "additions": [],
+                "alterations": [],
+                "omissions": []
+              },
+              "assertion": {
+                "state": "low_confidence",
+                "evidence": [{ "name": "template", "scale": "cosine", "value": 0.44 }],
+                "reasonCodes": ["below_asserted_threshold"]
+              }
+            }
+          ],
+          "sectionRegions": [
+            {
+              "id": "section_intro",
+              "startSample": 0,
+              "endSample": 20000,
+              "label": "intro",
+              "assertion": { "state": "asserted", "evidence": [], "reasonCodes": [] }
+            },
+            {
+              "id": "section_unknown",
+              "startSample": 20000,
+              "endSample": 48000,
+              "label": "unknown",
+              "assertion": {
+                "state": "abstained",
+                "evidence": [],
+                "reasonCodes": ["section_uncertain"]
+              }
+            }
+          ],
+          "keyRegions": [
+            {
+              "id": "key_a_minor",
+              "startSample": 0,
+              "endSample": 32000,
+              "value": { "kind": "key", "tonic": "A", "mode": "minor" },
+              "assertion": { "state": "asserted", "evidence": [], "reasonCodes": [] }
+            },
+            {
+              "id": "key_unknown",
+              "startSample": 32000,
+              "endSample": 48000,
+              "value": { "kind": "unknown" },
+              "assertion": {
+                "state": "abstained",
+                "evidence": [],
+                "reasonCodes": ["key_uncertain"]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "revision_reviewable",
+        "projectId": "project_golden",
+        "createdAt": "2026-08-17T11:00:00Z",
+        "manifestHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "supportClaimIds": ["claim_fixture"],
+        "timeline": {
+          "bars": [],
+          "unmeteredRegions": [
+            {
+              "id": "unmetered_reviewable",
+              "startSample": 0,
+              "endSample": 48000,
+              "reasonCode": "reviewable_fixture"
+            }
+          ],
+          "chordEvents": [
+            {
+              "id": "chord_reviewable",
+              "startSample": 0,
+              "endSample": 48000,
+              "value": { "kind": "no_chord" },
+              "assertion": { "state": "asserted", "evidence": [], "reasonCodes": [] }
+            }
+          ],
+          "sectionRegions": [
+            {
+              "id": "section_reviewable",
+              "startSample": 0,
+              "endSample": 48000,
+              "label": "neutral",
+              "assertion": { "state": "asserted", "evidence": [], "reasonCodes": [] }
+            }
+          ],
+          "keyRegions": [
+            {
+              "id": "key_reviewable",
+              "startSample": 0,
+              "endSample": 48000,
+              "value": { "kind": "unknown" },
+              "assertion": { "state": "abstained", "evidence": [], "reasonCodes": ["unknown"] }
+            }
+          ]
+        }
+      }
+    ],
+    "editLayers": [
+      {
+        "id": "edit_original",
+        "analysisRevisionId": "revision_original",
+        "transactions": [
+          {
+            "id": "transaction_unselected",
+            "parentTransactionId": null,
+            "operations": [
+              {
+                "type": "replace_chord_value",
+                "eventId": "chord_am7_e",
+                "value": {
+                  "kind": "chord",
+                  "root": "A",
+                  "quality": "major",
+                  "extensions": [],
+                  "additions": [],
+                  "alterations": [],
+                  "omissions": []
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "edit_reviewable",
+        "analysisRevisionId": "revision_reviewable",
+        "transactions": []
+      }
+    ],
+    "lyricsDocuments": [
+      {
+        "attribution": ["User-supplied fixture text"],
+        "id": "lyrics_repeated",
+        "language": "en",
+        "text": "go go\nhome go",
+        "notices": ["Test fixture only"],
+        "provenance": { "provider": "user", "reference": "fixture" },
+        "suppliedTimingKind": "untimed",
+        "tokenization": { "scheme": "open-chords-whitespace", "version": "1.0" },
+        "lines": [
+          { "id": "line_first", "startOffset": 0, "endOffset": 5 },
+          { "id": "line_second", "startOffset": 6, "endOffset": 13 }
+        ],
+        "tokens": [
+          {
+            "id": "token_go_1",
+            "lineId": "line_first",
+            "startOffset": 0,
+            "endOffset": 2,
+            "text": "go"
+          },
+          {
+            "id": "token_go_2",
+            "lineId": "line_first",
+            "startOffset": 3,
+            "endOffset": 5,
+            "text": "go"
+          },
+          {
+            "id": "token_home",
+            "lineId": "line_second",
+            "startOffset": 6,
+            "endOffset": 10,
+            "text": "home"
+          },
+          {
+            "id": "token_go_3",
+            "lineId": "line_second",
+            "startOffset": 11,
+            "endOffset": 13,
+            "text": "go"
+          }
+        ]
+      }
+    ],
+    "lyricsAlignments": [
+      {
+        "id": "alignment_repeated",
+        "lyricsDocumentId": "lyrics_repeated",
+        "analysisRevisionId": "revision_original",
+        "lineOccurrences": [
+          {
+            "lineId": "line_first",
+            "timing": {
+              "state": "matched",
+              "startSample": 1000,
+              "endSample": 5000,
+              "assertion": {
+                "state": "asserted",
+                "evidence": [],
+                "reasonCodes": []
+              }
+            }
+          },
+          {
+            "lineId": "line_second",
+            "timing": {
+              "state": "matched",
+              "startSample": 20000,
+              "endSample": 28000,
+              "assertion": {
+                "state": "low_confidence",
+                "evidence": [],
+                "reasonCodes": ["weak_alignment"]
+              }
+            }
+          }
+        ],
+        "occurrences": [
+          {
+            "tokenId": "token_go_1",
+            "timing": {
+              "state": "matched",
+              "startSample": 1000,
+              "endSample": 3000,
+              "assertion": { "state": "asserted", "evidence": [], "reasonCodes": [] }
+            }
+          },
+          {
+            "tokenId": "token_go_2",
+            "timing": { "state": "unmatched", "reasonCode": "repetition_ambiguous" }
+          },
+          {
+            "tokenId": "token_home",
+            "timing": {
+              "state": "matched",
+              "startSample": 20000,
+              "endSample": 24000,
+              "assertion": {
+                "state": "low_confidence",
+                "evidence": [],
+                "reasonCodes": ["weak_alignment"]
+              }
+            }
+          },
+          {
+            "tokenId": "token_go_3",
+            "timing": {
+              "state": "matched",
+              "startSample": 25000,
+              "endSample": 28000,
+              "assertion": { "state": "asserted", "evidence": [], "reasonCodes": [] }
+            }
+          }
+        ]
+      }
+    ],
+    "activeView": {
+      "analysisRevisionId": "revision_original",
+      "editLayerId": "edit_original",
+      "editHistoryPosition": 0,
+      "lyricsDocumentId": "lyrics_repeated",
+      "lyricsAlignmentId": "alignment_repeated",
+      "presentation": {
+        "transposeSemitones": 0,
+        "beginnerView": false,
+        "enharmonicPreference": "contextual"
+      }
+    }
+  }
+}

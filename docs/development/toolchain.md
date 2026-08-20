@@ -28,4 +28,6 @@ Use the exact pnpm version declared in `package.json`. The workspace has one loc
 - `pnpm test:renderer`
 - `pnpm package -- --arch=<native architecture>`
 
+Domain/contract changes additionally run `pnpm contracts:schema:check`, `pnpm test:fixtures`, and `pnpm test:python`; see [Canonical domain contracts](./domain-contracts.md).
+
 CI runs the complete sequence on macOS 15 arm64 and Windows Server 2025 x64 with a frozen pnpm install.

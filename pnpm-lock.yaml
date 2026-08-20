@@ -48,6 +48,15 @@ importers:
       '@electron/fuses':
         specifier: 1.8.0
         version: 1.8.0
+      '@open-chords/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
+      '@open-chords/domain':
+        specifier: workspace:*
+        version: link:packages/domain
+      '@open-chords/testkit':
+        specifier: workspace:*
+        version: link:packages/testkit
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1
@@ -93,6 +102,27 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@26.2.0)(@vitest/browser-playwright@4.1.10)(vite@8.2.1(@types/node@26.2.0)(jiti@2.7.0)(terser@5.50.0))
+
+  packages/contracts:
+    dependencies:
+      '@open-chords/domain':
+        specifier: workspace:*
+        version: link:../domain
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/domain:
+    dependencies:
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/testkit:
+    dependencies:
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
 packages:
 
