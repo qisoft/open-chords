@@ -32,6 +32,10 @@ const envelope = () => ({
 async function getSecuritySnapshot() {
   const command = ShellSecuritySnapshotCommandSchema.parse({
     ...envelope(),
+    runtimeSecurity: {
+      contextIsolation: process.contextIsolated,
+      sandbox: process.sandboxed,
+    },
     type: "shell.get_security_snapshot",
   });
   const response = DesktopResponseSchema.parse(

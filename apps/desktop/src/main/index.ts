@@ -5,11 +5,8 @@ import { app, type BrowserWindow, type WebContents } from "electron";
 
 import { installDesktopIpc } from "./desktop-ipc.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
-import {
-  createDesktopWindow,
-  hardenWebContents,
-  PRIMARY_RENDERER_SECURITY_CONFIGURATION,
-} from "./shell.ts";
+import { PRIMARY_RENDERER_SECURITY_CONFIGURATION } from "./renderer-security.ts";
+import { createDesktopWindow, hardenWebContents } from "./shell.ts";
 import { unavailableProjectAuthority } from "./unavailable-project-authority.ts";
 import { presentDesktopWindow } from "./window-lifecycle.ts";
 

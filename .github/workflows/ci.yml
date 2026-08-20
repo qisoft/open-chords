@@ -50,7 +50,7 @@ jobs:
         run: pnpm test
       - name: Run isolated renderer smoke test
         run: pnpm test:renderer
-      - name: Exercise Forge packaging hooks
-        run: pnpm package -- --arch=${{ matrix.arch }}
-      - name: Verify packaged trust boundary
+      - name: Build installable Forge artifact
+        run: pnpm make -- --arch=${{ matrix.arch }}
+      - name: Verify installed trust boundary
         run: pnpm test:packaged

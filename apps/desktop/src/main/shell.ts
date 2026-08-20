@@ -3,14 +3,9 @@ import { join } from "node:path";
 import { app, BrowserWindow, type Session, type WebContents } from "electron";
 
 import { APP_ENTRY_URL } from "./desktop-origin.ts";
+import { PRIMARY_RENDERER_SECURITY_CONFIGURATION } from "./renderer-security.ts";
 
 export const PRIMARY_RENDERER_PARTITION = "persist:open-chords-primary";
-export const PRIMARY_RENDERER_SECURITY_CONFIGURATION = {
-  contextIsolation: true,
-  nodeIntegration: false,
-  sandbox: true,
-  webSecurity: true,
-} as const;
 
 const hardenedSessions = new WeakSet<Session>();
 const hardenedContents = new WeakSet<WebContents>();

@@ -15,6 +15,7 @@ import {
 } from "@open-chords/domain";
 
 import { APP_ENTRY_URL } from "./desktop-origin.ts";
+import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
 
 const MAX_COMMAND_BYTES = 256 * 1024;
 const MAX_CONCURRENT_READS = 32;
@@ -23,13 +24,6 @@ const MAX_PENDING_MUTATIONS = 32;
 const MAX_TRACKED_INVALID_SENDERS = 1_024;
 const MAX_MUTATIONS_PER_PROJECT = 32;
 const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
-
-export type DesktopSecurityConfiguration = {
-  contextIsolation: boolean;
-  nodeIntegration: boolean;
-  sandbox: boolean;
-  webSecurity: boolean;
-};
 
 export type DesktopSenderContext = {
   frameUrl: string;
@@ -96,7 +90,6 @@ export class DesktopCommandGateway {
       return this.#invalid(rawCommand, sender, "Command does not match its capability");
     }
     const command = parsed.data;
-    this.#invalidCounts.delete(invalidCountKey(sender));
 
     if (command.generationId !== sender.generationId) {
       return {
@@ -115,7 +108,10 @@ export class DesktopCommandGateway {
         action: "none",
         response: DesktopResponseSchema.parse({
           ...responseEnvelope(command),
-          security: sender.security,
+          security: {
+            ...sender.security,
+            ...command.runtimeSecurity,
+          },
           type: "shell.security_snapshot",
         }),
       };

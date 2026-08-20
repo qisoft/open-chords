@@ -24,6 +24,10 @@ const commandEnvelope = {
 
 export const ShellSecuritySnapshotCommandSchema = z.strictObject({
   ...commandEnvelope,
+  runtimeSecurity: z.strictObject({
+    contextIsolation: z.literal(true),
+    sandbox: z.literal(true),
+  }),
   type: z.literal("shell.get_security_snapshot"),
 });
 

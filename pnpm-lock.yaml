@@ -84,6 +84,9 @@ importers:
       electron:
         specifier: 43.4.0
         version: 43.4.0
+      extract-zip:
+        specifier: npm:@electron-internal/extract-zip@1.0.1
+        version: '@electron-internal/extract-zip@1.0.1'
       oxfmt:
         specifier: 0.63.0
         version: 0.63.0

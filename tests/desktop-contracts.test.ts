@@ -12,10 +12,20 @@ describe("desktop IPC contracts", () => {
       protocol: "open-chords/desktop-ipc",
       protocolVersion: "1.0",
       requestId: "request_security_snapshot",
+      runtimeSecurity: {
+        contextIsolation: true,
+        sandbox: true,
+      },
       type: "shell.get_security_snapshot",
     };
 
     expect(DesktopCommandSchema.parse(command)).toEqual(command);
+    expect(() =>
+      DesktopCommandSchema.parse({
+        ...command,
+        runtimeSecurity: { ...command.runtimeSecurity, sandbox: false },
+      }),
+    ).toThrow(/Invalid input/);
     expect(() => DesktopCommandSchema.parse({ ...command, channel: "generic.invoke" })).toThrow(
       /unrecognized|unknown/i,
     );

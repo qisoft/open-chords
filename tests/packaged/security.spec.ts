@@ -1,18 +1,26 @@
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { extractFile } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { expect, test } from "@playwright/test";
+import extractZip from "extract-zip";
 import { z } from "zod";
 
 const PRODUCT_NAME = "Open Chords";
-const packageRoot = join(
+const archivePath = join(
   process.cwd(),
   "out",
-  `${PRODUCT_NAME}-${process.platform}-${process.arch}`,
+  "make",
+  "zip",
+  process.platform,
+  process.arch,
+  `${PRODUCT_NAME}-${process.platform}-${process.arch}-0.0.0.zip`,
 );
+const packageRoot = mkdtempSync(join(tmpdir(), "open-chords-installed-"));
 const executablePath =
   process.platform === "darwin"
     ? join(packageRoot, `${PRODUCT_NAME}.app`, "Contents", "MacOS", PRODUCT_NAME)
@@ -21,6 +29,14 @@ const resourcesPath =
   process.platform === "darwin"
     ? join(packageRoot, `${PRODUCT_NAME}.app`, "Contents", "Resources")
     : join(packageRoot, "resources");
+
+test.beforeAll(async () => {
+  await extractZip(archivePath, { dir: packageRoot });
+});
+
+test.afterAll(() => {
+  rmSync(packageRoot, { force: true, recursive: true });
+});
 
 test("packaged shell flips every security fuse explicitly", async () => {
   const wire = await getCurrentFuseWire(executablePath);
@@ -93,6 +109,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     }
     expect(renderer).toMatchObject({
       apiKeys: ["project", "shell"],
+      externalFetch: "rejected",
       heading: "Open Chords foundation",
       missingProject: { code: "project_not_found", type: "desktop.error" },
       nodeGlobals: {
@@ -167,6 +184,7 @@ const CdpTargetsSchema = z.array(
 
 const RendererSnapshotSchema = z.object({
   apiKeys: z.array(z.string()),
+  externalFetch: z.literal("rejected"),
   heading: z.string().nullable(),
   missingProject: z.object({
     code: z.literal("project_not_found"),
@@ -228,6 +246,10 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       });
       resolve({
       apiKeys: Object.keys(window.openChords).sort(),
+      externalFetch: await fetch("https://www.youtube.com/iframe_api").then(
+        () => "resolved",
+        () => "rejected",
+      ),
       heading: document.querySelector("h1")?.textContent ?? null,
       missingProject: await window.openChords.project.getSnapshot("project_missing"),
       nodeGlobals: {

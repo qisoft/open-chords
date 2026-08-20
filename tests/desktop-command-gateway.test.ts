@@ -35,12 +35,22 @@ function readGoldenProject() {
   return parseProjectContract(envelope.payload);
 }
 
-function shellCommand(requestId = "request_security") {
+function commandEnvelope(requestId: string) {
   return {
     generationId: sender.generationId,
     protocol: "open-chords/desktop-ipc",
     protocolVersion: "1.0",
     requestId,
+  } as const;
+}
+
+function shellCommand(requestId = "request_security") {
+  return {
+    ...commandEnvelope(requestId),
+    runtimeSecurity: {
+      contextIsolation: true,
+      sandbox: true,
+    },
     type: "shell.get_security_snapshot",
   } as const;
 }
@@ -83,6 +93,9 @@ describe("DesktopCommandGateway", () => {
     expect((await gateway.execute({ ...shellCommand(), unknown: true }, sender)).action).toBe(
       "none",
     );
+    expect(
+      (await gateway.execute(shellCommand("request_valid_between_attacks"), sender)).action,
+    ).toBe("none");
     expect((await gateway.execute({ ...shellCommand(), unknown: true }, sender)).action).toBe(
       "reload_generation",
     );
@@ -141,7 +154,7 @@ describe("DesktopCommandGateway", () => {
 
     const result = await gateway.execute(
       {
-        ...shellCommand("request_wrong_project"),
+        ...commandEnvelope("request_wrong_project"),
         projectId: "project_fixture",
         type: "project.get_snapshot",
       },
@@ -165,7 +178,7 @@ describe("DesktopCommandGateway", () => {
 
     const result = await gateway.execute(
       {
-        ...shellCommand("request_invalid_project"),
+        ...commandEnvelope("request_invalid_project"),
         projectId: project.id,
         type: "project.get_snapshot",
       },
@@ -189,7 +202,7 @@ describe("DesktopCommandGateway", () => {
 
     const result = await gateway.execute(
       {
-        ...shellCommand("request_oversized_project"),
+        ...commandEnvelope("request_oversized_project"),
         projectId: project.id,
         type: "project.get_snapshot",
       },
@@ -215,7 +228,7 @@ describe("DesktopCommandGateway", () => {
     const reads = Array.from({ length: 32 }, (_, index) =>
       gateway.execute(
         {
-          ...shellCommand(`request_read_${String(index)}`),
+          ...commandEnvelope(`request_read_${String(index)}`),
           projectId: "project_fixture",
           type: "project.get_snapshot",
         },
@@ -226,7 +239,7 @@ describe("DesktopCommandGateway", () => {
 
     const overflow = await gateway.execute(
       {
-        ...shellCommand("request_read_overflow"),
+        ...commandEnvelope("request_read_overflow"),
         projectId: "project_fixture",
         type: "project.get_snapshot",
       },
@@ -256,7 +269,7 @@ describe("DesktopCommandGateway", () => {
       }),
     );
     const mutation = (id: string, revision: string) => ({
-      ...shellCommand(`request_${id}`),
+      ...commandEnvelope(`request_${id}`),
       expectedProjectRevisionId: revision,
       projectId: "project_fixture",
       transaction: {
@@ -295,7 +308,7 @@ describe("DesktopCommandGateway", () => {
       }),
     );
     const mutation = (index: number) => ({
-      ...shellCommand(`request_mutation_${String(index)}`),
+      ...commandEnvelope(`request_mutation_${String(index)}`),
       expectedProjectRevisionId: "projectrevision_current",
       projectId: "project_fixture",
       transaction: {
@@ -332,7 +345,7 @@ describe("DesktopCommandGateway", () => {
       }),
     );
     const mutation = (index: number | "overflow") => ({
-      ...shellCommand(`request_mutation_global_${String(index)}`),
+      ...commandEnvelope(`request_mutation_global_${String(index)}`),
       expectedProjectRevisionId: "projectrevision_current",
       projectId: `project_${String(index)}`,
       transaction: {
