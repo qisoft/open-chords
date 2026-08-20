@@ -6,6 +6,9 @@
     "types": ["node", "vitest/globals"]
   },
   "include": [
+    "apps/desktop/src/main/**/*.ts",
+    "apps/desktop/src/preload/**/*.ts",
+    "apps/desktop/src/renderer/**/*.d.ts",
     "packages/contracts/src/**/*.ts",
     "packages/domain/src/**/*.ts",
     "packages/testkit/src/**/*.ts",

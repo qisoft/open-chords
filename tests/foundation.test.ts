@@ -131,4 +131,26 @@ describe("production build contract", () => {
       expect.arrayContaining([expect.stringMatching(/\.css$/), expect.stringMatching(/\.js$/)]),
     );
   });
+
+  it("declares every renderer resource in the packaged asset manifest", () => {
+    const rendererDirectory = join(repositoryRoot, "dist/renderer");
+    const html = readFileSync(join(rendererDirectory, "index.html"), "utf8");
+    const manifest = readJson("dist/renderer/asset-manifest.json");
+    const declared = new Set(
+      Object.values(manifest).flatMap((entry) => {
+        if (!isRecord(entry) || typeof entry.file !== "string") return [];
+        const css = Array.isArray(entry.css)
+          ? entry.css.filter((value): value is string => typeof value === "string")
+          : [];
+        const assets = Array.isArray(entry.assets)
+          ? entry.assets.filter((value): value is string => typeof value === "string")
+          : [];
+        return [entry.file, ...css, ...assets];
+      }),
+    );
+    const requested = [...html.matchAll(/(?:src|href)="\.\/([^"#?]+)"/g)].map((match) => match[1]);
+
+    expect(requested.length).toBeGreaterThan(0);
+    expect(requested.every((path) => path !== undefined && declared.has(path))).toBe(true);
+  });
 });

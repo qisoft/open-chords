@@ -1,0 +1,262 @@
+import {
+  DESKTOP_IPC_PROTOCOL,
+  DESKTOP_IPC_VERSION,
+  DesktopCommandSchema,
+  DesktopErrorResponseSchema,
+  DesktopResponseSchema,
+  type DesktopCommand,
+  type DesktopResponse,
+} from "@open-chords/contracts";
+import type { EditTransaction, ProjectContract } from "@open-chords/domain";
+
+const APP_ENTRY_URL = "open-chords://app/index.html";
+const MAX_COMMAND_BYTES = 256 * 1024;
+const MAX_CONCURRENT_READS = 32;
+const MAX_INVALID_COMMANDS = 3;
+const MAX_MUTATIONS_PER_PROJECT = 32;
+
+export type DesktopSenderContext = {
+  frameUrl: string;
+  generationId: string;
+  isMainFrame: boolean;
+  senderId: number;
+};
+
+export type ProjectAuthority = {
+  commitEditTransaction(input: {
+    expectedProjectRevisionId: string;
+    projectId: string;
+    transaction: EditTransaction;
+  }): Promise<{ notFound: true } | { projectRevisionId: string } | { stale: true }>;
+  getSnapshot(projectId: string): Promise<{
+    eventSequence: number;
+    project: ProjectContract;
+    projectRevisionId: string;
+  } | null>;
+};
+
+export type DesktopGatewayAction = "destroy_sender" | "none" | "reload_generation";
+
+export type DesktopGatewayResult = {
+  action: DesktopGatewayAction;
+  response: DesktopResponse;
+};
+
+export class DesktopCommandGateway {
+  readonly #authority: ProjectAuthority;
+  readonly #invalidCounts = new Map<string, number>();
+  readonly #mutationDepths = new Map<string, number>();
+  readonly #mutationQueues = new Map<string, Promise<void>>();
+  #activeReads = 0;
+
+  constructor(authority: ProjectAuthority) {
+    this.#authority = authority;
+  }
+
+  async execute(rawCommand: unknown, sender: DesktopSenderContext): Promise<DesktopGatewayResult> {
+    if (!sender.isMainFrame || sender.frameUrl !== APP_ENTRY_URL) {
+      return {
+        action: "destroy_sender",
+        response: errorResponse("unauthorized_sender", "Renderer is not authorized", false),
+      };
+    }
+
+    if (encodedSize(rawCommand) > MAX_COMMAND_BYTES) {
+      return this.#invalid(sender, "Command exceeds the size limit");
+    }
+
+    const parsed = DesktopCommandSchema.safeParse(rawCommand);
+    if (!parsed.success) return this.#invalid(sender, "Command does not match its capability");
+    const command = parsed.data;
+
+    if (command.generationId !== sender.generationId) {
+      return {
+        action: "reload_generation",
+        response: errorResponse(
+          "invalid_generation",
+          "Renderer generation is no longer active",
+          true,
+          command,
+        ),
+      };
+    }
+
+    if (command.type === "shell.get_security_snapshot") {
+      return {
+        action: "none",
+        response: DesktopResponseSchema.parse({
+          ...responseEnvelope(command),
+          security: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            webSecurity: true,
+          },
+          type: "shell.security_snapshot",
+        }),
+      };
+    }
+
+    if (command.type === "project.get_snapshot") return this.#readSnapshot(command);
+    return this.#enqueueMutation(command);
+  }
+
+  async #readSnapshot(
+    command: Extract<DesktopCommand, { type: "project.get_snapshot" }>,
+  ): Promise<DesktopGatewayResult> {
+    if (this.#activeReads >= MAX_CONCURRENT_READS) {
+      return {
+        action: "none",
+        response: errorResponse("busy", "Too many project reads are active", true, command),
+      };
+    }
+
+    this.#activeReads += 1;
+    try {
+      const snapshot = await this.#authority.getSnapshot(command.projectId);
+      if (snapshot === null) {
+        return {
+          action: "none",
+          response: errorResponse("project_not_found", "Project was not found", false, command),
+        };
+      }
+      return {
+        action: "none",
+        response: DesktopResponseSchema.parse({
+          ...responseEnvelope(command),
+          ...snapshot,
+          type: "project.snapshot",
+        }),
+      };
+    } catch {
+      return {
+        action: "none",
+        response: errorResponse("internal_error", "Project read failed", true, command),
+      };
+    } finally {
+      this.#activeReads -= 1;
+    }
+  }
+
+  async #enqueueMutation(
+    command: Extract<DesktopCommand, { type: "project.commit_edit_transaction" }>,
+  ): Promise<DesktopGatewayResult> {
+    const depth = this.#mutationDepths.get(command.projectId) ?? 0;
+    if (depth >= MAX_MUTATIONS_PER_PROJECT) {
+      return {
+        action: "none",
+        response: errorResponse("busy", "Project mutation queue is full", true, command),
+      };
+    }
+    this.#mutationDepths.set(command.projectId, depth + 1);
+    const prior = this.#mutationQueues.get(command.projectId) ?? Promise.resolve();
+    const task = prior.catch(() => undefined).then(async () => this.#commitMutation(command));
+    const queueTail = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#mutationQueues.set(command.projectId, queueTail);
+    try {
+      return await task;
+    } finally {
+      const remaining = (this.#mutationDepths.get(command.projectId) ?? 1) - 1;
+      if (remaining === 0) this.#mutationDepths.delete(command.projectId);
+      else this.#mutationDepths.set(command.projectId, remaining);
+      if (this.#mutationQueues.get(command.projectId) === queueTail) {
+        this.#mutationQueues.delete(command.projectId);
+      }
+    }
+  }
+
+  async #commitMutation(
+    command: Extract<DesktopCommand, { type: "project.commit_edit_transaction" }>,
+  ): Promise<DesktopGatewayResult> {
+    try {
+      const result = await this.#authority.commitEditTransaction({
+        expectedProjectRevisionId: command.expectedProjectRevisionId,
+        projectId: command.projectId,
+        transaction: command.transaction,
+      });
+      if ("stale" in result) {
+        return {
+          action: "none",
+          response: errorResponse(
+            "stale_revision",
+            "Project changed before this transaction could commit",
+            true,
+            command,
+          ),
+        };
+      }
+      if ("notFound" in result) {
+        return {
+          action: "none",
+          response: errorResponse("project_not_found", "Project was not found", false, command),
+        };
+      }
+      return {
+        action: "none",
+        response: DesktopResponseSchema.parse({
+          ...responseEnvelope(command),
+          projectId: command.projectId,
+          projectRevisionId: result.projectRevisionId,
+          transactionId: command.transaction.id,
+          type: "project.committed",
+        }),
+      };
+    } catch {
+      return {
+        action: "none",
+        response: errorResponse("internal_error", "Project mutation failed", true, command),
+      };
+    }
+  }
+
+  #invalid(sender: DesktopSenderContext, message: string): DesktopGatewayResult {
+    const key = `${String(sender.senderId)}:${sender.generationId}`;
+    const count = (this.#invalidCounts.get(key) ?? 0) + 1;
+    this.#invalidCounts.set(key, count);
+    return {
+      action: count >= MAX_INVALID_COMMANDS ? "reload_generation" : "none",
+      response: errorResponse("invalid_command", message, false),
+    };
+  }
+}
+
+function encodedSize(value: unknown): number {
+  try {
+    const encoded = JSON.stringify(value);
+    return encoded === undefined
+      ? Number.POSITIVE_INFINITY
+      : new TextEncoder().encode(encoded).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function responseEnvelope(command: DesktopCommand) {
+  return {
+    generationId: command.generationId,
+    protocol: DESKTOP_IPC_PROTOCOL,
+    protocolVersion: DESKTOP_IPC_VERSION,
+    requestId: command.requestId,
+  } as const;
+}
+
+function errorResponse(
+  code: Extract<DesktopResponse, { type: "desktop.error" }>["code"],
+  message: string,
+  retryable: boolean,
+  command?: DesktopCommand,
+): Extract<DesktopResponse, { type: "desktop.error" }> {
+  return DesktopErrorResponseSchema.parse({
+    code,
+    generationId: command?.generationId ?? null,
+    message,
+    protocol: DESKTOP_IPC_PROTOCOL,
+    protocolVersion: DESKTOP_IPC_VERSION,
+    requestId: command?.requestId ?? null,
+    retryable,
+    type: "desktop.error",
+  });
+}

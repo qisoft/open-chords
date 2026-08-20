@@ -52,3 +52,5 @@ jobs:
         run: pnpm test:renderer
       - name: Exercise Forge packaging hooks
         run: pnpm package -- --arch=${{ matrix.arch }}
+      - name: Verify packaged trust boundary
+        run: pnpm test:packaged

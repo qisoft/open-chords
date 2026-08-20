@@ -5,6 +5,8 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
+export * from "./desktop.ts";
+
 export const CONTRACT_MAJOR = 1;
 export const CONTRACT_MINOR = 0;
 export const CONTRACT_VERSION = `${String(CONTRACT_MAJOR)}.${String(CONTRACT_MINOR)}`;

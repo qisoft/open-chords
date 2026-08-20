@@ -1,6 +1,12 @@
 export { canonicalSerialize } from "./canonical.ts";
 export { materializeEffectiveTimeline, type EffectiveTimeline } from "./projection.ts";
-export { ProjectContractSchema, type LyricsAlignment, type ProjectContract } from "./schema.ts";
+export {
+  EditTransactionSchema,
+  ProjectContractSchema,
+  type EditTransaction,
+  type LyricsAlignment,
+  type ProjectContract,
+} from "./schema.ts";
 
 import { validateProjectInvariants } from "./invariants.ts";
 import {

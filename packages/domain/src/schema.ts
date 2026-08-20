@@ -408,6 +408,7 @@ export type AnalysisRevision = z.infer<typeof AnalysisRevisionSchema>;
 export type ChordEvent = z.infer<typeof ChordEventSchema>;
 export type ChordValue = z.infer<typeof ChordValueSchema>;
 export type EditLayer = z.infer<typeof EditLayerSchema>;
+export type EditTransaction = z.infer<typeof EditTransactionSchema>;
 export type LyricsAlignment = z.infer<typeof LyricsAlignmentSchema>;
 export type LyricsDocument = z.infer<typeof LyricsDocumentSchema>;
 export type MusicalTimeline = z.infer<typeof MusicalTimelineSchema>;
