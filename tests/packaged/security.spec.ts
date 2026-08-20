@@ -35,7 +35,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(() => {
-  rmSync(packageRoot, { force: true, recursive: true });
+  rmSync(packageRoot, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
 });
 
 test("packaged shell flips every security fuse explicitly", async () => {
@@ -151,9 +151,30 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     });
     expect(secondInstanceExitCode).toBe(0);
   } finally {
-    if (!application.killed) application.kill();
+    await stopApplication(application);
   }
 });
+
+async function stopApplication(application: ReturnType<typeof spawn>): Promise<void> {
+  if (application.exitCode !== null || application.signalCode !== null) return;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Packaged application did not exit after termination"));
+    }, 5_000);
+    application.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    application.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    if (!application.kill()) {
+      clearTimeout(timeout);
+      resolve();
+    }
+  });
+}
 
 async function reservePort(): Promise<number> {
   return new Promise((resolve, reject) => {
