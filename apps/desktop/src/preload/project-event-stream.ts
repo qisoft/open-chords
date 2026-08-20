@@ -1,5 +1,7 @@
 import { ProjectEventSchema, type ProjectEvent } from "@open-chords/contracts";
 
+const MAX_GAP_RECOVERY_REFRESHES = 2;
+
 export type EventSnapshot = {
   eventSequence: number;
 };
@@ -40,12 +42,7 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
 
     let recovery = this.#recoveries.get(event.projectId);
     if (recovery === undefined) {
-      const promise = this.#refresh(event.projectId).then((snapshot) => {
-        const currentSequence = this.#lastSequences.get(event.projectId) ?? 0;
-        const applied = snapshot.eventSequence > currentSequence;
-        if (applied) this.synchronize(event.projectId, snapshot.eventSequence);
-        return { applied, snapshot };
-      });
+      const promise = this.#recoverGap(event.projectId, event.sequence);
       recovery = { delivered: false, promise };
       this.#recoveries.set(event.projectId, recovery);
       const cleanup = () => {
@@ -67,6 +64,28 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
       this.#lastSequences.set(event.projectId, event.sequence);
       return { event, kind: "event" };
     }
+    throw new Error("Project snapshot recovery did not close the event gap");
+  }
+
+  async #recoverGap(
+    projectId: string,
+    targetSequence: number,
+  ): Promise<{ applied: boolean; snapshot: TSnapshot }> {
+    let applied = false;
+    let snapshot: TSnapshot | undefined;
+
+    for (let attempt = 0; attempt < MAX_GAP_RECOVERY_REFRESHES; attempt += 1) {
+      const sequenceBeforeRefresh = this.#lastSequences.get(projectId) ?? 0;
+      snapshot = await this.#refresh(projectId);
+      if (snapshot.eventSequence > sequenceBeforeRefresh) {
+        this.synchronize(projectId, snapshot.eventSequence);
+        applied = true;
+      }
+      const currentSequence = this.#lastSequences.get(projectId) ?? 0;
+      if (currentSequence >= targetSequence) return { applied, snapshot };
+      if (currentSequence <= sequenceBeforeRefresh) break;
+    }
+
     throw new Error("Project snapshot recovery did not close the event gap");
   }
 }

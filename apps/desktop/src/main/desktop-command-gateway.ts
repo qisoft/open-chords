@@ -19,6 +19,7 @@ import { APP_ENTRY_URL } from "./desktop-origin.ts";
 const MAX_COMMAND_BYTES = 256 * 1024;
 const MAX_CONCURRENT_READS = 32;
 const MAX_INVALID_COMMANDS = 3;
+const MAX_PENDING_MUTATIONS = 32;
 const MAX_TRACKED_INVALID_SENDERS = 1_024;
 const MAX_MUTATIONS_PER_PROJECT = 32;
 const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -64,6 +65,7 @@ export class DesktopCommandGateway {
   readonly #mutationDepths = new Map<string, number>();
   readonly #mutationQueues = new Map<string, Promise<void>>();
   #activeReads = 0;
+  #pendingMutations = 0;
 
   constructor(authority: ProjectAuthority) {
     this.#authority = authority;
@@ -172,6 +174,12 @@ export class DesktopCommandGateway {
   async #enqueueMutation(
     command: Extract<DesktopCommand, { type: "project.commit_edit_transaction" }>,
   ): Promise<DesktopGatewayResult> {
+    if (this.#pendingMutations >= MAX_PENDING_MUTATIONS) {
+      return {
+        action: "none",
+        response: errorResponse("busy", "Global mutation queue is full", true, command),
+      };
+    }
     const depth = this.#mutationDepths.get(command.projectId) ?? 0;
     if (depth >= MAX_MUTATIONS_PER_PROJECT) {
       return {
@@ -179,6 +187,7 @@ export class DesktopCommandGateway {
         response: errorResponse("busy", "Project mutation queue is full", true, command),
       };
     }
+    this.#pendingMutations += 1;
     this.#mutationDepths.set(command.projectId, depth + 1);
     const prior = this.#mutationQueues.get(command.projectId) ?? Promise.resolve();
     const task = prior.catch(() => undefined).then(async () => this.#commitMutation(command));
@@ -190,6 +199,7 @@ export class DesktopCommandGateway {
     try {
       return await task;
     } finally {
+      this.#pendingMutations -= 1;
       const remaining = (this.#mutationDepths.get(command.projectId) ?? 1) - 1;
       if (remaining === 0) this.#mutationDepths.delete(command.projectId);
       else this.#mutationDepths.set(command.projectId, remaining);

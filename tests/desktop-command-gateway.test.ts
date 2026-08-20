@@ -317,4 +317,41 @@ describe("DesktopCommandGateway", () => {
     release();
     await Promise.all(accepted);
   });
+
+  it("bounds pending mutations across distinct Project IDs", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gateway = new DesktopCommandGateway(
+      createAuthority({
+        commitEditTransaction: async ({ transaction }) => {
+          if (transaction.id !== "transaction_overflow") await blocked;
+          return { projectRevisionId: "projectrevision_next" };
+        },
+      }),
+    );
+    const mutation = (index: number | "overflow") => ({
+      ...shellCommand(`request_mutation_global_${String(index)}`),
+      expectedProjectRevisionId: "projectrevision_current",
+      projectId: `project_${String(index)}`,
+      transaction: {
+        id: `transaction_${String(index)}`,
+        operations: [
+          { eventId: "chord_fixture", type: "replace_chord_value", value: { kind: "no_chord" } },
+        ],
+        parentTransactionId: null,
+      },
+      type: "project.commit_edit_transaction",
+    });
+    const accepted = Array.from({ length: 32 }, (_, index) =>
+      gateway.execute(mutation(index), sender),
+    );
+
+    const overflow = await gateway.execute(mutation("overflow"), sender);
+    expect(overflow.response).toMatchObject({ code: "busy", retryable: true });
+
+    release();
+    await Promise.all(accepted);
+  });
 });
