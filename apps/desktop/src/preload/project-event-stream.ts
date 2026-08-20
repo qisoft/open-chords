@@ -25,7 +25,8 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
     if (!Number.isSafeInteger(eventSequence) || eventSequence < 0) {
       throw new Error("Project event sequence must be a non-negative safe integer");
     }
-    this.#lastSequences.set(projectId, eventSequence);
+    const currentSequence = this.#lastSequences.get(projectId) ?? 0;
+    if (eventSequence > currentSequence) this.#lastSequences.set(projectId, eventSequence);
   }
 
   async accept(rawEvent: unknown): Promise<ProjectStreamUpdate<TSnapshot>> {
@@ -66,6 +67,6 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
       this.#lastSequences.set(event.projectId, event.sequence);
       return { event, kind: "event" };
     }
-    return this.accept(event);
+    throw new Error("Project snapshot recovery did not close the event gap");
   }
 }

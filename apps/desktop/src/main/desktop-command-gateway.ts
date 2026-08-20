@@ -8,19 +8,33 @@ import {
   type DesktopCommand,
   type DesktopResponse,
 } from "@open-chords/contracts";
-import type { EditTransaction, ProjectContract } from "@open-chords/domain";
+import {
+  parseProjectContract,
+  type EditTransaction,
+  type ProjectContract,
+} from "@open-chords/domain";
 
-const APP_ENTRY_URL = "open-chords://app/index.html";
+import { APP_ENTRY_URL } from "./desktop-origin.ts";
+
 const MAX_COMMAND_BYTES = 256 * 1024;
 const MAX_CONCURRENT_READS = 32;
 const MAX_INVALID_COMMANDS = 3;
 const MAX_TRACKED_INVALID_SENDERS = 1_024;
 const MAX_MUTATIONS_PER_PROJECT = 32;
+const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
+
+export type DesktopSecurityConfiguration = {
+  contextIsolation: boolean;
+  nodeIntegration: boolean;
+  sandbox: boolean;
+  webSecurity: boolean;
+};
 
 export type DesktopSenderContext = {
   frameUrl: string;
   generationId: string;
   isMainFrame: boolean;
+  security: DesktopSecurityConfiguration;
   senderId: number;
 };
 
@@ -60,7 +74,11 @@ export class DesktopCommandGateway {
     sender: DesktopSenderContext,
     expectedType?: DesktopCommand["type"],
   ): Promise<DesktopGatewayResult> {
-    if (!sender.isMainFrame || sender.frameUrl !== APP_ENTRY_URL) {
+    if (
+      !sender.isMainFrame ||
+      sender.frameUrl !== APP_ENTRY_URL ||
+      !isSecureRendererConfiguration(sender.security)
+    ) {
       return {
         action: "destroy_sender",
         response: errorResponse("unauthorized_sender", "Renderer is not authorized", false),
@@ -95,12 +113,7 @@ export class DesktopCommandGateway {
         action: "none",
         response: DesktopResponseSchema.parse({
           ...responseEnvelope(command),
-          security: {
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: true,
-            webSecurity: true,
-          },
+          security: sender.security,
           type: "shell.security_snapshot",
         }),
       };
@@ -129,13 +142,22 @@ export class DesktopCommandGateway {
           response: errorResponse("project_not_found", "Project was not found", false, command),
         };
       }
+      const project = parseProjectContract(snapshot.project);
+      if (project.id !== command.projectId) {
+        throw new Error("Project authority returned a snapshot for a different Project");
+      }
+      const response = {
+        ...responseEnvelope(command),
+        ...snapshot,
+        project,
+        type: "project.snapshot",
+      } as const;
+      if (encodedSize(response) > MAX_SNAPSHOT_BYTES) {
+        throw new Error("Project snapshot exceeds the size limit");
+      }
       return {
         action: "none",
-        response: DesktopResponseSchema.parse({
-          ...responseEnvelope(command),
-          ...snapshot,
-          type: "project.snapshot",
-        }),
+        response: DesktopResponseSchema.parse(response),
       };
     } catch {
       return {
@@ -241,6 +263,15 @@ export class DesktopCommandGateway {
       response: errorResponse("invalid_command", message, false, correlationEnvelope(rawCommand)),
     };
   }
+}
+
+function isSecureRendererConfiguration(configuration: DesktopSecurityConfiguration): boolean {
+  return (
+    configuration.contextIsolation &&
+    !configuration.nodeIntegration &&
+    configuration.sandbox &&
+    configuration.webSecurity
+  );
 }
 
 function invalidCountKey(sender: DesktopSenderContext): string {

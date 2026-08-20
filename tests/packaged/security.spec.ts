@@ -118,6 +118,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     for (const resourceUrl of renderer.resourceUrls) {
       expect(allowedAssets.has(new URL(resourceUrl).pathname.slice(1))).toBe(true);
     }
+    expect(renderer.undeclaredAssetStatus).toBe(404);
 
     const secondInstanceExitCode = await new Promise<number | null>((resolve, reject) => {
       const child = spawn(executablePath, [], { stdio: "ignore" });
@@ -189,6 +190,7 @@ const RendererSnapshotSchema = z.object({
     type: z.literal("shell.security_snapshot"),
   }),
   shellKeys: z.array(z.string()),
+  undeclaredAssetStatus: z.number().int(),
   url: z.string(),
 });
 
@@ -216,7 +218,15 @@ async function inspectPackagedRenderer(
 
 async function evaluateRendererTarget(webSocketUrl: string) {
   const expression = `new Promise((resolve) => {
-    const inspect = async () => resolve({
+    const inspect = async () => {
+      await new Promise((probeComplete) => {
+        const image = new Image();
+        image.addEventListener("load", probeComplete, { once: true });
+        image.addEventListener("error", probeComplete, { once: true });
+        image.src = "open-chords://app/asset-manifest.json";
+        document.body.append(image);
+      });
+      resolve({
       apiKeys: Object.keys(window.openChords).sort(),
       heading: document.querySelector("h1")?.textContent ?? null,
       missingProject: await window.openChords.project.getSnapshot("project_missing"),
@@ -233,13 +243,15 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       security: await window.openChords.shell.getSecuritySnapshot(),
       shellKeys: Object.keys(window.openChords.shell).sort(),
       url: window.location.href,
-    });
+      });
+    };
     if (document.readyState === "complete") void inspect();
     else window.addEventListener("load", () => void inspect(), { once: true });
   })`;
 
   return new Promise<z.infer<typeof RendererSnapshotSchema>>((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
+    let undeclaredAssetStatus: number | undefined;
     const timeout = setTimeout(() => {
       socket.close();
       reject(new Error("Renderer CDP evaluation timed out"));
@@ -256,8 +268,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       socket.send(
         JSON.stringify({
           id: 1,
-          method: "Runtime.evaluate",
-          params: { awaitPromise: true, expression, returnByValue: true },
+          method: "Network.enable",
         }),
       );
     });
@@ -270,10 +281,34 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         const text = await decodeWebSocketMessage(rawData);
         if (text === null) return;
         const rawResponse: unknown = JSON.parse(text);
-        if (!z.object({ id: z.literal(1) }).safeParse(rawResponse).success) return;
+        const networkResponse = z
+          .object({
+            method: z.literal("Network.responseReceived"),
+            params: z.object({ response: z.object({ status: z.number(), url: z.string() }) }),
+          })
+          .safeParse(rawResponse);
+        if (networkResponse.success) {
+          if (
+            networkResponse.data.params.response.url === "open-chords://app/asset-manifest.json"
+          ) {
+            undeclaredAssetStatus = networkResponse.data.params.response.status;
+          }
+          return;
+        }
+        if (z.object({ id: z.literal(1) }).safeParse(rawResponse).success) {
+          socket.send(
+            JSON.stringify({
+              id: 2,
+              method: "Runtime.evaluate",
+              params: { awaitPromise: true, expression, returnByValue: true },
+            }),
+          );
+          return;
+        }
+        if (!z.object({ id: z.literal(2) }).safeParse(rawResponse).success) return;
         const response = z
           .object({
-            id: z.literal(1),
+            id: z.literal(2),
             result: z.object({
               exceptionDetails: z.unknown().optional(),
               result: z.object({ value: z.unknown().optional() }),
@@ -284,7 +319,13 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         if (response.data.result.exceptionDetails !== undefined) {
           throw new Error("Renderer CDP evaluation threw");
         }
-        const snapshot = RendererSnapshotSchema.parse(response.data.result.result.value);
+        const snapshotValue = z
+          .record(z.string(), z.unknown())
+          .parse(response.data.result.result.value);
+        const snapshot = RendererSnapshotSchema.parse({
+          ...snapshotValue,
+          undeclaredAssetStatus,
+        });
         clearTimeout(timeout);
         socket.close();
         resolve(snapshot);

@@ -57,4 +57,24 @@ describe("ProjectEventStream", () => {
     expect(await second).toMatchObject({ event: { sequence: 9 }, kind: "event" });
     expect(await stream.accept(event(8))).toEqual({ kind: "ignored" });
   });
+
+  it("does not move the sequence backwards when an older snapshot arrives late", async () => {
+    const stream = new ProjectEventStream(async () => ({ eventSequence: 0 }));
+    stream.synchronize("project_fixture", 8);
+    stream.synchronize("project_fixture", 5);
+
+    expect(await stream.accept(event(6))).toEqual({ kind: "ignored" });
+  });
+
+  it("stops recovery when a snapshot makes no progress", async () => {
+    const refresh = vi.fn<() => Promise<{ eventSequence: number }>>(async () => {
+      if (refresh.mock.calls.length > 1) throw new Error("recovery repeated without progress");
+      return { eventSequence: 4 };
+    });
+    const stream = new ProjectEventStream(refresh);
+    stream.synchronize("project_fixture", 4);
+
+    await expect(stream.accept(event(7))).rejects.toThrow(/did not close the event gap/);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
 });

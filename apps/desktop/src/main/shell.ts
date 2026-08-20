@@ -2,8 +2,15 @@ import { join } from "node:path";
 
 import { app, BrowserWindow, type Session, type WebContents } from "electron";
 
-export const APP_ENTRY_URL = "open-chords://app/index.html";
+import { APP_ENTRY_URL } from "./desktop-origin.ts";
+
 export const PRIMARY_RENDERER_PARTITION = "persist:open-chords-primary";
+export const PRIMARY_RENDERER_SECURITY_CONFIGURATION = {
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+  webSecurity: true,
+} as const;
 
 const hardenedSessions = new WeakSet<Session>();
 const hardenedContents = new WeakSet<WebContents>();
@@ -52,19 +59,16 @@ export function createDesktopWindow(generationId: string): BrowserWindow {
       additionalArguments: [`--open-chords-generation=${generationId}`],
       allowRunningInsecureContent: false,
       autoplayPolicy: "document-user-activation-required",
-      contextIsolation: true,
+      ...PRIMARY_RENDERER_SECURITY_CONFIGURATION,
       devTools: !app.isPackaged,
       enableWebSQL: false,
       navigateOnDragDrop: false,
-      nodeIntegration: false,
       nodeIntegrationInSubFrames: false,
       nodeIntegrationInWorker: false,
       partition: PRIMARY_RENDERER_PARTITION,
       preload: join(__dirname, "../preload/preload.cjs"),
       safeDialogs: true,
-      sandbox: true,
       spellcheck: false,
-      webSecurity: true,
       webviewTag: false,
     },
   });

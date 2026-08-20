@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { parseProjectContract } from "@open-chords/domain";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,7 +14,26 @@ const sender = {
   generationId: "generation_fixture",
   isMainFrame: true,
   senderId: 7,
+  security: {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    webSecurity: true,
+  },
 } as const;
+
+const fixturePath = join(
+  import.meta.dirname,
+  "../packages/testkit/contracts/v1/valid/project-envelope.json",
+);
+
+function readGoldenProject() {
+  const envelope: unknown = JSON.parse(readFileSync(fixturePath, "utf8"));
+  if (typeof envelope !== "object" || envelope === null || !("payload" in envelope)) {
+    throw new Error("Golden Project envelope is missing its payload");
+  }
+  return parseProjectContract(envelope.payload);
+}
 
 function shellCommand(requestId = "request_security") {
   return {
@@ -92,6 +115,88 @@ describe("DesktopCommandGateway", () => {
 
     expect(result.action).toBe("reload_generation");
     expect(result.response).toMatchObject({ code: "invalid_generation" });
+  });
+
+  it("destroys a renderer whose effective security configuration is weaker", async () => {
+    const gateway = new DesktopCommandGateway(createAuthority());
+    const result = await gateway.execute(shellCommand(), {
+      ...sender,
+      security: { ...sender.security, sandbox: false },
+    });
+
+    expect(result.action).toBe("destroy_sender");
+    expect(result.response).toMatchObject({ code: "unauthorized_sender" });
+  });
+
+  it("rejects snapshots for a different Project before crossing IPC", async () => {
+    const project = { ...readGoldenProject(), id: "project_other" };
+    const authority = createAuthority({
+      getSnapshot: async () => ({
+        eventSequence: 1,
+        project,
+        projectRevisionId: "projectrevision_fixture",
+      }),
+    });
+    const gateway = new DesktopCommandGateway(authority);
+
+    const result = await gateway.execute(
+      {
+        ...shellCommand("request_wrong_project"),
+        projectId: "project_fixture",
+        type: "project.get_snapshot",
+      },
+      sender,
+    );
+
+    expect(result.response).toMatchObject({ code: "internal_error", type: "desktop.error" });
+  });
+
+  it("revalidates full Project invariants before returning a snapshot", async () => {
+    const project = structuredClone(readGoldenProject());
+    project.analysisRevisions[0]!.timeline.chordEvents[0]!.endSample += 1;
+    const authority = createAuthority({
+      getSnapshot: async () => ({
+        eventSequence: 1,
+        project,
+        projectRevisionId: "projectrevision_fixture",
+      }),
+    });
+    const gateway = new DesktopCommandGateway(authority);
+
+    const result = await gateway.execute(
+      {
+        ...shellCommand("request_invalid_project"),
+        projectId: project.id,
+        type: "project.get_snapshot",
+      },
+      sender,
+    );
+
+    expect(result.response).toMatchObject({ code: "internal_error", type: "desktop.error" });
+  });
+
+  it("rejects an oversized snapshot before returning it over IPC", async () => {
+    const project = structuredClone(readGoldenProject());
+    project.extensions["org.openchords.oversized"] = "x".repeat(17 * 1024 * 1024);
+    const authority = createAuthority({
+      getSnapshot: async () => ({
+        eventSequence: 1,
+        project,
+        projectRevisionId: "projectrevision_fixture",
+      }),
+    });
+    const gateway = new DesktopCommandGateway(authority);
+
+    const result = await gateway.execute(
+      {
+        ...shellCommand("request_oversized_project"),
+        projectId: project.id,
+        type: "project.get_snapshot",
+      },
+      sender,
+    );
+
+    expect(result.response).toMatchObject({ code: "internal_error", type: "desktop.error" });
   });
 
   it("caps concurrent reads at 32", async () => {

@@ -9,6 +9,7 @@ import { ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
 import {
   DesktopCommandGateway,
   type DesktopGatewayAction,
+  type DesktopSenderContext,
   type ProjectAuthority,
 } from "./desktop-command-gateway.ts";
 
@@ -21,8 +22,10 @@ const commandChannels = [
 ] as const satisfies ReadonlyArray<readonly [string, CommandType]>;
 
 export type DesktopIpcOptions = {
-  generationFor(sender: WebContents): string | null;
   onSenderAction(action: Exclude<DesktopGatewayAction, "none">, sender: WebContents): void;
+  rendererContextFor(
+    sender: WebContents,
+  ): Pick<DesktopSenderContext, "generationId" | "security"> | null;
 };
 
 export function installDesktopIpc(authority: ProjectAuthority, options: DesktopIpcOptions): void {
@@ -30,8 +33,7 @@ export function installDesktopIpc(authority: ProjectAuthority, options: DesktopI
 
   for (const [channel, expectedType] of commandChannels) {
     ipcMain.handle(channel, async (event, rawCommand: unknown) => {
-      const generationId = options.generationFor(event.sender);
-      const sender = senderContext(event, generationId);
+      const sender = senderContext(event, options.rendererContextFor(event.sender));
       const result = await gateway.execute(rawCommand, sender, expectedType);
       if (result.action !== "none") options.onSenderAction(result.action, event.sender);
       return result.response;
@@ -44,13 +46,22 @@ export function publishProjectEvent(sender: WebContents, rawEvent: ProjectEvent)
   if (!sender.isDestroyed()) sender.send(DESKTOP_IPC_CHANNELS.projectChanged, event);
 }
 
-function senderContext(event: IpcMainInvokeEvent, generationId: string | null) {
+function senderContext(
+  event: IpcMainInvokeEvent,
+  rendererContext: Pick<DesktopSenderContext, "generationId" | "security"> | null,
+) {
   const senderFrame = event.senderFrame;
   const isMainFrame = senderFrame !== null && senderFrame === event.sender.mainFrame;
   return {
     frameUrl: isMainFrame ? senderFrame.url : "",
-    generationId: generationId ?? "generation_missing",
+    generationId: rendererContext?.generationId ?? "generation_missing",
     isMainFrame,
+    security: rendererContext?.security ?? {
+      contextIsolation: false,
+      nodeIntegration: true,
+      sandbox: false,
+      webSecurity: false,
+    },
     senderId: event.sender.id,
   };
 }

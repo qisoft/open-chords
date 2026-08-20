@@ -5,14 +5,25 @@ import { app, type BrowserWindow, type WebContents } from "electron";
 
 import { installDesktopIpc } from "./desktop-ipc.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
-import { createDesktopWindow, hardenWebContents } from "./shell.ts";
+import {
+  createDesktopWindow,
+  hardenWebContents,
+  PRIMARY_RENDERER_SECURITY_CONFIGURATION,
+} from "./shell.ts";
 import { unavailableProjectAuthority } from "./unavailable-project-authority.ts";
+import { presentDesktopWindow } from "./window-lifecycle.ts";
 
 registerRendererScheme();
 
 const ownsSingleInstance = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
-const rendererGenerations = new Map<number, string>();
+const rendererContexts = new Map<
+  number,
+  {
+    generationId: string;
+    security: typeof PRIMARY_RENDERER_SECURITY_CONFIGURATION;
+  }
+>();
 
 if (!ownsSingleInstance) {
   app.quit();
@@ -20,12 +31,11 @@ if (!ownsSingleInstance) {
   app.on("web-contents-created", (_event, contents) => hardenWebContents(contents));
   app.on("second-instance", () => {
     const window = createOrFocusWindow();
-    if (window.isMinimized()) window.restore();
-    window.focus();
+    presentDesktopWindow(window);
   });
 
   app.on("activate", () => {
-    createOrFocusWindow();
+    presentDesktopWindow(createOrFocusWindow());
   });
 
   app.on("window-all-closed", () => {
@@ -37,8 +47,8 @@ if (!ownsSingleInstance) {
     .then(() => {
       installRendererProtocol(join(__dirname, "../renderer"));
       installDesktopIpc(unavailableProjectAuthority, {
-        generationFor: (sender) => rendererGenerations.get(sender.id) ?? null,
         onSenderAction: (_action, sender) => replaceCompromisedRenderer(sender),
+        rendererContextFor: (sender) => rendererContexts.get(sender.id) ?? null,
       });
       createOrFocusWindow();
       return undefined;
@@ -54,9 +64,12 @@ function createOrFocusWindow() {
     const window = createDesktopWindow(generationId);
     mainWindow = window;
     const webContentsId = window.webContents.id;
-    rendererGenerations.set(webContentsId, generationId);
+    rendererContexts.set(webContentsId, {
+      generationId,
+      security: PRIMARY_RENDERER_SECURITY_CONFIGURATION,
+    });
     window.webContents.once("destroyed", () => {
-      rendererGenerations.delete(webContentsId);
+      rendererContexts.delete(webContentsId);
     });
     window.once("closed", () => {
       if (mainWindow === window) mainWindow = null;
@@ -67,7 +80,7 @@ function createOrFocusWindow() {
 
 function replaceCompromisedRenderer(sender: WebContents): void {
   const isMainRenderer = mainWindow?.webContents === sender;
-  rendererGenerations.delete(sender.id);
+  rendererContexts.delete(sender.id);
   if (!sender.isDestroyed()) sender.close({ waitForBeforeUnload: false });
   if (isMainRenderer) {
     mainWindow = null;
