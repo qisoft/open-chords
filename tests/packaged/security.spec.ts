@@ -41,9 +41,10 @@ test("packaged shell flips every security fuse explicitly", async () => {
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {
   const rawManifest: unknown = JSON.parse(
-    extractFile(join(resourcesPath, "app.asar"), "dist/renderer/asset-manifest.json").toString(
-      "utf8",
-    ),
+    extractFile(
+      join(resourcesPath, "app.asar"),
+      join("dist", "renderer", "asset-manifest.json"),
+    ).toString("utf8"),
   );
   const manifest = z
     .record(
