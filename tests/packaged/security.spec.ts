@@ -438,6 +438,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
               id: 2,
               method: "Runtime.evaluate",
               params: {
+                allowUnsafeEvalBlockedByCSP: false,
                 awaitPromise: true,
                 expression: `new Promise((resolve) => {
                   const probe = () => {
