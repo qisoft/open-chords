@@ -1671,6 +1671,7 @@ export class ProjectLibrary {
       );
 
     const locators = selected?.locators ?? mergeCatalogWithEntries({}, entries);
+    if (selected === undefined && locators.size === 0) return locators;
     const locatorsBySourceId = Object.fromEntries(locators);
     const unchanged =
       selected !== undefined &&
@@ -1686,9 +1687,15 @@ export class ProjectLibrary {
     if (invalidPaths.length > 0)
       await this.#quarantineInvalidCatalogs(invalidPaths, selected?.path);
     const content = canonicalSerialize(catalog);
-    await atomicWriteFile(paths[1]!, content);
-    await atomicWriteFile(paths[0]!, content);
-    await this.#faultInjector("after_catalog_durable");
+    const copiesAreCurrent =
+      invalidPaths.length === 0 &&
+      candidates.length === paths.length &&
+      candidates.every(({ catalog: candidate }) => canonicalSerialize(candidate) === content);
+    if (!copiesAreCurrent) {
+      await atomicWriteFile(paths[1]!, content);
+      await atomicWriteFile(paths[0]!, content);
+      await this.#faultInjector("after_catalog_durable");
+    }
     return locators;
   }
 
