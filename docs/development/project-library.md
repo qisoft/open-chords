@@ -24,13 +24,13 @@ Project payloads and Project Revision records are canonical JSON objects address
 4. atomically replace `HEAD.json`, sync the resulting file, and sync directories where the platform permits it;
 5. reopen and validate the committed Head before returning success or notifying subscribers.
 
-The project index is rewritten from verified Heads and is never used as authority. Tests inject failures after payload sync, after revision publication, immediately before Head replacement, and immediately after it; reopening exposes either the old or new complete Head, never a mixed payload.
+The project index is rewritten from verified Heads and is never used as authority. A Head must identify the newest member of one unambiguous, parent-linked revision-pointer chain. Tests inject failures after payload sync, after revision publication, immediately before Head replacement, and immediately after it; reopening exposes either the old or new complete Head, never a mixed payload.
 
 ## Startup and recovery
 
 Startup removes abandoned staging directories before accepting work. Every active Head, revision object, content hash, Project envelope, domain invariant, Source record, and receipt is revalidated. If the active Head cannot be resolved, it is moved to `quarantine/` and the newest verified revision-pointer entry is republished as Head. Recovery writes an explicit loss report. If no verified revision exists, the Project remains listed as `damaged` and reads fail rather than inventing or silently repairing state.
 
-Opening an older supported schema preserves its restored revision before running registered migrations. Each migration produces and validates another Project Revision before Head changes. A failed migration leaves the prior revision readable and unchanged. Rollback likewise publishes a new revision from a compatible retained payload; it does not rewrite history or downgrade in place.
+Opening an older supported schema automatically runs registered migrations after preserving and validating its current revision. Each migration produces and validates another Project Revision before Head changes. A failed or unavailable migration leaves the prior revision readable, unchanged, and read-only. Rollback likewise publishes a new revision from a compatible retained payload; it does not rewrite history or downgrade in place.
 
 ## Location and deletion policy
 
@@ -38,7 +38,7 @@ The state root holds only the atomic active-location record and the default Libr
 
 The default path policy rejects UNC paths, known network filesystem types, and known cloud-sync path roots such as iCloud Drive/CloudStorage, OneDrive, Dropbox, and Google Drive. A platform adapter can make this policy stricter without changing the Project Library interface.
 
-Deleting a Project first moves its owned records to Library Trash. Restore is reversible. Immediate permanent deletion requires the exact Project ID as confirmation; default Empty Trash selects records older than 30 days. These operations remove Library-owned records only and never delete external Source media, export targets, or already-created archives.
+Deleting a Project first moves its owned records to Library Trash. Restore is reversible. Immediate permanent deletion requires the exact Project ID as confirmation; default Empty Trash selects records older than 30 days. After permanent deletion, the Library reclaims only content-addressed objects that no remaining active or trashed revision references. These operations remove Library-owned records only and never delete external Source media, export targets, or already-created archives.
 
 ## Verification
 
@@ -49,4 +49,4 @@ pnpm exec vitest run tests/project-library.test.ts
 pnpm validate
 ```
 
-The focused suite covers durable reopen, subscriber ordering, crash injection, corrupt-Head recovery, damaged visibility, newer-minor read-only behavior, migration failure, migration/rollback history, Trash, explicit deletion, relocation, and index rebuilding.
+The focused suite covers durable reopen, subscriber ordering, crash injection, Head-to-ledger verification, corrupt-Head recovery, damaged visibility, newer-minor read-only behavior, startup migration and migration failure, migration/rollback history, reference-aware deletion, Trash validation, relocation, and index rebuilding.

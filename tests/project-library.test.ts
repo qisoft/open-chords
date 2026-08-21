@@ -220,6 +220,29 @@ describe("ProjectLibrary", () => {
     expect(readdirSync(join(recovered.activeRoot, "quarantine"))).toHaveLength(1);
   });
 
+  it("rejects an altered Head that is not the exact verified ledger pointer", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-head-ledger-");
+    const library = await openProjectLibrary({ stateRoot });
+    const created = await library.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const headPath = join(library.activeRoot, "projects", "project_golden", "HEAD.json");
+    const alteredHead = z
+      .object({ sequence: z.number() })
+      .loose()
+      .parse(JSON.parse(readFileSync(headPath, "utf8")));
+    writeFileSync(headPath, JSON.stringify({ ...alteredHead, sequence: 99 }));
+
+    const recovered = await openProjectLibrary({ stateRoot });
+    expect((await recovered.getSnapshot("project_golden"))?.projectRevisionId).toBe(
+      created.projectRevisionId,
+    );
+    expect(recovered.listProjects()[0]?.recoveryReport?.lostProjectRevisionId).toBe(
+      created.projectRevisionId,
+    );
+  });
+
   it("keeps a Project visible as damaged when no verified revision remains", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-damaged-");
     const library = await openProjectLibrary({ stateRoot });
@@ -337,6 +360,59 @@ describe("ProjectLibrary", () => {
     );
   });
 
+  it("automatically migrates an existing older Library when it opens", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-open-migration-");
+    const olderApplication = await openProjectLibrary({ stateRoot });
+    await olderApplication.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const migration: ProjectMigration = {
+      fromVersion: "1.0",
+      migrate: (rawEnvelope) => {
+        const envelope = structuredClone(ProjectEnvelopeSchema.parse(rawEnvelope));
+        envelope.schemaVersion = "1.1";
+        envelope.payload.schemaVersion = "1.1";
+        return envelope;
+      },
+      toVersion: "1.1",
+    };
+
+    const currentApplication = await openProjectLibrary({
+      currentSchemaVersion: "1.1",
+      migrations: [migration],
+      stateRoot,
+    });
+    const migrated = await currentApplication.readProject("project_golden");
+    expect(migrated.compatibility).toBe("writable");
+    expect(migrated.envelope.schemaVersion).toBe("1.1");
+    expect(migrated.revisions.map(({ reason }) => reason)).toEqual(["created", "migration"]);
+  });
+
+  it("keeps an existing older revision read-only when automatic migration fails", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-open-migration-failure-");
+    const olderApplication = await openProjectLibrary({ stateRoot });
+    const created = await olderApplication.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+
+    const currentApplication = await openProjectLibrary({
+      currentSchemaVersion: "1.1",
+      migrations: [
+        {
+          fromVersion: "1.0",
+          migrate: () => {
+            throw new Error("migration fixture failed");
+          },
+          toVersion: "1.1",
+        },
+      ],
+      stateRoot,
+    });
+    const unchanged = await currentApplication.readProject("project_golden");
+    expect(unchanged.compatibility).toBe("read_only");
+    expect(unchanged.projectRevisionId).toBe(created.projectRevisionId);
+    expect(unchanged.revisions).toHaveLength(1);
+  });
+
   it("supports recoverable Trash without deleting external media or export targets", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-trash-");
     const library = await openProjectLibrary({
@@ -371,6 +447,7 @@ describe("ProjectLibrary", () => {
     ).rejects.toThrow(/confirmation/i);
     await library.permanentlyDeleteProject("project_golden", "project_golden");
     expect(library.listProjects()).toEqual([]);
+    expect(readdirSync(join(library.activeRoot, "objects", "sha256"))).toEqual([]);
   });
 
   it("relocates only to a local path, atomically switches, and retains the old copy", async () => {
@@ -392,6 +469,25 @@ describe("ProjectLibrary", () => {
 
     const cloudTarget = join(destinationParent, "Dropbox", "Open Chords");
     await expect(reopened.relocate(cloudTarget)).rejects.toThrow(/local disk/i);
+  });
+
+  it("refuses relocation when a trashed Project is corrupt", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-relocate-trash-state-");
+    const destinationParent = await temporaryDirectory(
+      "open-chords-library-relocate-trash-target-",
+    );
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    await library.trashProject("project_golden");
+    corruptPayload(library.activeRoot, "project_golden", "trash");
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(reopened.listProjects()).toEqual([
+      expect.objectContaining({ projectId: "project_golden", status: "damaged" }),
+    ]);
+    await expect(reopened.relocate(join(destinationParent, "Moved Library"))).rejects.toThrow(
+      /complete validation/i,
+    );
   });
 
   it("rejects a cloud-synchronized active Library path before initializing Project data", async () => {
@@ -418,9 +514,17 @@ describe("ProjectLibrary", () => {
 });
 
 function corruptActivePayload(activeRoot: string, projectId: string): void {
+  corruptPayload(activeRoot, projectId, "projects");
+}
+
+function corruptPayload(
+  activeRoot: string,
+  projectId: string,
+  container: "projects" | "trash",
+): void {
   const head = z
     .object({ revisionObjectHash: z.string() })
-    .parse(JSON.parse(readFileSync(join(activeRoot, "projects", projectId, "HEAD.json"), "utf8")));
+    .parse(JSON.parse(readFileSync(join(activeRoot, container, projectId, "HEAD.json"), "utf8")));
   const revisionPath = objectPath(activeRoot, head.revisionObjectHash);
   const revision = z
     .object({ payloadObjectHash: z.string() })

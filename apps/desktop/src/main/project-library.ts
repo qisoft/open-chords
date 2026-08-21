@@ -123,6 +123,7 @@ type RevisionSnapshot = {
 
 type LibraryEntry = {
   compatibility: "read_only" | "writable";
+  location: "active" | "trashed";
   recoveryReport?: ProjectRecoveryReport;
   revision?: RevisionSnapshot;
   revisions: RevisionSnapshot[];
@@ -155,6 +156,13 @@ export class ProjectLibraryReadOnlyError extends Error {
   constructor(schemaVersion: string) {
     super(`Project schema ${schemaVersion} is read-only in this application`);
     this.name = "ProjectLibraryReadOnlyError";
+  }
+}
+
+class ProjectStorageCorruptionError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "ProjectStorageCorruptionError";
   }
 }
 
@@ -273,7 +281,7 @@ export class ProjectLibrary {
     }>;
   }> {
     const entry = this.#entries.get(projectId);
-    if (entry === undefined || entry.status === "trashed")
+    if (entry === undefined || entry.location === "trashed")
       throw new Error(`Project ${projectId} was not found`);
     if (entry.status === "damaged" || entry.revision === undefined)
       throw new ProjectLibraryDamagedError(projectId);
@@ -299,7 +307,7 @@ export class ProjectLibrary {
     projectRevisionId: string;
   } | null> {
     const entry = this.#entries.get(projectId);
-    if (entry === undefined || entry.status === "trashed") return null;
+    if (entry === undefined || entry.location === "trashed") return null;
     if (entry.status === "damaged" || entry.revision === undefined)
       throw new ProjectLibraryDamagedError(projectId);
     return {
@@ -318,7 +326,7 @@ export class ProjectLibrary {
   > {
     return this.#serializeMutation(async () => {
       const entry = this.#entries.get(input.projectId);
-      if (entry === undefined || entry.status === "trashed") return { notFound: true };
+      if (entry === undefined || entry.location === "trashed") return { notFound: true };
       if (entry.status === "damaged" || entry.revision === undefined)
         throw new ProjectLibraryDamagedError(input.projectId);
       if (entry.compatibility === "read_only") return { readOnly: true };
@@ -373,7 +381,7 @@ export class ProjectLibrary {
   async trashProject(projectId: string): Promise<void> {
     await this.#serializeMutation(async () => {
       const entry = this.#entries.get(projectId);
-      if (entry === undefined || entry.status === "trashed")
+      if (entry === undefined || entry.location === "trashed")
         throw new Error("Project was not found");
       const source = this.#projectDirectory(projectId, "active");
       const target = this.#projectDirectory(projectId, "trashed");
@@ -384,7 +392,7 @@ export class ProjectLibrary {
         schemaVersion: "1.0",
         trashedAt: this.#now().toISOString(),
       });
-      await writeDurableFile(join(source, "TRASH.json"), canonicalSerialize(trashRecord), "wx");
+      await writeDurableFile(join(source, "TRASH.json"), canonicalSerialize(trashRecord));
       await rename(source, target);
       await syncDirectory(dirname(source));
       await syncDirectory(dirname(target));
@@ -395,7 +403,7 @@ export class ProjectLibrary {
   async restoreTrashedProject(projectId: string): Promise<void> {
     await this.#serializeMutation(async () => {
       const entry = this.#entries.get(projectId);
-      if (entry?.status !== "trashed") throw new Error("Trashed Project was not found");
+      if (entry?.location !== "trashed") throw new Error("Trashed Project was not found");
       const source = this.#projectDirectory(projectId, "trashed");
       const target = this.#projectDirectory(projectId, "active");
       await rm(join(source, "TRASH.json"), { force: true });
@@ -411,10 +419,11 @@ export class ProjectLibrary {
       throw new Error("Permanent deletion confirmation does not match");
     await this.#serializeMutation(async () => {
       const entry = this.#entries.get(projectId);
-      if (entry?.status !== "trashed") throw new Error("Project must be in Library Trash");
+      if (entry?.location !== "trashed") throw new Error("Project must be in Library Trash");
       await rm(this.#projectDirectory(projectId, "trashed"), { recursive: true });
       await syncDirectory(join(this.#activeRoot, "trash"));
       await this.#refreshEntries();
+      await this.#collectUnreferencedObjects();
     });
   }
 
@@ -424,7 +433,7 @@ export class ProjectLibrary {
       const deleted: string[] = [];
       for (const [projectId, entry] of this.#entries) {
         if (
-          entry.status === "trashed" &&
+          entry.location === "trashed" &&
           entry.trashRecord !== undefined &&
           new Date(entry.trashRecord.trashedAt) < threshold
         ) {
@@ -434,6 +443,7 @@ export class ProjectLibrary {
       }
       if (deleted.length > 0) await syncDirectory(join(this.#activeRoot, "trash"));
       await this.#refreshEntries();
+      await this.#collectUnreferencedObjects();
       return deleted.toSorted();
     });
   }
@@ -503,6 +513,8 @@ export class ProjectLibrary {
     ]);
     await scavengeDirectory(join(this.#activeRoot, "staging"));
     await this.#refreshEntries();
+    await this.#migrateExistingProjects();
+    await this.#collectUnreferencedObjects();
   }
 
   async #refreshEntries(): Promise<void> {
@@ -532,30 +544,37 @@ export class ProjectLibrary {
       const projectId = directory.name;
       const projectDirectory = join(container, projectId);
       const recoveryReport = await readLatestRecoveryReport(projectDirectory);
-      const trashRecord =
-        location === "trashed"
-          ? await parseJsonFile(join(projectDirectory, "TRASH.json"), TrashRecordSchema).catch(
-              () => undefined,
-            )
-          : undefined;
+      let trashRecord: TrashRecord | undefined;
       try {
+        if (location === "trashed")
+          trashRecord = await parseJsonFile(
+            join(projectDirectory, "TRASH.json"),
+            TrashRecordSchema,
+          );
         const revision = await this.#readHead(projectDirectory, projectId);
         const revisions = await this.#readVerifiedRevisions(projectDirectory, projectId);
         entries.set(projectId, {
           compatibility: this.#compatibilityFor(revision.payload.envelope),
+          location,
           ...(recoveryReport === undefined ? {} : { recoveryReport }),
           revision,
           revisions,
           status: location === "active" ? "active" : "trashed",
           ...(trashRecord === undefined ? {} : { trashRecord }),
         });
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ProjectStorageCorruptionError)) throw error;
         if (location === "trashed") {
+          const revisions = await this.#readVerifiedRevisions(projectDirectory, projectId);
+          const latest = revisions.at(-1);
           entries.set(projectId, {
-            compatibility: "read_only",
+            compatibility:
+              latest === undefined ? "read_only" : this.#compatibilityFor(latest.payload.envelope),
+            location,
             ...(recoveryReport === undefined ? {} : { recoveryReport }),
-            revisions: [],
-            status: "trashed",
+            ...(latest === undefined ? {} : { revision: latest }),
+            revisions,
+            status: "damaged",
             ...(trashRecord === undefined ? {} : { trashRecord }),
           });
           continue;
@@ -571,7 +590,8 @@ export class ProjectLibrary {
     try {
       const rawHead = await parseJsonFile(join(projectDirectory, "HEAD.json"), ProjectHeadSchema);
       lostProjectRevisionId = rawHead.projectRevisionId;
-    } catch {
+    } catch (error) {
+      if (!(error instanceof ProjectStorageCorruptionError)) throw error;
       // The quarantined report still explains that the active Head was unreadable.
     }
     const headPath = join(projectDirectory, "HEAD.json");
@@ -606,6 +626,7 @@ export class ProjectLibrary {
     if (recovered === undefined) {
       return {
         compatibility: "read_only",
+        location: "active",
         recoveryReport: report,
         revisions: [],
         status: "damaged",
@@ -624,6 +645,7 @@ export class ProjectLibrary {
     );
     return {
       compatibility: this.#compatibilityFor(recovered.payload.envelope),
+      location: "active",
       recoveryReport: report,
       revision: recovered,
       revisions,
@@ -633,16 +655,19 @@ export class ProjectLibrary {
 
   async #readHead(projectDirectory: string, projectId: string): Promise<RevisionSnapshot> {
     const head = await parseJsonFile(join(projectDirectory, "HEAD.json"), ProjectHeadSchema);
-    if (head.projectId !== projectId) throw new Error("Project Head belongs to another Project");
-    const revision = await this.#readRevision(
-      head.revisionObjectHash,
-      {
-        projectRevisionId: head.projectRevisionId,
-        revisionObjectHash: head.revisionObjectHash,
-        sequence: head.sequence,
-      },
-      projectId,
-    );
+    if (head.projectId !== projectId)
+      throw new ProjectStorageCorruptionError("Project Head belongs to another Project");
+    const revisions = await this.#readVerifiedRevisions(projectDirectory, projectId);
+    const revision = revisions.at(-1);
+    if (
+      revision === undefined ||
+      revision.pointer.projectRevisionId !== head.projectRevisionId ||
+      revision.pointer.revisionObjectHash !== head.revisionObjectHash ||
+      revision.pointer.sequence !== head.sequence
+    )
+      throw new ProjectStorageCorruptionError(
+        "Project Head is not the latest revision in the verified pointer ledger",
+      );
     return revision;
   }
 
@@ -651,18 +676,46 @@ export class ProjectLibrary {
     projectId: string,
   ): Promise<RevisionSnapshot[]> {
     const revisionsDirectory = join(projectDirectory, "revisions");
-    if (!(await pathExists(revisionsDirectory))) return [];
-    const verified: RevisionSnapshot[] = [];
-    for (const file of (await readdir(revisionsDirectory)).toSorted()) {
+    let files: string[];
+    try {
+      files = await readdir(revisionsDirectory);
+    } catch (error) {
+      if (isMissingPathError(error)) return [];
+      throw error;
+    }
+    const candidates: RevisionSnapshot[] = [];
+    for (const file of files.toSorted()) {
       if (!file.endsWith(".json")) continue;
       try {
         const pointer = await parseJsonFile(join(revisionsDirectory, file), RevisionPointerSchema);
-        verified.push(await this.#readRevision(pointer.revisionObjectHash, pointer, projectId));
-      } catch {
+        candidates.push(await this.#readRevision(pointer.revisionObjectHash, pointer, projectId));
+      } catch (error) {
+        if (!(error instanceof ProjectStorageCorruptionError)) throw error;
         // Invalid immutable revisions are ignored during recovery and remain available for diagnosis.
       }
     }
-    return verified.toSorted((left, right) => left.pointer.sequence - right.pointer.sequence);
+    const sorted = candidates.toSorted(
+      (left, right) =>
+        left.pointer.sequence - right.pointer.sequence ||
+        left.revision.projectRevisionId.localeCompare(right.revision.projectRevisionId),
+    );
+    const verified: RevisionSnapshot[] = [];
+    let expectedSequence = 1;
+    let expectedParent: string | null = null;
+    while (true) {
+      const matching = sorted.filter(
+        ({ pointer, revision }) =>
+          pointer.sequence === expectedSequence &&
+          revision.parentProjectRevisionId === expectedParent,
+      );
+      if (matching.length !== 1) break;
+      const next = matching[0];
+      if (next === undefined) break;
+      verified.push(next);
+      expectedParent = next.revision.projectRevisionId;
+      expectedSequence += 1;
+    }
+    return verified;
   }
 
   async #readRevision(
@@ -675,19 +728,39 @@ export class ProjectLibrary {
       revision.projectRevisionId !== pointer.projectRevisionId ||
       (expectedProjectId !== undefined && revision.projectId !== expectedProjectId)
     ) {
-      throw new Error("Project Revision pointer does not match its immutable object");
+      throw new ProjectStorageCorruptionError(
+        "Project Revision pointer does not match its immutable object",
+      );
     }
     const payload = await this.#readObject(revision.payloadObjectHash, StoredProjectPayloadSchema);
-    validateStoredPayload(payload);
+    try {
+      validateStoredPayload(payload);
+    } catch (error) {
+      throw new ProjectStorageCorruptionError("Stored Project payload is invalid", error);
+    }
     if (payload.envelope.payload.id !== revision.projectId)
-      throw new Error("Project Revision payload belongs to another Project");
+      throw new ProjectStorageCorruptionError(
+        "Project Revision payload belongs to another Project",
+      );
     return { payload, pointer, revision };
   }
 
   async #readObject<T>(hash: string, schema: z.ZodType<T>): Promise<T> {
-    const content = await readFile(this.#objectPath(hash), "utf8");
-    if (hashContent(content) !== hash) throw new Error("Immutable object hash mismatch");
-    return schema.parse(JSON.parse(content));
+    let content: string;
+    try {
+      content = await readFile(this.#objectPath(hash), "utf8");
+    } catch (error) {
+      if (isMissingPathError(error))
+        throw new ProjectStorageCorruptionError("Immutable object is missing", error);
+      throw error;
+    }
+    if (hashContent(content) !== hash)
+      throw new ProjectStorageCorruptionError("Immutable object hash mismatch");
+    try {
+      return schema.parse(JSON.parse(content));
+    } catch (error) {
+      throw new ProjectStorageCorruptionError("Immutable object is invalid", error);
+    }
   }
 
   async #commitPayload(
@@ -822,6 +895,46 @@ export class ProjectLibrary {
     return current;
   }
 
+  async #migrateExistingProjects(): Promise<void> {
+    const candidates = [...this.#entries.entries()].filter(
+      ([, entry]) =>
+        entry.location === "active" &&
+        entry.status === "active" &&
+        entry.revision !== undefined &&
+        isOlderCompatibleSchema(entry.revision.payload.envelope, this.#currentSchemaVersion),
+    );
+    for (const [projectId, entry] of candidates) {
+      if (entry.revision === undefined) continue;
+      try {
+        await this.#migrateUntilCurrent(projectId, entry.revision);
+      } catch (error) {
+        if (isNodeError(error) && error.code !== undefined) throw error;
+        // A failed or unavailable migration leaves the last durable revision readable and read-only.
+        await this.#refreshEntries();
+      }
+    }
+  }
+
+  async #collectUnreferencedObjects(): Promise<void> {
+    const referenced = new Set<string>();
+    for (const entry of this.#entries.values()) {
+      for (const revision of entry.revisions) {
+        referenced.add(revision.pointer.revisionObjectHash);
+        referenced.add(revision.revision.payloadObjectHash);
+      }
+    }
+    const objectsDirectory = join(this.#activeRoot, "objects", "sha256");
+    let removed = false;
+    for (const file of await readdir(objectsDirectory)) {
+      const match = /^([a-f0-9]{64})\.json$/.exec(file);
+      if (match?.[1] === undefined) continue;
+      if (referenced.has(`sha256:${match[1]}`)) continue;
+      await rm(join(objectsDirectory, file));
+      removed = true;
+    }
+    if (removed) await syncDirectory(objectsDirectory);
+  }
+
   #requireWritableEntry(
     projectId: string,
     expectedProjectRevisionId: string,
@@ -923,13 +1036,32 @@ async function readLatestRecoveryReport(
     .filter((file) => file.endsWith(".json"))
     .toSorted();
   const latest = reports.at(-1);
-  return latest === undefined
-    ? undefined
-    : parseJsonFile(join(reportsDirectory, latest), RecoveryReportSchema).catch(() => undefined);
+  if (latest === undefined) return undefined;
+  try {
+    return await parseJsonFile(join(reportsDirectory, latest), RecoveryReportSchema);
+  } catch (error) {
+    if (error instanceof ProjectStorageCorruptionError) return undefined;
+    throw error;
+  }
 }
 
 async function parseJsonFile<T>(path: string, schema: z.ZodType<T>): Promise<T> {
-  return schema.parse(JSON.parse(await readFile(path, "utf8")));
+  let content: string;
+  try {
+    content = await readFile(path, "utf8");
+  } catch (error) {
+    if (isMissingPathError(error))
+      throw new ProjectStorageCorruptionError(
+        `Required storage file is missing: ${basename(path)}`,
+        error,
+      );
+    throw error;
+  }
+  try {
+    return schema.parse(JSON.parse(content));
+  } catch (error) {
+    throw new ProjectStorageCorruptionError(`Storage file is invalid: ${basename(path)}`, error);
+  }
 }
 
 function hashContent(content: string): string {
@@ -1047,6 +1179,25 @@ function compareSchemaVersions(left: string, right: string): number {
   const rightVersion = parseSchemaVersion(right);
   if (leftVersion.major !== rightVersion.major) return leftVersion.major - rightVersion.major;
   return leftVersion.minor - rightVersion.minor;
+}
+
+function isOlderCompatibleSchema(
+  envelope: z.infer<typeof ProjectEnvelopeSchema>,
+  currentVersion: string,
+): boolean {
+  const current = parseSchemaVersion(currentVersion);
+  return [envelope.schemaVersion, envelope.payload.schemaVersion].every((version) => {
+    const candidate = parseSchemaVersion(version);
+    return candidate.major === current.major && candidate.minor < current.minor;
+  });
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    isNodeError(error) &&
+    error.code !== undefined &&
+    ["EISDIR", "ENOENT", "ENOTDIR"].includes(error.code)
+  );
 }
 
 function isNestedPath(parent: string, candidate: string): boolean {
