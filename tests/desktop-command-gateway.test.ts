@@ -199,6 +199,18 @@ describe("DesktopCommandGateway", () => {
     expect(result.response).toMatchObject({ code: "internal_error", type: "desktop.error" });
   });
 
+  it("reports a newer Project schema as read-only instead of a generic failure", async () => {
+    const gateway = new DesktopCommandGateway(
+      createAuthority({ commitEditTransaction: async () => ({ readOnly: true }) }),
+    );
+    const result = await gateway.execute(
+      mutationCommand({ requestId: "request_read_only", transactionId: "transaction_read_only" }),
+      sender,
+    );
+
+    expect(result.response).toMatchObject({ code: "project_read_only", retryable: false });
+  });
+
   it("revalidates full Project invariants before returning a snapshot", async () => {
     const project = structuredClone(readGoldenProject());
     project.analysisRevisions[0]!.timeline.chordEvents[0]!.endSample += 1;

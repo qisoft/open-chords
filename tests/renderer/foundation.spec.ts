@@ -1,4 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { _electron as electron, expect, test } from "@playwright/test";
@@ -6,6 +8,7 @@ import { _electron as electron, expect, test } from "@playwright/test";
 const repositoryRoot = join(import.meta.dirname, "../..");
 
 test("the primary renderer runs only through the hardened application origin", async () => {
+  const userDataDirectory = mkdtempSync(join(tmpdir(), "open-chords-renderer-profile-"));
   let requestCount = 0;
   const server = createServer((_request, response) => {
     requestCount += 1;
@@ -26,7 +29,10 @@ test("the primary renderer runs only through the hardened application origin", a
   for (const [name, value] of Object.entries(process.env)) {
     if (name !== "ELECTRON_RUN_AS_NODE" && value !== undefined) environment[name] = value;
   }
-  const application = await electron.launch({ args: [repositoryRoot], env: environment });
+  const application = await electron.launch({
+    args: [repositoryRoot, `--user-data-dir=${userDataDirectory}`],
+    env: environment,
+  });
 
   try {
     const page = await application.firstWindow();
@@ -70,5 +76,6 @@ test("the primary renderer runs only through the hardened application origin", a
         else resolve();
       });
     });
+    rmSync(userDataDirectory, { force: true, recursive: true });
   }
 });

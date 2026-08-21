@@ -72,6 +72,7 @@ export const DesktopErrorResponseSchema = z.strictObject({
     "invalid_command",
     "invalid_generation",
     "project_not_found",
+    "project_read_only",
     "stale_revision",
     "unauthorized_sender",
   ]),

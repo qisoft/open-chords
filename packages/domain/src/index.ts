@@ -3,6 +3,7 @@ export { materializeEffectiveTimeline, type EffectiveTimeline } from "./projecti
 export {
   EditTransactionSchema,
   ProjectContractSchema,
+  StableIdSchema,
   type EditTransaction,
   type LyricsAlignment,
   type ProjectContract,
