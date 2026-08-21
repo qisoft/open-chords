@@ -198,16 +198,17 @@ describe("ProjectLibrary", () => {
     expect(stored.revisions).toHaveLength(2);
   });
 
-  it("never exposes a partial Head when a crash interrupts publication", async () => {
-    for (const faultPoint of [
-      "after_payload_durable",
-      "after_object_rename",
-      "after_revision_durable",
-      "before_head_replace",
-      "after_head_rename",
-      "after_head_file_sync",
-      "after_head_replace",
-    ] as const satisfies readonly ProjectLibraryFaultPoint[]) {
+  it.each([
+    "after_payload_durable",
+    "after_object_rename",
+    "after_revision_durable",
+    "before_head_replace",
+    "after_head_rename",
+    "after_head_file_sync",
+    "after_head_replace",
+  ] as const satisfies readonly ProjectLibraryFaultPoint[])(
+    "never exposes a partial Head when a crash interrupts publication at %s",
+    async (faultPoint) => {
       const stateRoot = await temporaryDirectory(`open-chords-library-${faultPoint}-`);
       const baseline = await openProjectLibrary({ stateRoot });
       const created = await baseline.createProject({
@@ -252,8 +253,8 @@ describe("ProjectLibrary", () => {
       expect(snapshot?.eventSequence).toBe(committedDespiteFault ? 2 : 1);
       expect(changes).toHaveLength(committedDespiteFault ? 1 : 0);
       expect(readdirSync(join(recovered.activeRoot, "staging"))).toHaveLength(0);
-    }
-  });
+    },
+  );
 
   it("does not publish or retain a first revision whose Head was never installed", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-unpublished-first-");
