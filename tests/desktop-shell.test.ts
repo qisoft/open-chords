@@ -9,11 +9,16 @@ import {
   denyPermissionRequest,
   denyWindowOpen,
   guardPrimaryRendererNavigation,
+  PRIMARY_RENDERER_PARTITION,
   preventWebviewAttachment,
   rendererRequestPolicy,
 } from "../apps/desktop/src/main/shell.ts";
 
 describe("desktop shell denial policy", () => {
+  it("keeps the primary renderer session ephemeral", () => {
+    expect(PRIMARY_RENDERER_PARTITION.startsWith("persist:")).toBe(false);
+  });
+
   it("denies permissions and non-application requests at the session seam", () => {
     const permissionCallback = vi.fn<(allowed: boolean) => void>();
     denyPermissionRequest(permissionCallback);

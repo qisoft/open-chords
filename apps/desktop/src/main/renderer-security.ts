@@ -1,6 +1,7 @@
 export type DesktopSecurityConfiguration = {
   contextIsolation: boolean;
   nodeIntegration: boolean;
+  persistentSession: boolean;
   sandbox: boolean;
   webSecurity: boolean;
 };
@@ -10,4 +11,4 @@ export const PRIMARY_RENDERER_SECURITY_CONFIGURATION = {
   nodeIntegration: false,
   sandbox: true,
   webSecurity: true,
-} as const satisfies DesktopSecurityConfiguration;
+} as const satisfies Omit<DesktopSecurityConfiguration, "persistentSession">;

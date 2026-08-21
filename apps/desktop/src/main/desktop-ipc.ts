@@ -59,6 +59,7 @@ function senderContext(
     security: rendererContext?.security ?? {
       contextIsolation: false,
       nodeIntegration: true,
+      persistentSession: true,
       sandbox: false,
       webSecurity: false,
     },

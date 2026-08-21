@@ -15,7 +15,10 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
   readonly #lastSequences = new Map<string, number>();
   readonly #recoveries = new Map<
     string,
-    { delivered: boolean; promise: Promise<{ applied: boolean; snapshot: TSnapshot }> }
+    {
+      promise: Promise<{ advancedSequence: boolean; snapshot: TSnapshot }>;
+      snapshotDelivered: boolean;
+    }
   >();
   readonly #refresh: (projectId: string) => Promise<TSnapshot>;
 
@@ -44,7 +47,7 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
       let recovery = this.#recoveries.get(event.projectId);
       if (recovery === undefined) {
         const promise = this.#recoverGap(event.projectId, event.sequence);
-        recovery = { delivered: false, promise };
+        recovery = { promise, snapshotDelivered: false };
         this.#recoveries.set(event.projectId, recovery);
         const cleanup = () => {
           if (this.#recoveries.get(event.projectId) === recovery) {
@@ -55,8 +58,8 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
       }
 
       const result = await recovery.promise;
-      if (result.applied && !recovery.delivered) {
-        recovery.delivered = true;
+      if (result.advancedSequence && !recovery.snapshotDelivered) {
+        recovery.snapshotDelivered = true;
         return { kind: "snapshot", snapshot: result.snapshot };
       }
     }
@@ -65,8 +68,8 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
   async #recoverGap(
     projectId: string,
     targetSequence: number,
-  ): Promise<{ applied: boolean; snapshot: TSnapshot }> {
-    let applied = false;
+  ): Promise<{ advancedSequence: boolean; snapshot: TSnapshot }> {
+    let advancedSequence = false;
     let snapshot: TSnapshot | undefined;
 
     for (let attempt = 0; attempt < MAX_GAP_RECOVERY_REFRESHES; attempt += 1) {
@@ -74,10 +77,10 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
       snapshot = await this.#refresh(projectId);
       if (snapshot.eventSequence > sequenceBeforeRefresh) {
         this.synchronize(projectId, snapshot.eventSequence);
-        applied = true;
+        advancedSequence = true;
       }
       const currentSequence = this.#lastSequences.get(projectId) ?? 0;
-      if (currentSequence >= targetSequence) return { applied, snapshot };
+      if (currentSequence >= targetSequence) return { advancedSequence, snapshot };
       if (currentSequence <= sequenceBeforeRefresh) break;
     }
 

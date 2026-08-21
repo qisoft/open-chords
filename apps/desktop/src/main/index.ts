@@ -5,7 +5,10 @@ import { app, type BrowserWindow, type WebContents } from "electron";
 
 import { installDesktopIpc } from "./desktop-ipc.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
-import { PRIMARY_RENDERER_SECURITY_CONFIGURATION } from "./renderer-security.ts";
+import {
+  PRIMARY_RENDERER_SECURITY_CONFIGURATION,
+  type DesktopSecurityConfiguration,
+} from "./renderer-security.ts";
 import { createDesktopWindow, hardenWebContents } from "./shell.ts";
 import { unavailableProjectAuthority } from "./unavailable-project-authority.ts";
 import { presentDesktopWindow } from "./window-lifecycle.ts";
@@ -18,7 +21,7 @@ const rendererContexts = new Map<
   number,
   {
     generationId: string;
-    security: typeof PRIMARY_RENDERER_SECURITY_CONFIGURATION;
+    security: DesktopSecurityConfiguration;
   }
 >();
 
@@ -63,7 +66,10 @@ function createOrFocusWindow() {
     const webContentsId = window.webContents.id;
     rendererContexts.set(webContentsId, {
       generationId,
-      security: PRIMARY_RENDERER_SECURITY_CONFIGURATION,
+      security: {
+        ...PRIMARY_RENDERER_SECURITY_CONFIGURATION,
+        persistentSession: window.webContents.session.isPersistent(),
+      },
     });
     window.webContents.once("destroyed", () => {
       rendererContexts.delete(webContentsId);

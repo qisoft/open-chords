@@ -17,6 +17,7 @@ const sender = {
   security: {
     contextIsolation: true,
     nodeIntegration: false,
+    persistentSession: false,
     sandbox: true,
     webSecurity: true,
   },
@@ -158,13 +159,21 @@ describe("DesktopCommandGateway", () => {
 
   it("destroys a renderer whose effective security configuration is weaker", async () => {
     const gateway = new DesktopCommandGateway(createAuthority());
-    const result = await gateway.execute(shellCommand(), {
+    const sandboxedResult = await gateway.execute(shellCommand(), {
       ...sender,
       security: { ...sender.security, sandbox: false },
     });
 
-    expect(result.action).toBe("destroy_sender");
-    expect(result.response).toMatchObject({ code: "unauthorized_sender" });
+    expect(sandboxedResult.action).toBe("destroy_sender");
+    expect(sandboxedResult.response).toMatchObject({ code: "unauthorized_sender" });
+
+    const persistentResult = await gateway.execute(shellCommand(), {
+      ...sender,
+      security: { ...sender.security, persistentSession: true },
+    });
+
+    expect(persistentResult.action).toBe("destroy_sender");
+    expect(persistentResult.response).toMatchObject({ code: "unauthorized_sender" });
   });
 
   it("rejects snapshots for a different Project before crossing IPC", async () => {

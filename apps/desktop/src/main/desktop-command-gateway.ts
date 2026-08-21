@@ -276,6 +276,7 @@ function isSecureRendererConfiguration(configuration: DesktopSecurityConfigurati
   return (
     configuration.contextIsolation &&
     !configuration.nodeIntegration &&
+    !configuration.persistentSession &&
     configuration.sandbox &&
     configuration.webSecurity
   );

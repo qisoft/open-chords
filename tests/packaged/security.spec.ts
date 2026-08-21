@@ -122,6 +122,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     expect(renderer).toMatchObject({
       apiKeys: ["project", "shell"],
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
+      effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },
       externalFetch: "rejected",
       heading: "Open Chords foundation",
       missingProject: { code: "project_not_found", type: "desktop.error" },
@@ -139,6 +140,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
         security: {
           contextIsolation: true,
           nodeIntegration: false,
+          persistentSession: false,
           sandbox: true,
           webSecurity: true,
         },
@@ -220,9 +222,23 @@ const CdpTargetsSchema = z.array(
   }),
 );
 
+const CdpEvaluationResponseSchema = z.object({
+  id: z.number().int(),
+  result: z.object({
+    exceptionDetails: z.unknown().optional(),
+    result: z.object({ value: z.unknown().optional() }),
+  }),
+});
+
+const EffectiveCspProbeSchema = z.object({
+  evalBlocked: z.literal(true),
+  inlineScriptBlocked: z.literal(true),
+});
+
 const RendererSnapshotSchema = z.object({
   apiKeys: z.array(z.string()),
   contentSecurityPolicy: z.literal(EXPECTED_RENDERER_CSP),
+  effectiveCsp: EffectiveCspProbeSchema,
   externalFetch: z.literal("rejected"),
   heading: z.string().nullable(),
   missingProject: z.object({
@@ -244,6 +260,7 @@ const RendererSnapshotSchema = z.object({
     security: z.object({
       contextIsolation: z.literal(true),
       nodeIntegration: z.literal(false),
+      persistentSession: z.literal(false),
       sandbox: z.literal(true),
       webSecurity: z.literal(true),
     }),
@@ -356,6 +373,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
   return new Promise<z.infer<typeof RendererSnapshotSchema>>((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
     let contentSecurityPolicy: string | undefined;
+    let effectiveCsp: z.infer<typeof EffectiveCspProbeSchema> | undefined;
     let undeclaredAssetStatus: number | undefined;
     const timeout = setTimeout(() => {
       socket.close();
@@ -418,6 +436,54 @@ async function evaluateRendererTarget(webSocketUrl: string) {
           socket.send(
             JSON.stringify({
               id: 2,
+              method: "Runtime.evaluate",
+              params: {
+                awaitPromise: true,
+                expression: `new Promise((resolve) => {
+                  const probe = () => {
+                    delete globalThis.__openChordsInlineCspProbe;
+                    delete globalThis.__openChordsEvalCspProbe;
+                    const script = document.createElement("script");
+                    script.textContent = "globalThis.__openChordsInlineCspProbe = true";
+                    document.head.append(script);
+                    script.remove();
+                    let evalBlocked = false;
+                    try {
+                      globalThis.eval("globalThis.__openChordsEvalCspProbe = true");
+                    } catch {
+                      evalBlocked = true;
+                    }
+                    const result = {
+                      evalBlocked: evalBlocked && globalThis.__openChordsEvalCspProbe !== true,
+                      inlineScriptBlocked: globalThis.__openChordsInlineCspProbe !== true,
+                    };
+                    delete globalThis.__openChordsInlineCspProbe;
+                    delete globalThis.__openChordsEvalCspProbe;
+                    resolve(result);
+                  };
+                  if (document.head === null) {
+                    window.addEventListener("DOMContentLoaded", probe, { once: true });
+                  } else {
+                    probe();
+                  }
+                })`,
+                returnByValue: true,
+              },
+            }),
+          );
+          return;
+        }
+        if (z.object({ id: z.literal(2) }).safeParse(rawResponse).success) {
+          const response = CdpEvaluationResponseSchema.parse(rawResponse);
+          if (response.result.exceptionDetails !== undefined) {
+            throw new Error(
+              `Effective packaged CSP probe threw: ${JSON.stringify(response.result.exceptionDetails)}`,
+            );
+          }
+          effectiveCsp = EffectiveCspProbeSchema.parse(response.result.result.value);
+          socket.send(
+            JSON.stringify({
+              id: 3,
               method: "Page.setBypassCSP",
               params: { enabled: true },
             }),
@@ -425,7 +491,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
           return;
         }
         const bypassResponse = z
-          .object({ id: z.literal(2), error: z.unknown().optional() })
+          .object({ id: z.literal(3), error: z.unknown().optional() })
           .safeParse(rawResponse);
         if (bypassResponse.success) {
           if (bypassResponse.data.error !== undefined) {
@@ -433,33 +499,23 @@ async function evaluateRendererTarget(webSocketUrl: string) {
           }
           socket.send(
             JSON.stringify({
-              id: 3,
+              id: 4,
               method: "Runtime.evaluate",
               params: { awaitPromise: true, expression, returnByValue: true },
             }),
           );
           return;
         }
-        if (!z.object({ id: z.literal(3) }).safeParse(rawResponse).success) return;
-        const response = z
-          .object({
-            id: z.literal(3),
-            result: z.object({
-              exceptionDetails: z.unknown().optional(),
-              result: z.object({ value: z.unknown().optional() }),
-            }),
-          })
-          .safeParse(rawResponse);
-        if (!response.success) throw new Error("Renderer returned an invalid CDP response");
-        if (response.data.result.exceptionDetails !== undefined) {
+        if (!z.object({ id: z.literal(4) }).safeParse(rawResponse).success) return;
+        const response = CdpEvaluationResponseSchema.parse(rawResponse);
+        if (response.result.exceptionDetails !== undefined) {
           throw new Error("Renderer CDP evaluation threw");
         }
-        const snapshotValue = z
-          .record(z.string(), z.unknown())
-          .parse(response.data.result.result.value);
+        const snapshotValue = z.record(z.string(), z.unknown()).parse(response.result.result.value);
         const snapshot = RendererSnapshotSchema.parse({
           ...snapshotValue,
           contentSecurityPolicy,
+          effectiveCsp,
           undeclaredAssetStatus,
         });
         clearTimeout(timeout);

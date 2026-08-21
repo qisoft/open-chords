@@ -89,6 +89,7 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
     security: z.strictObject({
       contextIsolation: z.literal(true),
       nodeIntegration: z.literal(false),
+      persistentSession: z.literal(false),
       sandbox: z.literal(true),
       webSecurity: z.literal(true),
     }),
