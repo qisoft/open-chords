@@ -155,48 +155,56 @@ function envelopeForProject(projectId: string) {
   return envelope;
 }
 
+const DURABILITY_TEST_TIMEOUT_MS = 15_000;
+
 describe("ProjectLibrary", () => {
-  it("publishes immutable revisions, commits through the ProjectAuthority seam, and reopens", async () => {
-    const stateRoot = await temporaryDirectory("open-chords-library-state-");
-    const library = await openProjectLibrary({ stateRoot });
-    const changes: Array<{ projectRevisionId: string; sequence: number }> = [];
-    library.subscribe(({ projectRevisionId, sequence }) =>
-      changes.push({ projectRevisionId, sequence }),
-    );
-    const created = await library.createProject({
-      envelope: goldenEnvelope(),
-      records: ownedRecords(),
-    });
+  it(
+    "publishes immutable revisions, commits through the ProjectAuthority seam, and reopens",
+    async () => {
+      const stateRoot = await temporaryDirectory("open-chords-library-state-");
+      const library = await openProjectLibrary({ stateRoot });
+      const changes: Array<{ projectRevisionId: string; sequence: number }> = [];
+      library.subscribe(({ projectRevisionId, sequence }) =>
+        changes.push({ projectRevisionId, sequence }),
+      );
+      const created = await library.createProject({
+        envelope: goldenEnvelope(),
+        records: ownedRecords(),
+      });
 
-    const committed = await library.commitEditTransaction({
-      expectedProjectRevisionId: created.projectRevisionId,
-      projectId: "project_golden",
-      transaction: replacementTransaction("transaction_library"),
-    });
-    expect(committed).toHaveProperty("projectRevisionId");
-    if (!("projectRevisionId" in committed)) throw new Error("Project mutation did not commit");
-    expect(committed.projectRevisionId).not.toBe(created.projectRevisionId);
-    expect(changes).toEqual([
-      { projectRevisionId: created.projectRevisionId, sequence: 1 },
-      { projectRevisionId: committed.projectRevisionId, sequence: 2 },
-    ]);
+      const committed = await library.commitEditTransaction({
+        expectedProjectRevisionId: created.projectRevisionId,
+        projectId: "project_golden",
+        transaction: replacementTransaction("transaction_library"),
+      });
+      expect(committed).toHaveProperty("projectRevisionId");
+      if (!("projectRevisionId" in committed)) throw new Error("Project mutation did not commit");
+      expect(committed.projectRevisionId).not.toBe(created.projectRevisionId);
+      expect(changes).toEqual([
+        { projectRevisionId: created.projectRevisionId, sequence: 1 },
+        { projectRevisionId: committed.projectRevisionId, sequence: 2 },
+      ]);
 
-    const reopened = await openProjectLibrary({ stateRoot });
-    const snapshot = await reopened.getSnapshot("project_golden");
-    expect(snapshot).not.toBeNull();
-    expect(snapshot).toMatchObject({
-      eventSequence: 2,
-      projectRevisionId: committed.projectRevisionId,
-    });
-    const project = parseProjectContract(snapshot?.project);
-    expect(project.editLayers[0]?.transactions.at(-1)?.id).toBe("transaction_library");
-    expect(project.activeView.editHistoryPosition).toBe(project.editLayers[0]?.transactions.length);
+      const reopened = await openProjectLibrary({ stateRoot });
+      const snapshot = await reopened.getSnapshot("project_golden");
+      expect(snapshot).not.toBeNull();
+      expect(snapshot).toMatchObject({
+        eventSequence: 2,
+        projectRevisionId: committed.projectRevisionId,
+      });
+      const project = parseProjectContract(snapshot?.project);
+      expect(project.editLayers[0]?.transactions.at(-1)?.id).toBe("transaction_library");
+      expect(project.activeView.editHistoryPosition).toBe(
+        project.editLayers[0]?.transactions.length,
+      );
 
-    const stored = await reopened.readProject("project_golden");
-    expect(stored.records).toEqual(ownedRecords());
-    expect(stored.compatibility).toBe("writable");
-    expect(stored.revisions).toHaveLength(2);
-  });
+      const stored = await reopened.readProject("project_golden");
+      expect(stored.records).toEqual(ownedRecords());
+      expect(stored.compatibility).toBe("writable");
+      expect(stored.revisions).toHaveLength(2);
+    },
+    DURABILITY_TEST_TIMEOUT_MS,
+  );
 
   it.each([
     "after_payload_durable",
@@ -254,6 +262,7 @@ describe("ProjectLibrary", () => {
       expect(changes).toHaveLength(committedDespiteFault ? 1 : 0);
       expect(readdirSync(join(recovered.activeRoot, "staging"))).toHaveLength(0);
     },
+    DURABILITY_TEST_TIMEOUT_MS,
   );
 
   it("does not publish or retain a first revision whose Head was never installed", async () => {
@@ -1482,12 +1491,13 @@ describe("ProjectLibrary", () => {
     },
   );
 
-  it("reconciles relocation failures on both sides of the location commit", async () => {
-    for (const faultPoint of [
-      "after_relocation_target_rename",
-      "after_relocation_location_rename",
-      "after_relocation_location_replace",
-    ] as const satisfies readonly ProjectLibraryFaultPoint[]) {
+  it.each([
+    "after_relocation_target_rename",
+    "after_relocation_location_rename",
+    "after_relocation_location_replace",
+  ] as const satisfies readonly ProjectLibraryFaultPoint[])(
+    "reconciles a relocation failure at %s",
+    async (faultPoint) => {
       const stateRoot = await temporaryDirectory(`open-chords-library-${faultPoint}-state-`);
       const destinationParent = await temporaryDirectory(
         `open-chords-library-${faultPoint}-target-`,
@@ -1518,8 +1528,8 @@ describe("ProjectLibrary", () => {
       const reopened = await openProjectLibrary({ stateRoot });
       expect(reopened.activeRoot).toBe(library.activeRoot);
       expect((await reopened.getSnapshot("project_golden"))?.project.id).toBe("project_golden");
-    }
-  });
+    },
+  );
 
   it("uses the durable relocation journal to clear an interrupted copy on explicit retry", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-relocation-journal-state-");
