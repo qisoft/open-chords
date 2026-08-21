@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -7,9 +9,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { canonicalSerialize, parseProjectContract } from "@open-chords/domain";
@@ -204,21 +206,47 @@ describe("ProjectLibrary", () => {
         },
         stateRoot,
       });
+      const changes: Array<{ projectRevisionId: string; sequence: number }> = [];
+      crashing.subscribe(({ projectRevisionId, sequence }) =>
+        changes.push({ projectRevisionId, sequence }),
+      );
 
-      await expect(
-        crashing.commitEditTransaction({
+      const outcome = await crashing
+        .commitEditTransaction({
           expectedProjectRevisionId: created.projectRevisionId,
           projectId: "project_golden",
           transaction: replacementTransaction(`transaction_${faultPoint}`),
-        }),
-      ).rejects.toThrow(/simulated crash/);
+        })
+        .then(
+          () => "resolved",
+          () => "rejected",
+        );
+      expect(outcome).toBe(faultPoint === "after_head_replace" ? "resolved" : "rejected");
 
       const recovered = await openProjectLibrary({ stateRoot });
       const snapshot = await recovered.getSnapshot("project_golden");
       expect(() => parseProjectContract(snapshot?.project)).not.toThrow();
       expect(snapshot?.eventSequence).toBe(faultPoint === "after_head_replace" ? 2 : 1);
+      expect(changes).toHaveLength(faultPoint === "after_head_replace" ? 1 : 0);
       expect(readdirSync(join(recovered.activeRoot, "staging"))).toHaveLength(0);
     }
+  });
+
+  it("does not publish or retain a first revision whose Head was never installed", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-unpublished-first-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const projectDirectory = join(library.activeRoot, "projects", "project_golden");
+    const stagedPublication = join(library.activeRoot, "staging", "interrupted-publication");
+    mkdirSync(stagedPublication);
+    renameSync(join(projectDirectory, "HEAD.json"), join(stagedPublication, "HEAD.json"));
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(reopened.listProjects()).toEqual([]);
+    expect(readdirSync(join(reopened.activeRoot, "objects", "sha256"))).toEqual([]);
+    expect(readdirSync(join(reopened.activeRoot, "quarantine"))).toEqual([
+      expect.stringMatching(/^project_golden-UNPUBLISHED-/),
+    ]);
   });
 
   it("reconciles an unpublished durable pointer before another live mutation", async () => {
@@ -265,6 +293,47 @@ describe("ProjectLibrary", () => {
     expect(readdirSync(join(reopened.activeRoot, "objects", "sha256"))).toHaveLength(4);
   });
 
+  it("collects a pre-existing unpublished pointer tail during startup", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-startup-tail-");
+    const library = await openProjectLibrary({ stateRoot });
+    const created = await library.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const committed = await library.commitEditTransaction({
+      expectedProjectRevisionId: created.projectRevisionId,
+      projectId: "project_golden",
+      transaction: replacementTransaction("transaction_unpublished_tail"),
+    });
+    if (!("projectRevisionId" in committed)) throw new Error("Fixture mutation did not commit");
+    const projectDirectory = join(library.activeRoot, "projects", "project_golden");
+    const pointerFiles = readdirSync(join(projectDirectory, "revisions")).toSorted();
+    const firstPointerFile = pointerFiles[0];
+    if (firstPointerFile === undefined) throw new Error("Initial revision pointer is missing");
+    const firstPointer = z
+      .object({
+        projectRevisionId: z.string(),
+        revisionObjectHash: z.string(),
+        sequence: z.number(),
+      })
+      .parse(
+        JSON.parse(readFileSync(join(projectDirectory, "revisions", firstPointerFile), "utf8")),
+      );
+    const currentHead = z
+      .object({ format: z.string(), projectId: z.string(), schemaVersion: z.string() })
+      .loose()
+      .parse(JSON.parse(readFileSync(join(projectDirectory, "HEAD.json"), "utf8")));
+    writeFileSync(
+      join(projectDirectory, "HEAD.json"),
+      canonicalSerialize({ ...currentHead, ...firstPointer }),
+    );
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect((await reopened.readProject("project_golden")).revisions).toHaveLength(1);
+    expect(readdirSync(join(projectDirectory, "revisions"))).toHaveLength(1);
+    expect(readdirSync(join(reopened.activeRoot, "objects", "sha256"))).toHaveLength(2);
+  });
+
   it("quarantines a corrupt active revision and restores the last verified revision", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-recovery-");
     const library = await openProjectLibrary({ stateRoot });
@@ -294,6 +363,22 @@ describe("ProjectLibrary", () => {
       }),
     ]);
     expect(readdirSync(join(recovered.activeRoot, "quarantine"))).toHaveLength(1);
+  });
+
+  it("recovers a missing published Head when no staged publication identifies crash residue", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-missing-head-");
+    const library = await openProjectLibrary({ stateRoot });
+    const created = await library.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    rmSync(join(library.activeRoot, "projects", "project_golden", "HEAD.json"));
+
+    const recovered = await openProjectLibrary({ stateRoot });
+    expect((await recovered.getSnapshot("project_golden"))?.projectRevisionId).toBe(
+      created.projectRevisionId,
+    );
+    expect(recovered.listProjects()[0]?.recoveryReport).toBeDefined();
   });
 
   it("rejects an altered Head that is not the exact verified ledger pointer", async () => {
@@ -560,6 +645,32 @@ describe("ProjectLibrary", () => {
     expect(unchanged.migrationFailure).toMatch(/disk full during migration/);
   });
 
+  it("keeps errno-shaped migration callback failures readable and read-only", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-migration-errno-");
+    const olderApplication = await openProjectLibrary({ stateRoot });
+    const created = await olderApplication.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const currentApplication = await openProjectLibrary({
+      currentSchemaVersion: "1.1",
+      migrations: [
+        {
+          fromVersion: "1.0",
+          migrate: () => {
+            throw Object.assign(new Error("migration input was not found"), { code: "ENOENT" });
+          },
+          toVersion: "1.1",
+        },
+      ],
+      stateRoot,
+    });
+
+    const unchanged = await currentApplication.readProject("project_golden");
+    expect(unchanged.projectRevisionId).toBe(created.projectRevisionId);
+    expect(unchanged.migrationFailure).toMatch(/migration input was not found/);
+  });
+
   it("does not publish an intermediate revision when a later migration step fails", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-migration-chain-failure-");
     const olderApplication = await openProjectLibrary({ stateRoot });
@@ -706,6 +817,44 @@ describe("ProjectLibrary", () => {
     ).rejects.toThrow(/already owned/i);
   });
 
+  it("enforces immutable Snapshot and Metadata Observation records across Projects", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-source-record-authority-");
+    const library = await openProjectLibrary({ stateRoot });
+    const original = ownedRecords();
+    const source = original.sources[0];
+    const snapshot = source?.snapshots[0];
+    if (source === undefined || snapshot === undefined)
+      throw new Error("Source fixture is missing");
+    source.metadataObservations = [
+      {
+        id: "metadata_fixture",
+        observedAt: snapshot.observedAt,
+        provider: "filesystem",
+        title: "Original title",
+      },
+    ];
+    snapshot.metadataObservationIds = ["metadata_fixture"];
+    await library.createProject({ envelope: goldenEnvelope(), records: original });
+    const secondEnvelope = envelopeForProject("project_second");
+
+    const changedSnapshot = structuredClone(original);
+    const secondSnapshot = changedSnapshot.sources[0]?.snapshots[0];
+    if (secondSnapshot === undefined) throw new Error("Source Snapshot fixture is missing");
+    secondSnapshot.canonicalAudioFingerprint =
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
+    await expect(
+      library.createProject({ envelope: secondEnvelope, records: changedSnapshot }),
+    ).rejects.toThrow(/Snapshot.*immutable/i);
+
+    const changedObservation = structuredClone(original);
+    const observation = changedObservation.sources[0]?.metadataObservations[0];
+    if (observation === undefined) throw new Error("Metadata Observation fixture is missing");
+    observation.title = "Changed title";
+    await expect(
+      library.createProject({ envelope: secondEnvelope, records: changedObservation }),
+    ).rejects.toThrow(/Metadata Observation.*immutable/i);
+  });
+
   it("binds canonical YouTube Locators and Snapshot provenance to Source identity", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-youtube-records-");
     const library = await openProjectLibrary({ stateRoot });
@@ -781,6 +930,14 @@ describe("ProjectLibrary", () => {
     snapshot.metadataObservationIds = ["metadata_missing"];
     await expect(library.createProject({ envelope: goldenEnvelope(), records })).rejects.toThrow(
       /metadata reference/i,
+    );
+
+    snapshot.metadataObservationIds = ["metadata_fixture"];
+    const observation = source.metadataObservations[0];
+    if (observation === undefined) throw new Error("Metadata Observation fixture is missing");
+    observation.observedAt = "2026-08-21T09:00:00Z";
+    await expect(library.createProject({ envelope: goldenEnvelope(), records })).rejects.toThrow(
+      /late/i,
     );
   });
 
@@ -901,17 +1058,79 @@ describe("ProjectLibrary", () => {
     const oldRoot = library.activeRoot;
 
     await library.relocate(destination);
-    expect(library.activeRoot).toBe(destination);
+    expect(library.activeRoot).toBe(await realpath(destination));
     expect(readFileSync(join(oldRoot, "projects", "project_golden", "HEAD.json"), "utf8")).toBe(
       readFileSync(join(destination, "projects", "project_golden", "HEAD.json"), "utf8"),
     );
     const reopened = await openProjectLibrary({ stateRoot });
-    expect(reopened.activeRoot).toBe(destination);
+    expect(reopened.activeRoot).toBe(await realpath(destination));
     expect((await reopened.getSnapshot("project_golden"))?.project.id).toBe("project_golden");
 
     const cloudTarget = join(destinationParent, "Dropbox", "Open Chords");
     await expect(reopened.relocate(cloudTarget)).rejects.toThrow(/local disk/i);
   });
+
+  it("reconciles relocation failures on both sides of the location commit", async () => {
+    for (const faultPoint of [
+      "after_relocation_target_rename",
+      "after_relocation_location_replace",
+    ] as const satisfies readonly ProjectLibraryFaultPoint[]) {
+      const stateRoot = await temporaryDirectory(`open-chords-library-${faultPoint}-state-`);
+      const destinationParent = await temporaryDirectory(
+        `open-chords-library-${faultPoint}-target-`,
+      );
+      const destination = join(destinationParent, "Moved Library");
+      let injected = false;
+      const library = await openProjectLibrary({
+        faultInjector: (point) => {
+          if (!injected && point === faultPoint) {
+            injected = true;
+            throw new Error(`simulated relocation failure at ${point}`);
+          }
+        },
+        stateRoot,
+      });
+      await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+      const oldRoot = library.activeRoot;
+      const canonicalDestination = join(await realpath(destinationParent), "Moved Library");
+
+      await expect(library.relocate(destination)).rejects.toThrow(/simulated relocation failure/);
+      const beforeLocationCommit = faultPoint === "after_relocation_target_rename";
+      expect({
+        activeRoot: library.activeRoot,
+        destinationExists: existsSync(destination),
+      }).toEqual(
+        beforeLocationCommit
+          ? { activeRoot: oldRoot, destinationExists: false }
+          : { activeRoot: canonicalDestination, destinationExists: true },
+      );
+      if (beforeLocationCommit) await library.relocate(destination);
+      const reopened = await openProjectLibrary({ stateRoot });
+      expect(reopened.activeRoot).toBe(library.activeRoot);
+      expect((await reopened.getSnapshot("project_golden"))?.project.id).toBe("project_golden");
+    }
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "stores the canonical relocation target instead of a mutable symlink alias",
+    async () => {
+      const stateRoot = await temporaryDirectory("open-chords-library-relocate-alias-state-");
+      const destinationParent = await temporaryDirectory(
+        "open-chords-library-relocate-alias-target-",
+      );
+      const aliasParent = join(dirname(destinationParent), `alias-${Date.now()}`);
+      temporaryRoots.push(aliasParent);
+      symlinkSync(destinationParent, aliasParent, "dir");
+      const library = await openProjectLibrary({ stateRoot });
+      await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+
+      await library.relocate(join(aliasParent, "Moved Library"));
+      expect(library.activeRoot).toBe(join(await realpath(destinationParent), "Moved Library"));
+      expect(readFileSync(join(stateRoot, "project-library-location.json"), "utf8")).not.toContain(
+        aliasParent,
+      );
+    },
+  );
 
   it("refuses relocation when a trashed Project is corrupt", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-relocate-trash-state-");
@@ -1103,4 +1322,3 @@ function rewriteStoredProjectEnvelope(
 function hashFixtureContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
-import { createHash } from "node:crypto";

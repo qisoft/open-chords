@@ -239,7 +239,7 @@ export class DesktopCommandGateway {
           action: "none",
           response: errorResponse(
             "project_read_only",
-            "Project schema is newer than this application can write",
+            "Project is read-only in this application",
             false,
             command,
           ),

@@ -103,6 +103,8 @@ export type ProjectLibraryFaultPoint =
   | "after_revision_durable"
   | "before_head_replace"
   | "after_head_replace"
+  | "after_relocation_target_rename"
+  | "after_relocation_location_replace"
   | "after_trash_move"
   | "after_trash_restore_move"
   | "after_permanent_delete";
@@ -510,9 +512,10 @@ export class ProjectLibrary {
   async relocate(targetRoot: string): Promise<void> {
     await this.#serializeMutation(async () => {
       if (!isAbsolute(targetRoot)) throw new Error("Project Library target must be absolute");
-      const target = resolve(targetRoot);
-      if (target === this.#activeRoot) return;
-      if (isNestedPath(this.#activeRoot, target) || isNestedPath(target, this.#activeRoot))
+      const previousRoot = this.#activeRoot;
+      const target = await canonicalizeLibraryPath(targetRoot);
+      if (target === previousRoot) return;
+      if (isNestedPath(previousRoot, target) || isNestedPath(target, previousRoot))
         throw new Error("Project Library cannot be relocated inside its current directory");
       await this.#assertLocalPath(target);
       if (await pathExists(target))
@@ -522,8 +525,9 @@ export class ProjectLibrary {
         dirname(target),
         `.open-chords-library-relocation-${randomUUID()}`,
       );
+      let targetInstalled = false;
       try {
-        await cp(this.#activeRoot, stagingTarget, {
+        await cp(previousRoot, stagingTarget, {
           errorOnExist: true,
           force: false,
           recursive: true,
@@ -545,7 +549,9 @@ export class ProjectLibrary {
           throw new Error("Relocated Project Library did not pass complete validation");
         await syncTree(stagingTarget);
         await rename(stagingTarget, target);
+        targetInstalled = true;
         await syncDirectory(dirname(target));
+        await this.#faultInjector("after_relocation_target_rename");
         await atomicWriteFile(
           join(this.#stateRoot, LIBRARY_LOCATION_FILE),
           canonicalSerialize({
@@ -554,10 +560,40 @@ export class ProjectLibrary {
             schemaVersion: "1.0",
           }),
         );
+        await this.#faultInjector("after_relocation_location_replace");
         this.#activeRoot = target;
         await this.#refreshEntries();
       } catch (error) {
         await rm(stagingTarget, { force: true, recursive: true });
+        if (targetInstalled) {
+          try {
+            const authoritativeRoot = await readLibraryLocation(
+              join(this.#stateRoot, LIBRARY_LOCATION_FILE),
+              previousRoot,
+            );
+            if (authoritativeRoot === target) {
+              this.#activeRoot = target;
+              await this.#refreshEntries();
+            } else if (authoritativeRoot === previousRoot) {
+              this.#activeRoot = previousRoot;
+              await this.#refreshEntries();
+              await rm(target, { force: true, recursive: true });
+              await syncDirectory(dirname(target));
+            } else {
+              throw new Error("Project Library location changed during relocation", {
+                cause: error,
+              });
+            }
+          } catch (recoveryError) {
+            this.#mutationBlockedError = new Error(
+              "Project Library must be reopened after an unreconciled relocation failure",
+              { cause: recoveryError },
+            );
+            throw new Error("Project Library relocation failed and reconciliation also failed", {
+              cause: recoveryError,
+            });
+          }
+        }
         throw error;
       }
     });
@@ -574,9 +610,10 @@ export class ProjectLibrary {
       join(this.#activeRoot, "trash"),
     ])
       await ensureManagedDirectory(this.#activeRoot, directory);
-    await scavengeDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
     await this.#refreshEntries();
+    await scavengeDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
     await this.#migrateExistingProjects();
+    await this.#collectUnreferencedObjects();
   }
 
   async #refreshEntries(): Promise<void> {
@@ -618,6 +655,22 @@ export class ProjectLibrary {
       const projectDirectory = join(container, projectId);
       await assertManagedDirectory(this.#activeRoot, projectDirectory);
       const recoveryReport = await readLatestRecoveryReport(this.#activeRoot, projectDirectory);
+      if (
+        location === "active" &&
+        recoveryReport === undefined &&
+        !(await pathExists(join(projectDirectory, "HEAD.json"))) &&
+        (await this.#hasStagedHead(projectId))
+      ) {
+        const quarantineDirectory = join(this.#activeRoot, "quarantine");
+        await assertManagedDirectory(this.#activeRoot, quarantineDirectory);
+        await rename(
+          projectDirectory,
+          join(quarantineDirectory, `${safeFileName(projectId)}-UNPUBLISHED-${randomUUID()}`),
+        );
+        await syncDirectory(quarantineDirectory);
+        await syncDirectory(container);
+        continue;
+      }
       let trashRecord: TrashRecord | undefined;
       try {
         if (location === "trashed")
@@ -658,6 +711,23 @@ export class ProjectLibrary {
         entries.set(projectId, recovered);
       }
     }
+  }
+
+  async #hasStagedHead(projectId: string): Promise<boolean> {
+    const stagingDirectory = join(this.#activeRoot, "staging");
+    await assertManagedDirectory(this.#activeRoot, stagingDirectory);
+    for (const entry of await readdir(stagingDirectory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const headPath = join(stagingDirectory, entry.name, "HEAD.json");
+      if (!(await pathExists(headPath))) continue;
+      try {
+        const head = await parseJsonFile(headPath, ProjectHeadSchema);
+        if (head.projectId === projectId) return true;
+      } catch (error) {
+        if (!(error instanceof ProjectStorageCorruptionError)) throw error;
+      }
+    }
+    return false;
   }
 
   async #recoverProject(projectDirectory: string, projectId: string): Promise<LibraryEntry> {
@@ -915,10 +985,21 @@ export class ProjectLibrary {
         reason,
       );
     } catch (error) {
+      let committedAfterFailure: RevisionSnapshot | undefined;
       try {
         await this.#refreshEntries();
         await scavengeDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
         await this.#collectUnreferencedObjects();
+        const current = this.#entries.get(projectId)?.revision;
+        const expectedPayloadHash = hashContent(
+          canonicalSerialize(validateStoredPayload(rawPayload)),
+        );
+        if (
+          current?.pointer.sequence === sequence &&
+          current.revision.parentProjectRevisionId === parentProjectRevisionId &&
+          current.revision.payloadObjectHash === expectedPayloadHash
+        )
+          committedAfterFailure = current;
       } catch (recoveryError) {
         const combinedFailure = new AggregateError(
           [error, recoveryError],
@@ -929,6 +1010,10 @@ export class ProjectLibrary {
           { cause: combinedFailure },
         );
         throw new ProjectPublicationReconciliationError(recoveryError);
+      }
+      if (committedAfterFailure !== undefined) {
+        this.#notifySubscribers(committedAfterFailure);
+        return committedAfterFailure;
       }
       throw new ProjectPublicationError(error);
     }
@@ -944,7 +1029,7 @@ export class ProjectLibrary {
     const payload = validateStoredPayload(rawPayload);
     if (payload.envelope.payload.id !== projectId)
       throw new Error("Project payload belongs to another Project");
-    assertSourceAuthorityAgainstEntries(projectId, payload.records, this.#entries);
+    assertSourceAuthorityAgainstEntries(payload.records, this.#entries);
     const projectRevisionId = `projectrevision_${randomUUID().replaceAll("-", "")}`;
     await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
     const stagingDirectory = join(this.#activeRoot, "staging", randomUUID());
@@ -1011,14 +1096,22 @@ export class ProjectLibrary {
     const committed = this.#entries.get(projectId)?.revision;
     if (committed?.revision.projectRevisionId !== projectRevisionId)
       throw new Error("Committed Project Head could not be verified");
+    this.#notifySubscribers(committed);
+    return committed;
+  }
+
+  #notifySubscribers(committed: RevisionSnapshot): void {
     for (const subscriber of this.#subscribers) {
       try {
-        subscriber({ projectId, projectRevisionId, sequence });
+        subscriber({
+          projectId: committed.revision.projectId,
+          projectRevisionId: committed.revision.projectRevisionId,
+          sequence: committed.pointer.sequence,
+        });
       } catch {
         // Observer failures cannot roll back or invalidate an already durable Project Head.
       }
     }
-    return committed;
   }
 
   async #installObject(stagedPath: string, hash: string): Promise<void> {
@@ -1094,8 +1187,7 @@ export class ProjectLibrary {
       } catch (error) {
         if (
           error instanceof ProjectPublicationReconciliationError ||
-          error === this.#mutationBlockedError ||
-          (isNodeError(error) && error.code !== undefined)
+          error === this.#mutationBlockedError
         )
           throw error;
         this.#migrationFailures.set(projectId, errorMessage(error));
@@ -1284,24 +1376,29 @@ function validateLibrarySourceAuthority(entries: ReadonlyMap<string, LibraryEntr
   const accumulated = new Map<string, LibraryEntry>();
   for (const [projectId, entry] of entries) {
     if (entry.revision !== undefined)
-      assertSourceAuthorityAgainstEntries(projectId, entry.revision.payload.records, accumulated);
+      assertSourceAuthorityAgainstEntries(entry.revision.payload.records, accumulated);
     accumulated.set(projectId, entry);
   }
 }
 
 function assertSourceAuthorityAgainstEntries(
-  projectId: string,
   records: ProjectOwnedRecords,
   entries: ReadonlyMap<string, LibraryEntry>,
 ): void {
   const sourceIdToIdentity = new Map<string, string>();
   const identityToSourceId = new Map<string, string>();
-  for (const [otherProjectId, entry] of entries) {
-    if (otherProjectId === projectId || entry.revision === undefined) continue;
+  const snapshotById = new Map<string, string>();
+  const observationById = new Map<string, string>();
+  for (const entry of entries.values()) {
+    if (entry.revision === undefined) continue;
     for (const source of entry.revision.payload.records.sources) {
       const identity = sourceIdentityKey(source.identity);
       sourceIdToIdentity.set(source.id, identity);
       identityToSourceId.set(identity, source.id);
+      for (const snapshot of source.snapshots)
+        snapshotById.set(snapshot.id, canonicalSerialize(snapshot));
+      for (const observation of source.metadataObservations)
+        observationById.set(observation.id, canonicalSerialize(observation));
     }
   }
   for (const source of records.sources) {
@@ -1312,6 +1409,22 @@ function assertSourceAuthorityAgainstEntries(
     const establishedId = identityToSourceId.get(identity);
     if (establishedId !== undefined && establishedId !== source.id)
       throw new Error(`Source identity is already owned by ${establishedId}`);
+    for (const snapshot of source.snapshots) {
+      const content = canonicalSerialize(snapshot);
+      const established = snapshotById.get(snapshot.id);
+      if (established !== undefined && established !== content)
+        throw new Error(`Source Snapshot ${snapshot.id} conflicts with its immutable record`);
+      snapshotById.set(snapshot.id, content);
+    }
+    for (const observation of source.metadataObservations) {
+      const content = canonicalSerialize(observation);
+      const established = observationById.get(observation.id);
+      if (established !== undefined && established !== content)
+        throw new Error(
+          `Source Metadata Observation ${observation.id} conflicts with its immutable record`,
+        );
+      observationById.set(observation.id, content);
+    }
     sourceIdToIdentity.set(source.id, identity);
     identityToSourceId.set(identity, source.id);
   }
@@ -1500,6 +1613,13 @@ async function classifyLibraryPath(path: string): Promise<"local" | "unsupported
   if (hasCloudPathSegment(normalized)) return "unsupported";
   if (process.platform === "win32" && /^\\\\/.test(path)) return "unsupported";
 
+  const canonicalCandidate = await canonicalizeLibraryPath(normalized);
+  if (hasCloudPathSegment(canonicalCandidate)) return "unsupported";
+  return (await isPlatformLocalVolume(canonicalCandidate)) ? "local" : "unsupported";
+}
+
+async function canonicalizeLibraryPath(path: string): Promise<string> {
+  const normalized = resolve(path);
   let probe = normalized;
   while (!(await pathExists(probe))) {
     const parent = dirname(probe);
@@ -1509,9 +1629,7 @@ async function classifyLibraryPath(path: string): Promise<"local" | "unsupported
   const stats = await stat(probe);
   if (!stats.isDirectory()) probe = dirname(probe);
   const canonicalProbe = await realpath(probe);
-  const canonicalCandidate = resolve(canonicalProbe, relative(probe, normalized));
-  if (hasCloudPathSegment(canonicalCandidate)) return "unsupported";
-  return (await isPlatformLocalVolume(canonicalProbe)) ? "local" : "unsupported";
+  return resolve(canonicalProbe, relative(probe, normalized));
 }
 
 function hasCloudPathSegment(path: string): boolean {

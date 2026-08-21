@@ -184,11 +184,13 @@ export const ProjectOwnedRecordsSchema = z
           if (
             observation === undefined ||
             (snapshot.provenance.kind === "youtube_acquisition" &&
-              observation.provider !== "youtube")
+              (observation.provider !== "youtube" ||
+                Date.parse(observation.observedAt) > Date.parse(snapshot.observedAt)))
           ) {
             context.addIssue({
               code: "custom",
-              message: "Source Snapshot metadata reference is missing or has the wrong provider",
+              message:
+                "Source Snapshot metadata reference is missing, late, or has the wrong provider",
               path: [
                 "sources",
                 sourceIndex,
