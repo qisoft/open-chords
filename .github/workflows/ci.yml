@@ -48,7 +48,15 @@ jobs:
         run: pnpm typecheck
       - name: Run foundation tests
         run: pnpm test
+      - name: Verify generated contract schema
+        run: pnpm contracts:schema:check
+      - name: Validate TypeScript contract fixtures
+        run: pnpm test:fixtures
+      - name: Validate Python contract fixtures
+        run: pnpm test:python
       - name: Run isolated renderer smoke test
         run: pnpm test:renderer
-      - name: Exercise Forge packaging hooks
-        run: pnpm package -- --arch=${{ matrix.arch }}
+      - name: Build installable Forge artifact
+        run: pnpm make -- --arch=${{ matrix.arch }}
+      - name: Verify installed trust boundary
+        run: pnpm test:packaged

@@ -10,6 +10,7 @@ export default defineConfig({
     outDir: "../../../../dist/renderer",
     emptyOutDir: true,
     assetsDir: "assets",
+    manifest: "asset-manifest.json",
     sourcemap: false,
   },
 });
