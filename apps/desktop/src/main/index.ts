@@ -30,12 +30,12 @@ if (!ownsSingleInstance) {
 } else {
   app.on("web-contents-created", (_event, contents) => hardenWebContents(contents));
   app.on("second-instance", () => {
-    const window = createOrFocusWindow();
+    const window = getOrCreateWindow();
     presentDesktopWindow(window);
   });
 
   app.on("activate", () => {
-    presentDesktopWindow(createOrFocusWindow());
+    presentDesktopWindow(getOrCreateWindow());
   });
 
   app.on("window-all-closed", () => {
@@ -50,7 +50,7 @@ if (!ownsSingleInstance) {
         onSenderAction: (_action, sender) => replaceCompromisedRenderer(sender),
         rendererContextFor: (sender) => rendererContexts.get(sender.id) ?? null,
       });
-      createOrFocusWindow();
+      getOrCreateWindow();
       return undefined;
     })
     .catch(() => {
@@ -58,7 +58,7 @@ if (!ownsSingleInstance) {
     });
 }
 
-function createOrFocusWindow() {
+function getOrCreateWindow() {
   if (mainWindow === null || mainWindow.isDestroyed()) {
     const generationId = `generation_${randomUUID().replaceAll("-", "")}`;
     const window = createDesktopWindow(generationId);
@@ -87,6 +87,6 @@ function replaceCompromisedRenderer(sender: WebContents): void {
   if (!sender.isDestroyed()) sender.close({ waitForBeforeUnload: false });
   if (isMainRenderer) {
     mainWindow = null;
-    queueMicrotask(() => createOrFocusWindow());
+    queueMicrotask(() => getOrCreateWindow());
   }
 }
