@@ -19,14 +19,39 @@ function isPrimaryRendererUrl(value: string): boolean {
   }
 }
 
+export function denyPermissionRequest(callback: (allowed: boolean) => void): void {
+  callback(false);
+}
+
+export function denyWindowOpen() {
+  return { action: "deny" } as const;
+}
+
+export function preventWebviewAttachment(event: { preventDefault(): void }): void {
+  event.preventDefault();
+}
+
+export function guardPrimaryRendererNavigation(
+  event: { preventDefault(): void },
+  url: string,
+): void {
+  if (url !== APP_ENTRY_URL) event.preventDefault();
+}
+
+export function rendererRequestPolicy(url: string): { cancel: boolean } {
+  return { cancel: !isPrimaryRendererUrl(url) };
+}
+
 export function hardenRendererSession(session: Session): void {
   if (hardenedSessions.has(session)) return;
   hardenedSessions.add(session);
 
   session.setPermissionCheckHandler(() => false);
-  session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  session.setPermissionRequestHandler((_webContents, _permission, callback) =>
+    denyPermissionRequest(callback),
+  );
   session.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: !isPrimaryRendererUrl(details.url) });
+    callback(rendererRequestPolicy(details.url));
   });
 }
 
@@ -34,14 +59,10 @@ export function hardenWebContents(contents: WebContents): void {
   if (hardenedContents.has(contents)) return;
   hardenedContents.add(contents);
   hardenRendererSession(contents.session);
-  contents.setWindowOpenHandler(() => ({ action: "deny" }));
-  contents.on("will-attach-webview", (event) => event.preventDefault());
-  contents.on("will-navigate", (event, url) => {
-    if (url !== APP_ENTRY_URL) event.preventDefault();
-  });
-  contents.on("will-redirect", (event, url) => {
-    if (url !== APP_ENTRY_URL) event.preventDefault();
-  });
+  contents.setWindowOpenHandler(denyWindowOpen);
+  contents.on("will-attach-webview", preventWebviewAttachment);
+  contents.on("will-navigate", guardPrimaryRendererNavigation);
+  contents.on("will-redirect", guardPrimaryRendererNavigation);
 }
 
 export function createDesktopWindow(generationId: string): BrowserWindow {

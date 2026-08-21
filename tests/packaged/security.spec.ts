@@ -118,6 +118,9 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
         process: "undefined",
         require: "undefined",
       },
+      navigationDenied: true,
+      permissionDenied: true,
+      popupDenied: true,
       projectKeys: ["commitEditTransaction", "getSnapshot", "subscribe"],
       security: {
         security: {
@@ -130,6 +133,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       },
       shellKeys: ["getSecuritySnapshot"],
       url: "open-chords://app/index.html",
+      webSecurityEnforced: true,
     });
     expect(renderer.resourceUrls.length).toBeGreaterThan(0);
     for (const resourceUrl of renderer.resourceUrls) {
@@ -217,6 +221,9 @@ const RendererSnapshotSchema = z.object({
     process: z.string(),
     require: z.string(),
   }),
+  navigationDenied: z.literal(true),
+  permissionDenied: z.literal(true),
+  popupDenied: z.literal(true),
   projectKeys: z.array(z.string()),
   resourceUrls: z.array(z.string()),
   security: z.object({
@@ -231,6 +238,7 @@ const RendererSnapshotSchema = z.object({
   shellKeys: z.array(z.string()),
   undeclaredAssetStatus: z.number().int(),
   url: z.string(),
+  webSecurityEnforced: z.literal(true),
 });
 
 async function inspectPackagedRenderer(
@@ -240,16 +248,17 @@ async function inspectPackagedRenderer(
   const deadline = Date.now() + 30_000;
   let lastError: unknown;
   while (Date.now() < deadline) {
+    let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
     try {
       const response = await fetch(`${endpoint}/json/list`);
       const rawTargets: unknown = await response.json();
-      const target = CdpTargetsSchema.parse(rawTargets).find(
+      target = CdpTargetsSchema.parse(rawTargets).find(
         (candidate) => candidate.type === "page" && candidate.url.startsWith("open-chords://"),
       );
-      if (target !== undefined) return await evaluateRendererTarget(target.webSocketDebuggerUrl);
     } catch (error) {
       lastError = error;
     }
+    if (target !== undefined) return await evaluateRendererTarget(target.webSocketDebuggerUrl);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Could not inspect packaged renderer", { cause: lastError });
@@ -265,6 +274,33 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         image.src = "open-chords://app/asset-manifest.json";
         document.body.append(image);
       });
+      const webSecurityEnforced = await new Promise((probeComplete) => {
+        const frame = document.createElement("iframe");
+        frame.addEventListener("load", () => {
+          try {
+            void frame.contentWindow.document.body;
+            probeComplete(false);
+          } catch {
+            probeComplete(true);
+          } finally {
+            frame.remove();
+          }
+        }, { once: true });
+        frame.src = "data:text/html,<p>cross-origin probe</p>";
+        document.body.append(frame);
+      });
+      const permissionDenied = await Notification.requestPermission().then(
+        (permission) => permission === "denied",
+        () => true,
+      );
+      const popupDenied = window.open("https://example.com/", "_blank") === null;
+      const originalUrl = window.location.href;
+      const navigation = document.createElement("a");
+      navigation.href = "https://example.com/";
+      document.body.append(navigation);
+      navigation.click();
+      await new Promise((navigationSettled) => setTimeout(navigationSettled, 100));
+      navigation.remove();
       resolve({
       apiKeys: Object.keys(window.openChords).sort(),
       externalFetch: await fetch("https://www.youtube.com/iframe_api").then(
@@ -279,6 +315,9 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         process: typeof globalThis.process,
         require: typeof globalThis.require,
       },
+      navigationDenied: window.location.href === originalUrl,
+      permissionDenied,
+      popupDenied,
       projectKeys: Object.keys(window.openChords.project).sort(),
       resourceUrls: Array.from(document.querySelectorAll("script[src], link[rel=stylesheet][href]"))
         .map((element) => element instanceof HTMLScriptElement ? element.src : element.href)
@@ -286,6 +325,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       security: await window.openChords.shell.getSecuritySnapshot(),
       shellKeys: Object.keys(window.openChords.shell).sort(),
       url: window.location.href,
+      webSecurityEnforced,
       });
     };
     if (document.readyState === "complete") void inspect();
@@ -342,16 +382,32 @@ async function evaluateRendererTarget(webSocketUrl: string) {
           socket.send(
             JSON.stringify({
               id: 2,
+              method: "Page.setBypassCSP",
+              params: { enabled: true },
+            }),
+          );
+          return;
+        }
+        const bypassResponse = z
+          .object({ id: z.literal(2), error: z.unknown().optional() })
+          .safeParse(rawResponse);
+        if (bypassResponse.success) {
+          if (bypassResponse.data.error !== undefined) {
+            throw new Error("Could not isolate webSecurity from packaged CSP");
+          }
+          socket.send(
+            JSON.stringify({
+              id: 3,
               method: "Runtime.evaluate",
               params: { awaitPromise: true, expression, returnByValue: true },
             }),
           );
           return;
         }
-        if (!z.object({ id: z.literal(2) }).safeParse(rawResponse).success) return;
+        if (!z.object({ id: z.literal(3) }).safeParse(rawResponse).success) return;
         const response = z
           .object({
-            id: z.literal(2),
+            id: z.literal(3),
             result: z.object({
               exceptionDetails: z.unknown().optional(),
               result: z.object({ value: z.unknown().optional() }),

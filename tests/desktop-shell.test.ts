@@ -2,9 +2,45 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loadRendererAssetManifest } from "../apps/desktop/src/main/renderer-assets.ts";
+import {
+  denyPermissionRequest,
+  denyWindowOpen,
+  guardPrimaryRendererNavigation,
+  preventWebviewAttachment,
+  rendererRequestPolicy,
+} from "../apps/desktop/src/main/shell.ts";
+
+describe("desktop shell denial policy", () => {
+  it("denies permissions and non-application requests at the session seam", () => {
+    const permissionCallback = vi.fn<(allowed: boolean) => void>();
+    denyPermissionRequest(permissionCallback);
+    expect(permissionCallback).toHaveBeenCalledWith(false);
+    expect(rendererRequestPolicy("https://example.com/")).toEqual({ cancel: true });
+    expect(rendererRequestPolicy("open-chords://app/index.html")).toEqual({ cancel: false });
+    expect(rendererRequestPolicy("open-chords://other/index.html")).toEqual({ cancel: true });
+  });
+
+  it("denies popup, webview, navigation, and redirect escape at the WebContents seam", () => {
+    expect(denyWindowOpen()).toEqual({ action: "deny" });
+    const preventAttachment = vi.fn<() => void>();
+    preventWebviewAttachment({ preventDefault: preventAttachment });
+    expect(preventAttachment).toHaveBeenCalledOnce();
+
+    const preventEscape = vi.fn<() => void>();
+    guardPrimaryRendererNavigation({ preventDefault: preventEscape }, "https://example.com/");
+    expect(preventEscape).toHaveBeenCalledOnce();
+
+    const preventApplication = vi.fn<() => void>();
+    guardPrimaryRendererNavigation(
+      { preventDefault: preventApplication },
+      "open-chords://app/index.html",
+    );
+    expect(preventApplication).not.toHaveBeenCalled();
+  });
+});
 
 describe("desktop shell renderer assets", () => {
   const roots: string[] = [];
