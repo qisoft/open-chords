@@ -951,6 +951,52 @@ describe("ProjectLibrary", () => {
     });
   });
 
+  it("publishes Project entries and Locator authority as one in-memory snapshot", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-locator-atomic-");
+    let pauseCatalog = false;
+    let releaseCatalog!: () => void;
+    let catalogReached!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseCatalog = resolve;
+    });
+    const reached = new Promise<void>((resolve) => {
+      catalogReached = resolve;
+    });
+    const library = await openProjectLibrary({
+      faultInjector: async (point) => {
+        if (pauseCatalog && point === "after_catalog_durable") {
+          catalogReached();
+          await blocked;
+        }
+      },
+      stateRoot,
+    });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const changed = ownedRecords();
+    const locator = changed.sources[0]?.locators[0];
+    if (locator?.kind !== "local_file") throw new Error("Local Locator fixture is missing");
+    locator.status = "unavailable";
+    locator.verifiedAt = "2026-08-21T09:00:00Z";
+
+    pauseCatalog = true;
+    const creating = library.createProject({
+      envelope: envelopeForProject("project_second"),
+      records: changed,
+    });
+    await reached;
+    expect(library.listProjects()).toHaveLength(1);
+    expect(
+      (await library.readProject("project_golden")).records.sources[0]?.locators[0],
+    ).toMatchObject({ status: "available", verifiedAt: "2026-08-21T08:00:00Z" });
+
+    releaseCatalog();
+    await creating;
+    expect(library.listProjects()).toHaveLength(2);
+    expect(
+      (await library.readProject("project_golden")).records.sources[0]?.locators[0],
+    ).toMatchObject({ status: "unavailable", verifiedAt: "2026-08-21T09:00:00Z" });
+  });
+
   it("rejects conflicting equal-time Locator observations before publication", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-locator-conflict-");
     const library = await openProjectLibrary({ stateRoot });
@@ -1498,6 +1544,57 @@ describe("ProjectLibrary", () => {
     expect(existsSync(stagingTarget)).toBe(false);
     expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(false);
   });
+
+  it.runIf(process.platform !== "win32")(
+    "never follows a replaced relocation wrapper symlink during cleanup",
+    async () => {
+      for (const marked of [false, true]) {
+        const stateRoot = await temporaryDirectory(
+          `open-chords-library-relocation-symlink-${marked ? "marked" : "empty"}-state-`,
+        );
+        const destinationParent = await temporaryDirectory(
+          `open-chords-library-relocation-symlink-${marked ? "marked" : "empty"}-target-`,
+        );
+        const library = await openProjectLibrary({ stateRoot });
+        await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+        const parent = await realpath(destinationParent);
+        const target = join(parent, "Moved Library");
+        const stagingTarget = join(parent, ".open-chords-library-relocation-journaled");
+        const unrelated = join(parent, ".open-chords-library-relocation-unrelated");
+        const relocationId = marked
+          ? "55555555-5555-4555-8555-555555555555"
+          : "66666666-6666-4666-8666-666666666666";
+        mkdirSync(unrelated);
+        if (marked)
+          writeFileSync(
+            join(unrelated, ".open-chords-relocation.json"),
+            canonicalSerialize({
+              format: "open-chords/project-library-relocation-marker",
+              id: relocationId,
+              schemaVersion: "1.0",
+            }),
+          );
+        symlinkSync(unrelated, stagingTarget, "dir");
+        writeFileSync(
+          join(stateRoot, "project-library-relocation.json"),
+          canonicalSerialize({
+            format: "open-chords/project-library-relocation",
+            id: relocationId,
+            previousRoot: library.activeRoot,
+            schemaVersion: "1.0",
+            stagingTarget,
+            target,
+            targetParent: parent,
+          }),
+        );
+
+        await expect(library.relocate(target)).rejects.toThrow(/ownership is ambiguous/i);
+        expect(existsSync(unrelated)).toBe(true);
+        expect(existsSync(stagingTarget)).toBe(true);
+        expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(true);
+      }
+    },
+  );
 
   it("scavenges a completed relocation wrapper on reopen and permits another relocation", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-completed-journal-state-");

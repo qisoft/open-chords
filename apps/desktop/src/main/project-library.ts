@@ -150,6 +150,7 @@ export type ProjectLibraryFaultPoint =
   | "after_relocation_location_rename"
   | "after_relocation_location_replace"
   | "after_catalog_recovery_report"
+  | "after_catalog_durable"
   | "before_relocation_staging_cleanup"
   | "before_trash_parent_sync"
   | "before_trash_restore_parent_sync"
@@ -790,9 +791,13 @@ export class ProjectLibrary {
   ): Promise<void> {
     if (!(await pathExists(journal.stagingTarget))) return;
     const approvedParent = await realpath(dirname(approvedTarget));
+    const stagingMetadata = await lstat(journal.stagingTarget);
+    if (stagingMetadata.isSymbolicLink() || !stagingMetadata.isDirectory())
+      throw new Error("Project Library relocation staging ownership is ambiguous");
     const stagingPath = await realpath(journal.stagingTarget);
     if (
       approvedParent !== journal.targetParent ||
+      stagingPath !== journal.stagingTarget ||
       dirname(stagingPath) !== journal.targetParent ||
       !basename(stagingPath).startsWith(".open-chords-library-relocation-")
     )
@@ -801,14 +806,14 @@ export class ProjectLibrary {
     if (!(await pathExists(markerPath))) {
       if ((await readdir(stagingPath)).length !== 0)
         throw new Error("Project Library relocation staging marker is missing");
-      await rmdir(stagingPath);
+      await rmdir(journal.stagingTarget);
       await syncDirectory(approvedParent);
       return;
     }
     const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
     if (marker.id !== journal.id)
       throw new Error("Project Library relocation staging ownership is ambiguous");
-    await rm(stagingPath, { recursive: true });
+    await rm(journal.stagingTarget, { recursive: true });
     await syncDirectory(approvedParent);
   }
 
@@ -844,8 +849,9 @@ export class ProjectLibrary {
       const entry = entries.get(projectId);
       if (entry !== undefined) entry.migrationFailure = failure;
     }
+    const locatorCatalog = await this.#refreshLocatorCatalog(entries);
     this.#entries = entries;
-    await this.#refreshLocatorCatalog();
+    this.#locatorCatalog = locatorCatalog;
     await atomicWriteFile(
       join(this.#activeRoot, "project-index.json"),
       canonicalSerialize({
@@ -1569,7 +1575,9 @@ export class ProjectLibrary {
     return materializeCurrentLocators(records, this.#locatorCatalog);
   }
 
-  async #refreshLocatorCatalog(): Promise<void> {
+  async #refreshLocatorCatalog(
+    entries: ReadonlyMap<string, LibraryEntry>,
+  ): Promise<LocatorCatalog> {
     const paths = [
       join(this.#activeRoot, SOURCE_CATALOG_FILE),
       join(this.#activeRoot, SOURCE_CATALOG_BACKUP_FILE),
@@ -1590,7 +1598,7 @@ export class ProjectLibrary {
       try {
         candidates.push({
           catalog,
-          locators: mergeCatalogWithEntries(catalog.locatorsBySourceId, this.#entries),
+          locators: mergeCatalogWithEntries(catalog.locatorsBySourceId, entries),
           path,
         });
       } catch {
@@ -1618,7 +1626,7 @@ export class ProjectLibrary {
         "Source catalog and its last-known-good backup are both invalid",
       );
 
-    const locators = selected?.locators ?? mergeCatalogWithEntries({}, this.#entries);
+    const locators = selected?.locators ?? mergeCatalogWithEntries({}, entries);
     const locatorsBySourceId = Object.fromEntries(locators);
     const unchanged =
       selected !== undefined &&
@@ -1636,7 +1644,8 @@ export class ProjectLibrary {
     const content = canonicalSerialize(catalog);
     await atomicWriteFile(paths[1]!, content);
     await atomicWriteFile(paths[0]!, content);
-    this.#locatorCatalog = locators;
+    await this.#faultInjector("after_catalog_durable");
+    return locators;
   }
 
   async #quarantineInvalidCatalogs(
