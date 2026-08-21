@@ -929,7 +929,7 @@ describe("ProjectLibrary", () => {
     ).rejects.toThrow(/Metadata Observation.*immutable/i);
   });
 
-  it("enforces one canonical Locator state for a shared Source", async () => {
+  it("materializes one current additive Locator state for a shared Source", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-locator-authority-");
     const library = await openProjectLibrary({ stateRoot });
     await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
@@ -937,10 +937,18 @@ describe("ProjectLibrary", () => {
     const locator = changed.sources[0]?.locators[0];
     if (locator?.kind !== "local_file") throw new Error("Local Locator fixture is missing");
     locator.status = "unavailable";
+    locator.verifiedAt = "2026-08-21T09:00:00Z";
 
-    await expect(
-      library.createProject({ envelope: envelopeForProject("project_second"), records: changed }),
-    ).rejects.toThrow(/Locator state/i);
+    await library.createProject({
+      envelope: envelopeForProject("project_second"),
+      records: changed,
+    });
+    const firstLocator = (await library.readProject("project_golden")).records.sources[0]
+      ?.locators[0];
+    expect(firstLocator).toMatchObject({
+      status: "unavailable",
+      verifiedAt: "2026-08-21T09:00:00Z",
+    });
   });
 
   it("binds canonical YouTube Locators and Snapshot provenance to Source identity", async () => {
@@ -1292,6 +1300,14 @@ describe("ProjectLibrary", () => {
     const relocationId = "11111111-1111-4111-8111-111111111111";
     mkdirSync(stagingTarget);
     writeFileSync(
+      join(stagingTarget, ".open-chords-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation-marker",
+        id: relocationId,
+        schemaVersion: "1.0",
+      }),
+    );
+    writeFileSync(
       join(stateRoot, "project-library-relocation.json"),
       canonicalSerialize({
         format: "open-chords/project-library-relocation",
@@ -1300,6 +1316,7 @@ describe("ProjectLibrary", () => {
         schemaVersion: "1.0",
         stagingTarget,
         target,
+        targetParent: dirname(target),
       }),
     );
 
@@ -1343,6 +1360,7 @@ describe("ProjectLibrary", () => {
         schemaVersion: "1.0",
         stagingTarget,
         target: canonicalFirstTarget,
+        targetParent: dirname(canonicalFirstTarget),
       }),
     );
 
@@ -1380,12 +1398,14 @@ describe("ProjectLibrary", () => {
         schemaVersion: "1.0",
         stagingTarget: join(dirname(target), ".open-chords-library-relocation-missing"),
         target,
+        targetParent: dirname(target),
       }),
     );
     corruptActivePayload(target, "project_golden");
 
-    await expect(library.relocate(target)).rejects.toThrow(/complete validation/i);
-    expect(library.activeRoot).not.toBe(target);
+    await library.relocate(target);
+    expect(library.activeRoot).toBe(target);
+    expect((await library.getSnapshot("project_golden"))?.project.id).toBe("project_golden");
   });
 
   it.runIf(process.platform !== "win32")(

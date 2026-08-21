@@ -100,6 +100,7 @@ const RelocationJournalSchema = z.strictObject({
   schemaVersion: z.literal("1.0"),
   stagingTarget: z.string().min(1),
   target: z.string().min(1),
+  targetParent: z.string().min(1),
 });
 const RelocationMarkerSchema = z.strictObject({
   format: z.literal("open-chords/project-library-relocation-marker"),
@@ -379,7 +380,7 @@ export class ProjectLibrary {
       compatibility: entry.compatibility,
       envelope: structuredClone(entry.revision.payload.envelope),
       projectRevisionId: entry.revision.revision.projectRevisionId,
-      records: structuredClone(entry.revision.payload.records),
+      records: this.#recordsWithCurrentLocators(entry.revision.payload.records),
       ...(entry.migrationFailure === undefined ? {} : { migrationFailure: entry.migrationFailure }),
       ...(entry.recoveryReport === undefined
         ? {}
@@ -592,22 +593,27 @@ export class ProjectLibrary {
       if (await this.#resumeRelocation(target)) return;
       if (await pathExists(target))
         throw new Error("Project Library relocation target already exists");
-      await mkdir(dirname(target), { recursive: true });
+      if (!(await pathExists(dirname(target))))
+        throw new Error("Project Library relocation target parent must already exist");
+      const targetParent = await realpath(dirname(target));
+      await syncDirectory(targetParent);
       const stagingTarget = join(
         dirname(target),
         `.open-chords-library-relocation-${randomUUID()}`,
       );
       const relocationId = randomUUID();
+      const relocationJournal = RelocationJournalSchema.parse({
+        format: "open-chords/project-library-relocation",
+        id: relocationId,
+        previousRoot,
+        schemaVersion: "1.0",
+        stagingTarget,
+        target,
+        targetParent,
+      });
       await atomicWriteFile(
         join(this.#stateRoot, RELOCATION_JOURNAL_FILE),
-        canonicalSerialize({
-          format: "open-chords/project-library-relocation",
-          id: relocationId,
-          previousRoot,
-          schemaVersion: "1.0",
-          stagingTarget,
-          target,
-        }),
+        canonicalSerialize(relocationJournal),
       );
       const stagedLibrary = join(stagingTarget, "library");
       await mkdir(stagingTarget);
@@ -674,13 +680,13 @@ export class ProjectLibrary {
         await this.#faultInjector("after_relocation_location_replace");
         this.#activeRoot = target;
         await this.#refreshEntries();
-        await rm(stagingTarget, { force: true, recursive: true });
+        await this.#removeRelocationStaging(relocationJournal, target);
         await this.#cleanupCompletedRelocation();
       } catch (error) {
         let stagingCleanupError: unknown;
         try {
           await this.#faultInjector("before_relocation_staging_cleanup");
-          await rm(stagingTarget, { force: true, recursive: true });
+          await this.#removeRelocationStaging(relocationJournal, target);
         } catch (cleanupError) {
           stagingCleanupError = cleanupError;
         }
@@ -718,7 +724,7 @@ export class ProjectLibrary {
     if (journal === undefined) return false;
     if (journal.previousRoot !== this.#activeRoot || journal.target !== target)
       throw new Error("Another Project Library relocation requires recovery first");
-    await this.#removeRelocationStaging(journal, target, false);
+    await this.#removeRelocationStaging(journal, target);
     if (await pathExists(target)) {
       const marker = await parseJsonFile(
         join(target, RELOCATION_MARKER_FILE),
@@ -726,33 +732,11 @@ export class ProjectLibrary {
       );
       if (marker.id !== journal.id)
         throw new Error("Project Library relocation target ownership is ambiguous");
-      const validation = new ProjectLibrary(
-        {
-          currentSchemaVersion: this.#currentSchemaVersion,
-          migrations: this.#migrations,
-          now: this.#now,
-          pathPolicy: this.#pathPolicy,
-          stateRoot: this.#stateRoot,
-        },
-        target,
-      );
-      await validation.#initializeRoot();
-      if (validation.listProjects().some(({ status }) => status === "damaged"))
-        throw new Error("Interrupted relocation target did not pass complete validation");
-      await syncTree(target);
-      await syncDirectory(dirname(target));
-      await atomicWriteFile(
-        join(this.#stateRoot, LIBRARY_LOCATION_FILE),
-        canonicalSerialize({
-          activeRoot: target,
-          format: "open-chords/project-library-location",
-          schemaVersion: "1.0",
-        }),
-      );
-      this.#activeRoot = target;
-      await this.#initializeRoot();
-      await this.#cleanupCompletedRelocation();
-      return true;
+      const targetParent = await realpath(dirname(target));
+      if (targetParent !== journal.targetParent)
+        throw new Error("Project Library relocation target parent changed during interruption");
+      await rm(target, { recursive: true });
+      await syncDirectory(targetParent);
     }
     await this.#clearRelocationJournal();
     return false;
@@ -761,7 +745,7 @@ export class ProjectLibrary {
   async #cleanupCompletedRelocation(): Promise<void> {
     const journal = await readRelocationJournal(this.#stateRoot);
     if (journal === undefined || journal.target !== this.#activeRoot) return;
-    await this.#removeRelocationStaging(journal, this.#activeRoot, true);
+    await this.#removeRelocationStaging(journal, this.#activeRoot);
     const markerPath = join(this.#activeRoot, RELOCATION_MARKER_FILE);
     if (await pathExists(markerPath)) {
       const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
@@ -776,24 +760,22 @@ export class ProjectLibrary {
   async #removeRelocationStaging(
     journal: z.infer<typeof RelocationJournalSchema>,
     approvedTarget: string,
-    requireMarker: boolean,
   ): Promise<void> {
     if (!(await pathExists(journal.stagingTarget))) return;
     const approvedParent = await realpath(dirname(approvedTarget));
     const stagingPath = await realpath(journal.stagingTarget);
     if (
-      dirname(stagingPath) !== approvedParent ||
+      approvedParent !== journal.targetParent ||
+      dirname(stagingPath) !== journal.targetParent ||
       !basename(stagingPath).startsWith(".open-chords-library-relocation-")
     )
       throw new Error("Project Library relocation staging path is outside its approved parent");
     const markerPath = join(stagingPath, RELOCATION_MARKER_FILE);
-    if (await pathExists(markerPath)) {
-      const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
-      if (marker.id !== journal.id)
-        throw new Error("Project Library relocation staging ownership is ambiguous");
-    } else if (requireMarker) {
+    if (!(await pathExists(markerPath)))
       throw new Error("Project Library relocation staging marker is missing");
-    }
+    const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
+    if (marker.id !== journal.id)
+      throw new Error("Project Library relocation staging ownership is ambiguous");
     await rm(stagingPath, { recursive: true });
     await syncDirectory(approvedParent);
   }
@@ -1548,6 +1530,35 @@ export class ProjectLibrary {
     return join(this.#activeRoot, location === "active" ? "projects" : "trash", projectId);
   }
 
+  #recordsWithCurrentLocators(records: ProjectOwnedRecords): ProjectOwnedRecords {
+    type Locator = ProjectOwnedRecords["sources"][number]["locators"][number];
+    const current = new Map<string, Map<string, Locator>>();
+    for (const entry of this.#entries.values()) {
+      if (entry.revision === undefined) continue;
+      for (const source of entry.revision.payload.records.sources) {
+        const byId = current.get(source.id) ?? new Map<string, Locator>();
+        for (const locator of source.locators) {
+          const existing = byId.get(locator.id);
+          if (
+            existing === undefined ||
+            locatorObservationTime(locator) > locatorObservationTime(existing)
+          )
+            byId.set(locator.id, structuredClone(locator));
+        }
+        current.set(source.id, byId);
+      }
+    }
+    const materialized = structuredClone(records);
+    for (const source of materialized.sources) {
+      const byId = current.get(source.id);
+      if (byId !== undefined)
+        source.locators = [...byId.values()].toSorted((left, right) =>
+          left.id.localeCompare(right.id),
+        );
+    }
+    return materialized;
+  }
+
   async #runReconciledLifecycleMutation<T>(operation: () => Promise<T>): Promise<T> {
     try {
       return await operation();
@@ -1679,19 +1690,12 @@ function assertSourceAuthorityAgainstEntries(
   const identityToSourceId = new Map<string, string>();
   const snapshotById = new Map<string, string>();
   const observationById = new Map<string, string>();
-  const locatorsBySourceId = new Map<string, string>();
   for (const entry of entries.values()) {
     if (entry.revision === undefined) continue;
     for (const source of entry.revision.payload.records.sources) {
       const identity = sourceIdentityKey(source.identity);
       sourceIdToIdentity.set(source.id, identity);
       identityToSourceId.set(identity, source.id);
-      locatorsBySourceId.set(
-        source.id,
-        canonicalSerialize(
-          source.locators.toSorted((left, right) => left.id.localeCompare(right.id)),
-        ),
-      );
       for (const snapshot of source.snapshots)
         snapshotById.set(snapshot.id, canonicalSerialize(snapshot));
       for (const observation of source.metadataObservations)
@@ -1706,12 +1710,6 @@ function assertSourceAuthorityAgainstEntries(
     const establishedId = identityToSourceId.get(identity);
     if (establishedId !== undefined && establishedId !== source.id)
       throw new Error(`Source identity is already owned by ${establishedId}`);
-    const locators = canonicalSerialize(
-      source.locators.toSorted((left, right) => left.id.localeCompare(right.id)),
-    );
-    const establishedLocators = locatorsBySourceId.get(source.id);
-    if (establishedLocators !== undefined && establishedLocators !== locators)
-      throw new Error(`Source ${source.id} conflicts with Library Locator state`);
     for (const snapshot of source.snapshots) {
       const content = canonicalSerialize(snapshot);
       const established = snapshotById.get(snapshot.id);
@@ -1730,7 +1728,6 @@ function assertSourceAuthorityAgainstEntries(
     }
     sourceIdToIdentity.set(source.id, identity);
     identityToSourceId.set(identity, source.id);
-    locatorsBySourceId.set(source.id, locators);
   }
 }
 
@@ -1738,6 +1735,12 @@ function sourceIdentityKey(identity: ProjectOwnedRecords["sources"][number]["ide
   return identity.kind === "local_file"
     ? `local_file:${identity.fingerprint}`
     : `youtube:${identity.videoId}`;
+}
+
+function locatorObservationTime(
+  locator: ProjectOwnedRecords["sources"][number]["locators"][number],
+): number {
+  return Date.parse(locator.kind === "local_file" ? locator.verifiedAt : locator.observedAt);
 }
 
 async function readLibraryLocation(path: string, fallback: string): Promise<string> {
@@ -1755,7 +1758,9 @@ async function readRelocationJournal(
   const journal = await parseJsonFile(path, RelocationJournalSchema);
   if (
     ![journal.previousRoot, journal.stagingTarget, journal.target].every(isAbsolute) ||
-    dirname(journal.stagingTarget) !== dirname(journal.target)
+    !isAbsolute(journal.targetParent) ||
+    dirname(journal.stagingTarget) !== journal.targetParent ||
+    dirname(journal.target) !== journal.targetParent
   )
     throw new Error("Project Library relocation journal contains unsafe paths");
   return journal;
