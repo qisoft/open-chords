@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   access,
@@ -6,12 +7,13 @@ import {
   open,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
-  statfs,
 } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 
 import {
   CONTRACT_VERSION,
@@ -35,6 +37,7 @@ const PROJECT_REVISION_ID_PATTERN = /^projectrevision_[a-f0-9]{32}$/;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1_000;
 const LIBRARY_LOCATION_FILE = "project-library-location.json";
 const DEFAULT_LIBRARY_DIRECTORY = "project-library";
+const execFileAsync = promisify(execFile);
 
 const HashSchema = z.string().regex(HASH_PATTERN);
 const ProjectRevisionIdSchema = z.string().regex(PROJECT_REVISION_ID_PATTERN);
@@ -197,7 +200,7 @@ export class ProjectLibrary {
     if (!isAbsolute(options.stateRoot))
       throw new Error("Project Library state root must be absolute");
     const stateRoot = resolve(options.stateRoot);
-    await mkdir(stateRoot, { recursive: true });
+    await ensureDurableDirectory(stateRoot);
     const locationPath = join(stateRoot, LIBRARY_LOCATION_FILE);
     const activeRoot = await readLibraryLocation(
       locationPath,
@@ -366,10 +369,10 @@ export class ProjectLibrary {
         ({ revision }) => revision.projectRevisionId === targetProjectRevisionId,
       );
       if (target === undefined) throw new Error("Rollback Project Revision was not found");
-      this.#assertCurrentWritableSchema(target.payload.envelope);
+      const payload = await this.#prepareMigratedPayload(target);
       const next = await this.#commitPayload(
         projectId,
-        target.payload,
+        payload,
         entry.revision.revision.projectRevisionId,
         entry.revision.pointer.sequence + 1,
         "rollback",
@@ -393,6 +396,7 @@ export class ProjectLibrary {
         trashedAt: this.#now().toISOString(),
       });
       await writeDurableFile(join(source, "TRASH.json"), canonicalSerialize(trashRecord));
+      await syncDirectory(source);
       await rename(source, target);
       await syncDirectory(dirname(source));
       await syncDirectory(dirname(target));
@@ -407,6 +411,7 @@ export class ProjectLibrary {
       const source = this.#projectDirectory(projectId, "trashed");
       const target = this.#projectDirectory(projectId, "active");
       await rm(join(source, "TRASH.json"), { force: true });
+      await syncDirectory(source);
       await rename(source, target);
       await syncDirectory(dirname(source));
       await syncDirectory(dirname(target));
@@ -484,6 +489,7 @@ export class ProjectLibrary {
         await validation.#initializeRoot();
         if (validation.listProjects().some(({ status }) => status === "damaged"))
           throw new Error("Relocated Project Library did not pass complete validation");
+        await syncTree(stagingTarget);
         await rename(stagingTarget, target);
         await syncDirectory(dirname(target));
         await atomicWriteFile(
@@ -504,17 +510,19 @@ export class ProjectLibrary {
   }
 
   async #initializeRoot(): Promise<void> {
-    await Promise.all([
-      mkdir(join(this.#activeRoot, "objects", "sha256"), { recursive: true }),
-      mkdir(join(this.#activeRoot, "projects"), { recursive: true }),
-      mkdir(join(this.#activeRoot, "quarantine"), { recursive: true }),
-      mkdir(join(this.#activeRoot, "staging"), { recursive: true }),
-      mkdir(join(this.#activeRoot, "trash"), { recursive: true }),
-    ]);
+    await ensureDurableDirectory(this.#activeRoot);
+    for (const directory of [
+      join(this.#activeRoot, "objects"),
+      join(this.#activeRoot, "objects", "sha256"),
+      join(this.#activeRoot, "projects"),
+      join(this.#activeRoot, "quarantine"),
+      join(this.#activeRoot, "staging"),
+      join(this.#activeRoot, "trash"),
+    ])
+      await ensureDurableDirectory(directory);
     await scavengeDirectory(join(this.#activeRoot, "staging"));
     await this.#refreshEntries();
     await this.#migrateExistingProjects();
-    await this.#collectUnreferencedObjects();
   }
 
   async #refreshEntries(): Promise<void> {
@@ -605,6 +613,7 @@ export class ProjectLibrary {
         ),
       );
       await syncDirectory(join(this.#activeRoot, "quarantine"));
+      await syncDirectory(projectDirectory);
     }
     const revisions = await this.#readVerifiedRevisions(projectDirectory, projectId);
     const recovered = revisions.at(-1);
@@ -617,12 +626,14 @@ export class ProjectLibrary {
       reason: "active_head_corrupt",
       schemaVersion: "1.0",
     });
-    await mkdir(join(projectDirectory, "reports"), { recursive: true });
+    const reportsDirectory = join(projectDirectory, "reports");
+    await ensureDurableDirectory(reportsDirectory);
     await writeDurableFile(
-      join(projectDirectory, "reports", `recovery-${Date.now()}-${randomUUID()}.json`),
+      join(reportsDirectory, `recovery-${Date.now()}-${randomUUID()}.json`),
       canonicalSerialize(report),
       "wx",
     );
+    await syncDirectory(reportsDirectory);
     if (recovered === undefined) {
       return {
         compatibility: "read_only",
@@ -820,7 +831,8 @@ export class ProjectLibrary {
     await this.#installObject(stagedRevisionPath, revisionObjectHash);
     const projectDirectory = this.#projectDirectory(projectId, "active");
     const revisionsDirectory = join(projectDirectory, "revisions");
-    await mkdir(revisionsDirectory, { recursive: true });
+    await ensureDurableDirectory(projectDirectory);
+    await ensureDurableDirectory(revisionsDirectory);
     await rename(
       stagedPointerPath,
       join(revisionsDirectory, `${String(sequence).padStart(12, "0")}-${projectRevisionId}.json`),
@@ -865,34 +877,35 @@ export class ProjectLibrary {
     projectId: string,
     initial: RevisionSnapshot,
   ): Promise<RevisionSnapshot> {
-    let current = initial;
-    while (
-      compareSchemaVersions(current.payload.envelope.schemaVersion, this.#currentSchemaVersion) < 0
-    ) {
+    if (this.#compatibilityFor(initial.payload.envelope) === "writable") return initial;
+    const migratedPayload = await this.#prepareMigratedPayload(initial);
+    return this.#commitPayload(
+      projectId,
+      migratedPayload,
+      initial.revision.projectRevisionId,
+      initial.pointer.sequence + 1,
+      "migration",
+    );
+  }
+
+  async #prepareMigratedPayload(initial: RevisionSnapshot): Promise<StoredProjectPayload> {
+    let envelope = structuredClone(initial.payload.envelope);
+    while (compareSchemaVersions(envelope.schemaVersion, this.#currentSchemaVersion) < 0) {
       const migration = this.#migrations.find(
-        ({ fromVersion }) => fromVersion === current.payload.envelope.schemaVersion,
+        ({ fromVersion }) => fromVersion === envelope.schemaVersion,
       );
-      if (migration === undefined)
-        throw new ProjectLibraryReadOnlyError(current.payload.envelope.schemaVersion);
-      const migratedEnvelope = ProjectEnvelopeSchema.parse(
-        await migration.migrate(structuredClone(current.payload.envelope)),
-      );
-      if (migratedEnvelope.schemaVersion !== migration.toVersion)
+      if (migration === undefined) throw new ProjectLibraryReadOnlyError(envelope.schemaVersion);
+      envelope = ProjectEnvelopeSchema.parse(await migration.migrate(structuredClone(envelope)));
+      if (envelope.schemaVersion !== migration.toVersion)
         throw new Error("Project migration returned an unexpected schema version");
-      const migratedPayload = buildStoredPayload({
-        envelope: migratedEnvelope,
-        records: current.payload.records,
-      });
-      current = await this.#commitPayload(
-        projectId,
-        migratedPayload,
-        current.revision.projectRevisionId,
-        current.pointer.sequence + 1,
-        "migration",
-      );
+      buildStoredPayload({ envelope, records: initial.payload.records });
     }
-    this.#assertCurrentWritableSchema(current.payload.envelope);
-    return current;
+    const migratedPayload = buildStoredPayload({
+      envelope,
+      records: initial.payload.records,
+    });
+    this.#assertCurrentWritableSchema(migratedPayload.envelope);
+    return migratedPayload;
   }
 
   async #migrateExistingProjects(): Promise<void> {
@@ -916,6 +929,7 @@ export class ProjectLibrary {
   }
 
   async #collectUnreferencedObjects(): Promise<void> {
+    if ([...this.#entries.values()].some(({ status }) => status === "damaged")) return;
     const referenced = new Set<string>();
     for (const entry of this.#entries.values()) {
       for (const revision of entry.revisions) {
@@ -1005,6 +1019,20 @@ export class ProjectLibrary {
 function validateStoredPayload(input: unknown): StoredProjectPayload {
   const payload = StoredProjectPayloadSchema.parse(input);
   parseContractEnvelope(payload.envelope);
+  const { projectRange } = payload.records;
+  if (
+    projectRange.endSourceSample - projectRange.startSourceSample !==
+    payload.envelope.payload.durationSamples
+  ) {
+    throw new Error("Project Range length must equal Project durationSamples");
+  }
+  const source = payload.records.sources.find(({ id }) => id === projectRange.sourceId);
+  if (
+    source === undefined ||
+    !source.snapshots.some(({ durationSamples }) => durationSamples >= projectRange.endSourceSample)
+  ) {
+    throw new Error("Project Range must fit a retained Source Snapshot");
+  }
   return payload;
 }
 
@@ -1082,6 +1110,13 @@ async function writeDurableFile(
   }
 }
 
+async function ensureDurableDirectory(path: string): Promise<void> {
+  await mkdir(path, { recursive: true });
+  await syncDirectory(path);
+  const parent = dirname(path);
+  if (parent !== path) await syncDirectory(parent);
+}
+
 async function atomicWriteFile(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
@@ -1131,28 +1166,29 @@ async function scavengeDirectory(path: string): Promise<void> {
   await syncDirectory(path);
 }
 
+async function syncTree(path: string): Promise<void> {
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    const entryPath = join(path, entry.name);
+    if (entry.isDirectory()) await syncTree(entryPath);
+    else if (entry.isFile()) await syncFile(entryPath);
+    else throw new Error("Project Library contains an unsupported filesystem entry");
+  }
+  await syncDirectory(path);
+}
+
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
   }
 }
 
 async function classifyLibraryPath(path: string): Promise<"local" | "unsupported"> {
   const normalized = resolve(path);
-  const lowerSegments = normalized.split(sep).map((segment) => segment.toLowerCase());
-  const cloudSegments = [
-    "cloudstorage",
-    "dropbox",
-    "google drive",
-    "icloud drive",
-    "mobile documents",
-    "onedrive",
-  ];
-  if (lowerSegments.some((segment) => cloudSegments.some((cloud) => segment.includes(cloud))))
-    return "unsupported";
+  if (hasCloudPathSegment(normalized)) return "unsupported";
   if (process.platform === "win32" && /^\\\\/.test(path)) return "unsupported";
 
   let probe = normalized;
@@ -1163,9 +1199,93 @@ async function classifyLibraryPath(path: string): Promise<"local" | "unsupported
   }
   const stats = await stat(probe);
   if (!stats.isDirectory()) probe = dirname(probe);
-  const filesystem = await statfs(probe, { bigint: true });
-  const unsupportedTypes = new Set([0x517bn, 0x6969n, 0xff53_4d42n]);
-  return unsupportedTypes.has(filesystem.type) ? "unsupported" : "local";
+  const canonicalProbe = await realpath(probe);
+  const canonicalCandidate = resolve(canonicalProbe, relative(probe, normalized));
+  if (hasCloudPathSegment(canonicalCandidate)) return "unsupported";
+  return (await isPlatformLocalVolume(canonicalProbe)) ? "local" : "unsupported";
+}
+
+function hasCloudPathSegment(path: string): boolean {
+  const cloudSegments = [
+    "cloudstorage",
+    "dropbox",
+    "google drive",
+    "icloud drive",
+    "mobile documents",
+    "onedrive",
+  ];
+  return path
+    .split(sep)
+    .map((segment) => segment.toLowerCase())
+    .some((segment) => cloudSegments.some((cloud) => segment.includes(cloud)));
+}
+
+async function isPlatformLocalVolume(path: string): Promise<boolean> {
+  if (process.platform === "darwin") {
+    const { stdout } = await execFileAsync("/sbin/mount", [], { encoding: "utf8" });
+    const mounts = stdout
+      .split("\n")
+      .flatMap((line) => {
+        const match = /^.+ on (.+) \(([^)]+)\)$/.exec(line);
+        return match?.[1] === undefined || match[2] === undefined
+          ? []
+          : [{ mountPoint: match[1], options: match[2].split(", ") }];
+      })
+      .filter(({ mountPoint }) => isAtOrBelow(path, mountPoint))
+      .toSorted((left, right) => right.mountPoint.length - left.mountPoint.length);
+    return mounts[0]?.options.includes("local") === true;
+  }
+  if (process.platform === "win32") {
+    const root = parse(path).root.replace(/[\\/]$/, "");
+    if (root === "") return false;
+    try {
+      const { stdout } = await execFileAsync("fsutil.exe", ["fsinfo", "drivetype", root], {
+        encoding: "utf8",
+      });
+      return /fixed drive/i.test(stdout);
+    } catch {
+      return false;
+    }
+  }
+  if (process.platform === "linux") {
+    const mountInfo = await readFile("/proc/self/mountinfo", "utf8");
+    const mounts = mountInfo
+      .split("\n")
+      .flatMap((line) => {
+        const [beforeSeparator, afterSeparator] = line.split(" - ");
+        const fields = beforeSeparator?.split(" ");
+        const filesystem = afterSeparator?.split(" ")[0];
+        return fields?.[4] === undefined || filesystem === undefined
+          ? []
+          : [{ filesystem, mountPoint: decodeMountInfoPath(fields[4]) }];
+      })
+      .filter(({ mountPoint }) => isAtOrBelow(path, mountPoint))
+      .toSorted((left, right) => right.mountPoint.length - left.mountPoint.length);
+    const localFilesystems = new Set([
+      "apfs",
+      "btrfs",
+      "ext2",
+      "ext3",
+      "ext4",
+      "overlay",
+      "ramfs",
+      "tmpfs",
+      "xfs",
+      "zfs",
+    ]);
+    return mounts[0] !== undefined && localFilesystems.has(mounts[0].filesystem);
+  }
+  return false;
+}
+
+function decodeMountInfoPath(path: string): string {
+  return path.replaceAll(/\\([0-7]{3})/g, (_, octal: string) =>
+    String.fromCodePoint(Number.parseInt(octal, 8)),
+  );
+}
+
+function isAtOrBelow(path: string, parent: string): boolean {
+  return path === parent || path.startsWith(parent === sep ? sep : `${parent}${sep}`);
 }
 
 function parseSchemaVersion(version: string): { major: number; minor: number } {

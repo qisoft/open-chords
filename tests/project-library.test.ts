@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -343,14 +343,14 @@ describe("ProjectLibrary", () => {
     expect(afterMigration.envelope.schemaVersion).toBe("1.1");
     expect(afterMigration.revisions).toHaveLength(2);
 
-    const compatibleRevision = afterMigration.revisions.at(-1);
-    if (compatibleRevision === undefined) throw new Error("Migrated revision is missing");
+    const preMigrationRevision = afterMigration.revisions[0];
+    if (preMigrationRevision === undefined) throw new Error("Pre-migration revision is missing");
     const objectCountBeforeRollback = readdirSync(
       join(library.activeRoot, "objects", "sha256"),
     ).length;
     const rolledBack = await library.rollbackProject(
       "project_golden",
-      compatibleRevision.projectRevisionId,
+      preMigrationRevision.projectRevisionId,
       migrated.projectRevisionId,
     );
     expect(rolledBack.projectRevisionId).not.toBe(migrated.projectRevisionId);
@@ -413,6 +413,61 @@ describe("ProjectLibrary", () => {
     expect(unchanged.revisions).toHaveLength(1);
   });
 
+  it("does not publish an intermediate revision when a later migration step fails", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-migration-chain-failure-");
+    const olderApplication = await openProjectLibrary({ stateRoot });
+    const created = await olderApplication.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const currentApplication = await openProjectLibrary({
+      currentSchemaVersion: "1.2",
+      migrations: [
+        {
+          fromVersion: "1.0",
+          migrate: (rawEnvelope) => {
+            const envelope = structuredClone(ProjectEnvelopeSchema.parse(rawEnvelope));
+            envelope.schemaVersion = "1.1";
+            envelope.payload.schemaVersion = "1.1";
+            return envelope;
+          },
+          toVersion: "1.1",
+        },
+        {
+          fromVersion: "1.1",
+          migrate: () => {
+            throw new Error("second migration fixture failed");
+          },
+          toVersion: "1.2",
+        },
+      ],
+      stateRoot,
+    });
+
+    const unchanged = await currentApplication.readProject("project_golden");
+    expect(unchanged.projectRevisionId).toBe(created.projectRevisionId);
+    expect(unchanged.envelope.schemaVersion).toBe("1.0");
+    expect(unchanged.revisions).toHaveLength(1);
+  });
+
+  it("validates Project Range against Project duration and retained Source Snapshots", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-range-validation-");
+    const library = await openProjectLibrary({ stateRoot });
+    const wrongLength = ownedRecords();
+    wrongLength.projectRange.endSourceSample -= 1;
+    await expect(
+      library.createProject({ envelope: goldenEnvelope(), records: wrongLength }),
+    ).rejects.toThrow(/range length/i);
+
+    const outsideSnapshot = ownedRecords();
+    const snapshot = outsideSnapshot.sources[0]?.snapshots[0];
+    if (snapshot === undefined) throw new Error("Source Snapshot fixture is missing");
+    snapshot.durationSamples = outsideSnapshot.projectRange.endSourceSample - 1;
+    await expect(
+      library.createProject({ envelope: goldenEnvelope(), records: outsideSnapshot }),
+    ).rejects.toThrow(/fit a retained Source Snapshot/i);
+  });
+
   it("supports recoverable Trash without deleting external media or export targets", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-trash-");
     const library = await openProjectLibrary({
@@ -448,6 +503,25 @@ describe("ProjectLibrary", () => {
     await library.permanentlyDeleteProject("project_golden", "project_golden");
     expect(library.listProjects()).toEqual([]);
     expect(readdirSync(join(library.activeRoot, "objects", "sha256"))).toEqual([]);
+  });
+
+  it("does not reclaim immutable objects while another Project is damaged", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-damaged-gc-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const secondEnvelope = structuredClone(goldenEnvelope());
+    secondEnvelope.payload.id = "project_second";
+    for (const revision of secondEnvelope.payload.analysisRevisions)
+      revision.projectId = "project_second";
+    await library.createProject({ envelope: secondEnvelope, records: ownedRecords() });
+    corruptActivePayload(library.activeRoot, "project_golden");
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    const objectsDirectory = join(reopened.activeRoot, "objects", "sha256");
+    const objectsBeforeDeletion = readdirSync(objectsDirectory).toSorted();
+    await reopened.trashProject("project_second");
+    await reopened.permanentlyDeleteProject("project_second", "project_second");
+    expect(readdirSync(objectsDirectory).toSorted()).toEqual(objectsBeforeDeletion);
   });
 
   it("relocates only to a local path, atomically switches, and retains the old copy", async () => {
@@ -496,6 +570,21 @@ describe("ProjectLibrary", () => {
       openProjectLibrary({ stateRoot: join(parent, "Library", "CloudStorage", "Open Chords") }),
     ).rejects.toThrow(/local disk/i);
   });
+
+  it.runIf(process.platform !== "win32")(
+    "rejects a local-looking symlink into a cloud-synchronized path",
+    async () => {
+      const parent = await temporaryDirectory("open-chords-library-cloud-link-");
+      const cloudTarget = join(parent, "CloudStorage", "Dropbox", "Open Chords");
+      mkdirSync(cloudTarget, { recursive: true });
+      const localLookingLink = join(parent, "library-link");
+      symlinkSync(cloudTarget, localLookingLink, "dir");
+
+      await expect(
+        openProjectLibrary({ stateRoot: join(localLookingLink, "state") }),
+      ).rejects.toThrow(/local disk/i);
+    },
+  );
 
   it("rebuilds a corrupt index instead of treating it as authority", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-index-");

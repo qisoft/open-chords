@@ -12,7 +12,7 @@ Issue [#39](https://github.com/qisoft/open-chords/issues/39) owns the durable, m
 - recoverable Library Trash, explicit permanent deletion, and age-bounded Empty Trash;
 - validated relocation to another local-disk directory while retaining the previous copy.
 
-The same interface is the production `ProjectAuthority` used by the typed desktop command gateway. A newer safely understood minor schema remains readable but returns `project_read_only` for mutation. Project Library records keep Source identity, private Locators, immutable Source Snapshots and metadata observations, Project Range, and Export Receipts beside the canonical Project envelope; none of those main-only records cross the current IPC snapshot seam.
+The same interface is the production `ProjectAuthority` used by the typed desktop command gateway. A newer safely understood minor schema remains readable but returns `project_read_only` for mutation. Project Library records keep Source identity, private Locators, immutable Source Snapshots and metadata observations, Project Range, and Export Receipts beside the canonical Project envelope; publication verifies that the Project Range length matches the Project duration and fits a retained Source Snapshot. None of those main-only records cross the current IPC snapshot seam.
 
 ## Durable publication
 
@@ -30,15 +30,15 @@ The project index is rewritten from verified Heads and is never used as authorit
 
 Startup removes abandoned staging directories before accepting work. Every active Head, revision object, content hash, Project envelope, domain invariant, Source record, and receipt is revalidated. If the active Head cannot be resolved, it is moved to `quarantine/` and the newest verified revision-pointer entry is republished as Head. Recovery writes an explicit loss report. If no verified revision exists, the Project remains listed as `damaged` and reads fail rather than inventing or silently repairing state.
 
-Opening an older supported schema automatically runs registered migrations after preserving and validating its current revision. Each migration produces and validates another Project Revision before Head changes. A failed or unavailable migration leaves the prior revision readable, unchanged, and read-only. Rollback likewise publishes a new revision from a compatible retained payload; it does not rewrite history or downgrade in place.
+Opening an older supported schema automatically runs registered migrations after preserving and validating its current revision. The complete migration chain is evaluated and validated in memory, then published as one new Project Revision. A failed or unavailable step leaves the prior revision readable, unchanged, and read-only. Rollback can select the pre-migration backup, replay the current migration chain, and publish the result as a new rollback revision; it does not rewrite history or downgrade in place.
 
 ## Location and deletion policy
 
-The state root holds only the atomic active-location record and the default Library directory. Relocation copies to same-parent staging, scavenges copied staging, validates all active and trashed Projects, renames the complete copy into place, and then atomically switches the location record. The old Library is retained.
+The state root holds only the atomic active-location record and the default Library directory. Relocation copies to same-parent staging, scavenges copied staging, validates all active and trashed Projects, syncs the complete tree, renames the copy into place, and then atomically switches the location record. The old Library is retained.
 
-The default path policy rejects UNC paths, known network filesystem types, and known cloud-sync path roots such as iCloud Drive/CloudStorage, OneDrive, Dropbox, and Google Drive. A platform adapter can make this policy stricter without changing the Project Library interface.
+The default path policy resolves existing ancestors to prevent symlink bypasses, rejects UNC and Windows remote drives, requires a local macOS mount or an allowlisted local Linux filesystem, and rejects known cloud-sync path roots such as iCloud Drive/CloudStorage, OneDrive, Dropbox, and Google Drive. A platform adapter can make this policy stricter without changing the Project Library interface.
 
-Deleting a Project first moves its owned records to Library Trash. Restore is reversible. Immediate permanent deletion requires the exact Project ID as confirmation; default Empty Trash selects records older than 30 days. After permanent deletion, the Library reclaims only content-addressed objects that no remaining active or trashed revision references. These operations remove Library-owned records only and never delete external Source media, export targets, or already-created archives.
+Deleting a Project first moves its owned records to Library Trash. Restore is reversible. Immediate permanent deletion requires the exact Project ID as confirmation; default Empty Trash selects records older than 30 days. After permanent deletion, the Library reclaims only content-addressed objects that no remaining active or trashed revision references, and defers reclamation entirely while any Project is damaged. These operations remove Library-owned records only and never delete external Source media, export targets, or already-created archives.
 
 ## Verification
 
