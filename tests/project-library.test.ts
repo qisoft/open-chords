@@ -1011,6 +1011,22 @@ describe("ProjectLibrary", () => {
     locator.verifiedAt = "2026-08-21T09:00:00Z";
     writeFileSync(catalogPath, canonicalSerialize(catalog));
 
+    await expect(
+      openProjectLibrary({
+        faultInjector: (point) => {
+          if (point === "after_catalog_recovery_report")
+            throw new Error("simulated catalog recovery interruption");
+        },
+        stateRoot,
+      }),
+    ).rejects.toThrow(/catalog recovery interruption/i);
+    expect(existsSync(catalogPath)).toBe(true);
+    expect(
+      readdirSync(join(library.activeRoot, "reports")).some((name) =>
+        name.startsWith("source-catalog-recovery-"),
+      ),
+    ).toBe(true);
+
     const reopened = await openProjectLibrary({ stateRoot });
     expect(
       (await reopened.readProject("project_golden")).records.sources[0]?.locators[0],
@@ -1027,6 +1043,34 @@ describe("ProjectLibrary", () => {
         name.startsWith("source-catalog-recovery-"),
       ),
     ).toBe(true);
+  });
+
+  it("defers catalog pruning while a non-deleted Project is opaquely damaged", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-catalog-damaged-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const projectDirectory = join(library.activeRoot, "projects", "project_golden");
+    rmSync(join(projectDirectory, "HEAD.json"));
+    const revisionsDirectory = join(projectDirectory, "revisions");
+    for (const name of readdirSync(revisionsDirectory)) rmSync(join(revisionsDirectory, name));
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(reopened.listProjects()).toEqual([
+      expect.objectContaining({ projectId: "project_golden", status: "damaged" }),
+    ]);
+    const catalogSchema = z.looseObject({
+      locatorsBySourceId: z.record(z.string(), z.array(z.unknown())),
+    });
+    const catalog = catalogSchema.parse(
+      JSON.parse(readFileSync(join(reopened.activeRoot, "source-catalog.json"), "utf8")),
+    );
+    expect(catalog.locatorsBySourceId.source_fixture).toHaveLength(1);
+
+    await openProjectLibrary({ stateRoot });
+    const reopenedCatalog = catalogSchema.parse(
+      JSON.parse(readFileSync(join(reopened.activeRoot, "source-catalog.json"), "utf8")),
+    );
+    expect(reopenedCatalog).toEqual(catalog);
   });
 
   it("recovers from duplicate Locator IDs in the primary catalog", async () => {

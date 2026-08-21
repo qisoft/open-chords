@@ -149,6 +149,7 @@ export type ProjectLibraryFaultPoint =
   | "after_relocation_target_rename"
   | "after_relocation_location_rename"
   | "after_relocation_location_replace"
+  | "after_catalog_recovery_report"
   | "before_relocation_staging_cleanup"
   | "before_trash_parent_sync"
   | "before_trash_restore_parent_sync"
@@ -823,6 +824,7 @@ export class ProjectLibrary {
       join(this.#activeRoot, "objects", "sha256"),
       join(this.#activeRoot, "projects"),
       join(this.#activeRoot, "quarantine"),
+      join(this.#activeRoot, "reports"),
       join(this.#activeRoot, "staging"),
       join(this.#activeRoot, "trash"),
     ])
@@ -1642,29 +1644,26 @@ export class ProjectLibrary {
     recoveredFrom?: string,
   ): Promise<void> {
     const quarantineDirectory = join(this.#activeRoot, "quarantine");
-    const quarantined: string[] = [];
-    for (const path of paths) {
-      const target = join(
-        quarantineDirectory,
-        `source-catalog-${basename(path)}-${randomUUID()}.json`,
-      );
-      await rename(path, target);
-      quarantined.push(basename(target));
-    }
-    await syncDirectory(quarantineDirectory);
-    await syncDirectory(this.#activeRoot);
+    const quarantineMoves = paths.map((path) => ({
+      path,
+      target: join(quarantineDirectory, `source-catalog-${basename(path)}-${randomUUID()}.json`),
+    }));
     const reportsDirectory = join(this.#activeRoot, "reports");
-    await ensureManagedDirectory(this.#activeRoot, reportsDirectory);
+    await assertManagedDirectory(this.#activeRoot, reportsDirectory);
     await atomicWriteFile(
       join(reportsDirectory, `source-catalog-recovery-${randomUUID()}.json`),
       canonicalSerialize({
         format: "open-chords/source-catalog-recovery",
-        quarantined,
+        quarantineTargets: quarantineMoves.map(({ target }) => basename(target)),
         recoveredFrom: recoveredFrom === undefined ? null : basename(recoveredFrom),
         recoveredAt: this.#now().toISOString(),
         schemaVersion: "1.0",
       }),
     );
+    await this.#faultInjector("after_catalog_recovery_report");
+    for (const { path, target } of quarantineMoves) await rename(path, target);
+    await syncDirectory(quarantineDirectory);
+    await syncDirectory(this.#activeRoot);
   }
 
   async #runReconciledLifecycleMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -1884,7 +1883,12 @@ function mergeCatalogWithEntries(
       bySource.set(source.id, locators);
     }
   }
-  for (const sourceId of bySource.keys()) if (!referenced.has(sourceId)) bySource.delete(sourceId);
+  const hasOpaqueDamagedProject = [...entries.values()].some(
+    (entry) => entry.status === "damaged" && entry.revision === undefined,
+  );
+  if (!hasOpaqueDamagedProject)
+    for (const sourceId of bySource.keys())
+      if (!referenced.has(sourceId)) bySource.delete(sourceId);
   const catalog = new Map(
     [...bySource].map(([sourceId, locators]) => [
       sourceId,
