@@ -37,6 +37,8 @@ const HASH_PATTERN = /^sha256:([a-f0-9]{64})$/;
 const PROJECT_REVISION_ID_PATTERN = /^projectrevision_[a-f0-9]{32}$/;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1_000;
 const LIBRARY_LOCATION_FILE = "project-library-location.json";
+const RELOCATION_JOURNAL_FILE = "project-library-relocation.json";
+const RELOCATION_MARKER_FILE = ".open-chords-relocation.json";
 const DEFAULT_LIBRARY_DIRECTORY = "project-library";
 const execFileAsync = promisify(execFile);
 
@@ -91,6 +93,19 @@ const LibraryLocationSchema = z.strictObject({
   format: z.literal("open-chords/project-library-location"),
   schemaVersion: z.literal("1.0"),
 });
+const RelocationJournalSchema = z.strictObject({
+  format: z.literal("open-chords/project-library-relocation"),
+  id: z.string().uuid(),
+  previousRoot: z.string().min(1),
+  schemaVersion: z.literal("1.0"),
+  stagingTarget: z.string().min(1),
+  target: z.string().min(1),
+});
+const RelocationMarkerSchema = z.strictObject({
+  format: z.literal("open-chords/project-library-relocation-marker"),
+  id: z.string().uuid(),
+  schemaVersion: z.literal("1.0"),
+});
 
 type StoredProjectPayload = z.infer<typeof StoredProjectPayloadSchema>;
 type ProjectRevisionRecord = z.infer<typeof ProjectRevisionRecordSchema>;
@@ -113,6 +128,7 @@ export type ProjectLibraryFaultPoint =
   | "before_trash_parent_sync"
   | "before_trash_restore_parent_sync"
   | "before_permanent_delete_parent_sync"
+  | "before_empty_trash_remove"
   | "after_trash_move"
   | "after_trash_restore_move"
   | "after_permanent_delete";
@@ -255,6 +271,7 @@ export class ProjectLibrary {
       throw new Error("Project Library state root must be absolute");
     const stateRoot = resolve(options.stateRoot);
     await ensureDurableDirectory(stateRoot);
+    await inspectRelocationJournal(stateRoot);
     const locationPath = join(stateRoot, LIBRARY_LOCATION_FILE);
     const configuredRoot = await readLibraryLocation(
       locationPath,
@@ -264,6 +281,7 @@ export class ProjectLibrary {
     const library = new ProjectLibrary(options, activeRoot);
     await library.#assertLocalPath(activeRoot);
     await library.#initializeRoot();
+    await library.#cleanupCompletedRelocation();
     return library;
   }
 
@@ -545,15 +563,14 @@ export class ProjectLibrary {
           ) {
             const projectDirectory = this.#projectDirectory(projectId, "trashed");
             await assertManagedDirectory(this.#activeRoot, projectDirectory);
+            await this.#faultInjector("before_empty_trash_remove");
             await rm(projectDirectory, { recursive: true });
+            try {
+              await syncDirectory(join(this.#activeRoot, "trash"));
+            } catch (error) {
+              throw new ProjectLifecycleDurabilityError(error);
+            }
             deleted.push(projectId);
-          }
-        }
-        if (deleted.length > 0) {
-          try {
-            await syncDirectory(join(this.#activeRoot, "trash"));
-          } catch (error) {
-            throw new ProjectLifecycleDurabilityError(error);
           }
         }
         await this.#refreshEntries();
@@ -568,6 +585,7 @@ export class ProjectLibrary {
       if (!isAbsolute(targetRoot)) throw new Error("Project Library target must be absolute");
       const previousRoot = this.#activeRoot;
       const target = await canonicalizeLibraryPath(targetRoot);
+      if (await this.#resumeRelocation(target)) return;
       if (target === previousRoot) return;
       if (isNestedPath(previousRoot, target) || isNestedPath(target, previousRoot))
         throw new Error("Project Library cannot be relocated inside its current directory");
@@ -579,6 +597,31 @@ export class ProjectLibrary {
         dirname(target),
         `.open-chords-library-relocation-${randomUUID()}`,
       );
+      const relocationId = randomUUID();
+      await atomicWriteFile(
+        join(this.#stateRoot, RELOCATION_JOURNAL_FILE),
+        canonicalSerialize({
+          format: "open-chords/project-library-relocation",
+          id: relocationId,
+          previousRoot,
+          schemaVersion: "1.0",
+          stagingTarget,
+          target,
+        }),
+      );
+      const stagedLibrary = join(stagingTarget, "library");
+      await mkdir(stagingTarget);
+      await writeDurableFile(
+        join(stagingTarget, RELOCATION_MARKER_FILE),
+        canonicalSerialize({
+          format: "open-chords/project-library-relocation-marker",
+          id: relocationId,
+          schemaVersion: "1.0",
+        }),
+        "wx",
+      );
+      await syncDirectory(stagingTarget);
+      await syncDirectory(dirname(stagingTarget));
       let targetInstalled = false;
       let targetDurable = false;
       let locationDurable = false;
@@ -589,13 +632,13 @@ export class ProjectLibrary {
         schemaVersion: "1.0",
       });
       try {
-        await cp(previousRoot, stagingTarget, {
+        await cp(previousRoot, stagedLibrary, {
           errorOnExist: true,
           force: false,
           recursive: true,
         });
-        await rm(join(stagingTarget, "staging"), { force: true, recursive: true });
-        await mkdir(join(stagingTarget, "staging"));
+        await rm(join(stagedLibrary, "staging"), { force: true, recursive: true });
+        await mkdir(join(stagedLibrary, "staging"));
         const validation = new ProjectLibrary(
           {
             currentSchemaVersion: this.#currentSchemaVersion,
@@ -604,13 +647,22 @@ export class ProjectLibrary {
             pathPolicy: this.#pathPolicy,
             stateRoot: this.#stateRoot,
           },
-          stagingTarget,
+          stagedLibrary,
         );
         await validation.#initializeRoot();
         if (validation.listProjects().some(({ status }) => status === "damaged"))
           throw new Error("Relocated Project Library did not pass complete validation");
-        await syncTree(stagingTarget);
-        await rename(stagingTarget, target);
+        await writeDurableFile(
+          join(stagedLibrary, RELOCATION_MARKER_FILE),
+          canonicalSerialize({
+            format: "open-chords/project-library-relocation-marker",
+            id: relocationId,
+            schemaVersion: "1.0",
+          }),
+          "wx",
+        );
+        await syncTree(stagedLibrary);
+        await rename(stagedLibrary, target);
         targetInstalled = true;
         await syncDirectory(dirname(target));
         targetDurable = true;
@@ -622,6 +674,8 @@ export class ProjectLibrary {
         await this.#faultInjector("after_relocation_location_replace");
         this.#activeRoot = target;
         await this.#refreshEntries();
+        await rm(stagingTarget, { force: true, recursive: true });
+        await this.#cleanupCompletedRelocation();
       } catch (error) {
         let stagingCleanupError: unknown;
         try {
@@ -651,10 +705,78 @@ export class ProjectLibrary {
             `Project Library relocation and staging cleanup both failed: ${errorMessage(stagingCleanupError)}`,
             { cause: error },
           );
+        if (targetInstalled) await this.#cleanupCompletedRelocation();
+        else await this.#clearRelocationJournal();
         if (targetInstalled) return;
         throw error;
       }
     });
+  }
+
+  async #resumeRelocation(target: string): Promise<boolean> {
+    const journal = await readRelocationJournal(this.#stateRoot);
+    if (journal === undefined) return false;
+    if (journal.previousRoot !== this.#activeRoot || journal.target !== target)
+      throw new Error("Another Project Library relocation requires recovery first");
+    if (await pathExists(journal.stagingTarget)) {
+      const approvedParent = await realpath(dirname(target));
+      const stagingPath = await realpath(journal.stagingTarget);
+      if (
+        dirname(stagingPath) !== approvedParent ||
+        !basename(stagingPath).startsWith(".open-chords-library-relocation-")
+      )
+        throw new Error("Project Library relocation staging path is outside its approved parent");
+      const marker = await parseJsonFile(
+        join(stagingPath, RELOCATION_MARKER_FILE),
+        RelocationMarkerSchema,
+      );
+      if (marker.id !== journal.id)
+        throw new Error("Project Library relocation staging ownership is ambiguous");
+      await rm(stagingPath, { recursive: true });
+      await syncDirectory(approvedParent);
+    }
+    if (await pathExists(target)) {
+      const marker = await parseJsonFile(
+        join(target, RELOCATION_MARKER_FILE),
+        RelocationMarkerSchema,
+      );
+      if (marker.id !== journal.id)
+        throw new Error("Project Library relocation target ownership is ambiguous");
+      await atomicWriteFile(
+        join(this.#stateRoot, LIBRARY_LOCATION_FILE),
+        canonicalSerialize({
+          activeRoot: target,
+          format: "open-chords/project-library-location",
+          schemaVersion: "1.0",
+        }),
+      );
+      this.#activeRoot = target;
+      await this.#initializeRoot();
+      await this.#cleanupCompletedRelocation();
+      return true;
+    }
+    await this.#clearRelocationJournal();
+    return false;
+  }
+
+  async #cleanupCompletedRelocation(): Promise<void> {
+    const journal = await readRelocationJournal(this.#stateRoot);
+    if (journal === undefined || journal.target !== this.#activeRoot) return;
+    if (await pathExists(journal.stagingTarget)) return;
+    const markerPath = join(this.#activeRoot, RELOCATION_MARKER_FILE);
+    if (await pathExists(markerPath)) {
+      const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
+      if (marker.id !== journal.id)
+        throw new Error("Project Library relocation marker does not match its journal");
+      await rm(markerPath);
+      await syncDirectory(this.#activeRoot);
+    }
+    await this.#clearRelocationJournal();
+  }
+
+  async #clearRelocationJournal(): Promise<void> {
+    await rm(join(this.#stateRoot, RELOCATION_JOURNAL_FILE), { force: true });
+    await syncDirectory(this.#stateRoot);
   }
 
   async #initializeRoot(): Promise<void> {
@@ -1585,6 +1707,24 @@ async function readLibraryLocation(path: string, fallback: string): Promise<stri
   const location = await parseJsonFile(path, LibraryLocationSchema);
   if (!isAbsolute(location.activeRoot)) throw new Error("Project Library location is not absolute");
   return resolve(location.activeRoot);
+}
+
+async function readRelocationJournal(
+  stateRoot: string,
+): Promise<z.infer<typeof RelocationJournalSchema> | undefined> {
+  const path = join(stateRoot, RELOCATION_JOURNAL_FILE);
+  if (!(await pathExists(path))) return undefined;
+  const journal = await parseJsonFile(path, RelocationJournalSchema);
+  if (
+    ![journal.previousRoot, journal.stagingTarget, journal.target].every(isAbsolute) ||
+    dirname(journal.stagingTarget) !== dirname(journal.target)
+  )
+    throw new Error("Project Library relocation journal contains unsafe paths");
+  return journal;
+}
+
+async function inspectRelocationJournal(stateRoot: string): Promise<void> {
+  await readRelocationJournal(stateRoot);
 }
 
 async function readLatestRecoveryReport(

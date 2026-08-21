@@ -202,16 +202,6 @@ export const ProjectOwnedRecordsSchema = z
             });
           }
         }
-        if (
-          snapshot.provenance.kind === "youtube_acquisition" &&
-          snapshot.metadataObservationIds.length === 0
-        ) {
-          context.addIssue({
-            code: "custom",
-            message: "YouTube Source Snapshot requires acquisition-time metadata",
-            path: ["sources", sourceIndex, "snapshots", snapshotIndex, "metadataObservationIds"],
-          });
-        }
         const snapshotMatches =
           (source.identity.kind === "local_file" &&
             snapshot.provenance.kind === "local_file" &&

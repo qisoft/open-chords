@@ -1012,6 +1012,12 @@ describe("ProjectLibrary", () => {
     await expect(library.createProject({ envelope: goldenEnvelope(), records })).rejects.toThrow(
       /late/i,
     );
+
+    source.metadataObservations = [];
+    snapshot.metadataObservationIds = [];
+    await expect(
+      library.createProject({ envelope: goldenEnvelope(), records }),
+    ).resolves.toBeDefined();
   });
 
   it("supports recoverable Trash without deleting external media or export targets", async () => {
@@ -1134,6 +1140,36 @@ describe("ProjectLibrary", () => {
     await expect(library.restoreTrashedProject("project_golden")).rejects.toThrow(/reopened/i);
   });
 
+  it("durably commits each Empty Trash removal before attempting the next", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-empty-trash-batch-");
+    let removals = 0;
+    let failSecond = true;
+    const library = await openProjectLibrary({
+      faultInjector: (point) => {
+        if (point === "before_empty_trash_remove" && ++removals === 2 && failSecond)
+          throw new Error("simulated second Trash removal failure");
+      },
+      stateRoot,
+    });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    await library.createProject({
+      envelope: envelopeForProject("project_second"),
+      records: ownedRecords(),
+    });
+    await library.trashProject("project_golden");
+    await library.trashProject("project_second");
+
+    await expect(
+      library.emptyTrash({ olderThan: new Date("2100-01-01T00:00:00Z") }),
+    ).rejects.toThrow(/second Trash removal failure/);
+    expect(library.listProjects()).toHaveLength(1);
+    failSecond = false;
+    removals = 0;
+    await expect(
+      library.emptyTrash({ olderThan: new Date("2100-01-01T00:00:00Z") }),
+    ).resolves.toHaveLength(1);
+  });
+
   it("requires exact confirmation for immediate permanent deletion", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-delete-");
     const library = await openProjectLibrary({ stateRoot });
@@ -1224,6 +1260,46 @@ describe("ProjectLibrary", () => {
       expect(reopened.activeRoot).toBe(library.activeRoot);
       expect((await reopened.getSnapshot("project_golden"))?.project.id).toBe("project_golden");
     }
+  });
+
+  it("uses the durable relocation journal to clear an interrupted copy on explicit retry", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-relocation-journal-state-");
+    const destinationParent = await temporaryDirectory(
+      "open-chords-library-relocation-journal-target-",
+    );
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const target = join(await realpath(destinationParent), "Moved Library");
+    const stagingTarget = join(
+      await realpath(destinationParent),
+      ".open-chords-library-relocation-interrupted",
+    );
+    const relocationId = "11111111-1111-4111-8111-111111111111";
+    mkdirSync(stagingTarget);
+    writeFileSync(
+      join(stagingTarget, ".open-chords-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation-marker",
+        id: relocationId,
+        schemaVersion: "1.0",
+      }),
+    );
+    writeFileSync(
+      join(stateRoot, "project-library-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation",
+        id: relocationId,
+        previousRoot: library.activeRoot,
+        schemaVersion: "1.0",
+        stagingTarget,
+        target,
+      }),
+    );
+
+    await library.relocate(target);
+    expect(library.activeRoot).toBe(target);
+    expect(existsSync(stagingTarget)).toBe(false);
+    expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(false);
   });
 
   it.runIf(process.platform !== "win32")(
