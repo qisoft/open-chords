@@ -105,6 +105,7 @@ export type ProjectLibraryFaultPoint =
   | "after_head_replace"
   | "after_relocation_target_rename"
   | "after_relocation_location_replace"
+  | "before_relocation_staging_cleanup"
   | "after_trash_move"
   | "after_trash_restore_move"
   | "after_permanent_delete";
@@ -234,10 +235,11 @@ export class ProjectLibrary {
     const stateRoot = resolve(options.stateRoot);
     await ensureDurableDirectory(stateRoot);
     const locationPath = join(stateRoot, LIBRARY_LOCATION_FILE);
-    const activeRoot = await readLibraryLocation(
+    const configuredRoot = await readLibraryLocation(
       locationPath,
       join(stateRoot, DEFAULT_LIBRARY_DIRECTORY),
     );
+    const activeRoot = await canonicalizeLibraryPath(configuredRoot);
     const library = new ProjectLibrary(options, activeRoot);
     await library.#assertLocalPath(activeRoot);
     await library.#initializeRoot();
@@ -564,7 +566,13 @@ export class ProjectLibrary {
         this.#activeRoot = target;
         await this.#refreshEntries();
       } catch (error) {
-        await rm(stagingTarget, { force: true, recursive: true });
+        let stagingCleanupError: unknown;
+        try {
+          await this.#faultInjector("before_relocation_staging_cleanup");
+          await rm(stagingTarget, { force: true, recursive: true });
+        } catch (cleanupError) {
+          stagingCleanupError = cleanupError;
+        }
         if (targetInstalled) {
           try {
             const authoritativeRoot = await readLibraryLocation(
@@ -594,6 +602,11 @@ export class ProjectLibrary {
             });
           }
         }
+        if (stagingCleanupError !== undefined)
+          throw new Error(
+            `Project Library relocation and staging cleanup both failed: ${errorMessage(stagingCleanupError)}`,
+            { cause: error },
+          );
         throw error;
       }
     });
@@ -655,11 +668,13 @@ export class ProjectLibrary {
       const projectDirectory = join(container, projectId);
       await assertManagedDirectory(this.#activeRoot, projectDirectory);
       const recoveryReport = await readLatestRecoveryReport(this.#activeRoot, projectDirectory);
+      const stagedHead = await this.#stagedHeadForProject(projectId);
+      const headExists = await pathExists(join(projectDirectory, "HEAD.json"));
       if (
         location === "active" &&
         recoveryReport === undefined &&
-        !(await pathExists(join(projectDirectory, "HEAD.json"))) &&
-        (await this.#hasStagedHead(projectId))
+        !headExists &&
+        stagedHead?.sequence === 1
       ) {
         const quarantineDirectory = join(this.#activeRoot, "quarantine");
         await assertManagedDirectory(this.#activeRoot, quarantineDirectory);
@@ -707,13 +722,19 @@ export class ProjectLibrary {
           });
           continue;
         }
-        const recovered = await this.#recoverProject(projectDirectory, projectId);
+        const recovered = await this.#recoverProject(
+          projectDirectory,
+          projectId,
+          stagedHead === undefined ? (headExists ? undefined : 0) : stagedHead.sequence - 1,
+        );
         entries.set(projectId, recovered);
       }
     }
   }
 
-  async #hasStagedHead(projectId: string): Promise<boolean> {
+  async #stagedHeadForProject(
+    projectId: string,
+  ): Promise<z.infer<typeof ProjectHeadSchema> | undefined> {
     const stagingDirectory = join(this.#activeRoot, "staging");
     await assertManagedDirectory(this.#activeRoot, stagingDirectory);
     for (const entry of await readdir(stagingDirectory, { withFileTypes: true })) {
@@ -722,15 +743,19 @@ export class ProjectLibrary {
       if (!(await pathExists(headPath))) continue;
       try {
         const head = await parseJsonFile(headPath, ProjectHeadSchema);
-        if (head.projectId === projectId) return true;
+        if (head.projectId === projectId) return head;
       } catch (error) {
         if (!(error instanceof ProjectStorageCorruptionError)) throw error;
       }
     }
-    return false;
+    return undefined;
   }
 
-  async #recoverProject(projectDirectory: string, projectId: string): Promise<LibraryEntry> {
+  async #recoverProject(
+    projectDirectory: string,
+    projectId: string,
+    maximumRecoverableSequence?: number,
+  ): Promise<LibraryEntry> {
     let lostProjectRevisionId: string | null = null;
     try {
       const rawHead = await parseJsonFile(join(projectDirectory, "HEAD.json"), ProjectHeadSchema);
@@ -753,8 +778,13 @@ export class ProjectLibrary {
       await syncDirectory(join(this.#activeRoot, "quarantine"));
       await syncDirectory(projectDirectory);
     }
+    if (maximumRecoverableSequence !== undefined && maximumRecoverableSequence > 0)
+      await this.#discardUnpublishedRevisionTail(projectDirectory, maximumRecoverableSequence);
     const revisions = await this.#readVerifiedRevisions(projectDirectory, projectId);
-    const recovered = revisions.at(-1);
+    const recovered =
+      maximumRecoverableSequence === undefined
+        ? revisions.at(-1)
+        : revisions.findLast(({ pointer }) => pointer.sequence <= maximumRecoverableSequence);
     const report = RecoveryReportSchema.parse({
       createdAt: this.#now().toISOString(),
       format: "open-chords/project-recovery-report",
@@ -1034,6 +1064,7 @@ export class ProjectLibrary {
     await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
     const stagingDirectory = join(this.#activeRoot, "staging", randomUUID());
     await mkdir(stagingDirectory, { recursive: true });
+    await syncDirectory(join(this.#activeRoot, "staging"));
     const payloadContent = canonicalSerialize(payload);
     const payloadObjectHash = hashContent(payloadContent);
     const stagedPayloadPath = join(stagingDirectory, "payload.json");

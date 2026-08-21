@@ -365,20 +365,51 @@ describe("ProjectLibrary", () => {
     expect(readdirSync(join(recovered.activeRoot, "quarantine"))).toHaveLength(1);
   });
 
-  it("recovers a missing published Head when no staged publication identifies crash residue", async () => {
+  it("keeps a Project damaged when both Head and its durable publication boundary are missing", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-missing-head-");
     const library = await openProjectLibrary({ stateRoot });
-    const created = await library.createProject({
+    await library.createProject({
       envelope: goldenEnvelope(),
       records: ownedRecords(),
     });
     rmSync(join(library.activeRoot, "projects", "project_golden", "HEAD.json"));
 
     const recovered = await openProjectLibrary({ stateRoot });
-    expect((await recovered.getSnapshot("project_golden"))?.projectRevisionId).toBe(
-      created.projectRevisionId,
+    expect(recovered.listProjects()).toEqual([
+      expect.objectContaining({ projectId: "project_golden", status: "damaged" }),
+    ]);
+    await expect(recovered.getSnapshot("project_golden")).rejects.toThrow(
+      ProjectLibraryDamagedError,
     );
-    expect(recovered.listProjects()[0]?.recoveryReport).toBeDefined();
+  });
+
+  it("excludes a staged unpublished tail while recovering a corrupt or missing old Head", async () => {
+    for (const oldHeadState of ["corrupt", "missing"] as const) {
+      const stateRoot = await temporaryDirectory(`open-chords-library-staged-${oldHeadState}-`);
+      const library = await openProjectLibrary({ stateRoot });
+      const created = await library.createProject({
+        envelope: goldenEnvelope(),
+        records: ownedRecords(),
+      });
+      const committed = await library.commitEditTransaction({
+        expectedProjectRevisionId: created.projectRevisionId,
+        projectId: "project_golden",
+        transaction: replacementTransaction(`transaction_staged_${oldHeadState}`),
+      });
+      if (!("projectRevisionId" in committed)) throw new Error("Fixture mutation did not commit");
+      const projectDirectory = join(library.activeRoot, "projects", "project_golden");
+      const stagedPublication = join(library.activeRoot, "staging", `interrupted-${oldHeadState}`);
+      mkdirSync(stagedPublication);
+      renameSync(join(projectDirectory, "HEAD.json"), join(stagedPublication, "HEAD.json"));
+      if (oldHeadState === "corrupt") writeFileSync(join(projectDirectory, "HEAD.json"), "broken");
+
+      const recovered = await openProjectLibrary({ stateRoot });
+      expect((await recovered.getSnapshot("project_golden"))?.projectRevisionId).toBe(
+        created.projectRevisionId,
+      );
+      expect((await recovered.readProject("project_golden")).revisions).toHaveLength(1);
+      expect(readdirSync(join(recovered.activeRoot, "objects", "sha256"))).toHaveLength(2);
+    }
   });
 
   it("rejects an altered Head that is not the exact verified ledger pointer", async () => {
@@ -1087,6 +1118,8 @@ describe("ProjectLibrary", () => {
             injected = true;
             throw new Error(`simulated relocation failure at ${point}`);
           }
+          if (injected && point === "before_relocation_staging_cleanup")
+            throw new Error("simulated relocation staging cleanup failure");
         },
         stateRoot,
       });
@@ -1094,7 +1127,9 @@ describe("ProjectLibrary", () => {
       const oldRoot = library.activeRoot;
       const canonicalDestination = join(await realpath(destinationParent), "Moved Library");
 
-      await expect(library.relocate(destination)).rejects.toThrow(/simulated relocation failure/);
+      await expect(library.relocate(destination)).rejects.toThrow(
+        /relocation and staging cleanup both failed/i,
+      );
       const beforeLocationCommit = faultPoint === "after_relocation_target_rename";
       expect({
         activeRoot: library.activeRoot,
@@ -1129,6 +1164,22 @@ describe("ProjectLibrary", () => {
       expect(readFileSync(join(stateRoot, "project-library-location.json"), "utf8")).not.toContain(
         aliasParent,
       );
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "compares relocation containment in the canonical active-root namespace",
+    async () => {
+      const realParent = await temporaryDirectory("open-chords-library-active-real-");
+      const aliasParent = join(dirname(realParent), `active-alias-${Date.now()}`);
+      temporaryRoots.push(aliasParent);
+      symlinkSync(realParent, aliasParent, "dir");
+      const library = await openProjectLibrary({ stateRoot: join(aliasParent, "State") });
+      await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+      const nestedTarget = join(await realpath(library.activeRoot), "Nested Library");
+
+      await expect(library.relocate(nestedTarget)).rejects.toThrow(/inside its current directory/i);
+      expect(existsSync(nestedTarget)).toBe(false);
     },
   );
 
