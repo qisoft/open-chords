@@ -93,6 +93,7 @@ function ownedRecords(): ProjectOwnedRecords {
               "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
             durationSamples: 96_000,
             id: "snapshot_fixture",
+            metadataObservationIds: [],
             observedAt: "2026-08-21T08:00:00Z",
             provenance: {
               components: [
@@ -128,6 +129,13 @@ function replacementTransaction(id: string) {
     ],
     parentTransactionId: null,
   };
+}
+
+function envelopeForProject(projectId: string) {
+  const envelope = structuredClone(goldenEnvelope());
+  envelope.payload.id = projectId;
+  for (const revision of envelope.payload.analysisRevisions) revision.projectId = projectId;
+  return envelope;
 }
 
 describe("ProjectLibrary", () => {
@@ -253,6 +261,8 @@ describe("ProjectLibrary", () => {
     expect(stored.envelope.payload.editLayers[0]?.transactions.map(({ id }) => id)).not.toContain(
       "transaction_failed_publication",
     );
+    expect(readdirSync(join(reopened.activeRoot, "staging"))).toEqual([]);
+    expect(readdirSync(join(reopened.activeRoot, "objects", "sha256"))).toHaveLength(4);
   });
 
   it("quarantines a corrupt active revision and restores the last verified revision", async () => {
@@ -388,7 +398,25 @@ describe("ProjectLibrary", () => {
     const stateRoot = await temporaryDirectory("open-chords-library-newer-major-");
     const library = await openProjectLibrary({ stateRoot });
     await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
-    rewriteStoredProjectMajor(library.activeRoot, "project_golden", "2.0");
+    rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", { version: "2.0" });
+    const headPath = join(library.activeRoot, "projects", "project_golden", "HEAD.json");
+    const headBeforeOpen = readFileSync(headPath, "utf8");
+
+    await expect(openProjectLibrary({ stateRoot })).rejects.toBeInstanceOf(
+      ProjectLibraryIncompatibleSchemaError,
+    );
+    expect(readFileSync(headPath, "utf8")).toBe(headBeforeOpen);
+    expect(readdirSync(join(library.activeRoot, "quarantine"))).toEqual([]);
+  });
+
+  it("rejects unknown newer-minor core semantics without Head recovery", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-newer-minor-core-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
+      addFutureCoreField: true,
+      version: "1.1",
+    });
     const headPath = join(library.activeRoot, "projects", "project_golden", "HEAD.json");
     const headBeforeOpen = readFileSync(headPath, "utf8");
 
@@ -492,6 +520,7 @@ describe("ProjectLibrary", () => {
     expect(unchanged.compatibility).toBe("read_only");
     expect(unchanged.projectRevisionId).toBe(created.projectRevisionId);
     expect(unchanged.revisions).toHaveLength(1);
+    expect(unchanged.migrationFailure).toMatch(/migration fixture failed/);
   });
 
   it("opens the original read-only after migration publication runs out of space", async () => {
@@ -528,6 +557,7 @@ describe("ProjectLibrary", () => {
     expect(unchanged.compatibility).toBe("read_only");
     expect(unchanged.projectRevisionId).toBe(created.projectRevisionId);
     expect(unchanged.revisions).toHaveLength(1);
+    expect(unchanged.migrationFailure).toMatch(/disk full during migration/);
   });
 
   it("does not publish an intermediate revision when a later migration step fails", async () => {
@@ -641,6 +671,41 @@ describe("ProjectLibrary", () => {
     ).rejects.toThrow(/fit a retained Source Snapshot/i);
   });
 
+  it("enforces stable and deduplicated Source identity across Projects", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-source-authority-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const secondEnvelope = envelopeForProject("project_second");
+
+    const conflictingIdentity = ownedRecords();
+    const conflictingSource = conflictingIdentity.sources[0];
+    const conflictingLocator = conflictingSource?.locators[0];
+    const conflictingSnapshot = conflictingSource?.snapshots[0];
+    const differentFingerprint =
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
+    if (
+      conflictingSource?.identity.kind !== "local_file" ||
+      conflictingLocator?.kind !== "local_file" ||
+      conflictingSnapshot === undefined
+    )
+      throw new Error("Local Source fixture is missing");
+    conflictingSource.identity.fingerprint = differentFingerprint;
+    conflictingLocator.fingerprint = differentFingerprint;
+    conflictingSnapshot.byteFingerprint = differentFingerprint;
+    await expect(
+      library.createProject({ envelope: secondEnvelope, records: conflictingIdentity }),
+    ).rejects.toThrow(/conflicts with Library Source identity/i);
+
+    const duplicateIdentity = ownedRecords();
+    const duplicateSource = duplicateIdentity.sources[0];
+    if (duplicateSource === undefined) throw new Error("Source fixture is missing");
+    duplicateSource.id = "source_duplicate";
+    duplicateIdentity.projectRange.sourceId = "source_duplicate";
+    await expect(
+      library.createProject({ envelope: secondEnvelope, records: duplicateIdentity }),
+    ).rejects.toThrow(/already owned/i);
+  });
+
   it("binds canonical YouTube Locators and Snapshot provenance to Source identity", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-youtube-records-");
     const library = await openProjectLibrary({ stateRoot });
@@ -650,6 +715,14 @@ describe("ProjectLibrary", () => {
     if (source === undefined || snapshot === undefined)
       throw new Error("Source fixture is missing");
     source.identity = { kind: "youtube", provider: "youtube", videoId: "BBBBBBBBBBB" };
+    source.metadataObservations = [
+      {
+        id: "metadata_fixture",
+        observedAt: "2026-08-21T08:00:00Z",
+        provider: "youtube",
+        title: "Fixture title",
+      },
+    ];
     source.locators = [
       {
         canonicalUrl: "https://www.youtube.com/watch?v=AAAAAAAAAAA&list=playlist",
@@ -660,6 +733,7 @@ describe("ProjectLibrary", () => {
       },
     ];
     snapshot.selectedFormat.providerFormatId = "251";
+    snapshot.metadataObservationIds = ["metadata_fixture"];
     snapshot.provenance = {
       acquisitionAttemptId: "attempt_fixture",
       brokerSummary: {
@@ -702,6 +776,12 @@ describe("ProjectLibrary", () => {
     await expect(library.createProject({ envelope: goldenEnvelope(), records })).rejects.toThrow(
       /provenance/i,
     );
+
+    snapshot.provenance.videoId = "BBBBBBBBBBB";
+    snapshot.metadataObservationIds = ["metadata_missing"];
+    await expect(library.createProject({ envelope: goldenEnvelope(), records })).rejects.toThrow(
+      /metadata reference/i,
+    );
   });
 
   it("supports recoverable Trash without deleting external media or export targets", async () => {
@@ -743,6 +823,41 @@ describe("ProjectLibrary", () => {
       expect.objectContaining({ projectId: "project_golden", status: "active" }),
     ]);
     expect((await reopened.getSnapshot("project_golden"))?.project.id).toBe("project_golden");
+  });
+
+  it("reconciles committed Trash lifecycle changes after post-move failures", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-trash-reconciliation-");
+    let faultPoint: ProjectLibraryFaultPoint | undefined = "after_trash_move";
+    let injected = false;
+    const library = await openProjectLibrary({
+      faultInjector: (point) => {
+        if (!injected && point === faultPoint) {
+          injected = true;
+          throw new Error(`simulated lifecycle failure at ${point}`);
+        }
+      },
+      stateRoot,
+    });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    await expect(library.trashProject("project_golden")).rejects.toThrow(/lifecycle failure/);
+    expect(library.listProjects()[0]?.status).toBe("trashed");
+
+    faultPoint = "after_trash_restore_move";
+    injected = false;
+    await expect(library.restoreTrashedProject("project_golden")).rejects.toThrow(
+      /lifecycle failure/,
+    );
+    expect(library.listProjects()[0]?.status).toBe("active");
+    expect((await library.getSnapshot("project_golden"))?.project.id).toBe("project_golden");
+
+    faultPoint = undefined;
+    await library.trashProject("project_golden");
+    faultPoint = "after_permanent_delete";
+    injected = false;
+    await expect(
+      library.permanentlyDeleteProject("project_golden", "project_golden"),
+    ).rejects.toThrow(/lifecycle failure/);
+    expect(library.listProjects()).toEqual([]);
   });
 
   it("requires exact confirmation for immediate permanent deletion", async () => {
@@ -869,10 +984,31 @@ describe("ProjectLibrary", () => {
       rmSync(projectDirectory, { recursive: true });
       symlinkSync(victim, projectDirectory, "dir");
 
-      await expect(library.trashProject("project_golden")).rejects.toThrow(/real directory/i);
+      await expect(library.trashProject("project_golden")).rejects.toThrow(/reconciliation/i);
       expect(readFileSync(externalTrashMarker, "utf8")).toBe("external file");
       await expect(openProjectLibrary({ stateRoot })).rejects.toThrow(/unsupported entry/i);
       expect(readFileSync(externalTrashMarker, "utf8")).toBe("external file");
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "rejects a target-container symlink swap before moving Project data",
+    async () => {
+      const stateRoot = await temporaryDirectory("open-chords-library-target-link-");
+      const victim = await temporaryDirectory("open-chords-library-target-link-victim-");
+      const marker = join(victim, "must-survive.txt");
+      writeFileSync(marker, "survives");
+      const library = await openProjectLibrary({ stateRoot });
+      await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+      const trashContainer = join(library.activeRoot, "trash");
+      rmSync(trashContainer, { recursive: true });
+      symlinkSync(victim, trashContainer, "dir");
+
+      await expect(library.trashProject("project_golden")).rejects.toThrow(/reconciliation/i);
+      expect(readFileSync(marker, "utf8")).toBe("survives");
+      expect(
+        readFileSync(join(library.activeRoot, "projects", "project_golden", "HEAD.json"), "utf8"),
+      ).toContain("project_golden");
     },
   );
 
@@ -917,7 +1053,11 @@ function objectPath(activeRoot: string, hash: string): string {
   return join(activeRoot, "objects", "sha256", `${digest}.json`);
 }
 
-function rewriteStoredProjectMajor(activeRoot: string, projectId: string, version: string): void {
+function rewriteStoredProjectEnvelope(
+  activeRoot: string,
+  projectId: string,
+  options: { addFutureCoreField?: boolean; version: string },
+): void {
   const projectDirectory = join(activeRoot, "projects", projectId);
   const headPath = join(projectDirectory, "HEAD.json");
   const head = z
@@ -939,8 +1079,9 @@ function rewriteStoredProjectMajor(activeRoot: string, projectId: string, versio
     })
     .loose()
     .parse(JSON.parse(readFileSync(objectPath(activeRoot, revision.payloadObjectHash), "utf8")));
-  payload.envelope.schemaVersion = version;
-  payload.envelope.payload.schemaVersion = version;
+  payload.envelope.schemaVersion = options.version;
+  payload.envelope.payload.schemaVersion = options.version;
+  if (options.addFutureCoreField === true) payload.envelope.futureCoreField = "unsupported";
   const payloadContent = canonicalSerialize(payload);
   const payloadHash = hashFixtureContent(payloadContent);
   writeFileSync(objectPath(activeRoot, payloadHash), payloadContent);

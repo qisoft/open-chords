@@ -102,7 +102,10 @@ export type ProjectLibraryFaultPoint =
   | "after_payload_durable"
   | "after_revision_durable"
   | "before_head_replace"
-  | "after_head_replace";
+  | "after_head_replace"
+  | "after_trash_move"
+  | "after_trash_restore_move"
+  | "after_permanent_delete";
 
 export type ProjectMigration = {
   fromVersion: string;
@@ -128,6 +131,7 @@ type RevisionSnapshot = {
 type LibraryEntry = {
   compatibility: "read_only" | "writable";
   location: "active" | "trashed";
+  migrationFailure?: string;
   recoveryReport?: ProjectRecoveryReport;
   revision?: RevisionSnapshot;
   revisions: RevisionSnapshot[];
@@ -137,6 +141,7 @@ type LibraryEntry = {
 
 export type ProjectLibraryListEntry = {
   compatibility?: "read_only" | "writable";
+  migrationFailure?: string;
   projectId: string;
   projectRevisionId?: string;
   recoveryReport?: ProjectRecoveryReport;
@@ -170,6 +175,20 @@ class ProjectStorageCorruptionError extends Error {
   }
 }
 
+class ProjectPublicationError extends Error {
+  constructor(cause: unknown) {
+    super(`Project publication failed: ${errorMessage(cause)}`, { cause });
+    this.name = "ProjectPublicationError";
+  }
+}
+
+class ProjectPublicationReconciliationError extends Error {
+  constructor(cause: unknown) {
+    super("Project publication failed and storage reconciliation also failed", { cause });
+    this.name = "ProjectPublicationReconciliationError";
+  }
+}
+
 export class ProjectLibraryIncompatibleSchemaError extends Error {
   constructor(schemaVersion: string) {
     super(`Project schema ${schemaVersion} has an unsupported major version`);
@@ -190,6 +209,7 @@ export class ProjectLibrary {
   readonly #stateRoot: string;
   #activeRoot: string;
   #entries = new Map<string, LibraryEntry>();
+  readonly #migrationFailures = new Map<string, string>();
   #mutationBlockedError: Error | undefined;
   #mutationTail: Promise<void> = Promise.resolve();
   readonly #subscribers = new Set<(change: ProjectLibraryChange) => void>();
@@ -236,6 +256,9 @@ export class ProjectLibrary {
               projectRevisionId: entry.revision.revision.projectRevisionId,
             }),
         projectId,
+        ...(entry.migrationFailure === undefined
+          ? {}
+          : { migrationFailure: entry.migrationFailure }),
         ...(entry.recoveryReport === undefined ? {} : { recoveryReport: entry.recoveryReport }),
         status: entry.status,
       }))
@@ -287,6 +310,7 @@ export class ProjectLibrary {
     projectRevisionId: string;
     records: ProjectOwnedRecords;
     recoveryReport?: ProjectRecoveryReport;
+    migrationFailure?: string;
     revisions: Array<{
       createdAt: string;
       projectRevisionId: string;
@@ -303,6 +327,7 @@ export class ProjectLibrary {
       envelope: structuredClone(entry.revision.payload.envelope),
       projectRevisionId: entry.revision.revision.projectRevisionId,
       records: structuredClone(entry.revision.payload.records),
+      ...(entry.migrationFailure === undefined ? {} : { migrationFailure: entry.migrationFailure }),
       ...(entry.recoveryReport === undefined
         ? {}
         : { recoveryReport: structuredClone(entry.recoveryReport) }),
@@ -392,81 +417,94 @@ export class ProjectLibrary {
   }
 
   async trashProject(projectId: string): Promise<void> {
-    await this.#serializeMutation(async () => {
-      const entry = this.#entries.get(projectId);
-      if (entry === undefined || entry.location === "trashed")
-        throw new Error("Project was not found");
-      const source = this.#projectDirectory(projectId, "active");
-      await assertManagedDirectory(this.#activeRoot, source);
-      const target = this.#projectDirectory(projectId, "trashed");
-      await mkdir(dirname(target), { recursive: true });
-      const trashRecord = TrashRecordSchema.parse({
-        format: "open-chords/library-trash-record",
-        projectId,
-        schemaVersion: "1.0",
-        trashedAt: this.#now().toISOString(),
-      });
-      await atomicWriteFile(join(source, "TRASH.json"), canonicalSerialize(trashRecord));
-      await syncDirectory(source);
-      await rename(source, target);
-      await syncDirectory(dirname(source));
-      await syncDirectory(dirname(target));
-      await this.#refreshEntries();
-    });
+    await this.#serializeMutation(() =>
+      this.#runReconciledLifecycleMutation(async () => {
+        const entry = this.#entries.get(projectId);
+        if (entry === undefined || entry.location === "trashed")
+          throw new Error("Project was not found");
+        const source = this.#projectDirectory(projectId, "active");
+        await assertManagedDirectory(this.#activeRoot, source);
+        const target = this.#projectDirectory(projectId, "trashed");
+        await assertManagedDirectory(this.#activeRoot, dirname(target));
+        await mkdir(dirname(target), { recursive: true });
+        const trashRecord = TrashRecordSchema.parse({
+          format: "open-chords/library-trash-record",
+          projectId,
+          schemaVersion: "1.0",
+          trashedAt: this.#now().toISOString(),
+        });
+        await atomicWriteFile(join(source, "TRASH.json"), canonicalSerialize(trashRecord));
+        await syncDirectory(source);
+        await rename(source, target);
+        await syncDirectory(dirname(source));
+        await syncDirectory(dirname(target));
+        await this.#faultInjector("after_trash_move");
+        await this.#refreshEntries();
+      }),
+    );
   }
 
   async restoreTrashedProject(projectId: string): Promise<void> {
-    await this.#serializeMutation(async () => {
-      const entry = this.#entries.get(projectId);
-      if (entry?.location !== "trashed") throw new Error("Trashed Project was not found");
-      const source = this.#projectDirectory(projectId, "trashed");
-      await assertManagedDirectory(this.#activeRoot, source);
-      const target = this.#projectDirectory(projectId, "active");
-      await rename(source, target);
-      await syncDirectory(dirname(source));
-      await syncDirectory(dirname(target));
-      await rm(join(target, "TRASH.json"), { force: true });
-      await syncDirectory(target);
-      await this.#refreshEntries();
-    });
+    await this.#serializeMutation(() =>
+      this.#runReconciledLifecycleMutation(async () => {
+        const entry = this.#entries.get(projectId);
+        if (entry?.location !== "trashed") throw new Error("Trashed Project was not found");
+        const source = this.#projectDirectory(projectId, "trashed");
+        await assertManagedDirectory(this.#activeRoot, source);
+        const target = this.#projectDirectory(projectId, "active");
+        await assertManagedDirectory(this.#activeRoot, dirname(target));
+        await rename(source, target);
+        await syncDirectory(dirname(source));
+        await syncDirectory(dirname(target));
+        await this.#faultInjector("after_trash_restore_move");
+        await rm(join(target, "TRASH.json"), { force: true });
+        await syncDirectory(target);
+        await this.#refreshEntries();
+      }),
+    );
   }
 
   async permanentlyDeleteProject(projectId: string, confirmation: string): Promise<void> {
     if (confirmation !== projectId)
       throw new Error("Permanent deletion confirmation does not match");
-    await this.#serializeMutation(async () => {
-      const entry = this.#entries.get(projectId);
-      if (entry?.location !== "trashed") throw new Error("Project must be in Library Trash");
-      const projectDirectory = this.#projectDirectory(projectId, "trashed");
-      await assertManagedDirectory(this.#activeRoot, projectDirectory);
-      await rm(projectDirectory, { recursive: true });
-      await syncDirectory(join(this.#activeRoot, "trash"));
-      await this.#refreshEntries();
-      await this.#collectUnreferencedObjects();
-    });
+    await this.#serializeMutation(() =>
+      this.#runReconciledLifecycleMutation(async () => {
+        const entry = this.#entries.get(projectId);
+        if (entry?.location !== "trashed") throw new Error("Project must be in Library Trash");
+        const projectDirectory = this.#projectDirectory(projectId, "trashed");
+        await assertManagedDirectory(this.#activeRoot, projectDirectory);
+        await rm(projectDirectory, { recursive: true });
+        await syncDirectory(join(this.#activeRoot, "trash"));
+        await this.#faultInjector("after_permanent_delete");
+        await this.#refreshEntries();
+        await this.#collectUnreferencedObjects();
+      }),
+    );
   }
 
   async emptyTrash(options: { olderThan?: Date } = {}): Promise<string[]> {
-    return this.#serializeMutation(async () => {
-      const threshold = options.olderThan ?? new Date(this.#now().getTime() - THIRTY_DAYS_MS);
-      const deleted: string[] = [];
-      for (const [projectId, entry] of this.#entries) {
-        if (
-          entry.location === "trashed" &&
-          entry.trashRecord !== undefined &&
-          new Date(entry.trashRecord.trashedAt) < threshold
-        ) {
-          const projectDirectory = this.#projectDirectory(projectId, "trashed");
-          await assertManagedDirectory(this.#activeRoot, projectDirectory);
-          await rm(projectDirectory, { recursive: true });
-          deleted.push(projectId);
+    return this.#serializeMutation(() =>
+      this.#runReconciledLifecycleMutation(async () => {
+        const threshold = options.olderThan ?? new Date(this.#now().getTime() - THIRTY_DAYS_MS);
+        const deleted: string[] = [];
+        for (const [projectId, entry] of this.#entries) {
+          if (
+            entry.location === "trashed" &&
+            entry.trashRecord !== undefined &&
+            new Date(entry.trashRecord.trashedAt) < threshold
+          ) {
+            const projectDirectory = this.#projectDirectory(projectId, "trashed");
+            await assertManagedDirectory(this.#activeRoot, projectDirectory);
+            await rm(projectDirectory, { recursive: true });
+            deleted.push(projectId);
+          }
         }
-      }
-      if (deleted.length > 0) await syncDirectory(join(this.#activeRoot, "trash"));
-      await this.#refreshEntries();
-      await this.#collectUnreferencedObjects();
-      return deleted.toSorted();
-    });
+        if (deleted.length > 0) await syncDirectory(join(this.#activeRoot, "trash"));
+        await this.#refreshEntries();
+        await this.#collectUnreferencedObjects();
+        return deleted.toSorted();
+      }),
+    );
   }
 
   async relocate(targetRoot: string): Promise<void> {
@@ -545,6 +583,11 @@ export class ProjectLibrary {
     const entries = new Map<string, LibraryEntry>();
     await this.#scanProjectContainer("active", entries);
     await this.#scanProjectContainer("trashed", entries);
+    validateLibrarySourceAuthority(entries);
+    for (const [projectId, failure] of this.#migrationFailures) {
+      const entry = entries.get(projectId);
+      if (entry !== undefined) entry.migrationFailure = failure;
+    }
     this.#entries = entries;
     await atomicWriteFile(
       join(this.#activeRoot, "project-index.json"),
@@ -570,6 +613,8 @@ export class ProjectLibrary {
           `Managed Project container contains an unsupported entry: ${directory.name}`,
         );
       const projectId = directory.name;
+      if (entries.has(projectId))
+        throw new Error(`Project ${projectId} exists in both active Library and Trash`);
       const projectDirectory = join(container, projectId);
       await assertManagedDirectory(this.#activeRoot, projectDirectory);
       const recoveryReport = await readLatestRecoveryReport(this.#activeRoot, projectDirectory);
@@ -788,7 +833,7 @@ export class ProjectLibrary {
         "Project Revision pointer does not match its immutable object",
       );
     }
-    const payload = await this.#readObject(revision.payloadObjectHash, StoredProjectPayloadSchema);
+    const payload = await this.#readStoredPayload(revision.payloadObjectHash);
     try {
       validateStoredPayload(payload);
     } catch (error) {
@@ -803,6 +848,44 @@ export class ProjectLibrary {
   }
 
   async #readObject<T>(hash: string, schema: z.ZodType<T>): Promise<T> {
+    const content = await this.#readHashedObjectContent(hash);
+    try {
+      return schema.parse(JSON.parse(content));
+    } catch (error) {
+      throw new ProjectStorageCorruptionError("Immutable object is invalid", error);
+    }
+  }
+
+  async #readStoredPayload(hash: string): Promise<StoredProjectPayload> {
+    const content = await this.#readHashedObjectContent(hash);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch (error) {
+      throw new ProjectStorageCorruptionError("Immutable Project payload is not JSON", error);
+    }
+    let compatibility: { futureMinor: boolean };
+    try {
+      compatibility = inspectStoredPayloadCompatibility(raw);
+    } catch (error) {
+      if (error instanceof ProjectLibraryIncompatibleSchemaError) throw error;
+      throw new ProjectStorageCorruptionError(
+        "Immutable Project payload has invalid versions",
+        error,
+      );
+    }
+    try {
+      return StoredProjectPayloadSchema.parse(raw);
+    } catch (error) {
+      if (compatibility.futureMinor)
+        throw new ProjectLibraryIncompatibleSchemaError(
+          "newer minor with unsupported core semantics",
+        );
+      throw new ProjectStorageCorruptionError("Immutable Project payload is invalid", error);
+    }
+  }
+
+  async #readHashedObjectContent(hash: string): Promise<string> {
     let content: string;
     try {
       content = await readRegularStorageFile(this.#objectPath(hash));
@@ -813,11 +896,7 @@ export class ProjectLibrary {
     }
     if (hashContent(content) !== hash)
       throw new ProjectStorageCorruptionError("Immutable object hash mismatch");
-    try {
-      return schema.parse(JSON.parse(content));
-    } catch (error) {
-      throw new ProjectStorageCorruptionError("Immutable object is invalid", error);
-    }
+    return content;
   }
 
   async #commitPayload(
@@ -838,6 +917,8 @@ export class ProjectLibrary {
     } catch (error) {
       try {
         await this.#refreshEntries();
+        await scavengeDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
+        await this.#collectUnreferencedObjects();
       } catch (recoveryError) {
         const combinedFailure = new AggregateError(
           [error, recoveryError],
@@ -847,12 +928,9 @@ export class ProjectLibrary {
           "Project Library must be reopened after an unreconciled storage failure",
           { cause: combinedFailure },
         );
-        throw new Error(
-          "Project publication failed and storage reconciliation also failed; reopen the Library",
-          { cause: recoveryError },
-        );
+        throw new ProjectPublicationReconciliationError(recoveryError);
       }
-      throw error;
+      throw new ProjectPublicationError(error);
     }
   }
 
@@ -866,6 +944,7 @@ export class ProjectLibrary {
     const payload = validateStoredPayload(rawPayload);
     if (payload.envelope.payload.id !== projectId)
       throw new Error("Project payload belongs to another Project");
+    assertSourceAuthorityAgainstEntries(projectId, payload.records, this.#entries);
     const projectRevisionId = `projectrevision_${randomUUID().replaceAll("-", "")}`;
     await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
     const stagingDirectory = join(this.#activeRoot, "staging", randomUUID());
@@ -1011,9 +1090,22 @@ export class ProjectLibrary {
       if (entry.revision === undefined) continue;
       try {
         await this.#migrateUntilCurrent(projectId, entry.revision);
-      } catch {
+        this.#migrationFailures.delete(projectId);
+      } catch (error) {
+        if (
+          error instanceof ProjectPublicationReconciliationError ||
+          error === this.#mutationBlockedError ||
+          (isNodeError(error) && error.code !== undefined)
+        )
+          throw error;
+        this.#migrationFailures.set(projectId, errorMessage(error));
         // A failed or unavailable migration leaves the last durable revision readable and read-only.
         await this.#refreshEntries();
+        const refreshed = this.#entries.get(projectId);
+        if (refreshed?.compatibility === "writable") {
+          this.#migrationFailures.delete(projectId);
+          delete refreshed.migrationFailure;
+        }
       }
     }
   }
@@ -1092,6 +1184,26 @@ export class ProjectLibrary {
     return join(this.#activeRoot, location === "active" ? "projects" : "trash", projectId);
   }
 
+  async #runReconciledLifecycleMutation<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      try {
+        await this.#refreshEntries();
+        await this.#collectUnreferencedObjects();
+      } catch (recoveryError) {
+        this.#mutationBlockedError = new Error(
+          "Project Library must be reopened after an unreconciled lifecycle failure",
+          { cause: recoveryError },
+        );
+        throw new Error("Project lifecycle mutation failed and reconciliation also failed", {
+          cause: recoveryError,
+        });
+      }
+      throw error;
+    }
+  }
+
   async #serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
     const prior = this.#mutationTail;
     let release!: () => void;
@@ -1135,6 +1247,27 @@ function validateStoredPayload(input: unknown): StoredProjectPayload {
   return payload;
 }
 
+function inspectStoredPayloadCompatibility(input: unknown): { futureMinor: boolean } {
+  const versions = z
+    .object({
+      envelope: z.object({
+        payload: z.object({ schemaVersion: z.string() }),
+        schemaVersion: z.string(),
+      }),
+    })
+    .parse(input).envelope;
+  const supported = parseSchemaVersion(CONTRACT_VERSION);
+  for (const version of [versions.schemaVersion, versions.payload.schemaVersion]) {
+    if (parseSchemaVersion(version).major !== supported.major)
+      throw new ProjectLibraryIncompatibleSchemaError(version);
+  }
+  return {
+    futureMinor: [versions.schemaVersion, versions.payload.schemaVersion].some(
+      (version) => compareSchemaVersions(version, CONTRACT_VERSION) > 0,
+    ),
+  };
+}
+
 function buildStoredPayload(input: {
   envelope: unknown;
   records: ProjectOwnedRecords;
@@ -1145,6 +1278,49 @@ function buildStoredPayload(input: {
     records: input.records,
     schemaVersion: "1.0",
   });
+}
+
+function validateLibrarySourceAuthority(entries: ReadonlyMap<string, LibraryEntry>): void {
+  const accumulated = new Map<string, LibraryEntry>();
+  for (const [projectId, entry] of entries) {
+    if (entry.revision !== undefined)
+      assertSourceAuthorityAgainstEntries(projectId, entry.revision.payload.records, accumulated);
+    accumulated.set(projectId, entry);
+  }
+}
+
+function assertSourceAuthorityAgainstEntries(
+  projectId: string,
+  records: ProjectOwnedRecords,
+  entries: ReadonlyMap<string, LibraryEntry>,
+): void {
+  const sourceIdToIdentity = new Map<string, string>();
+  const identityToSourceId = new Map<string, string>();
+  for (const [otherProjectId, entry] of entries) {
+    if (otherProjectId === projectId || entry.revision === undefined) continue;
+    for (const source of entry.revision.payload.records.sources) {
+      const identity = sourceIdentityKey(source.identity);
+      sourceIdToIdentity.set(source.id, identity);
+      identityToSourceId.set(identity, source.id);
+    }
+  }
+  for (const source of records.sources) {
+    const identity = sourceIdentityKey(source.identity);
+    const establishedIdentity = sourceIdToIdentity.get(source.id);
+    if (establishedIdentity !== undefined && establishedIdentity !== identity)
+      throw new Error(`Source ${source.id} conflicts with Library Source identity`);
+    const establishedId = identityToSourceId.get(identity);
+    if (establishedId !== undefined && establishedId !== source.id)
+      throw new Error(`Source identity is already owned by ${establishedId}`);
+    sourceIdToIdentity.set(source.id, identity);
+    identityToSourceId.set(identity, source.id);
+  }
+}
+
+function sourceIdentityKey(identity: ProjectOwnedRecords["sources"][number]["identity"]): string {
+  return identity.kind === "local_file"
+    ? `local_file:${identity.fingerprint}`
+    : `youtube:${identity.videoId}`;
 }
 
 async function readLibraryLocation(path: string, fallback: string): Promise<string> {
@@ -1411,8 +1587,6 @@ async function isPlatformLocalVolume(path: string): Promise<boolean> {
       "ext3",
       "ext4",
       "overlay",
-      "ramfs",
-      "tmpfs",
       "xfs",
       "zfs",
     ]);
@@ -1505,4 +1679,8 @@ function safeFileName(value: string): string {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -48,6 +48,9 @@ export const SourceSnapshotSchema = z.strictObject({
   canonicalAudioFingerprint: Sha256Schema,
   durationSamples: z.number().int().positive(),
   id: StableIdSchema,
+  metadataObservationIds: z
+    .array(StableIdSchema)
+    .refine((ids) => new Set(ids).size === ids.length, "Metadata observation IDs must be unique"),
   observedAt: TimestampSchema,
   provenance: z.discriminatedUnion("kind", [
     z.strictObject({
@@ -79,6 +82,7 @@ export const SourceSnapshotSchema = z.strictObject({
 
 export const SourceMetadataObservationSchema = z.strictObject({
   declaredDurationSeconds: z.number().finite().nonnegative().optional(),
+  id: StableIdSchema,
   observedAt: TimestampSchema,
   provider: z.string().min(1),
   thumbnailUrl: z.url().optional(),
@@ -139,6 +143,12 @@ export const ProjectOwnedRecordsSchema = z
         ["sources", sourceIndex, "snapshots"],
         context,
       );
+      requireUniqueIds(
+        source.metadataObservations,
+        "Source Metadata Observation",
+        ["sources", sourceIndex, "metadataObservations"],
+        context,
+      );
       for (const [locatorIndex, locator] of source.locators.entries()) {
         const identityMatches =
           (source.identity.kind === "local_file" &&
@@ -166,6 +176,40 @@ export const ProjectOwnedRecordsSchema = z
         }
       }
       for (const [snapshotIndex, snapshot] of source.snapshots.entries()) {
+        const observations = new Map(
+          source.metadataObservations.map((observation) => [observation.id, observation]),
+        );
+        for (const [referenceIndex, observationId] of snapshot.metadataObservationIds.entries()) {
+          const observation = observations.get(observationId);
+          if (
+            observation === undefined ||
+            (snapshot.provenance.kind === "youtube_acquisition" &&
+              observation.provider !== "youtube")
+          ) {
+            context.addIssue({
+              code: "custom",
+              message: "Source Snapshot metadata reference is missing or has the wrong provider",
+              path: [
+                "sources",
+                sourceIndex,
+                "snapshots",
+                snapshotIndex,
+                "metadataObservationIds",
+                referenceIndex,
+              ],
+            });
+          }
+        }
+        if (
+          snapshot.provenance.kind === "youtube_acquisition" &&
+          snapshot.metadataObservationIds.length === 0
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "YouTube Source Snapshot requires acquisition-time metadata",
+            path: ["sources", sourceIndex, "snapshots", snapshotIndex, "metadataObservationIds"],
+          });
+        }
         const snapshotMatches =
           (source.identity.kind === "local_file" &&
             snapshot.provenance.kind === "local_file" &&
