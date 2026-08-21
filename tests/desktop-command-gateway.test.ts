@@ -55,6 +55,32 @@ function shellCommand(requestId = "request_security") {
   } as const;
 }
 
+function mutationCommand({
+  expectedProjectRevisionId = "projectrevision_current",
+  projectId = "project_fixture",
+  requestId,
+  transactionId,
+}: {
+  expectedProjectRevisionId?: string;
+  projectId?: string;
+  requestId: string;
+  transactionId: string;
+}) {
+  return {
+    ...commandEnvelope(requestId),
+    expectedProjectRevisionId,
+    projectId,
+    transaction: {
+      id: transactionId,
+      operations: [
+        { eventId: "chord_fixture", type: "replace_chord_value", value: { kind: "no_chord" } },
+      ],
+      parentTransactionId: null,
+    },
+    type: "project.commit_edit_transaction",
+  } as const;
+}
+
 function createAuthority(overrides: Partial<ProjectAuthority> = {}): ProjectAuthority {
   return {
     commitEditTransaction: async () => ({ projectRevisionId: "projectrevision_next" }),
@@ -268,19 +294,12 @@ describe("DesktopCommandGateway", () => {
         },
       }),
     );
-    const mutation = (id: string, revision: string) => ({
-      ...commandEnvelope(`request_${id}`),
-      expectedProjectRevisionId: revision,
-      projectId: "project_fixture",
-      transaction: {
-        id,
-        operations: [
-          { eventId: "chord_fixture", type: "replace_chord_value", value: { kind: "no_chord" } },
-        ],
-        parentTransactionId: null,
-      },
-      type: "project.commit_edit_transaction",
-    });
+    const mutation = (transactionId: string, expectedProjectRevisionId: string) =>
+      mutationCommand({
+        expectedProjectRevisionId,
+        requestId: `request_${transactionId}`,
+        transactionId,
+      });
 
     const first = gateway.execute(mutation("transaction_first", "projectrevision_a"), sender);
     const second = gateway.execute(mutation("transaction_stale", "projectrevision_b"), sender);
@@ -307,19 +326,11 @@ describe("DesktopCommandGateway", () => {
         },
       }),
     );
-    const mutation = (index: number) => ({
-      ...commandEnvelope(`request_mutation_${String(index)}`),
-      expectedProjectRevisionId: "projectrevision_current",
-      projectId: "project_fixture",
-      transaction: {
-        id: `transaction_${String(index)}`,
-        operations: [
-          { eventId: "chord_fixture", type: "replace_chord_value", value: { kind: "no_chord" } },
-        ],
-        parentTransactionId: null,
-      },
-      type: "project.commit_edit_transaction",
-    });
+    const mutation = (index: number) =>
+      mutationCommand({
+        requestId: `request_mutation_${String(index)}`,
+        transactionId: `transaction_${String(index)}`,
+      });
     const accepted = Array.from({ length: 32 }, (_, index) =>
       gateway.execute(mutation(index), sender),
     );
@@ -344,19 +355,12 @@ describe("DesktopCommandGateway", () => {
         },
       }),
     );
-    const mutation = (index: number | "overflow") => ({
-      ...commandEnvelope(`request_mutation_global_${String(index)}`),
-      expectedProjectRevisionId: "projectrevision_current",
-      projectId: `project_${String(index)}`,
-      transaction: {
-        id: `transaction_${String(index)}`,
-        operations: [
-          { eventId: "chord_fixture", type: "replace_chord_value", value: { kind: "no_chord" } },
-        ],
-        parentTransactionId: null,
-      },
-      type: "project.commit_edit_transaction",
-    });
+    const mutation = (index: number | "overflow") =>
+      mutationCommand({
+        projectId: `project_${String(index)}`,
+        requestId: `request_mutation_global_${String(index)}`,
+        transactionId: `transaction_${String(index)}`,
+      });
     const accepted = Array.from({ length: 32 }, (_, index) =>
       gateway.execute(mutation(index), sender),
     );

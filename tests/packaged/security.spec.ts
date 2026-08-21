@@ -11,6 +11,18 @@ import extractZip from "extract-zip";
 import { z } from "zod";
 
 const PRODUCT_NAME = "Open Chords";
+const EXPECTED_RENDERER_CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "connect-src 'none'",
+  "font-src 'self'",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
 const archivePath = join(
   process.cwd(),
   "out",
@@ -109,6 +121,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     }
     expect(renderer).toMatchObject({
       apiKeys: ["project", "shell"],
+      contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       externalFetch: "rejected",
       heading: "Open Chords foundation",
       missingProject: { code: "project_not_found", type: "desktop.error" },
@@ -209,6 +222,7 @@ const CdpTargetsSchema = z.array(
 
 const RendererSnapshotSchema = z.object({
   apiKeys: z.array(z.string()),
+  contentSecurityPolicy: z.literal(EXPECTED_RENDERER_CSP),
   externalFetch: z.literal("rejected"),
   heading: z.string().nullable(),
   missingProject: z.object({
@@ -267,6 +281,13 @@ async function inspectPackagedRenderer(
 async function evaluateRendererTarget(webSocketUrl: string) {
   const expression = `new Promise((resolve) => {
     const inspect = async () => {
+      await new Promise((probeComplete) => {
+        const image = new Image();
+        image.addEventListener("load", probeComplete, { once: true });
+        image.addEventListener("error", probeComplete, { once: true });
+        image.src = "open-chords://app/index.html?csp-probe";
+        document.body.append(image);
+      });
       await new Promise((probeComplete) => {
         const image = new Image();
         image.addEventListener("load", probeComplete, { once: true });
@@ -334,6 +355,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
 
   return new Promise<z.infer<typeof RendererSnapshotSchema>>((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
+    let contentSecurityPolicy: string | undefined;
     let undeclaredAssetStatus: number | undefined;
     const timeout = setTimeout(() => {
       socket.close();
@@ -367,10 +389,24 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         const networkResponse = z
           .object({
             method: z.literal("Network.responseReceived"),
-            params: z.object({ response: z.object({ status: z.number(), url: z.string() }) }),
+            params: z.object({
+              response: z.object({
+                headers: z.record(z.string(), z.unknown()),
+                status: z.number(),
+                url: z.string(),
+              }),
+            }),
           })
           .safeParse(rawResponse);
         if (networkResponse.success) {
+          if (
+            networkResponse.data.params.response.url === "open-chords://app/index.html?csp-probe"
+          ) {
+            const header = Object.entries(networkResponse.data.params.response.headers).find(
+              ([name]) => name.toLowerCase() === "content-security-policy",
+            )?.[1];
+            if (typeof header === "string") contentSecurityPolicy = header;
+          }
           if (
             networkResponse.data.params.response.url === "open-chords://app/asset-manifest.json"
           ) {
@@ -423,6 +459,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
           .parse(response.data.result.result.value);
         const snapshot = RendererSnapshotSchema.parse({
           ...snapshotValue,
+          contentSecurityPolicy,
           undeclaredAssetStatus,
         });
         clearTimeout(timeout);
