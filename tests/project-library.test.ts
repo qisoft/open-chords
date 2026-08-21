@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -928,6 +929,20 @@ describe("ProjectLibrary", () => {
     ).rejects.toThrow(/Metadata Observation.*immutable/i);
   });
 
+  it("enforces one canonical Locator state for a shared Source", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-locator-authority-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const changed = ownedRecords();
+    const locator = changed.sources[0]?.locators[0];
+    if (locator?.kind !== "local_file") throw new Error("Local Locator fixture is missing");
+    locator.status = "unavailable";
+
+    await expect(
+      library.createProject({ envelope: envelopeForProject("project_second"), records: changed }),
+    ).rejects.toThrow(/Locator state/i);
+  });
+
   it("binds canonical YouTube Locators and Snapshot provenance to Source identity", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-youtube-records-");
     const library = await openProjectLibrary({ stateRoot });
@@ -1277,14 +1292,6 @@ describe("ProjectLibrary", () => {
     const relocationId = "11111111-1111-4111-8111-111111111111";
     mkdirSync(stagingTarget);
     writeFileSync(
-      join(stagingTarget, ".open-chords-relocation.json"),
-      canonicalSerialize({
-        format: "open-chords/project-library-relocation-marker",
-        id: relocationId,
-        schemaVersion: "1.0",
-      }),
-    );
-    writeFileSync(
       join(stateRoot, "project-library-relocation.json"),
       canonicalSerialize({
         format: "open-chords/project-library-relocation",
@@ -1300,6 +1307,85 @@ describe("ProjectLibrary", () => {
     expect(library.activeRoot).toBe(target);
     expect(existsSync(stagingTarget)).toBe(false);
     expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(false);
+  });
+
+  it("scavenges a completed relocation wrapper on reopen and permits another relocation", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-completed-journal-state-");
+    const firstParent = await temporaryDirectory("open-chords-library-completed-journal-first-");
+    const secondParent = await temporaryDirectory("open-chords-library-completed-journal-second-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const previousRoot = library.activeRoot;
+    const firstTarget = join(firstParent, "Moved Library");
+    await library.relocate(firstTarget);
+    const canonicalFirstTarget = library.activeRoot;
+    const relocationId = "22222222-2222-4222-8222-222222222222";
+    const stagingTarget = join(
+      dirname(canonicalFirstTarget),
+      ".open-chords-library-relocation-completed",
+    );
+    mkdirSync(stagingTarget);
+    for (const root of [stagingTarget, canonicalFirstTarget])
+      writeFileSync(
+        join(root, ".open-chords-relocation.json"),
+        canonicalSerialize({
+          format: "open-chords/project-library-relocation-marker",
+          id: relocationId,
+          schemaVersion: "1.0",
+        }),
+      );
+    writeFileSync(
+      join(stateRoot, "project-library-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation",
+        id: relocationId,
+        previousRoot,
+        schemaVersion: "1.0",
+        stagingTarget,
+        target: canonicalFirstTarget,
+      }),
+    );
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(existsSync(stagingTarget)).toBe(false);
+    expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(false);
+    await reopened.relocate(join(secondParent, "Moved Again"));
+    expect(reopened.activeRoot).toBe(join(await realpath(secondParent), "Moved Again"));
+  });
+
+  it("revalidates an interrupted installed target before making it authoritative", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-resume-validation-state-");
+    const destinationParent = await temporaryDirectory(
+      "open-chords-library-resume-validation-target-",
+    );
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const target = join(await realpath(destinationParent), "Moved Library");
+    cpSync(library.activeRoot, target, { recursive: true });
+    const relocationId = "33333333-3333-4333-8333-333333333333";
+    writeFileSync(
+      join(target, ".open-chords-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation-marker",
+        id: relocationId,
+        schemaVersion: "1.0",
+      }),
+    );
+    writeFileSync(
+      join(stateRoot, "project-library-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation",
+        id: relocationId,
+        previousRoot: library.activeRoot,
+        schemaVersion: "1.0",
+        stagingTarget: join(dirname(target), ".open-chords-library-relocation-missing"),
+        target,
+      }),
+    );
+    corruptActivePayload(target, "project_golden");
+
+    await expect(library.relocate(target)).rejects.toThrow(/complete validation/i);
+    expect(library.activeRoot).not.toBe(target);
   });
 
   it.runIf(process.platform !== "win32")(

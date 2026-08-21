@@ -585,11 +585,11 @@ export class ProjectLibrary {
       if (!isAbsolute(targetRoot)) throw new Error("Project Library target must be absolute");
       const previousRoot = this.#activeRoot;
       const target = await canonicalizeLibraryPath(targetRoot);
-      if (await this.#resumeRelocation(target)) return;
       if (target === previousRoot) return;
       if (isNestedPath(previousRoot, target) || isNestedPath(target, previousRoot))
         throw new Error("Project Library cannot be relocated inside its current directory");
       await this.#assertLocalPath(target);
+      if (await this.#resumeRelocation(target)) return;
       if (await pathExists(target))
         throw new Error("Project Library relocation target already exists");
       await mkdir(dirname(target), { recursive: true });
@@ -718,23 +718,7 @@ export class ProjectLibrary {
     if (journal === undefined) return false;
     if (journal.previousRoot !== this.#activeRoot || journal.target !== target)
       throw new Error("Another Project Library relocation requires recovery first");
-    if (await pathExists(journal.stagingTarget)) {
-      const approvedParent = await realpath(dirname(target));
-      const stagingPath = await realpath(journal.stagingTarget);
-      if (
-        dirname(stagingPath) !== approvedParent ||
-        !basename(stagingPath).startsWith(".open-chords-library-relocation-")
-      )
-        throw new Error("Project Library relocation staging path is outside its approved parent");
-      const marker = await parseJsonFile(
-        join(stagingPath, RELOCATION_MARKER_FILE),
-        RelocationMarkerSchema,
-      );
-      if (marker.id !== journal.id)
-        throw new Error("Project Library relocation staging ownership is ambiguous");
-      await rm(stagingPath, { recursive: true });
-      await syncDirectory(approvedParent);
-    }
+    await this.#removeRelocationStaging(journal, target, false);
     if (await pathExists(target)) {
       const marker = await parseJsonFile(
         join(target, RELOCATION_MARKER_FILE),
@@ -742,6 +726,21 @@ export class ProjectLibrary {
       );
       if (marker.id !== journal.id)
         throw new Error("Project Library relocation target ownership is ambiguous");
+      const validation = new ProjectLibrary(
+        {
+          currentSchemaVersion: this.#currentSchemaVersion,
+          migrations: this.#migrations,
+          now: this.#now,
+          pathPolicy: this.#pathPolicy,
+          stateRoot: this.#stateRoot,
+        },
+        target,
+      );
+      await validation.#initializeRoot();
+      if (validation.listProjects().some(({ status }) => status === "damaged"))
+        throw new Error("Interrupted relocation target did not pass complete validation");
+      await syncTree(target);
+      await syncDirectory(dirname(target));
       await atomicWriteFile(
         join(this.#stateRoot, LIBRARY_LOCATION_FILE),
         canonicalSerialize({
@@ -762,7 +761,7 @@ export class ProjectLibrary {
   async #cleanupCompletedRelocation(): Promise<void> {
     const journal = await readRelocationJournal(this.#stateRoot);
     if (journal === undefined || journal.target !== this.#activeRoot) return;
-    if (await pathExists(journal.stagingTarget)) return;
+    await this.#removeRelocationStaging(journal, this.#activeRoot, true);
     const markerPath = join(this.#activeRoot, RELOCATION_MARKER_FILE);
     if (await pathExists(markerPath)) {
       const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
@@ -772,6 +771,31 @@ export class ProjectLibrary {
       await syncDirectory(this.#activeRoot);
     }
     await this.#clearRelocationJournal();
+  }
+
+  async #removeRelocationStaging(
+    journal: z.infer<typeof RelocationJournalSchema>,
+    approvedTarget: string,
+    requireMarker: boolean,
+  ): Promise<void> {
+    if (!(await pathExists(journal.stagingTarget))) return;
+    const approvedParent = await realpath(dirname(approvedTarget));
+    const stagingPath = await realpath(journal.stagingTarget);
+    if (
+      dirname(stagingPath) !== approvedParent ||
+      !basename(stagingPath).startsWith(".open-chords-library-relocation-")
+    )
+      throw new Error("Project Library relocation staging path is outside its approved parent");
+    const markerPath = join(stagingPath, RELOCATION_MARKER_FILE);
+    if (await pathExists(markerPath)) {
+      const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
+      if (marker.id !== journal.id)
+        throw new Error("Project Library relocation staging ownership is ambiguous");
+    } else if (requireMarker) {
+      throw new Error("Project Library relocation staging marker is missing");
+    }
+    await rm(stagingPath, { recursive: true });
+    await syncDirectory(approvedParent);
   }
 
   async #clearRelocationJournal(): Promise<void> {
@@ -1655,12 +1679,19 @@ function assertSourceAuthorityAgainstEntries(
   const identityToSourceId = new Map<string, string>();
   const snapshotById = new Map<string, string>();
   const observationById = new Map<string, string>();
+  const locatorsBySourceId = new Map<string, string>();
   for (const entry of entries.values()) {
     if (entry.revision === undefined) continue;
     for (const source of entry.revision.payload.records.sources) {
       const identity = sourceIdentityKey(source.identity);
       sourceIdToIdentity.set(source.id, identity);
       identityToSourceId.set(identity, source.id);
+      locatorsBySourceId.set(
+        source.id,
+        canonicalSerialize(
+          source.locators.toSorted((left, right) => left.id.localeCompare(right.id)),
+        ),
+      );
       for (const snapshot of source.snapshots)
         snapshotById.set(snapshot.id, canonicalSerialize(snapshot));
       for (const observation of source.metadataObservations)
@@ -1675,6 +1706,12 @@ function assertSourceAuthorityAgainstEntries(
     const establishedId = identityToSourceId.get(identity);
     if (establishedId !== undefined && establishedId !== source.id)
       throw new Error(`Source identity is already owned by ${establishedId}`);
+    const locators = canonicalSerialize(
+      source.locators.toSorted((left, right) => left.id.localeCompare(right.id)),
+    );
+    const establishedLocators = locatorsBySourceId.get(source.id);
+    if (establishedLocators !== undefined && establishedLocators !== locators)
+      throw new Error(`Source ${source.id} conflicts with Library Locator state`);
     for (const snapshot of source.snapshots) {
       const content = canonicalSerialize(snapshot);
       const established = snapshotById.get(snapshot.id);
@@ -1693,6 +1730,7 @@ function assertSourceAuthorityAgainstEntries(
     }
     sourceIdToIdentity.set(source.id, identity);
     identityToSourceId.set(identity, source.id);
+    locatorsBySourceId.set(source.id, locators);
   }
 }
 
