@@ -155,6 +155,7 @@ export type ProjectLibraryFaultPoint =
   | "after_relocation_target_rename"
   | "before_relocation_copy"
   | "before_relocation_cleanup_claim"
+  | "after_relocation_cleanup_remove"
   | "after_relocation_location_rename"
   | "after_relocation_location_replace"
   | "after_catalog_recovery_report"
@@ -841,7 +842,11 @@ export class ProjectLibrary {
     const cleanupExists = await pathEntryExists(cleanupTarget);
     if (candidateExists && cleanupExists)
       throw new Error("Project Library relocation cleanup ownership is ambiguous");
-    if (!candidateExists && !cleanupExists) return;
+    if (!candidateExists && !cleanupExists) {
+      await syncDirectory(journal.targetParent);
+      await assertRelocationParent(journal);
+      return;
+    }
     if (!cleanupExists) {
       await validateRelocationOwnedDirectory(candidate, journal.id, allowEmptyWithoutMarker);
       await this.#faultInjector("before_relocation_cleanup_claim");
@@ -852,6 +857,7 @@ export class ProjectLibrary {
     await assertRelocationParent(journal);
     await validateRelocationOwnedDirectory(cleanupTarget, journal.id, allowEmptyWithoutMarker);
     await rm(cleanupTarget, { recursive: true });
+    await this.#faultInjector("after_relocation_cleanup_remove");
     await syncDirectory(journal.targetParent);
   }
 

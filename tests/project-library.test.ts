@@ -1703,6 +1703,59 @@ describe("ProjectLibrary", () => {
     expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(true);
   });
 
+  it("re-syncs an already removed relocation cleanup before clearing its journal", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-cleanup-resync-state-");
+    const destinationParent = await temporaryDirectory(
+      "open-chords-library-cleanup-resync-target-",
+    );
+    const parent = await realpath(destinationParent);
+    const target = join(parent, "Moved Library");
+    const stagingTarget = join(parent, ".open-chords-library-relocation-journaled");
+    const relocationId = "99999999-9999-4999-8999-999999999999";
+    let injectFailure = true;
+    const library = await openProjectLibrary({
+      faultInjector: (point) => {
+        if (injectFailure && point === "after_relocation_cleanup_remove") {
+          injectFailure = false;
+          throw new Error("simulated cleanup parent sync interruption");
+        }
+      },
+      stateRoot,
+    });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    mkdirSync(stagingTarget);
+    writeFileSync(
+      join(stagingTarget, ".open-chords-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation-marker",
+        id: relocationId,
+        schemaVersion: "1.0",
+      }),
+    );
+    const safety = relocationJournalSafety(parent, relocationId);
+    writeFileSync(
+      join(stateRoot, "project-library-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation",
+        id: relocationId,
+        previousRoot: library.activeRoot,
+        schemaVersion: "1.0",
+        stagingTarget,
+        target,
+        ...safety,
+      }),
+    );
+
+    await expect(library.relocate(target)).rejects.toThrow(/parent sync interruption/i);
+    expect(existsSync(stagingTarget)).toBe(false);
+    expect(existsSync(safety.stagingCleanupTarget)).toBe(false);
+    expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(true);
+
+    await library.relocate(target);
+    expect(library.activeRoot).toBe(target);
+    expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(false);
+  });
+
   it("scavenges a completed relocation wrapper on reopen and permits another relocation", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-completed-journal-state-");
     const firstParent = await temporaryDirectory("open-chords-library-completed-journal-first-");
