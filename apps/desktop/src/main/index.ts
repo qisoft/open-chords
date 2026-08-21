@@ -35,19 +35,18 @@ if (!ownsSingleInstance) {
 } else {
   app.on("web-contents-created", (_event, contents) => hardenWebContents(contents));
   app.on("second-instance", () => {
-    const window = getOrCreateWindow();
-    presentDesktopWindow(window);
+    void desktopReady.then(() => presentDesktopWindow(getOrCreateWindow()));
   });
 
   app.on("activate", () => {
-    presentDesktopWindow(getOrCreateWindow());
+    void desktopReady.then(() => presentDesktopWindow(getOrCreateWindow()));
   });
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
   });
 
-  void app
+  const desktopReady = app
     .whenReady()
     .then(async () => {
       installRendererProtocol(join(__dirname, "../renderer"));

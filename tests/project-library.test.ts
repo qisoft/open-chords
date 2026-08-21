@@ -186,8 +186,11 @@ describe("ProjectLibrary", () => {
   it("never exposes a partial Head when a crash interrupts publication", async () => {
     for (const faultPoint of [
       "after_payload_durable",
+      "after_object_rename",
       "after_revision_durable",
       "before_head_replace",
+      "after_head_rename",
+      "after_head_file_sync",
       "after_head_replace",
     ] as const satisfies readonly ProjectLibraryFaultPoint[]) {
       const stateRoot = await temporaryDirectory(`open-chords-library-${faultPoint}-`);
@@ -221,13 +224,18 @@ describe("ProjectLibrary", () => {
           () => "resolved",
           () => "rejected",
         );
-      expect(outcome).toBe(faultPoint === "after_head_replace" ? "resolved" : "rejected");
+      const committedDespiteFault = [
+        "after_head_rename",
+        "after_head_file_sync",
+        "after_head_replace",
+      ].includes(faultPoint);
+      expect(outcome).toBe(committedDespiteFault ? "resolved" : "rejected");
 
       const recovered = await openProjectLibrary({ stateRoot });
       const snapshot = await recovered.getSnapshot("project_golden");
       expect(() => parseProjectContract(snapshot?.project)).not.toThrow();
-      expect(snapshot?.eventSequence).toBe(faultPoint === "after_head_replace" ? 2 : 1);
-      expect(changes).toHaveLength(faultPoint === "after_head_replace" ? 1 : 0);
+      expect(snapshot?.eventSequence).toBe(committedDespiteFault ? 2 : 1);
+      expect(changes).toHaveLength(committedDespiteFault ? 1 : 0);
       expect(readdirSync(join(recovered.activeRoot, "staging"))).toHaveLength(0);
     }
   });
@@ -412,6 +420,37 @@ describe("ProjectLibrary", () => {
     }
   });
 
+  it("does not trust a staged Head that does not match its exact installed pointer", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-staged-mismatch-");
+    const library = await openProjectLibrary({ stateRoot });
+    const created = await library.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const committed = await library.commitEditTransaction({
+      expectedProjectRevisionId: created.projectRevisionId,
+      projectId: "project_golden",
+      transaction: replacementTransaction("transaction_staged_mismatch"),
+    });
+    if (!("projectRevisionId" in committed)) throw new Error("Fixture mutation did not commit");
+    const projectDirectory = join(library.activeRoot, "projects", "project_golden");
+    const stagedDirectory = join(library.activeRoot, "staging", "altered-publication");
+    mkdirSync(stagedDirectory);
+    const stagedHeadPath = join(stagedDirectory, "HEAD.json");
+    renameSync(join(projectDirectory, "HEAD.json"), stagedHeadPath);
+    const stagedHead = z
+      .object({ sequence: z.number() })
+      .loose()
+      .parse(JSON.parse(readFileSync(stagedHeadPath, "utf8")));
+    writeFileSync(stagedHeadPath, canonicalSerialize({ ...stagedHead, sequence: 3 }));
+    writeFileSync(join(projectDirectory, "HEAD.json"), "broken");
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(reopened.listProjects()).toEqual([
+      expect.objectContaining({ projectId: "project_golden", status: "damaged" }),
+    ]);
+  });
+
   it("rejects an altered Head that is not the exact verified ledger pointer", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-head-ledger-");
     const library = await openProjectLibrary({ stateRoot });
@@ -476,13 +515,16 @@ describe("ProjectLibrary", () => {
       migrations: [migration],
       stateRoot: futureStateRoot,
     });
-    await expect(
-      futureLibrary.restoreProjectRevision({ envelope: legacy, records: ownedRecords() }),
-    ).rejects.toThrow(/migration fixture failed/);
+    const restored = await futureLibrary.restoreProjectRevision({
+      envelope: legacy,
+      records: ownedRecords(),
+    });
+    expect(restored.migrationFailure).toMatch(/migration fixture failed/);
     const unchanged = await futureLibrary.readProject("project_golden");
     expect(unchanged.envelope.schemaVersion).toBe("1.0");
     expect(unchanged.compatibility).toBe("read_only");
     expect(unchanged.revisions).toHaveLength(1);
+    expect(unchanged.migrationFailure).toMatch(/migration fixture failed/);
   });
 
   it("opens safely understood newer minor schemas read-only", async () => {
@@ -1048,6 +1090,50 @@ describe("ProjectLibrary", () => {
     expect(library.listProjects()).toEqual([]);
   });
 
+  it("blocks mutations and defers object collection after an uncertain delete sync", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-delete-sync-failure-");
+    let injected = false;
+    const library = await openProjectLibrary({
+      faultInjector: (point) => {
+        if (!injected && point === "before_permanent_delete_parent_sync") {
+          injected = true;
+          throw new Error("simulated delete parent sync failure");
+        }
+      },
+      stateRoot,
+    });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    await library.trashProject("project_golden");
+    const objectsDirectory = join(library.activeRoot, "objects", "sha256");
+    const objectsBefore = readdirSync(objectsDirectory).toSorted();
+
+    await expect(
+      library.permanentlyDeleteProject("project_golden", "project_golden"),
+    ).rejects.toThrow(/durably committed/i);
+    expect(readdirSync(objectsDirectory).toSorted()).toEqual(objectsBefore);
+    await expect(
+      library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() }),
+    ).rejects.toThrow(/reopened/i);
+  });
+
+  it("blocks mutations after an uncertain Trash rename sync", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-trash-sync-failure-");
+    let injected = false;
+    const library = await openProjectLibrary({
+      faultInjector: (point) => {
+        if (!injected && point === "before_trash_parent_sync") {
+          injected = true;
+          throw new Error("simulated Trash parent sync failure");
+        }
+      },
+      stateRoot,
+    });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+
+    await expect(library.trashProject("project_golden")).rejects.toThrow(/durably committed/i);
+    await expect(library.restoreTrashedProject("project_golden")).rejects.toThrow(/reopened/i);
+  });
+
   it("requires exact confirmation for immediate permanent deletion", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-delete-");
     const library = await openProjectLibrary({ stateRoot });
@@ -1104,6 +1190,7 @@ describe("ProjectLibrary", () => {
   it("reconciles relocation failures on both sides of the location commit", async () => {
     for (const faultPoint of [
       "after_relocation_target_rename",
+      "after_relocation_location_rename",
       "after_relocation_location_replace",
     ] as const satisfies readonly ProjectLibraryFaultPoint[]) {
       const stateRoot = await temporaryDirectory(`open-chords-library-${faultPoint}-state-`);
@@ -1124,22 +1211,15 @@ describe("ProjectLibrary", () => {
         stateRoot,
       });
       await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
-      const oldRoot = library.activeRoot;
       const canonicalDestination = join(await realpath(destinationParent), "Moved Library");
 
       await expect(library.relocate(destination)).rejects.toThrow(
         /relocation and staging cleanup both failed/i,
       );
-      const beforeLocationCommit = faultPoint === "after_relocation_target_rename";
       expect({
         activeRoot: library.activeRoot,
         destinationExists: existsSync(destination),
-      }).toEqual(
-        beforeLocationCommit
-          ? { activeRoot: oldRoot, destinationExists: false }
-          : { activeRoot: canonicalDestination, destinationExists: true },
-      );
-      if (beforeLocationCommit) await library.relocate(destination);
+      }).toEqual({ activeRoot: canonicalDestination, destinationExists: true });
       const reopened = await openProjectLibrary({ stateRoot });
       expect(reopened.activeRoot).toBe(library.activeRoot);
       expect((await reopened.getSnapshot("project_golden"))?.project.id).toBe("project_golden");

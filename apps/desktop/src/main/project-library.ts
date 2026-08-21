@@ -102,10 +102,17 @@ export type ProjectLibraryFaultPoint =
   | "after_payload_durable"
   | "after_revision_durable"
   | "before_head_replace"
+  | "after_head_rename"
+  | "after_head_file_sync"
   | "after_head_replace"
+  | "after_object_rename"
   | "after_relocation_target_rename"
+  | "after_relocation_location_rename"
   | "after_relocation_location_replace"
   | "before_relocation_staging_cleanup"
+  | "before_trash_parent_sync"
+  | "before_trash_restore_parent_sync"
+  | "before_permanent_delete_parent_sync"
   | "after_trash_move"
   | "after_trash_restore_move"
   | "after_permanent_delete";
@@ -189,6 +196,20 @@ class ProjectPublicationReconciliationError extends Error {
   constructor(cause: unknown) {
     super("Project publication failed and storage reconciliation also failed", { cause });
     this.name = "ProjectPublicationReconciliationError";
+  }
+}
+
+class ProjectHeadDurabilityError extends Error {
+  constructor(cause: unknown) {
+    super("Project Head durability could not be established", { cause });
+    this.name = "ProjectHeadDurabilityError";
+  }
+}
+
+class ProjectLifecycleDurabilityError extends Error {
+  constructor(cause: unknown) {
+    super("Project lifecycle directory change was not durably committed", { cause });
+    this.name = "ProjectLifecycleDurabilityError";
   }
 }
 
@@ -291,7 +312,7 @@ export class ProjectLibrary {
   async restoreProjectRevision(input: {
     envelope: unknown;
     records: ProjectOwnedRecords;
-  }): Promise<{ projectRevisionId: string }> {
+  }): Promise<{ migrationFailure?: string; projectRevisionId: string }> {
     return this.#serializeMutation(async () => {
       const payload = buildStoredPayload(input);
       const projectId = payload.envelope.payload.id;
@@ -302,8 +323,18 @@ export class ProjectLibrary {
         const migrated = await this.#migrateUntilCurrent(projectId, restored);
         return { projectRevisionId: migrated.revision.projectRevisionId };
       } catch (error) {
+        if (
+          error instanceof ProjectPublicationReconciliationError ||
+          error === this.#mutationBlockedError
+        )
+          throw error;
+        const migrationFailure = errorMessage(error);
+        this.#migrationFailures.set(projectId, migrationFailure);
         await this.#refreshEntries();
-        throw error;
+        return {
+          migrationFailure,
+          projectRevisionId: restored.revision.projectRevisionId,
+        };
       }
     });
   }
@@ -440,8 +471,13 @@ export class ProjectLibrary {
         await atomicWriteFile(join(source, "TRASH.json"), canonicalSerialize(trashRecord));
         await syncDirectory(source);
         await rename(source, target);
-        await syncDirectory(dirname(source));
-        await syncDirectory(dirname(target));
+        try {
+          await this.#faultInjector("before_trash_parent_sync");
+          await syncDirectory(dirname(source));
+          await syncDirectory(dirname(target));
+        } catch (error) {
+          throw new ProjectLifecycleDurabilityError(error);
+        }
         await this.#faultInjector("after_trash_move");
         await this.#refreshEntries();
       }),
@@ -458,8 +494,13 @@ export class ProjectLibrary {
         const target = this.#projectDirectory(projectId, "active");
         await assertManagedDirectory(this.#activeRoot, dirname(target));
         await rename(source, target);
-        await syncDirectory(dirname(source));
-        await syncDirectory(dirname(target));
+        try {
+          await this.#faultInjector("before_trash_restore_parent_sync");
+          await syncDirectory(dirname(source));
+          await syncDirectory(dirname(target));
+        } catch (error) {
+          throw new ProjectLifecycleDurabilityError(error);
+        }
         await this.#faultInjector("after_trash_restore_move");
         await rm(join(target, "TRASH.json"), { force: true });
         await syncDirectory(target);
@@ -478,7 +519,12 @@ export class ProjectLibrary {
         const projectDirectory = this.#projectDirectory(projectId, "trashed");
         await assertManagedDirectory(this.#activeRoot, projectDirectory);
         await rm(projectDirectory, { recursive: true });
-        await syncDirectory(join(this.#activeRoot, "trash"));
+        try {
+          await this.#faultInjector("before_permanent_delete_parent_sync");
+          await syncDirectory(join(this.#activeRoot, "trash"));
+        } catch (error) {
+          throw new ProjectLifecycleDurabilityError(error);
+        }
         await this.#faultInjector("after_permanent_delete");
         await this.#refreshEntries();
         await this.#collectUnreferencedObjects();
@@ -503,7 +549,13 @@ export class ProjectLibrary {
             deleted.push(projectId);
           }
         }
-        if (deleted.length > 0) await syncDirectory(join(this.#activeRoot, "trash"));
+        if (deleted.length > 0) {
+          try {
+            await syncDirectory(join(this.#activeRoot, "trash"));
+          } catch (error) {
+            throw new ProjectLifecycleDurabilityError(error);
+          }
+        }
         await this.#refreshEntries();
         await this.#collectUnreferencedObjects();
         return deleted.toSorted();
@@ -528,6 +580,14 @@ export class ProjectLibrary {
         `.open-chords-library-relocation-${randomUUID()}`,
       );
       let targetInstalled = false;
+      let targetDurable = false;
+      let locationDurable = false;
+      const locationPath = join(this.#stateRoot, LIBRARY_LOCATION_FILE);
+      const locationContent = canonicalSerialize({
+        activeRoot: target,
+        format: "open-chords/project-library-location",
+        schemaVersion: "1.0",
+      });
       try {
         await cp(previousRoot, stagingTarget, {
           errorOnExist: true,
@@ -553,15 +613,12 @@ export class ProjectLibrary {
         await rename(stagingTarget, target);
         targetInstalled = true;
         await syncDirectory(dirname(target));
+        targetDurable = true;
         await this.#faultInjector("after_relocation_target_rename");
-        await atomicWriteFile(
-          join(this.#stateRoot, LIBRARY_LOCATION_FILE),
-          canonicalSerialize({
-            activeRoot: target,
-            format: "open-chords/project-library-location",
-            schemaVersion: "1.0",
-          }),
+        await atomicWriteFile(locationPath, locationContent, () =>
+          this.#faultInjector("after_relocation_location_rename"),
         );
+        locationDurable = true;
         await this.#faultInjector("after_relocation_location_replace");
         this.#activeRoot = target;
         await this.#refreshEntries();
@@ -575,23 +632,10 @@ export class ProjectLibrary {
         }
         if (targetInstalled) {
           try {
-            const authoritativeRoot = await readLibraryLocation(
-              join(this.#stateRoot, LIBRARY_LOCATION_FILE),
-              previousRoot,
-            );
-            if (authoritativeRoot === target) {
-              this.#activeRoot = target;
-              await this.#refreshEntries();
-            } else if (authoritativeRoot === previousRoot) {
-              this.#activeRoot = previousRoot;
-              await this.#refreshEntries();
-              await rm(target, { force: true, recursive: true });
-              await syncDirectory(dirname(target));
-            } else {
-              throw new Error("Project Library location changed during relocation", {
-                cause: error,
-              });
-            }
+            if (!targetDurable) await syncDirectory(dirname(target));
+            if (!locationDurable) await atomicWriteFile(locationPath, locationContent);
+            this.#activeRoot = target;
+            await this.#refreshEntries();
           } catch (recoveryError) {
             this.#mutationBlockedError = new Error(
               "Project Library must be reopened after an unreconciled relocation failure",
@@ -607,6 +651,7 @@ export class ProjectLibrary {
             `Project Library relocation and staging cleanup both failed: ${errorMessage(stagingCleanupError)}`,
             { cause: error },
           );
+        if (targetInstalled) return;
         throw error;
       }
     });
@@ -668,13 +713,14 @@ export class ProjectLibrary {
       const projectDirectory = join(container, projectId);
       await assertManagedDirectory(this.#activeRoot, projectDirectory);
       const recoveryReport = await readLatestRecoveryReport(this.#activeRoot, projectDirectory);
-      const stagedHead = await this.#stagedHeadForProject(projectId);
+      const stagedBoundary = await this.#stagedHeadForProject(projectDirectory, projectId);
       const headExists = await pathExists(join(projectDirectory, "HEAD.json"));
       if (
         location === "active" &&
         recoveryReport === undefined &&
         !headExists &&
-        stagedHead?.sequence === 1
+        stagedBoundary?.kind === "valid" &&
+        stagedBoundary.head.sequence === 1
       ) {
         const quarantineDirectory = join(this.#activeRoot, "quarantine");
         await assertManagedDirectory(this.#activeRoot, quarantineDirectory);
@@ -725,7 +771,13 @@ export class ProjectLibrary {
         const recovered = await this.#recoverProject(
           projectDirectory,
           projectId,
-          stagedHead === undefined ? (headExists ? undefined : 0) : stagedHead.sequence - 1,
+          stagedBoundary === undefined
+            ? headExists
+              ? undefined
+              : 0
+            : stagedBoundary.kind === "valid"
+              ? stagedBoundary.head.sequence - 1
+              : 0,
         );
         entries.set(projectId, recovered);
       }
@@ -733,22 +785,42 @@ export class ProjectLibrary {
   }
 
   async #stagedHeadForProject(
+    projectDirectory: string,
     projectId: string,
-  ): Promise<z.infer<typeof ProjectHeadSchema> | undefined> {
+  ): Promise<
+    { head: z.infer<typeof ProjectHeadSchema>; kind: "valid" } | { kind: "ambiguous" } | undefined
+  > {
     const stagingDirectory = join(this.#activeRoot, "staging");
     await assertManagedDirectory(this.#activeRoot, stagingDirectory);
+    const candidates: z.infer<typeof ProjectHeadSchema>[] = [];
     for (const entry of await readdir(stagingDirectory, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const headPath = join(stagingDirectory, entry.name, "HEAD.json");
       if (!(await pathExists(headPath))) continue;
       try {
         const head = await parseJsonFile(headPath, ProjectHeadSchema);
-        if (head.projectId === projectId) return head;
+        if (head.projectId === projectId) candidates.push(head);
       } catch (error) {
         if (!(error instanceof ProjectStorageCorruptionError)) throw error;
       }
     }
-    return undefined;
+    if (candidates.length === 0) return undefined;
+    if (candidates.length !== 1) return { kind: "ambiguous" };
+    const head = candidates[0];
+    if (head === undefined) return { kind: "ambiguous" };
+    try {
+      const revisions = await this.#readVerifiedRevisions(projectDirectory, projectId);
+      const exactMatch = revisions.some(
+        ({ pointer }) =>
+          pointer.projectRevisionId === head.projectRevisionId &&
+          pointer.revisionObjectHash === head.revisionObjectHash &&
+          pointer.sequence === head.sequence,
+      );
+      return exactMatch ? { head, kind: "valid" } : { kind: "ambiguous" };
+    } catch (error) {
+      if (error instanceof ProjectStorageCorruptionError) return { kind: "ambiguous" };
+      throw error;
+    }
   }
 
   async #recoverProject(
@@ -1015,6 +1087,13 @@ export class ProjectLibrary {
         reason,
       );
     } catch (error) {
+      if (error instanceof ProjectHeadDurabilityError) {
+        this.#mutationBlockedError = new Error(
+          "Project Library must be reopened after an uncertain Head durability failure",
+          { cause: error },
+        );
+        throw new ProjectPublicationReconciliationError(error);
+      }
       let committedAfterFailure: RevisionSnapshot | undefined;
       try {
         await this.#refreshEntries();
@@ -1119,8 +1198,20 @@ export class ProjectLibrary {
     await this.#faultInjector("after_revision_durable");
     await this.#faultInjector("before_head_replace");
     await rename(stagedHeadPath, join(projectDirectory, "HEAD.json"));
-    await syncFile(join(projectDirectory, "HEAD.json"));
-    await syncDirectory(projectDirectory);
+    try {
+      await this.#faultInjector("after_head_rename");
+      await syncFile(join(projectDirectory, "HEAD.json"));
+      await this.#faultInjector("after_head_file_sync");
+      await syncDirectory(projectDirectory);
+    } catch (error) {
+      try {
+        await atomicWriteFile(join(projectDirectory, "HEAD.json"), canonicalSerialize(head));
+      } catch (recoveryError) {
+        throw new ProjectHeadDurabilityError(
+          new AggregateError([error, recoveryError], "Project Head durability retry failed"),
+        );
+      }
+    }
     await this.#faultInjector("after_head_replace");
     await rm(stagingDirectory, { force: true, recursive: true });
     await this.#refreshEntries();
@@ -1148,10 +1239,14 @@ export class ProjectLibrary {
   async #installObject(stagedPath: string, hash: string): Promise<void> {
     await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "objects", "sha256"));
     const target = this.#objectPath(hash);
+    let installed = false;
     try {
       await rename(stagedPath, target);
+      installed = true;
+      await this.#faultInjector("after_object_rename");
       await syncDirectory(dirname(target));
     } catch (error) {
+      if (installed) throw error;
       if (!(await pathExists(target))) throw error;
       const existing = await readFile(target, "utf8");
       if (hashContent(existing) !== hash)
@@ -1311,6 +1406,24 @@ export class ProjectLibrary {
     try {
       return await operation();
     } catch (error) {
+      if (error instanceof ProjectLifecycleDurabilityError) {
+        try {
+          await this.#refreshEntries();
+        } catch (recoveryError) {
+          this.#mutationBlockedError = new Error(
+            "Project Library must be reopened after an unreconciled lifecycle failure",
+            { cause: recoveryError },
+          );
+          throw new Error("Project lifecycle mutation failed and reconciliation also failed", {
+            cause: recoveryError,
+          });
+        }
+        this.#mutationBlockedError = new Error(
+          "Project Library must be reopened after an uncertain lifecycle durability failure",
+          { cause: error },
+        );
+        throw error;
+      }
       try {
         await this.#refreshEntries();
         await this.#collectUnreferencedObjects();
@@ -1569,12 +1682,17 @@ async function assertManagedDirectory(activeRoot: string, path: string): Promise
     throw new Error("Managed Project Library directory escapes the active root");
 }
 
-async function atomicWriteFile(path: string, content: string): Promise<void> {
+async function atomicWriteFile(
+  path: string,
+  content: string,
+  afterReplace: () => void | Promise<void> = () => undefined,
+): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
   try {
     await writeDurableFile(temporaryPath, content, "wx");
     await rename(temporaryPath, path);
+    await afterReplace();
     await syncFile(path);
     await syncDirectory(dirname(path));
   } finally {
