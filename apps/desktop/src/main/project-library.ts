@@ -11,7 +11,6 @@ import {
   realpath,
   rename,
   rm,
-  rmdir,
   stat,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
@@ -100,14 +99,21 @@ const LibraryLocationSchema = z.strictObject({
   format: z.literal("open-chords/project-library-location"),
   schemaVersion: z.literal("1.0"),
 });
+const DirectoryIdentitySchema = z.strictObject({
+  device: z.string().regex(/^\d+$/),
+  inode: z.string().regex(/^\d+$/),
+});
 const RelocationJournalSchema = z.strictObject({
+  stagingCleanupTarget: z.string().min(1),
   format: z.literal("open-chords/project-library-relocation"),
   id: z.string().uuid(),
   previousRoot: z.string().min(1),
   schemaVersion: z.literal("1.0"),
   stagingTarget: z.string().min(1),
   target: z.string().min(1),
+  targetCleanupTarget: z.string().min(1),
   targetParent: z.string().min(1),
+  targetParentIdentity: DirectoryIdentitySchema,
 });
 const RelocationMarkerSchema = z.strictObject({
   format: z.literal("open-chords/project-library-relocation-marker"),
@@ -147,6 +153,8 @@ export type ProjectLibraryFaultPoint =
   | "after_head_replace"
   | "after_object_rename"
   | "after_relocation_target_rename"
+  | "before_relocation_copy"
+  | "before_relocation_cleanup_claim"
   | "after_relocation_location_rename"
   | "after_relocation_location_replace"
   | "after_catalog_recovery_report"
@@ -623,6 +631,7 @@ export class ProjectLibrary {
       if (!(await pathExists(dirname(target))))
         throw new Error("Project Library relocation target parent must already exist");
       const targetParent = await realpath(dirname(target));
+      const targetParentIdentity = await readDirectoryIdentity(targetParent);
       await syncDirectory(targetParent);
       await syncDirectory(dirname(targetParent));
       const stagingTarget = join(
@@ -635,16 +644,33 @@ export class ProjectLibrary {
         id: relocationId,
         previousRoot,
         schemaVersion: "1.0",
+        stagingCleanupTarget: join(
+          targetParent,
+          `.open-chords-library-relocation-cleanup-${randomUUID()}`,
+        ),
         stagingTarget,
         target,
+        targetCleanupTarget: join(
+          targetParent,
+          `.open-chords-library-target-cleanup-${randomUUID()}`,
+        ),
         targetParent,
+        targetParentIdentity,
       });
       await atomicWriteFile(
         join(this.#stateRoot, RELOCATION_JOURNAL_FILE),
         canonicalSerialize(relocationJournal),
       );
       const stagedLibrary = join(stagingTarget, "library");
+      await assertRelocationParent(relocationJournal);
+      if (
+        (await pathEntryExists(relocationJournal.stagingCleanupTarget)) ||
+        (await pathEntryExists(relocationJournal.targetCleanupTarget))
+      )
+        throw new Error("Project Library relocation cleanup path already exists");
       await mkdir(stagingTarget);
+      await assertRelocationParent(relocationJournal);
+      await assertRealDirectory(stagingTarget);
       await writeDurableFile(
         join(stagingTarget, RELOCATION_MARKER_FILE),
         canonicalSerialize({
@@ -666,6 +692,9 @@ export class ProjectLibrary {
         schemaVersion: "1.0",
       });
       try {
+        await this.#faultInjector("before_relocation_copy");
+        await assertRelocationParent(relocationJournal);
+        await assertRealDirectory(stagingTarget);
         await cp(previousRoot, stagedLibrary, {
           errorOnExist: true,
           force: false,
@@ -696,8 +725,17 @@ export class ProjectLibrary {
           "wx",
         );
         await syncTree(stagedLibrary);
+        await assertRelocationParent(relocationJournal);
+        await assertRealDirectory(stagingTarget);
+        if (
+          (await pathEntryExists(target)) ||
+          (await pathEntryExists(relocationJournal.targetCleanupTarget))
+        )
+          throw new Error("Project Library relocation target appeared during copy");
         await rename(stagedLibrary, target);
         targetInstalled = true;
+        await assertRelocationParent(relocationJournal);
+        await assertRealDirectory(target);
         await syncDirectory(dirname(target));
         targetDurable = true;
         await this.#faultInjector("after_relocation_target_rename");
@@ -753,19 +791,12 @@ export class ProjectLibrary {
     if (journal.previousRoot !== this.#activeRoot || journal.target !== target)
       throw new Error("Another Project Library relocation requires recovery first");
     await this.#removeRelocationStaging(journal, target);
-    if (await pathExists(target)) {
-      const marker = await parseJsonFile(
-        join(target, RELOCATION_MARKER_FILE),
-        RelocationMarkerSchema,
-      );
-      if (marker.id !== journal.id)
-        throw new Error("Project Library relocation target ownership is ambiguous");
-      const targetParent = await realpath(dirname(target));
-      if (targetParent !== journal.targetParent)
-        throw new Error("Project Library relocation target parent changed during interruption");
-      await rm(target, { recursive: true });
-      await syncDirectory(targetParent);
-    }
+    await this.#claimValidateAndRemoveRelocationPath(
+      journal,
+      target,
+      journal.targetCleanupTarget,
+      false,
+    );
     await this.#clearRelocationJournal();
     return false;
   }
@@ -789,32 +820,39 @@ export class ProjectLibrary {
     journal: z.infer<typeof RelocationJournalSchema>,
     approvedTarget: string,
   ): Promise<void> {
-    if (!(await pathExists(journal.stagingTarget))) return;
-    const approvedParent = await realpath(dirname(approvedTarget));
-    const stagingMetadata = await lstat(journal.stagingTarget);
-    if (stagingMetadata.isSymbolicLink() || !stagingMetadata.isDirectory())
-      throw new Error("Project Library relocation staging ownership is ambiguous");
-    const stagingPath = await realpath(journal.stagingTarget);
-    if (
-      approvedParent !== journal.targetParent ||
-      stagingPath !== journal.stagingTarget ||
-      dirname(stagingPath) !== journal.targetParent ||
-      !basename(stagingPath).startsWith(".open-chords-library-relocation-")
-    )
+    if (dirname(approvedTarget) !== journal.targetParent)
       throw new Error("Project Library relocation staging path is outside its approved parent");
-    const markerPath = join(stagingPath, RELOCATION_MARKER_FILE);
-    if (!(await pathExists(markerPath))) {
-      if ((await readdir(stagingPath)).length !== 0)
-        throw new Error("Project Library relocation staging marker is missing");
-      await rmdir(journal.stagingTarget);
-      await syncDirectory(approvedParent);
-      return;
+    await this.#claimValidateAndRemoveRelocationPath(
+      journal,
+      journal.stagingTarget,
+      journal.stagingCleanupTarget,
+      true,
+    );
+  }
+
+  async #claimValidateAndRemoveRelocationPath(
+    journal: z.infer<typeof RelocationJournalSchema>,
+    candidate: string,
+    cleanupTarget: string,
+    allowEmptyWithoutMarker: boolean,
+  ): Promise<void> {
+    await assertRelocationParent(journal);
+    const candidateExists = await pathEntryExists(candidate);
+    const cleanupExists = await pathEntryExists(cleanupTarget);
+    if (candidateExists && cleanupExists)
+      throw new Error("Project Library relocation cleanup ownership is ambiguous");
+    if (!candidateExists && !cleanupExists) return;
+    if (!cleanupExists) {
+      await validateRelocationOwnedDirectory(candidate, journal.id, allowEmptyWithoutMarker);
+      await this.#faultInjector("before_relocation_cleanup_claim");
+      await assertRelocationParent(journal);
+      await rename(candidate, cleanupTarget);
+      await syncDirectory(journal.targetParent);
     }
-    const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
-    if (marker.id !== journal.id)
-      throw new Error("Project Library relocation staging ownership is ambiguous");
-    await rm(journal.stagingTarget, { recursive: true });
-    await syncDirectory(approvedParent);
+    await assertRelocationParent(journal);
+    await validateRelocationOwnedDirectory(cleanupTarget, journal.id, allowEmptyWithoutMarker);
+    await rm(cleanupTarget, { recursive: true });
+    await syncDirectory(journal.targetParent);
   }
 
   async #clearRelocationJournal(): Promise<void> {
@@ -1952,13 +1990,78 @@ async function readRelocationJournal(
   if (!(await pathExists(path))) return undefined;
   const journal = await parseJsonFile(path, RelocationJournalSchema);
   if (
-    ![journal.previousRoot, journal.stagingTarget, journal.target].every(isAbsolute) ||
+    ![
+      journal.previousRoot,
+      journal.stagingCleanupTarget,
+      journal.stagingTarget,
+      journal.target,
+      journal.targetCleanupTarget,
+    ].every(isAbsolute) ||
     !isAbsolute(journal.targetParent) ||
     dirname(journal.stagingTarget) !== journal.targetParent ||
-    dirname(journal.target) !== journal.targetParent
+    dirname(journal.stagingCleanupTarget) !== journal.targetParent ||
+    dirname(journal.target) !== journal.targetParent ||
+    dirname(journal.targetCleanupTarget) !== journal.targetParent ||
+    !basename(journal.stagingTarget).startsWith(".open-chords-library-relocation-") ||
+    !basename(journal.stagingCleanupTarget).startsWith(
+      ".open-chords-library-relocation-cleanup-",
+    ) ||
+    !basename(journal.targetCleanupTarget).startsWith(".open-chords-library-target-cleanup-") ||
+    new Set([
+      journal.stagingCleanupTarget,
+      journal.stagingTarget,
+      journal.target,
+      journal.targetCleanupTarget,
+    ]).size !== 4
   )
     throw new Error("Project Library relocation journal contains unsafe paths");
   return journal;
+}
+
+async function readDirectoryIdentity(
+  path: string,
+): Promise<z.infer<typeof DirectoryIdentitySchema>> {
+  const metadata = await lstat(path, { bigint: true });
+  if (metadata.isSymbolicLink() || !metadata.isDirectory())
+    throw new Error("Project Library relocation parent must be a real directory");
+  return DirectoryIdentitySchema.parse({
+    device: metadata.dev.toString(),
+    inode: metadata.ino.toString(),
+  });
+}
+
+async function assertRelocationParent(
+  journal: z.infer<typeof RelocationJournalSchema>,
+): Promise<void> {
+  const actual = await readDirectoryIdentity(journal.targetParent);
+  if (
+    actual.device !== journal.targetParentIdentity.device ||
+    actual.inode !== journal.targetParentIdentity.inode ||
+    (await realpath(journal.targetParent)) !== journal.targetParent
+  )
+    throw new Error("Project Library relocation target parent changed during operation");
+}
+
+async function assertRealDirectory(path: string): Promise<void> {
+  const metadata = await lstat(path);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory() || (await realpath(path)) !== path)
+    throw new Error("Project Library relocation path is not a real canonical directory");
+}
+
+async function validateRelocationOwnedDirectory(
+  path: string,
+  relocationId: string,
+  allowEmptyWithoutMarker: boolean,
+): Promise<void> {
+  await assertRealDirectory(path);
+  const markerPath = join(path, RELOCATION_MARKER_FILE);
+  if (!(await pathEntryExists(markerPath))) {
+    if (allowEmptyWithoutMarker && (await readdir(path)).length === 0) return;
+    throw new Error("Project Library relocation staging marker is missing");
+  }
+  const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
+  if (marker.id !== relocationId)
+    throw new Error("Project Library relocation ownership is ambiguous");
 }
 
 async function inspectRelocationJournal(stateRoot: string): Promise<void> {
@@ -2128,6 +2231,16 @@ async function syncTree(path: string): Promise<void> {
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
+    return true;
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
+  }
+}
+
+async function pathEntryExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
     return true;
   } catch (error) {
     if (isMissingPathError(error)) return false;
