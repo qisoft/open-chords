@@ -3,15 +3,18 @@ import {
   DESKTOP_IPC_CHANNELS,
   DESKTOP_IPC_PROTOCOL,
   DESKTOP_IPC_VERSION,
-  DesktopMessageIdSchema,
+  DesktopGenerationIdSchema,
   DesktopResponseSchema,
   ProjectEventSchema,
   ProjectSnapshotCommandSchema,
   ShellSecuritySnapshotCommandSchema,
-  type OpenChordsDesktopApi,
   type DesktopCommand,
+  type DesktopErrorResponse,
   type DesktopResponse,
+  type OpenChordsDesktopApi,
+  type ProjectCommittedResponse,
   type ProjectSnapshotResponse,
+  type ShellSecuritySnapshotResponse,
 } from "@open-chords/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
@@ -20,7 +23,7 @@ import { ProjectEventStream } from "./project-event-stream.ts";
 const generationArgument = process.argv.find((argument) =>
   argument.startsWith("--open-chords-generation="),
 );
-const generationId = DesktopMessageIdSchema.parse(generationArgument?.split("=", 2)[1]);
+const generationId = DesktopGenerationIdSchema.parse(generationArgument?.split("=", 2)[1]);
 
 const envelope = () => ({
   generationId,
@@ -28,6 +31,18 @@ const envelope = () => ({
   protocolVersion: DESKTOP_IPC_VERSION,
   requestId: `request_${crypto.randomUUID().replaceAll("-", "")}`,
 });
+
+async function invokeCapability<TExpected extends DesktopResponse>(
+  channel: string,
+  command: DesktopCommand,
+  isExpected: (response: DesktopResponse) => response is TExpected,
+  unexpectedResponseMessage: string,
+): Promise<DesktopErrorResponse | TExpected> {
+  const response = DesktopResponseSchema.parse(await ipcRenderer.invoke(channel, command));
+  assertCorrelated(response, command);
+  if (response.type === "desktop.error" || isExpected(response)) return response;
+  throw new Error(unexpectedResponseMessage);
+}
 
 async function getSecuritySnapshot() {
   const command = ShellSecuritySnapshotCommandSchema.parse({
@@ -38,14 +53,13 @@ async function getSecuritySnapshot() {
     },
     type: "shell.get_security_snapshot",
   });
-  const response = DesktopResponseSchema.parse(
-    await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.shellGetSecuritySnapshot, command),
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.shellGetSecuritySnapshot,
+    command,
+    (response): response is ShellSecuritySnapshotResponse =>
+      response.type === "shell.security_snapshot",
+    "Unexpected shell capability response",
   );
-  assertCorrelated(response, command);
-  if (response.type !== "shell.security_snapshot" && response.type !== "desktop.error") {
-    throw new Error("Unexpected shell capability response");
-  }
-  return response;
 }
 
 async function getProjectSnapshot(projectId: string) {
@@ -54,14 +68,12 @@ async function getProjectSnapshot(projectId: string) {
     projectId,
     type: "project.get_snapshot",
   });
-  const response = DesktopResponseSchema.parse(
-    await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.projectGetSnapshot, command),
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.projectGetSnapshot,
+    command,
+    (response): response is ProjectSnapshotResponse => response.type === "project.snapshot",
+    "Unexpected project snapshot response",
   );
-  assertCorrelated(response, command);
-  if (response.type !== "project.snapshot" && response.type !== "desktop.error") {
-    throw new Error("Unexpected project snapshot response");
-  }
-  return response;
 }
 
 async function commitEditTransaction(
@@ -72,14 +84,12 @@ async function commitEditTransaction(
     ...input,
     type: "project.commit_edit_transaction",
   });
-  const response = DesktopResponseSchema.parse(
-    await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.projectCommitEditTransaction, command),
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.projectCommitEditTransaction,
+    command,
+    (response): response is ProjectCommittedResponse => response.type === "project.committed",
+    "Unexpected project mutation response",
   );
-  assertCorrelated(response, command);
-  if (response.type !== "project.committed" && response.type !== "desktop.error") {
-    throw new Error("Unexpected project mutation response");
-  }
-  return response;
 }
 
 const eventStream = new ProjectEventStream<ProjectSnapshotResponse>(async (projectId) => {

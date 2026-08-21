@@ -3,7 +3,8 @@ import {
   DESKTOP_IPC_VERSION,
   DesktopCommandSchema,
   DesktopErrorResponseSchema,
-  DesktopMessageIdSchema,
+  DesktopGenerationIdSchema,
+  DesktopRequestIdSchema,
   DesktopResponseSchema,
   type DesktopCommand,
   type DesktopResponse,
@@ -289,8 +290,8 @@ function correlationEnvelope(
 ): Pick<DesktopCommand, "generationId" | "requestId"> | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   try {
-    const generationId = DesktopMessageIdSchema.safeParse(Reflect.get(value, "generationId"));
-    const requestId = DesktopMessageIdSchema.safeParse(Reflect.get(value, "requestId"));
+    const generationId = DesktopGenerationIdSchema.safeParse(Reflect.get(value, "generationId"));
+    const requestId = DesktopRequestIdSchema.safeParse(Reflect.get(value, "requestId"));
     if (!generationId.success || !requestId.success) return undefined;
     return { generationId: generationId.data, requestId: requestId.data };
   } catch {

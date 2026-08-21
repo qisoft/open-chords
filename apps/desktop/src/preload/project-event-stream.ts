@@ -33,38 +33,33 @@ export class ProjectEventStream<TSnapshot extends EventSnapshot> {
 
   async accept(rawEvent: unknown): Promise<ProjectStreamUpdate<TSnapshot>> {
     const event = ProjectEventSchema.parse(rawEvent);
-    const lastSequence = this.#lastSequences.get(event.projectId) ?? 0;
-    if (event.sequence <= lastSequence) return { kind: "ignored" };
-    if (event.sequence === lastSequence + 1) {
-      this.#lastSequences.set(event.projectId, event.sequence);
-      return { event, kind: "event" };
-    }
+    while (true) {
+      const lastSequence = this.#lastSequences.get(event.projectId) ?? 0;
+      if (event.sequence <= lastSequence) return { kind: "ignored" };
+      if (event.sequence === lastSequence + 1) {
+        this.#lastSequences.set(event.projectId, event.sequence);
+        return { event, kind: "event" };
+      }
 
-    let recovery = this.#recoveries.get(event.projectId);
-    if (recovery === undefined) {
-      const promise = this.#recoverGap(event.projectId, event.sequence);
-      recovery = { delivered: false, promise };
-      this.#recoveries.set(event.projectId, recovery);
-      const cleanup = () => {
-        if (this.#recoveries.get(event.projectId) === recovery) {
-          this.#recoveries.delete(event.projectId);
-        }
-      };
-      void promise.then(cleanup, cleanup);
-    }
+      let recovery = this.#recoveries.get(event.projectId);
+      if (recovery === undefined) {
+        const promise = this.#recoverGap(event.projectId, event.sequence);
+        recovery = { delivered: false, promise };
+        this.#recoveries.set(event.projectId, recovery);
+        const cleanup = () => {
+          if (this.#recoveries.get(event.projectId) === recovery) {
+            this.#recoveries.delete(event.projectId);
+          }
+        };
+        void promise.then(cleanup, cleanup);
+      }
 
-    const result = await recovery.promise;
-    if (result.applied && !recovery.delivered) {
-      recovery.delivered = true;
-      return { kind: "snapshot", snapshot: result.snapshot };
+      const result = await recovery.promise;
+      if (result.applied && !recovery.delivered) {
+        recovery.delivered = true;
+        return { kind: "snapshot", snapshot: result.snapshot };
+      }
     }
-    const recoveredSequence = this.#lastSequences.get(event.projectId) ?? 0;
-    if (event.sequence <= recoveredSequence) return { kind: "ignored" };
-    if (event.sequence === recoveredSequence + 1) {
-      this.#lastSequences.set(event.projectId, event.sequence);
-      return { event, kind: "event" };
-    }
-    throw new Error("Project snapshot recovery did not close the event gap");
   }
 
   async #recoverGap(

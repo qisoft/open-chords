@@ -14,16 +14,30 @@ export const DesktopMessageIdSchema = z
   .string()
   .max(128)
   .regex(/^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$/);
+export const DesktopGenerationIdSchema = DesktopMessageIdSchema.brand<"DesktopGenerationId">();
+export const DesktopProjectIdSchema = DesktopMessageIdSchema.brand<"DesktopProjectId">();
+export const DesktopProjectRevisionIdSchema =
+  DesktopMessageIdSchema.brand<"DesktopProjectRevisionId">();
+export const DesktopRequestIdSchema = DesktopMessageIdSchema.brand<"DesktopRequestId">();
+export const DesktopTransactionIdSchema = DesktopMessageIdSchema.brand<"DesktopTransactionId">();
 
-const commandEnvelope = {
-  generationId: DesktopMessageIdSchema,
+const protocolEnvelope = {
   protocol: z.literal(DESKTOP_IPC_PROTOCOL),
   protocolVersion: z.literal(DESKTOP_IPC_VERSION),
-  requestId: DesktopMessageIdSchema,
+};
+
+const generationEnvelope = {
+  ...protocolEnvelope,
+  generationId: DesktopGenerationIdSchema,
+};
+
+const correlatedEnvelope = {
+  ...generationEnvelope,
+  requestId: DesktopRequestIdSchema,
 };
 
 export const ShellSecuritySnapshotCommandSchema = z.strictObject({
-  ...commandEnvelope,
+  ...correlatedEnvelope,
   runtimeSecurity: z.strictObject({
     contextIsolation: z.literal(true),
     sandbox: z.literal(true),
@@ -32,16 +46,16 @@ export const ShellSecuritySnapshotCommandSchema = z.strictObject({
 });
 
 export const ProjectSnapshotCommandSchema = z.strictObject({
-  ...commandEnvelope,
-  projectId: DesktopMessageIdSchema,
+  ...correlatedEnvelope,
+  projectId: DesktopProjectIdSchema,
   type: z.literal("project.get_snapshot"),
 });
 
 export const CommitEditTransactionCommandSchema = z.strictObject({
-  ...commandEnvelope,
-  expectedProjectRevisionId: DesktopMessageIdSchema,
-  projectId: DesktopMessageIdSchema,
-  transaction: EditTransactionSchema.extend({ id: DesktopMessageIdSchema }),
+  ...correlatedEnvelope,
+  expectedProjectRevisionId: DesktopProjectRevisionIdSchema,
+  projectId: DesktopProjectIdSchema,
+  transaction: EditTransactionSchema.extend({ id: DesktopTransactionIdSchema }),
   type: z.literal("project.commit_edit_transaction"),
 });
 
@@ -50,13 +64,6 @@ export const DesktopCommandSchema = z.discriminatedUnion("type", [
   ProjectSnapshotCommandSchema,
   ShellSecuritySnapshotCommandSchema,
 ]);
-
-const responseEnvelope = {
-  generationId: DesktopMessageIdSchema,
-  protocol: z.literal(DESKTOP_IPC_PROTOCOL),
-  protocolVersion: z.literal(DESKTOP_IPC_VERSION),
-  requestId: DesktopMessageIdSchema,
-};
 
 export const DesktopErrorResponseSchema = z.strictObject({
   code: z.enum([
@@ -68,18 +75,17 @@ export const DesktopErrorResponseSchema = z.strictObject({
     "stale_revision",
     "unauthorized_sender",
   ]),
-  generationId: DesktopMessageIdSchema.nullable(),
+  generationId: DesktopGenerationIdSchema.nullable(),
   message: z.string().min(1).max(256),
-  protocol: z.literal(DESKTOP_IPC_PROTOCOL),
-  protocolVersion: z.literal(DESKTOP_IPC_VERSION),
-  requestId: DesktopMessageIdSchema.nullable(),
+  ...protocolEnvelope,
+  requestId: DesktopRequestIdSchema.nullable(),
   retryable: z.boolean(),
   type: z.literal("desktop.error"),
 });
 
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
   z.strictObject({
-    ...responseEnvelope,
+    ...correlatedEnvelope,
     security: z.strictObject({
       contextIsolation: z.literal(true),
       nodeIntegration: z.literal(false),
@@ -89,28 +95,26 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
     type: z.literal("shell.security_snapshot"),
   }),
   z.strictObject({
-    ...responseEnvelope,
+    ...correlatedEnvelope,
     eventSequence: z.number().int().nonnegative(),
     project: ProjectContractSchema,
-    projectRevisionId: DesktopMessageIdSchema,
+    projectRevisionId: DesktopProjectRevisionIdSchema,
     type: z.literal("project.snapshot"),
   }),
   z.strictObject({
-    ...responseEnvelope,
-    projectId: DesktopMessageIdSchema,
-    projectRevisionId: DesktopMessageIdSchema,
-    transactionId: DesktopMessageIdSchema,
+    ...correlatedEnvelope,
+    projectId: DesktopProjectIdSchema,
+    projectRevisionId: DesktopProjectRevisionIdSchema,
+    transactionId: DesktopTransactionIdSchema,
     type: z.literal("project.committed"),
   }),
   DesktopErrorResponseSchema,
 ]);
 
 export const ProjectEventSchema = z.strictObject({
-  generationId: DesktopMessageIdSchema,
-  projectId: DesktopMessageIdSchema,
-  projectRevisionId: DesktopMessageIdSchema,
-  protocol: z.literal(DESKTOP_IPC_PROTOCOL),
-  protocolVersion: z.literal(DESKTOP_IPC_VERSION),
+  ...generationEnvelope,
+  projectId: DesktopProjectIdSchema,
+  projectRevisionId: DesktopProjectRevisionIdSchema,
   sequence: z.number().int().positive(),
   type: z.literal("project.changed"),
 });

@@ -76,6 +76,24 @@ describe("ProjectEventStream", () => {
     expect(await stream.accept(event(8))).toEqual({ kind: "ignored" });
   });
 
+  it("starts a follow-up recovery when a concurrent event still has a gap", async () => {
+    const snapshots = [{ eventSequence: 7 }, { eventSequence: 9 }];
+    const refresh = vi.fn<() => Promise<{ eventSequence: number }>>(async () => {
+      const snapshot = snapshots.shift();
+      if (snapshot === undefined) throw new Error("Unexpected extra snapshot refresh");
+      return snapshot;
+    });
+    const stream = new ProjectEventStream(refresh);
+    stream.synchronize("project_fixture", 4);
+
+    const first = stream.accept(event(7));
+    const second = stream.accept(event(9));
+
+    expect(await first).toEqual({ kind: "snapshot", snapshot: { eventSequence: 7 } });
+    expect(await second).toEqual({ kind: "snapshot", snapshot: { eventSequence: 9 } });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
   it("does not move the sequence backwards when an older snapshot arrives late", async () => {
     const stream = new ProjectEventStream(async () => ({ eventSequence: 0 }));
     stream.synchronize("project_fixture", 8);
