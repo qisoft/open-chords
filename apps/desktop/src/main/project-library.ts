@@ -11,6 +11,7 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
   stat,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
@@ -31,7 +32,11 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
-import { ProjectOwnedRecordsSchema, type ProjectOwnedRecords } from "./project-library-records.ts";
+import {
+  ProjectOwnedRecordsSchema,
+  SourceLocatorSchema,
+  type ProjectOwnedRecords,
+} from "./project-library-records.ts";
 
 const HASH_PATTERN = /^sha256:([a-f0-9]{64})$/;
 const PROJECT_REVISION_ID_PATTERN = /^projectrevision_[a-f0-9]{32}$/;
@@ -40,6 +45,7 @@ const LIBRARY_LOCATION_FILE = "project-library-location.json";
 const RELOCATION_JOURNAL_FILE = "project-library-relocation.json";
 const RELOCATION_MARKER_FILE = ".open-chords-relocation.json";
 const DEFAULT_LIBRARY_DIRECTORY = "project-library";
+const SOURCE_CATALOG_FILE = "source-catalog.json";
 const execFileAsync = promisify(execFile);
 
 const HashSchema = z.string().regex(HASH_PATTERN);
@@ -105,6 +111,11 @@ const RelocationJournalSchema = z.strictObject({
 const RelocationMarkerSchema = z.strictObject({
   format: z.literal("open-chords/project-library-relocation-marker"),
   id: z.string().uuid(),
+  schemaVersion: z.literal("1.0"),
+});
+const SourceCatalogSchema = z.strictObject({
+  format: z.literal("open-chords/source-catalog"),
+  locatorsBySourceId: z.record(StableIdSchema, z.array(SourceLocatorSchema)),
   schemaVersion: z.literal("1.0"),
 });
 
@@ -251,6 +262,7 @@ export class ProjectLibrary {
   #activeRoot: string;
   #entries = new Map<string, LibraryEntry>();
   readonly #migrationFailures = new Map<string, string>();
+  #locatorCatalog = new Map<string, ProjectOwnedRecords["sources"][number]["locators"]>();
   #mutationBlockedError: Error | undefined;
   #mutationTail: Promise<void> = Promise.resolve();
   readonly #subscribers = new Set<(change: ProjectLibraryChange) => void>();
@@ -597,6 +609,7 @@ export class ProjectLibrary {
         throw new Error("Project Library relocation target parent must already exist");
       const targetParent = await realpath(dirname(target));
       await syncDirectory(targetParent);
+      await syncDirectory(dirname(targetParent));
       const stagingTarget = join(
         dirname(target),
         `.open-chords-library-relocation-${randomUUID()}`,
@@ -752,8 +765,8 @@ export class ProjectLibrary {
       if (marker.id !== journal.id)
         throw new Error("Project Library relocation marker does not match its journal");
       await rm(markerPath);
-      await syncDirectory(this.#activeRoot);
     }
+    await syncDirectory(this.#activeRoot);
     await this.#clearRelocationJournal();
   }
 
@@ -771,8 +784,13 @@ export class ProjectLibrary {
     )
       throw new Error("Project Library relocation staging path is outside its approved parent");
     const markerPath = join(stagingPath, RELOCATION_MARKER_FILE);
-    if (!(await pathExists(markerPath)))
-      throw new Error("Project Library relocation staging marker is missing");
+    if (!(await pathExists(markerPath))) {
+      if ((await readdir(stagingPath)).length !== 0)
+        throw new Error("Project Library relocation staging marker is missing");
+      await rmdir(stagingPath);
+      await syncDirectory(approvedParent);
+      return;
+    }
     const marker = await parseJsonFile(markerPath, RelocationMarkerSchema);
     if (marker.id !== journal.id)
       throw new Error("Project Library relocation staging ownership is ambiguous");
@@ -812,6 +830,7 @@ export class ProjectLibrary {
       if (entry !== undefined) entry.migrationFailure = failure;
     }
     this.#entries = entries;
+    await this.#refreshLocatorCatalog();
     await atomicWriteFile(
       join(this.#activeRoot, "project-index.json"),
       canonicalSerialize({
@@ -1267,6 +1286,7 @@ export class ProjectLibrary {
     if (payload.envelope.payload.id !== projectId)
       throw new Error("Project payload belongs to another Project");
     assertSourceAuthorityAgainstEntries(payload.records, this.#entries);
+    assertLocatorUpdates(payload.records, this.#locatorCatalog);
     const projectRevisionId = `projectrevision_${randomUUID().replaceAll("-", "")}`;
     await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
     const stagingDirectory = join(this.#activeRoot, "staging", randomUUID());
@@ -1531,32 +1551,49 @@ export class ProjectLibrary {
   }
 
   #recordsWithCurrentLocators(records: ProjectOwnedRecords): ProjectOwnedRecords {
+    const materialized = structuredClone(records);
+    for (const source of materialized.sources) {
+      const locators = this.#locatorCatalog.get(source.id);
+      if (locators !== undefined) source.locators = structuredClone(locators);
+    }
+    return materialized;
+  }
+
+  async #refreshLocatorCatalog(): Promise<void> {
     type Locator = ProjectOwnedRecords["sources"][number]["locators"][number];
-    const current = new Map<string, Map<string, Locator>>();
+    const catalogPath = join(this.#activeRoot, SOURCE_CATALOG_FILE);
+    const bySource = new Map<string, Map<string, Locator>>();
+    if (await pathExists(catalogPath)) {
+      const stored = await parseJsonFile(catalogPath, SourceCatalogSchema);
+      for (const [sourceId, locators] of Object.entries(stored.locatorsBySourceId))
+        bySource.set(sourceId, new Map(locators.map((locator) => [locator.id, locator])));
+    }
+    const referenced = new Set<string>();
     for (const entry of this.#entries.values()) {
       if (entry.revision === undefined) continue;
       for (const source of entry.revision.payload.records.sources) {
-        const byId = current.get(source.id) ?? new Map<string, Locator>();
-        for (const locator of source.locators) {
-          const existing = byId.get(locator.id);
-          if (
-            existing === undefined ||
-            locatorObservationTime(locator) > locatorObservationTime(existing)
-          )
-            byId.set(locator.id, structuredClone(locator));
-        }
-        current.set(source.id, byId);
+        referenced.add(source.id);
+        const locators = bySource.get(source.id) ?? new Map<string, Locator>();
+        mergeLocatorRecords(locators, source.locators);
+        bySource.set(source.id, locators);
       }
     }
-    const materialized = structuredClone(records);
-    for (const source of materialized.sources) {
-      const byId = current.get(source.id);
-      if (byId !== undefined)
-        source.locators = [...byId.values()].toSorted((left, right) =>
-          left.id.localeCompare(right.id),
-        );
-    }
-    return materialized;
+    for (const sourceId of bySource.keys())
+      if (!referenced.has(sourceId)) bySource.delete(sourceId);
+    this.#locatorCatalog = new Map(
+      [...bySource].map(([sourceId, locators]) => [
+        sourceId,
+        [...locators.values()].toSorted((left, right) => left.id.localeCompare(right.id)),
+      ]),
+    );
+    await atomicWriteFile(
+      catalogPath,
+      canonicalSerialize({
+        format: "open-chords/source-catalog",
+        locatorsBySourceId: Object.fromEntries(this.#locatorCatalog),
+        schemaVersion: "1.0",
+      }),
+    );
   }
 
   async #runReconciledLifecycleMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -1741,6 +1778,33 @@ function locatorObservationTime(
   locator: ProjectOwnedRecords["sources"][number]["locators"][number],
 ): number {
   return Date.parse(locator.kind === "local_file" ? locator.verifiedAt : locator.observedAt);
+}
+
+function mergeLocatorRecords(
+  current: Map<string, ProjectOwnedRecords["sources"][number]["locators"][number]>,
+  candidates: ProjectOwnedRecords["sources"][number]["locators"],
+): void {
+  for (const locator of candidates) {
+    const existing = current.get(locator.id);
+    if (existing === undefined) {
+      current.set(locator.id, structuredClone(locator));
+      continue;
+    }
+    const comparison = locatorObservationTime(locator) - locatorObservationTime(existing);
+    if (comparison === 0 && canonicalSerialize(locator) !== canonicalSerialize(existing))
+      throw new Error(`Source Locator ${locator.id} has conflicting equal-time observations`);
+    if (comparison > 0) current.set(locator.id, structuredClone(locator));
+  }
+}
+
+function assertLocatorUpdates(
+  records: ProjectOwnedRecords,
+  catalog: ReadonlyMap<string, ProjectOwnedRecords["sources"][number]["locators"]>,
+): void {
+  for (const source of records.sources) {
+    const current = new Map((catalog.get(source.id) ?? []).map((locator) => [locator.id, locator]));
+    mergeLocatorRecords(current, source.locators);
+  }
 }
 
 async function readLibraryLocation(path: string, fallback: string): Promise<string> {

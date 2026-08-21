@@ -951,6 +951,50 @@ describe("ProjectLibrary", () => {
     });
   });
 
+  it("rejects conflicting equal-time Locator observations before publication", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-locator-conflict-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const conflicting = ownedRecords();
+    const locator = conflicting.sources[0]?.locators[0];
+    if (locator?.kind !== "local_file") throw new Error("Local Locator fixture is missing");
+    locator.status = "unavailable";
+
+    await expect(
+      library.createProject({
+        envelope: envelopeForProject("project_second"),
+        records: conflicting,
+      }),
+    ).rejects.toThrow(/conflicting equal-time observations/i);
+    expect(library.listProjects()).toHaveLength(1);
+  });
+
+  it("retains current Locator authority after its publishing Project is deleted", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-locator-retention-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const changed = ownedRecords();
+    const locator = changed.sources[0]?.locators[0];
+    if (locator?.kind !== "local_file") throw new Error("Local Locator fixture is missing");
+    locator.status = "unavailable";
+    locator.verifiedAt = "2026-08-21T09:00:00Z";
+    await library.createProject({
+      envelope: envelopeForProject("project_second"),
+      records: changed,
+    });
+
+    await library.trashProject("project_second");
+    await library.permanentlyDeleteProject("project_second", "project_second");
+    expect(
+      (await library.readProject("project_golden")).records.sources[0]?.locators[0],
+    ).toMatchObject({ status: "unavailable", verifiedAt: "2026-08-21T09:00:00Z" });
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(
+      (await reopened.readProject("project_golden")).records.sources[0]?.locators[0],
+    ).toMatchObject({ status: "unavailable", verifiedAt: "2026-08-21T09:00:00Z" });
+  });
+
   it("binds canonical YouTube Locators and Snapshot provenance to Source identity", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-youtube-records-");
     const library = await openProjectLibrary({ stateRoot });
@@ -1312,6 +1356,36 @@ describe("ProjectLibrary", () => {
       canonicalSerialize({
         format: "open-chords/project-library-relocation",
         id: relocationId,
+        previousRoot: library.activeRoot,
+        schemaVersion: "1.0",
+        stagingTarget,
+        target,
+        targetParent: dirname(target),
+      }),
+    );
+
+    await library.relocate(target);
+    expect(library.activeRoot).toBe(target);
+    expect(existsSync(stagingTarget)).toBe(false);
+    expect(existsSync(join(stateRoot, "project-library-relocation.json"))).toBe(false);
+  });
+
+  it("recovers an empty relocation wrapper created before its ownership marker", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-empty-wrapper-state-");
+    const destinationParent = await temporaryDirectory("open-chords-library-empty-wrapper-target-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const target = join(await realpath(destinationParent), "Moved Library");
+    const stagingTarget = join(
+      await realpath(destinationParent),
+      ".open-chords-library-relocation-empty",
+    );
+    mkdirSync(stagingTarget);
+    writeFileSync(
+      join(stateRoot, "project-library-relocation.json"),
+      canonicalSerialize({
+        format: "open-chords/project-library-relocation",
+        id: "44444444-4444-4444-8444-444444444444",
         previousRoot: library.activeRoot,
         schemaVersion: "1.0",
         stagingTarget,
