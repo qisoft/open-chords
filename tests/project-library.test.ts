@@ -995,6 +995,61 @@ describe("ProjectLibrary", () => {
     ).toMatchObject({ status: "unavailable", verifiedAt: "2026-08-21T09:00:00Z" });
   });
 
+  it("recovers from a catalog Locator that does not match its Source identity", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-catalog-identity-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const catalogPath = join(library.activeRoot, "source-catalog.json");
+    const catalog = z
+      .looseObject({
+        locatorsBySourceId: z.record(z.string(), z.array(z.record(z.string(), z.unknown()))),
+      })
+      .parse(JSON.parse(readFileSync(catalogPath, "utf8")));
+    const locator = catalog.locatorsBySourceId.source_fixture?.[0];
+    if (locator === undefined) throw new Error("Catalog Locator fixture is missing");
+    locator.fingerprint = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    locator.verifiedAt = "2026-08-21T09:00:00Z";
+    writeFileSync(catalogPath, canonicalSerialize(catalog));
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(
+      (await reopened.readProject("project_golden")).records.sources[0]?.locators[0],
+    ).toMatchObject({
+      fingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    });
+    expect(
+      readdirSync(join(reopened.activeRoot, "quarantine")).some((name) =>
+        name.startsWith("source-catalog-source-catalog.json-"),
+      ),
+    ).toBe(true);
+    expect(
+      readdirSync(join(reopened.activeRoot, "reports")).some((name) =>
+        name.startsWith("source-catalog-recovery-"),
+      ),
+    ).toBe(true);
+  });
+
+  it("recovers from duplicate Locator IDs in the primary catalog", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-catalog-duplicates-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const catalogPath = join(library.activeRoot, "source-catalog.json");
+    const catalog = z
+      .looseObject({
+        locatorsBySourceId: z.record(z.string(), z.array(z.record(z.string(), z.unknown()))),
+      })
+      .parse(JSON.parse(readFileSync(catalogPath, "utf8")));
+    const locator = catalog.locatorsBySourceId.source_fixture?.[0];
+    if (locator === undefined) throw new Error("Catalog Locator fixture is missing");
+    catalog.locatorsBySourceId.source_fixture?.push({ ...locator, status: "unavailable" });
+    writeFileSync(catalogPath, canonicalSerialize(catalog));
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(
+      (await reopened.readProject("project_golden")).records.sources[0]?.locators,
+    ).toHaveLength(1);
+  });
+
   it("binds canonical YouTube Locators and Snapshot provenance to Source identity", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-youtube-records-");
     const library = await openProjectLibrary({ stateRoot });

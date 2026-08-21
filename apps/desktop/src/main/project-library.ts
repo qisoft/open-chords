@@ -46,6 +46,7 @@ const RELOCATION_JOURNAL_FILE = "project-library-relocation.json";
 const RELOCATION_MARKER_FILE = ".open-chords-relocation.json";
 const DEFAULT_LIBRARY_DIRECTORY = "project-library";
 const SOURCE_CATALOG_FILE = "source-catalog.json";
+const SOURCE_CATALOG_BACKUP_FILE = "source-catalog.backup.json";
 const execFileAsync = promisify(execFile);
 
 const HashSchema = z.string().regex(HASH_PATTERN);
@@ -115,12 +116,24 @@ const RelocationMarkerSchema = z.strictObject({
 });
 const SourceCatalogSchema = z.strictObject({
   format: z.literal("open-chords/source-catalog"),
-  locatorsBySourceId: z.record(StableIdSchema, z.array(SourceLocatorSchema)),
+  locatorsBySourceId: z.record(
+    StableIdSchema,
+    z
+      .array(SourceLocatorSchema)
+      .refine(
+        (locators) => new Set(locators.map(({ id }) => id)).size === locators.length,
+        "Source Locator IDs must be unique",
+      ),
+  ),
+  revision: z.number().int().nonnegative(),
   schemaVersion: z.literal("1.0"),
 });
 
 type StoredProjectPayload = z.infer<typeof StoredProjectPayloadSchema>;
 type ProjectRevisionRecord = z.infer<typeof ProjectRevisionRecordSchema>;
+type SourceCatalog = z.infer<typeof SourceCatalogSchema>;
+type LocatorRecords = ProjectOwnedRecords["sources"][number]["locators"];
+type LocatorCatalog = Map<string, LocatorRecords>;
 type RevisionPointer = z.infer<typeof RevisionPointerSchema>;
 type TrashRecord = z.infer<typeof TrashRecordSchema>;
 export type ProjectRecoveryReport = z.infer<typeof RecoveryReportSchema>;
@@ -1551,46 +1564,104 @@ export class ProjectLibrary {
   }
 
   #recordsWithCurrentLocators(records: ProjectOwnedRecords): ProjectOwnedRecords {
-    const materialized = structuredClone(records);
-    for (const source of materialized.sources) {
-      const locators = this.#locatorCatalog.get(source.id);
-      if (locators !== undefined) source.locators = structuredClone(locators);
-    }
-    return materialized;
+    return materializeCurrentLocators(records, this.#locatorCatalog);
   }
 
   async #refreshLocatorCatalog(): Promise<void> {
-    type Locator = ProjectOwnedRecords["sources"][number]["locators"][number];
-    const catalogPath = join(this.#activeRoot, SOURCE_CATALOG_FILE);
-    const bySource = new Map<string, Map<string, Locator>>();
-    if (await pathExists(catalogPath)) {
-      const stored = await parseJsonFile(catalogPath, SourceCatalogSchema);
-      for (const [sourceId, locators] of Object.entries(stored.locatorsBySourceId))
-        bySource.set(sourceId, new Map(locators.map((locator) => [locator.id, locator])));
-    }
-    const referenced = new Set<string>();
-    for (const entry of this.#entries.values()) {
-      if (entry.revision === undefined) continue;
-      for (const source of entry.revision.payload.records.sources) {
-        referenced.add(source.id);
-        const locators = bySource.get(source.id) ?? new Map<string, Locator>();
-        mergeLocatorRecords(locators, source.locators);
-        bySource.set(source.id, locators);
+    const paths = [
+      join(this.#activeRoot, SOURCE_CATALOG_FILE),
+      join(this.#activeRoot, SOURCE_CATALOG_BACKUP_FILE),
+    ];
+    const candidates: Array<{ catalog: SourceCatalog; locators: LocatorCatalog; path: string }> =
+      [];
+    const invalidPaths: string[] = [];
+    for (const path of paths) {
+      if (!(await pathExists(path))) continue;
+      let catalog: SourceCatalog;
+      try {
+        catalog = await parseJsonFile(path, SourceCatalogSchema);
+      } catch (error) {
+        if (!(error instanceof ProjectStorageCorruptionError)) throw error;
+        invalidPaths.push(path);
+        continue;
+      }
+      try {
+        candidates.push({
+          catalog,
+          locators: mergeCatalogWithEntries(catalog.locatorsBySourceId, this.#entries),
+          path,
+        });
+      } catch {
+        invalidPaths.push(path);
       }
     }
-    for (const sourceId of bySource.keys())
-      if (!referenced.has(sourceId)) bySource.delete(sourceId);
-    this.#locatorCatalog = new Map(
-      [...bySource].map(([sourceId, locators]) => [
-        sourceId,
-        [...locators.values()].toSorted((left, right) => left.id.localeCompare(right.id)),
-      ]),
+    candidates.sort(
+      (left, right) =>
+        right.catalog.revision - left.catalog.revision ||
+        paths.indexOf(left.path) - paths.indexOf(right.path),
     );
+    if (
+      candidates[0] !== undefined &&
+      candidates[1] !== undefined &&
+      candidates[0].catalog.revision === candidates[1].catalog.revision &&
+      canonicalSerialize(candidates[0].catalog.locatorsBySourceId) !==
+        canonicalSerialize(candidates[1].catalog.locatorsBySourceId)
+    )
+      throw new ProjectStorageCorruptionError(
+        "Source catalog copies disagree at the same revision",
+      );
+    const selected = candidates[0];
+    if (selected === undefined && invalidPaths.length > 0)
+      throw new ProjectStorageCorruptionError(
+        "Source catalog and its last-known-good backup are both invalid",
+      );
+
+    const locators = selected?.locators ?? mergeCatalogWithEntries({}, this.#entries);
+    const locatorsBySourceId = Object.fromEntries(locators);
+    const unchanged =
+      selected !== undefined &&
+      canonicalSerialize(selected.catalog.locatorsBySourceId) ===
+        canonicalSerialize(locatorsBySourceId);
+    const catalog = SourceCatalogSchema.parse({
+      format: "open-chords/source-catalog",
+      locatorsBySourceId,
+      revision: unchanged ? selected.catalog.revision : (selected?.catalog.revision ?? 0) + 1,
+      schemaVersion: "1.0",
+    });
+
+    if (invalidPaths.length > 0)
+      await this.#quarantineInvalidCatalogs(invalidPaths, selected?.path);
+    const content = canonicalSerialize(catalog);
+    await atomicWriteFile(paths[1]!, content);
+    await atomicWriteFile(paths[0]!, content);
+    this.#locatorCatalog = locators;
+  }
+
+  async #quarantineInvalidCatalogs(
+    paths: readonly string[],
+    recoveredFrom?: string,
+  ): Promise<void> {
+    const quarantineDirectory = join(this.#activeRoot, "quarantine");
+    const quarantined: string[] = [];
+    for (const path of paths) {
+      const target = join(
+        quarantineDirectory,
+        `source-catalog-${basename(path)}-${randomUUID()}.json`,
+      );
+      await rename(path, target);
+      quarantined.push(basename(target));
+    }
+    await syncDirectory(quarantineDirectory);
+    await syncDirectory(this.#activeRoot);
+    const reportsDirectory = join(this.#activeRoot, "reports");
+    await ensureManagedDirectory(this.#activeRoot, reportsDirectory);
     await atomicWriteFile(
-      catalogPath,
+      join(reportsDirectory, `source-catalog-recovery-${randomUUID()}.json`),
       canonicalSerialize({
-        format: "open-chords/source-catalog",
-        locatorsBySourceId: Object.fromEntries(this.#locatorCatalog),
+        format: "open-chords/source-catalog-recovery",
+        quarantined,
+        recoveredFrom: recoveredFrom === undefined ? null : basename(recoveredFrom),
+        recoveredAt: this.#now().toISOString(),
         schemaVersion: "1.0",
       }),
     );
@@ -1778,6 +1849,53 @@ function locatorObservationTime(
   locator: ProjectOwnedRecords["sources"][number]["locators"][number],
 ): number {
   return Date.parse(locator.kind === "local_file" ? locator.verifiedAt : locator.observedAt);
+}
+
+function materializeCurrentLocators(
+  records: ProjectOwnedRecords,
+  catalog: ReadonlyMap<string, LocatorRecords>,
+): ProjectOwnedRecords {
+  const materialized = structuredClone(records);
+  for (const source of materialized.sources) {
+    const locators = catalog.get(source.id);
+    if (locators !== undefined) source.locators = structuredClone(locators);
+  }
+  return ProjectOwnedRecordsSchema.parse(materialized);
+}
+
+function mergeCatalogWithEntries(
+  stored: Readonly<Record<string, LocatorRecords>>,
+  entries: ReadonlyMap<string, LibraryEntry>,
+): LocatorCatalog {
+  type Locator = LocatorRecords[number];
+  const bySource = new Map<string, Map<string, Locator>>();
+  for (const [sourceId, locators] of Object.entries(stored)) {
+    const byId = new Map<string, Locator>();
+    mergeLocatorRecords(byId, locators);
+    bySource.set(sourceId, byId);
+  }
+  const referenced = new Set<string>();
+  for (const entry of entries.values()) {
+    if (entry.revision === undefined) continue;
+    for (const source of entry.revision.payload.records.sources) {
+      referenced.add(source.id);
+      const locators = bySource.get(source.id) ?? new Map<string, Locator>();
+      mergeLocatorRecords(locators, source.locators);
+      bySource.set(source.id, locators);
+    }
+  }
+  for (const sourceId of bySource.keys()) if (!referenced.has(sourceId)) bySource.delete(sourceId);
+  const catalog = new Map(
+    [...bySource].map(([sourceId, locators]) => [
+      sourceId,
+      [...locators.values()].toSorted((left, right) => left.id.localeCompare(right.id)),
+    ]),
+  );
+  for (const entry of entries.values()) {
+    if (entry.revision !== undefined)
+      materializeCurrentLocators(entry.revision.payload.records, catalog);
+  }
+  return catalog;
 }
 
 function mergeLocatorRecords(
