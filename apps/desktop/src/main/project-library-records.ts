@@ -26,30 +26,50 @@ const SelectedMediaFormatSchema = z.strictObject({
   audioCodec: z.string().min(1),
   container: z.string().min(1),
   mimeType: z.string().min(1),
+  providerFormatId: z.string().min(1).optional(),
 });
 
-const ComponentVersionsSchema = z
-  .record(z.string().min(1), z.string().min(1))
-  .refine((versions) => Object.keys(versions).length > 0, "Component versions cannot be empty");
+const ComponentProvenanceSchema = z.strictObject({
+  hash: Sha256Schema,
+  id: z.string().min(1),
+  version: z.string().min(1),
+});
+const ComponentsSchema = z
+  .array(ComponentProvenanceSchema)
+  .min(1)
+  .refine(
+    (components) => new Set(components.map(({ id }) => id)).size === components.length,
+    "Component provenance IDs must be unique",
+  );
 
 export const SourceSnapshotSchema = z.strictObject({
   byteFingerprint: Sha256Schema,
+  byteSize: z.number().int().positive(),
   canonicalAudioFingerprint: Sha256Schema,
   durationSamples: z.number().int().positive(),
   id: StableIdSchema,
   observedAt: TimestampSchema,
   provenance: z.discriminatedUnion("kind", [
     z.strictObject({
-      componentHashes: z.array(Sha256Schema),
-      componentVersions: ComponentVersionsSchema,
+      components: ComponentsSchema,
       kind: z.literal("local_file"),
     }),
     z.strictObject({
-      componentHashes: z.array(Sha256Schema).min(1),
-      componentVersions: ComponentVersionsSchema,
+      acquisitionAttemptId: StableIdSchema,
+      brokerSummary: z.strictObject({
+        downloadedBytes: z.number().int().positive(),
+        redirectCount: z.number().int().nonnegative(),
+        requestCount: z.number().int().positive(),
+        wallTimeMs: z.number().int().positive(),
+      }),
+      canonicalUrl: z.url().startsWith("https://www.youtube.com/watch?v="),
+      components: ComponentsSchema,
       kind: z.literal("youtube_acquisition"),
-      policyHash: Sha256Schema,
-      policyVersion: z.string().min(1),
+      policy: z.strictObject({
+        hash: Sha256Schema,
+        id: z.string().min(1),
+        version: z.string().min(1),
+      }),
       provider: z.literal("youtube"),
       videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
     }),
@@ -152,7 +172,11 @@ export const ProjectOwnedRecordsSchema = z
             snapshot.byteFingerprint === source.identity.fingerprint) ||
           (source.identity.kind === "youtube" &&
             snapshot.provenance.kind === "youtube_acquisition" &&
-            snapshot.provenance.videoId === source.identity.videoId);
+            snapshot.provenance.videoId === source.identity.videoId &&
+            snapshot.provenance.canonicalUrl ===
+              `https://www.youtube.com/watch?v=${source.identity.videoId}` &&
+            snapshot.selectedFormat.providerFormatId !== undefined &&
+            snapshot.provenance.brokerSummary.downloadedBytes === snapshot.byteSize);
         if (!snapshotMatches) {
           context.addIssue({
             code: "custom",

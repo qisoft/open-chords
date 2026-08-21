@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
-import { parseProjectContract } from "@open-chords/domain";
+import { canonicalSerialize, parseProjectContract } from "@open-chords/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -20,6 +20,7 @@ import type { ProjectOwnedRecords } from "../apps/desktop/src/main/project-libra
 import {
   openProjectLibrary,
   ProjectLibraryDamagedError,
+  ProjectLibraryIncompatibleSchemaError,
   ProjectLibraryReadOnlyError,
   type ProjectLibraryFaultPoint,
   type ProjectMigration,
@@ -87,14 +88,20 @@ function ownedRecords(): ProjectOwnedRecords {
           {
             byteFingerprint:
               "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            byteSize: 192_044,
             canonicalAudioFingerprint:
               "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
             durationSamples: 96_000,
             id: "snapshot_fixture",
             observedAt: "2026-08-21T08:00:00Z",
             provenance: {
-              componentHashes: [],
-              componentVersions: { probe: "1.0.0" },
+              components: [
+                {
+                  hash: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  id: "media-probe",
+                  version: "1.0.0",
+                },
+              ],
               kind: "local_file",
             },
             selectedFormat: {
@@ -204,6 +211,48 @@ describe("ProjectLibrary", () => {
       expect(snapshot?.eventSequence).toBe(faultPoint === "after_head_replace" ? 2 : 1);
       expect(readdirSync(join(recovered.activeRoot, "staging"))).toHaveLength(0);
     }
+  });
+
+  it("reconciles an unpublished durable pointer before another live mutation", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-live-retry-");
+    const baseline = await openProjectLibrary({ stateRoot });
+    const created = await baseline.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    let injected = false;
+    const library = await openProjectLibrary({
+      faultInjector: (point) => {
+        if (!injected && point === "after_revision_durable") {
+          injected = true;
+          throw new Error("simulated publication failure");
+        }
+      },
+      stateRoot,
+    });
+    await expect(
+      library.commitEditTransaction({
+        expectedProjectRevisionId: created.projectRevisionId,
+        projectId: "project_golden",
+        transaction: replacementTransaction("transaction_failed_publication"),
+      }),
+    ).rejects.toThrow(/publication failure/);
+
+    const retried = await library.commitEditTransaction({
+      expectedProjectRevisionId: created.projectRevisionId,
+      projectId: "project_golden",
+      transaction: replacementTransaction("transaction_retried"),
+    });
+    if (!("projectRevisionId" in retried)) throw new Error("Retry did not publish");
+    const reopened = await openProjectLibrary({ stateRoot });
+    const stored = await reopened.readProject("project_golden");
+    expect(stored.revisions).toHaveLength(2);
+    expect(stored.envelope.payload.editLayers[0]?.transactions.map(({ id }) => id)).toContain(
+      "transaction_retried",
+    );
+    expect(stored.envelope.payload.editLayers[0]?.transactions.map(({ id }) => id)).not.toContain(
+      "transaction_failed_publication",
+    );
   });
 
   it("quarantines a corrupt active revision and restores the last verified revision", async () => {
@@ -335,25 +384,19 @@ describe("ProjectLibrary", () => {
     ).toEqual({ readOnly: true });
   });
 
-  it("opens a structurally understood newer major read-only without quarantine or mutation", async () => {
+  it("rejects an unknown major without quarantining or mutating its durable Head", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-newer-major-");
-    const futureEnvelope = structuredClone(goldenEnvelope());
-    futureEnvelope.schemaVersion = "2.0";
-    futureEnvelope.payload.schemaVersion = "2.0";
-    const futureApplication = await openProjectLibrary({
-      currentSchemaVersion: "2.0",
-      stateRoot,
-    });
-    const created = await futureApplication.createProject({
-      envelope: futureEnvelope,
-      records: ownedRecords(),
-    });
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    rewriteStoredProjectMajor(library.activeRoot, "project_golden", "2.0");
+    const headPath = join(library.activeRoot, "projects", "project_golden", "HEAD.json");
+    const headBeforeOpen = readFileSync(headPath, "utf8");
 
-    const olderApplication = await openProjectLibrary({ stateRoot });
-    const opened = await olderApplication.readProject("project_golden");
-    expect(opened.compatibility).toBe("read_only");
-    expect(opened.projectRevisionId).toBe(created.projectRevisionId);
-    expect(readdirSync(join(olderApplication.activeRoot, "quarantine"))).toEqual([]);
+    await expect(openProjectLibrary({ stateRoot })).rejects.toBeInstanceOf(
+      ProjectLibraryIncompatibleSchemaError,
+    );
+    expect(readFileSync(headPath, "utf8")).toBe(headBeforeOpen);
+    expect(readdirSync(join(library.activeRoot, "quarantine"))).toEqual([]);
   });
 
   it("migrates in a new revision and rolls back by publishing another compatible revision", async () => {
@@ -439,6 +482,42 @@ describe("ProjectLibrary", () => {
           fromVersion: "1.0",
           migrate: () => {
             throw new Error("migration fixture failed");
+          },
+          toVersion: "1.1",
+        },
+      ],
+      stateRoot,
+    });
+    const unchanged = await currentApplication.readProject("project_golden");
+    expect(unchanged.compatibility).toBe("read_only");
+    expect(unchanged.projectRevisionId).toBe(created.projectRevisionId);
+    expect(unchanged.revisions).toHaveLength(1);
+  });
+
+  it("opens the original read-only after migration publication runs out of space", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-migration-io-failure-");
+    const olderApplication = await openProjectLibrary({ stateRoot });
+    const created = await olderApplication.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    let injected = false;
+    const currentApplication = await openProjectLibrary({
+      currentSchemaVersion: "1.1",
+      faultInjector: (point) => {
+        if (!injected && point === "after_revision_durable") {
+          injected = true;
+          throw Object.assign(new Error("disk full during migration"), { code: "ENOSPC" });
+        }
+      },
+      migrations: [
+        {
+          fromVersion: "1.0",
+          migrate: (rawEnvelope) => {
+            const envelope = structuredClone(ProjectEnvelopeSchema.parse(rawEnvelope));
+            envelope.schemaVersion = "1.1";
+            envelope.payload.schemaVersion = "1.1";
+            return envelope;
           },
           toVersion: "1.1",
         },
@@ -580,12 +659,29 @@ describe("ProjectLibrary", () => {
         videoId: "BBBBBBBBBBB",
       },
     ];
+    snapshot.selectedFormat.providerFormatId = "251";
     snapshot.provenance = {
-      componentHashes: ["sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"],
-      componentVersions: { extractor: "1.0.0" },
+      acquisitionAttemptId: "attempt_fixture",
+      brokerSummary: {
+        downloadedBytes: snapshot.byteSize,
+        redirectCount: 1,
+        requestCount: 3,
+        wallTimeMs: 1_500,
+      },
+      canonicalUrl: "https://www.youtube.com/watch?v=BBBBBBBBBBB",
+      components: [
+        {
+          hash: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          id: "extractor-worker",
+          version: "1.0.0",
+        },
+      ],
       kind: "youtube_acquisition",
-      policyHash: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-      policyVersion: "1.0",
+      policy: {
+        hash: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        id: "youtube-acquisition-policy",
+        version: "1.0",
+      },
       provider: "youtube",
       videoId: "BBBBBBBBBBB",
     };
@@ -760,6 +856,26 @@ describe("ProjectLibrary", () => {
     },
   );
 
+  it.runIf(process.platform !== "win32")(
+    "rejects a per-Project symlink swap for live mutations and subsequent startup",
+    async () => {
+      const stateRoot = await temporaryDirectory("open-chords-library-project-link-");
+      const victim = await temporaryDirectory("open-chords-library-project-link-victim-");
+      const externalTrashMarker = join(victim, "TRASH.json");
+      writeFileSync(externalTrashMarker, "external file");
+      const library = await openProjectLibrary({ stateRoot });
+      await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+      const projectDirectory = join(library.activeRoot, "projects", "project_golden");
+      rmSync(projectDirectory, { recursive: true });
+      symlinkSync(victim, projectDirectory, "dir");
+
+      await expect(library.trashProject("project_golden")).rejects.toThrow(/real directory/i);
+      expect(readFileSync(externalTrashMarker, "utf8")).toBe("external file");
+      await expect(openProjectLibrary({ stateRoot })).rejects.toThrow(/unsupported entry/i);
+      expect(readFileSync(externalTrashMarker, "utf8")).toBe("external file");
+    },
+  );
+
   it("rebuilds a corrupt index instead of treating it as authority", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-index-");
     const library = await openProjectLibrary({ stateRoot });
@@ -800,3 +916,50 @@ function objectPath(activeRoot: string, hash: string): string {
   const digest = hash.replace(/^sha256:/, "");
   return join(activeRoot, "objects", "sha256", `${digest}.json`);
 }
+
+function rewriteStoredProjectMajor(activeRoot: string, projectId: string, version: string): void {
+  const projectDirectory = join(activeRoot, "projects", projectId);
+  const headPath = join(projectDirectory, "HEAD.json");
+  const head = z
+    .object({ revisionObjectHash: z.string() })
+    .loose()
+    .parse(JSON.parse(readFileSync(headPath, "utf8")));
+  const revision = z
+    .object({ payloadObjectHash: z.string() })
+    .loose()
+    .parse(JSON.parse(readFileSync(objectPath(activeRoot, head.revisionObjectHash), "utf8")));
+  const payload = z
+    .object({
+      envelope: z
+        .object({
+          payload: z.object({ schemaVersion: z.string() }).loose(),
+          schemaVersion: z.string(),
+        })
+        .loose(),
+    })
+    .loose()
+    .parse(JSON.parse(readFileSync(objectPath(activeRoot, revision.payloadObjectHash), "utf8")));
+  payload.envelope.schemaVersion = version;
+  payload.envelope.payload.schemaVersion = version;
+  const payloadContent = canonicalSerialize(payload);
+  const payloadHash = hashFixtureContent(payloadContent);
+  writeFileSync(objectPath(activeRoot, payloadHash), payloadContent);
+
+  const revisionContent = canonicalSerialize({ ...revision, payloadObjectHash: payloadHash });
+  const revisionHash = hashFixtureContent(revisionContent);
+  writeFileSync(objectPath(activeRoot, revisionHash), revisionContent);
+  const pointerFile = readdirSync(join(projectDirectory, "revisions"))[0];
+  if (pointerFile === undefined) throw new Error("Revision pointer fixture is missing");
+  const pointerPath = join(projectDirectory, "revisions", pointerFile);
+  const pointer = z
+    .object({ revisionObjectHash: z.string() })
+    .loose()
+    .parse(JSON.parse(readFileSync(pointerPath, "utf8")));
+  writeFileSync(pointerPath, canonicalSerialize({ ...pointer, revisionObjectHash: revisionHash }));
+  writeFileSync(headPath, canonicalSerialize({ ...head, revisionObjectHash: revisionHash }));
+}
+
+function hashFixtureContent(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+import { createHash } from "node:crypto";

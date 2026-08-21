@@ -12,7 +12,7 @@ Issue [#39](https://github.com/qisoft/open-chords/issues/39) owns the durable, m
 - recoverable Library Trash, explicit permanent deletion, and age-bounded Empty Trash;
 - validated relocation to another local-disk directory while retaining the previous copy.
 
-The same interface is the production `ProjectAuthority` used by the typed desktop command gateway. Structurally understood newer schemas remain readable but return `project_read_only` for mutation; incompatibility is not corruption and never triggers Head recovery. Project Library records keep Source identity, private Locators, immutable Source Snapshots and metadata observations, Project Range, and Export Receipts beside the canonical Project envelope. Snapshot validation binds local byte fingerprints or YouTube acquisition video IDs to Source identity and retains selected media format plus exact component/policy provenance. Publication also verifies that the Project Range length matches the Project duration and fits a retained Source Snapshot. None of those main-only records cross the current IPC snapshot seam.
+The same interface is the production `ProjectAuthority` used by the typed desktop command gateway. Safely understood newer minor schemas remain readable but return `project_read_only` for mutation; unknown majors are rejected without being mislabeled as corruption or triggering Head recovery. Project Library records keep Source identity, private Locators, immutable Source Snapshots and metadata observations, Project Range, and Export Receipts beside the canonical Project envelope. Snapshot validation binds local byte fingerprints or canonical YouTube acquisition video IDs to Source identity and retains byte size, provider format ID, named component version/hash records, policy provenance, and bounded broker counters. Publication also verifies that the Project Range length matches the Project duration and fits a retained Source Snapshot. None of those main-only records cross the current IPC snapshot seam.
 
 ## Durable publication
 
@@ -24,7 +24,7 @@ Project payloads and Project Revision records are canonical JSON objects address
 4. atomically replace `HEAD.json`, sync the resulting file, and sync directories where the platform permits it;
 5. reopen and validate the committed Head before returning success or notifying subscribers.
 
-The project index is rewritten from verified Heads and is never used as authority. A Head must identify a member of one unambiguous, parent-linked revision-pointer chain. A durable pointer beyond the Head is unpublished crash residue and is discarded on open; only successful atomic Head replacement makes that revision current. Tests inject failures after payload sync, after revision publication, immediately before Head replacement, and immediately after it; reopening exposes exactly the old Head before replacement and the new complete Head after replacement, never a mixed payload.
+The project index is rewritten from verified Heads and is never used as authority. A Head must identify a member of one unambiguous, parent-linked revision-pointer chain. A durable pointer beyond the Head is unpublished crash residue and is discarded during immediate failure reconciliation or on open; only successful atomic Head replacement makes that revision current. Tests inject failures after payload sync, after revision publication, immediately before Head replacement, and immediately after it; the live instance and a reopened Library expose exactly the old Head before replacement and the new complete Head after replacement, never a mixed payload.
 
 ## Startup and recovery
 
@@ -34,7 +34,7 @@ Opening an older supported schema automatically runs registered migrations after
 
 ## Location and deletion policy
 
-The state root holds only the atomic active-location record and the default Library directory. Every fixed managed directory must be a real directory canonically contained by the active root; symlinks and special files are rejected before traversal or startup scavenging. Relocation copies to same-parent staging, scavenges copied staging, validates all active and trashed Projects, syncs the complete tree, renames the copy into place, and then atomically switches the location record. The old Library is retained.
+The state root holds only the atomic active-location record and the default Library directory. Every fixed managed directory and per-Project directory must be a real directory canonically contained by the active root; symlinks and special files are rejected before traversal, mutation, deletion, or startup scavenging. Relocation copies to same-parent staging, scavenges copied staging, validates all active and trashed Projects, syncs the complete tree, renames the copy into place, and then atomically switches the location record. The old Library is retained.
 
 The default path policy resolves existing ancestors to prevent symlink bypasses, rejects UNC and Windows remote drives, requires a local macOS mount or an allowlisted local Linux filesystem, and rejects known cloud-sync path roots such as iCloud Drive/CloudStorage, OneDrive, Dropbox, and Google Drive. A platform adapter can make this policy stricter without changing the Project Library interface.
 

@@ -170,6 +170,13 @@ class ProjectStorageCorruptionError extends Error {
   }
 }
 
+export class ProjectLibraryIncompatibleSchemaError extends Error {
+  constructor(schemaVersion: string) {
+    super(`Project schema ${schemaVersion} has an unsupported major version`);
+    this.name = "ProjectLibraryIncompatibleSchemaError";
+  }
+}
+
 export async function openProjectLibrary(options: ProjectLibraryOptions): Promise<ProjectLibrary> {
   return ProjectLibrary.open(options);
 }
@@ -183,6 +190,7 @@ export class ProjectLibrary {
   readonly #stateRoot: string;
   #activeRoot: string;
   #entries = new Map<string, LibraryEntry>();
+  #mutationBlockedError: Error | undefined;
   #mutationTail: Promise<void> = Promise.resolve();
   readonly #subscribers = new Set<(change: ProjectLibraryChange) => void>();
 
@@ -389,6 +397,7 @@ export class ProjectLibrary {
       if (entry === undefined || entry.location === "trashed")
         throw new Error("Project was not found");
       const source = this.#projectDirectory(projectId, "active");
+      await assertManagedDirectory(this.#activeRoot, source);
       const target = this.#projectDirectory(projectId, "trashed");
       await mkdir(dirname(target), { recursive: true });
       const trashRecord = TrashRecordSchema.parse({
@@ -411,6 +420,7 @@ export class ProjectLibrary {
       const entry = this.#entries.get(projectId);
       if (entry?.location !== "trashed") throw new Error("Trashed Project was not found");
       const source = this.#projectDirectory(projectId, "trashed");
+      await assertManagedDirectory(this.#activeRoot, source);
       const target = this.#projectDirectory(projectId, "active");
       await rename(source, target);
       await syncDirectory(dirname(source));
@@ -427,7 +437,9 @@ export class ProjectLibrary {
     await this.#serializeMutation(async () => {
       const entry = this.#entries.get(projectId);
       if (entry?.location !== "trashed") throw new Error("Project must be in Library Trash");
-      await rm(this.#projectDirectory(projectId, "trashed"), { recursive: true });
+      const projectDirectory = this.#projectDirectory(projectId, "trashed");
+      await assertManagedDirectory(this.#activeRoot, projectDirectory);
+      await rm(projectDirectory, { recursive: true });
       await syncDirectory(join(this.#activeRoot, "trash"));
       await this.#refreshEntries();
       await this.#collectUnreferencedObjects();
@@ -444,7 +456,9 @@ export class ProjectLibrary {
           entry.trashRecord !== undefined &&
           new Date(entry.trashRecord.trashedAt) < threshold
         ) {
-          await rm(this.#projectDirectory(projectId, "trashed"), { recursive: true });
+          const projectDirectory = this.#projectDirectory(projectId, "trashed");
+          await assertManagedDirectory(this.#activeRoot, projectDirectory);
+          await rm(projectDirectory, { recursive: true });
           deleted.push(projectId);
         }
       }
@@ -551,9 +565,13 @@ export class ProjectLibrary {
     const container = join(this.#activeRoot, location === "active" ? "projects" : "trash");
     await assertManagedDirectory(this.#activeRoot, container);
     for (const directory of await readdir(container, { withFileTypes: true })) {
-      if (!directory.isDirectory()) continue;
+      if (!directory.isDirectory())
+        throw new Error(
+          `Managed Project container contains an unsupported entry: ${directory.name}`,
+        );
       const projectId = directory.name;
       const projectDirectory = join(container, projectId);
+      await assertManagedDirectory(this.#activeRoot, projectDirectory);
       const recoveryReport = await readLatestRecoveryReport(this.#activeRoot, projectDirectory);
       let trashRecord: TrashRecord | undefined;
       try {
@@ -774,6 +792,7 @@ export class ProjectLibrary {
     try {
       validateStoredPayload(payload);
     } catch (error) {
+      if (error instanceof ProjectLibraryIncompatibleSchemaError) throw error;
       throw new ProjectStorageCorruptionError("Stored Project payload is invalid", error);
     }
     if (payload.envelope.payload.id !== revision.projectId)
@@ -802,6 +821,42 @@ export class ProjectLibrary {
   }
 
   async #commitPayload(
+    projectId: string,
+    rawPayload: StoredProjectPayload,
+    parentProjectRevisionId: string | null,
+    sequence: number,
+    reason: ProjectRevisionRecord["reason"],
+  ): Promise<RevisionSnapshot> {
+    try {
+      return await this.#commitPayloadAttempt(
+        projectId,
+        rawPayload,
+        parentProjectRevisionId,
+        sequence,
+        reason,
+      );
+    } catch (error) {
+      try {
+        await this.#refreshEntries();
+      } catch (recoveryError) {
+        const combinedFailure = new AggregateError(
+          [error, recoveryError],
+          "Project publication failed and storage reconciliation also failed",
+        );
+        this.#mutationBlockedError = new Error(
+          "Project Library must be reopened after an unreconciled storage failure",
+          { cause: combinedFailure },
+        );
+        throw new Error(
+          "Project publication failed and storage reconciliation also failed; reopen the Library",
+          { cause: recoveryError },
+        );
+      }
+      throw error;
+    }
+  }
+
+  async #commitPayloadAttempt(
     projectId: string,
     rawPayload: StoredProjectPayload,
     parentProjectRevisionId: string | null,
@@ -956,8 +1011,7 @@ export class ProjectLibrary {
       if (entry.revision === undefined) continue;
       try {
         await this.#migrateUntilCurrent(projectId, entry.revision);
-      } catch (error) {
-        if (isNodeError(error) && error.code !== undefined) throw error;
+      } catch {
         // A failed or unavailable migration leaves the last durable revision readable and read-only.
         await this.#refreshEntries();
       }
@@ -1046,6 +1100,7 @@ export class ProjectLibrary {
     });
     await prior.catch(() => undefined);
     try {
+      if (this.#mutationBlockedError !== undefined) throw this.#mutationBlockedError;
       return await operation();
     } finally {
       release();
@@ -1058,8 +1113,11 @@ function validateStoredPayload(input: unknown): StoredProjectPayload {
   const supportedMajor = parseSchemaVersion(CONTRACT_VERSION).major;
   const envelopeMajor = parseSchemaVersion(payload.envelope.schemaVersion).major;
   const projectMajor = parseSchemaVersion(payload.envelope.payload.schemaVersion).major;
-  if (envelopeMajor === supportedMajor && projectMajor === supportedMajor)
-    parseContractEnvelope(payload.envelope);
+  if (envelopeMajor !== supportedMajor)
+    throw new ProjectLibraryIncompatibleSchemaError(payload.envelope.schemaVersion);
+  if (projectMajor !== supportedMajor)
+    throw new ProjectLibraryIncompatibleSchemaError(payload.envelope.payload.schemaVersion);
+  parseContractEnvelope(payload.envelope);
   const { projectRange } = payload.records;
   if (
     projectRange.endSourceSample - projectRange.startSourceSample !==
