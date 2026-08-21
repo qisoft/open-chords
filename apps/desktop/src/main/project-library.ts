@@ -2188,7 +2188,7 @@ async function atomicWriteFile(
 }
 
 async function syncFile(path: string): Promise<void> {
-  const handle = await open(path, "r");
+  const handle = await open(path, process.platform === "win32" ? "r+" : "r");
   try {
     await handle.sync();
   } finally {
