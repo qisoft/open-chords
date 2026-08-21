@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   access,
   cp,
+  lstat,
   mkdir,
   open,
   readdir,
@@ -191,6 +192,7 @@ export class ProjectLibrary {
     parseSchemaVersion(this.#currentSchemaVersion);
     this.#faultInjector = options.faultInjector ?? (() => undefined);
     this.#migrations = options.migrations ?? [];
+    validateMigrationGraph(this.#migrations);
     this.#now = options.now ?? (() => new Date());
     this.#pathPolicy = options.pathPolicy ?? classifyLibraryPath;
     this.#stateRoot = resolve(options.stateRoot);
@@ -395,7 +397,7 @@ export class ProjectLibrary {
         schemaVersion: "1.0",
         trashedAt: this.#now().toISOString(),
       });
-      await writeDurableFile(join(source, "TRASH.json"), canonicalSerialize(trashRecord));
+      await atomicWriteFile(join(source, "TRASH.json"), canonicalSerialize(trashRecord));
       await syncDirectory(source);
       await rename(source, target);
       await syncDirectory(dirname(source));
@@ -410,11 +412,11 @@ export class ProjectLibrary {
       if (entry?.location !== "trashed") throw new Error("Trashed Project was not found");
       const source = this.#projectDirectory(projectId, "trashed");
       const target = this.#projectDirectory(projectId, "active");
-      await rm(join(source, "TRASH.json"), { force: true });
-      await syncDirectory(source);
       await rename(source, target);
       await syncDirectory(dirname(source));
       await syncDirectory(dirname(target));
+      await rm(join(target, "TRASH.json"), { force: true });
+      await syncDirectory(target);
       await this.#refreshEntries();
     });
   }
@@ -510,7 +512,7 @@ export class ProjectLibrary {
   }
 
   async #initializeRoot(): Promise<void> {
-    await ensureDurableDirectory(this.#activeRoot);
+    await ensureManagedDirectory(this.#activeRoot, this.#activeRoot);
     for (const directory of [
       join(this.#activeRoot, "objects"),
       join(this.#activeRoot, "objects", "sha256"),
@@ -519,8 +521,8 @@ export class ProjectLibrary {
       join(this.#activeRoot, "staging"),
       join(this.#activeRoot, "trash"),
     ])
-      await ensureDurableDirectory(directory);
-    await scavengeDirectory(join(this.#activeRoot, "staging"));
+      await ensureManagedDirectory(this.#activeRoot, directory);
+    await scavengeDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
     await this.#refreshEntries();
     await this.#migrateExistingProjects();
   }
@@ -547,11 +549,12 @@ export class ProjectLibrary {
     entries: Map<string, LibraryEntry>,
   ): Promise<void> {
     const container = join(this.#activeRoot, location === "active" ? "projects" : "trash");
+    await assertManagedDirectory(this.#activeRoot, container);
     for (const directory of await readdir(container, { withFileTypes: true })) {
       if (!directory.isDirectory()) continue;
       const projectId = directory.name;
       const projectDirectory = join(container, projectId);
-      const recoveryReport = await readLatestRecoveryReport(projectDirectory);
+      const recoveryReport = await readLatestRecoveryReport(this.#activeRoot, projectDirectory);
       let trashRecord: TrashRecord | undefined;
       try {
         if (location === "trashed")
@@ -560,6 +563,7 @@ export class ProjectLibrary {
             TrashRecordSchema,
           );
         const revision = await this.#readHead(projectDirectory, projectId);
+        await this.#discardUnpublishedRevisionTail(projectDirectory, revision.pointer.sequence);
         const revisions = await this.#readVerifiedRevisions(projectDirectory, projectId);
         entries.set(projectId, {
           compatibility: this.#compatibilityFor(revision.payload.envelope),
@@ -604,6 +608,7 @@ export class ProjectLibrary {
     }
     const headPath = join(projectDirectory, "HEAD.json");
     if (await pathExists(headPath)) {
+      await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "quarantine"));
       await rename(
         headPath,
         join(
@@ -627,7 +632,7 @@ export class ProjectLibrary {
       schemaVersion: "1.0",
     });
     const reportsDirectory = join(projectDirectory, "reports");
-    await ensureDurableDirectory(reportsDirectory);
+    await ensureManagedDirectory(this.#activeRoot, reportsDirectory);
     await writeDurableFile(
       join(reportsDirectory, `recovery-${Date.now()}-${randomUUID()}.json`),
       canonicalSerialize(report),
@@ -669,17 +674,38 @@ export class ProjectLibrary {
     if (head.projectId !== projectId)
       throw new ProjectStorageCorruptionError("Project Head belongs to another Project");
     const revisions = await this.#readVerifiedRevisions(projectDirectory, projectId);
-    const revision = revisions.at(-1);
-    if (
-      revision === undefined ||
-      revision.pointer.projectRevisionId !== head.projectRevisionId ||
-      revision.pointer.revisionObjectHash !== head.revisionObjectHash ||
-      revision.pointer.sequence !== head.sequence
-    )
+    const revision = revisions.find(
+      ({ pointer }) =>
+        pointer.projectRevisionId === head.projectRevisionId &&
+        pointer.revisionObjectHash === head.revisionObjectHash &&
+        pointer.sequence === head.sequence,
+    );
+    if (revision === undefined)
       throw new ProjectStorageCorruptionError(
-        "Project Head is not the latest revision in the verified pointer ledger",
+        "Project Head does not identify a revision in the verified pointer ledger",
       );
     return revision;
+  }
+
+  async #discardUnpublishedRevisionTail(
+    projectDirectory: string,
+    headSequence: number,
+  ): Promise<void> {
+    const revisionsDirectory = join(projectDirectory, "revisions");
+    await assertManagedDirectory(this.#activeRoot, revisionsDirectory);
+    let removed = false;
+    for (const file of await readdir(revisionsDirectory)) {
+      if (!file.endsWith(".json")) continue;
+      try {
+        const pointer = await parseJsonFile(join(revisionsDirectory, file), RevisionPointerSchema);
+        if (pointer.sequence <= headSequence) continue;
+        await rm(join(revisionsDirectory, file));
+        removed = true;
+      } catch (error) {
+        if (!(error instanceof ProjectStorageCorruptionError)) throw error;
+      }
+    }
+    if (removed) await syncDirectory(revisionsDirectory);
   }
 
   async #readVerifiedRevisions(
@@ -689,6 +715,7 @@ export class ProjectLibrary {
     const revisionsDirectory = join(projectDirectory, "revisions");
     let files: string[];
     try {
+      await assertManagedDirectory(this.#activeRoot, revisionsDirectory);
       files = await readdir(revisionsDirectory);
     } catch (error) {
       if (isMissingPathError(error)) return [];
@@ -759,7 +786,7 @@ export class ProjectLibrary {
   async #readObject<T>(hash: string, schema: z.ZodType<T>): Promise<T> {
     let content: string;
     try {
-      content = await readFile(this.#objectPath(hash), "utf8");
+      content = await readRegularStorageFile(this.#objectPath(hash));
     } catch (error) {
       if (isMissingPathError(error))
         throw new ProjectStorageCorruptionError("Immutable object is missing", error);
@@ -785,6 +812,7 @@ export class ProjectLibrary {
     if (payload.envelope.payload.id !== projectId)
       throw new Error("Project payload belongs to another Project");
     const projectRevisionId = `projectrevision_${randomUUID().replaceAll("-", "")}`;
+    await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
     const stagingDirectory = join(this.#activeRoot, "staging", randomUUID());
     await mkdir(stagingDirectory, { recursive: true });
     const payloadContent = canonicalSerialize(payload);
@@ -831,8 +859,8 @@ export class ProjectLibrary {
     await this.#installObject(stagedRevisionPath, revisionObjectHash);
     const projectDirectory = this.#projectDirectory(projectId, "active");
     const revisionsDirectory = join(projectDirectory, "revisions");
-    await ensureDurableDirectory(projectDirectory);
-    await ensureDurableDirectory(revisionsDirectory);
+    await ensureManagedDirectory(this.#activeRoot, projectDirectory);
+    await ensureManagedDirectory(this.#activeRoot, revisionsDirectory);
     await rename(
       stagedPointerPath,
       join(revisionsDirectory, `${String(sequence).padStart(12, "0")}-${projectRevisionId}.json`),
@@ -860,6 +888,7 @@ export class ProjectLibrary {
   }
 
   async #installObject(stagedPath: string, hash: string): Promise<void> {
+    await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "objects", "sha256"));
     const target = this.#objectPath(hash);
     try {
       await rename(stagedPath, target);
@@ -890,15 +919,22 @@ export class ProjectLibrary {
 
   async #prepareMigratedPayload(initial: RevisionSnapshot): Promise<StoredProjectPayload> {
     let envelope = structuredClone(initial.payload.envelope);
-    while (compareSchemaVersions(envelope.schemaVersion, this.#currentSchemaVersion) < 0) {
-      const migration = this.#migrations.find(
-        ({ fromVersion }) => fromVersion === envelope.schemaVersion,
-      );
-      if (migration === undefined) throw new ProjectLibraryReadOnlyError(envelope.schemaVersion);
+    let completedSteps = 0;
+    while (isOlderCompatibleSchema(envelope, this.#currentSchemaVersion)) {
+      if (completedSteps >= this.#migrations.length)
+        throw new Error("Project migration graph did not reach the current schema");
+      const fromVersion = oldestEnvelopeSchemaVersion(envelope);
+      const migration = this.#migrations.find((candidate) => candidate.fromVersion === fromVersion);
+      if (migration === undefined) throw new ProjectLibraryReadOnlyError(fromVersion);
       envelope = ProjectEnvelopeSchema.parse(await migration.migrate(structuredClone(envelope)));
-      if (envelope.schemaVersion !== migration.toVersion)
-        throw new Error("Project migration returned an unexpected schema version");
+      const nextVersion = oldestEnvelopeSchemaVersion(envelope);
+      if (
+        compareSchemaVersions(nextVersion, fromVersion) <= 0 ||
+        nextVersion !== migration.toVersion
+      )
+        throw new Error("Project migration did not advance its complete schema state");
       buildStoredPayload({ envelope, records: initial.payload.records });
+      completedSteps += 1;
     }
     const migratedPayload = buildStoredPayload({
       envelope,
@@ -938,6 +974,7 @@ export class ProjectLibrary {
       }
     }
     const objectsDirectory = join(this.#activeRoot, "objects", "sha256");
+    await assertManagedDirectory(this.#activeRoot, objectsDirectory);
     let removed = false;
     for (const file of await readdir(objectsDirectory)) {
       const match = /^([a-f0-9]{64})\.json$/.exec(file);
@@ -1018,7 +1055,11 @@ export class ProjectLibrary {
 
 function validateStoredPayload(input: unknown): StoredProjectPayload {
   const payload = StoredProjectPayloadSchema.parse(input);
-  parseContractEnvelope(payload.envelope);
+  const supportedMajor = parseSchemaVersion(CONTRACT_VERSION).major;
+  const envelopeMajor = parseSchemaVersion(payload.envelope.schemaVersion).major;
+  const projectMajor = parseSchemaVersion(payload.envelope.payload.schemaVersion).major;
+  if (envelopeMajor === supportedMajor && projectMajor === supportedMajor)
+    parseContractEnvelope(payload.envelope);
   const { projectRange } = payload.records;
   if (
     projectRange.endSourceSample - projectRange.startSourceSample !==
@@ -1056,10 +1097,12 @@ async function readLibraryLocation(path: string, fallback: string): Promise<stri
 }
 
 async function readLatestRecoveryReport(
+  activeRoot: string,
   projectDirectory: string,
 ): Promise<ProjectRecoveryReport | undefined> {
   const reportsDirectory = join(projectDirectory, "reports");
   if (!(await pathExists(reportsDirectory))) return undefined;
+  await assertManagedDirectory(activeRoot, reportsDirectory);
   const reports = (await readdir(reportsDirectory))
     .filter((file) => file.endsWith(".json"))
     .toSorted();
@@ -1076,7 +1119,7 @@ async function readLatestRecoveryReport(
 async function parseJsonFile<T>(path: string, schema: z.ZodType<T>): Promise<T> {
   let content: string;
   try {
-    content = await readFile(path, "utf8");
+    content = await readRegularStorageFile(path);
   } catch (error) {
     if (isMissingPathError(error))
       throw new ProjectStorageCorruptionError(
@@ -1090,6 +1133,15 @@ async function parseJsonFile<T>(path: string, schema: z.ZodType<T>): Promise<T> 
   } catch (error) {
     throw new ProjectStorageCorruptionError(`Storage file is invalid: ${basename(path)}`, error);
   }
+}
+
+async function readRegularStorageFile(path: string): Promise<string> {
+  const metadata = await lstat(path);
+  if (metadata.isSymbolicLink() || !metadata.isFile())
+    throw new ProjectStorageCorruptionError(
+      `Storage path must be a regular file: ${basename(path)}`,
+    );
+  return readFile(path, "utf8");
 }
 
 function hashContent(content: string): string {
@@ -1115,6 +1167,28 @@ async function ensureDurableDirectory(path: string): Promise<void> {
   await syncDirectory(path);
   const parent = dirname(path);
   if (parent !== path) await syncDirectory(parent);
+}
+
+async function ensureManagedDirectory(activeRoot: string, path: string): Promise<void> {
+  try {
+    await mkdir(path);
+  } catch (error) {
+    if (!(isNodeError(error) && error.code === "EEXIST")) throw error;
+  }
+  await assertManagedDirectory(activeRoot, path);
+  await syncDirectory(path);
+  const parent = dirname(path);
+  if (parent !== path) await syncDirectory(parent);
+}
+
+async function assertManagedDirectory(activeRoot: string, path: string): Promise<void> {
+  const metadata = await lstat(path);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory())
+    throw new Error(`Managed Project Library path must be a real directory: ${basename(path)}`);
+  const canonicalRoot = await realpath(activeRoot);
+  const canonicalPath = await realpath(path);
+  if (canonicalPath !== canonicalRoot && !isNestedPath(canonicalRoot, canonicalPath))
+    throw new Error("Managed Project Library directory escapes the active root");
 }
 
 async function atomicWriteFile(path: string, content: string): Promise<void> {
@@ -1160,7 +1234,8 @@ async function syncDirectory(path: string): Promise<void> {
   }
 }
 
-async function scavengeDirectory(path: string): Promise<void> {
+async function scavengeDirectory(activeRoot: string, path: string): Promise<void> {
+  await assertManagedDirectory(activeRoot, path);
   for (const entry of await readdir(path))
     await rm(join(path, entry), { force: true, recursive: true });
   await syncDirectory(path);
@@ -1237,15 +1312,25 @@ async function isPlatformLocalVolume(path: string): Promise<boolean> {
   }
   if (process.platform === "win32") {
     const root = parse(path).root.replace(/[\\/]$/, "");
-    if (root === "") return false;
-    try {
-      const { stdout } = await execFileAsync("fsutil.exe", ["fsinfo", "drivetype", root], {
+    if (!/^[A-Za-z]:$/.test(root)) return false;
+    const escapedRoot = root.replace("'", "''");
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${escapedRoot}'"; if ($null -eq $drive) { exit 2 }; [Console]::Out.Write($drive.DriveType)`,
+      ],
+      {
         encoding: "utf8",
-      });
-      return /fixed drive/i.test(stdout);
-    } catch {
-      return false;
-    }
+      },
+    );
+    const driveType = Number.parseInt(stdout.trim(), 10);
+    if (!Number.isInteger(driveType))
+      throw new Error("Windows volume classifier returned an invalid drive type");
+    return driveType === 2 || driveType === 3;
   }
   if (process.platform === "linux") {
     const mountInfo = await readFile("/proc/self/mountinfo", "utf8");
@@ -1306,10 +1391,36 @@ function isOlderCompatibleSchema(
   currentVersion: string,
 ): boolean {
   const current = parseSchemaVersion(currentVersion);
-  return [envelope.schemaVersion, envelope.payload.schemaVersion].every((version) => {
-    const candidate = parseSchemaVersion(version);
-    return candidate.major === current.major && candidate.minor < current.minor;
-  });
+  const versions = [envelope.schemaVersion, envelope.payload.schemaVersion];
+  return (
+    versions.every((version) => {
+      const candidate = parseSchemaVersion(version);
+      return candidate.major === current.major && candidate.minor <= current.minor;
+    }) &&
+    versions.some((version) => {
+      const candidate = parseSchemaVersion(version);
+      return candidate.minor < current.minor;
+    })
+  );
+}
+
+function oldestEnvelopeSchemaVersion(envelope: z.infer<typeof ProjectEnvelopeSchema>): string {
+  return compareSchemaVersions(envelope.schemaVersion, envelope.payload.schemaVersion) <= 0
+    ? envelope.schemaVersion
+    : envelope.payload.schemaVersion;
+}
+
+function validateMigrationGraph(migrations: readonly ProjectMigration[]): void {
+  const fromVersions = new Set<string>();
+  for (const migration of migrations) {
+    parseSchemaVersion(migration.fromVersion);
+    parseSchemaVersion(migration.toVersion);
+    if (fromVersions.has(migration.fromVersion))
+      throw new Error(`Duplicate Project migration from ${migration.fromVersion}`);
+    if (compareSchemaVersions(migration.toVersion, migration.fromVersion) <= 0)
+      throw new Error("Project migrations must advance to a newer schema version");
+    fromVersions.add(migration.fromVersion);
+  }
 }
 
 function isMissingPathError(error: unknown): boolean {

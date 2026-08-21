@@ -22,17 +22,39 @@ export const SourceLocatorSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+const SelectedMediaFormatSchema = z.strictObject({
+  audioCodec: z.string().min(1),
+  container: z.string().min(1),
+  mimeType: z.string().min(1),
+});
+
+const ComponentVersionsSchema = z
+  .record(z.string().min(1), z.string().min(1))
+  .refine((versions) => Object.keys(versions).length > 0, "Component versions cannot be empty");
+
 export const SourceSnapshotSchema = z.strictObject({
   byteFingerprint: Sha256Schema,
   canonicalAudioFingerprint: Sha256Schema,
   durationSamples: z.number().int().positive(),
   id: StableIdSchema,
   observedAt: TimestampSchema,
-  provenance: z.strictObject({
-    componentHashes: z.array(Sha256Schema),
-    kind: z.enum(["local_file", "youtube_acquisition"]),
-    policyHash: Sha256Schema.optional(),
-  }),
+  provenance: z.discriminatedUnion("kind", [
+    z.strictObject({
+      componentHashes: z.array(Sha256Schema),
+      componentVersions: ComponentVersionsSchema,
+      kind: z.literal("local_file"),
+    }),
+    z.strictObject({
+      componentHashes: z.array(Sha256Schema).min(1),
+      componentVersions: ComponentVersionsSchema,
+      kind: z.literal("youtube_acquisition"),
+      policyHash: Sha256Schema,
+      policyVersion: z.string().min(1),
+      provider: z.literal("youtube"),
+      videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+    }),
+  ]),
+  selectedFormat: SelectedMediaFormatSchema,
 });
 
 export const SourceMetadataObservationSchema = z.strictObject({
@@ -110,6 +132,32 @@ export const ProjectOwnedRecordsSchema = z
             code: "custom",
             message: "Source Locator does not match Source identity",
             path: ["sources", sourceIndex, "locators", locatorIndex],
+          });
+        }
+        if (
+          locator.kind === "youtube" &&
+          locator.canonicalUrl !== `https://www.youtube.com/watch?v=${locator.videoId}`
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "YouTube Locator URL must be reconstructed from its exact video ID",
+            path: ["sources", sourceIndex, "locators", locatorIndex, "canonicalUrl"],
+          });
+        }
+      }
+      for (const [snapshotIndex, snapshot] of source.snapshots.entries()) {
+        const snapshotMatches =
+          (source.identity.kind === "local_file" &&
+            snapshot.provenance.kind === "local_file" &&
+            snapshot.byteFingerprint === source.identity.fingerprint) ||
+          (source.identity.kind === "youtube" &&
+            snapshot.provenance.kind === "youtube_acquisition" &&
+            snapshot.provenance.videoId === source.identity.videoId);
+        if (!snapshotMatches) {
+          context.addIssue({
+            code: "custom",
+            message: "Source Snapshot provenance does not match Source identity",
+            path: ["sources", sourceIndex, "snapshots", snapshotIndex],
           });
         }
       }
