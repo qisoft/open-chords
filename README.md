@@ -2,13 +2,15 @@
 
 Open Chords is an AGPL-3.0, local-first desktop application for turning a user-authorized media range into an editable, timed chord track for playback, practice, and export.
 
-The v1 product/technical specification and implementation plan are complete. Implementation is underway: the repository currently contains the toolchain, canonical domain contracts, and hardened Electron shell with typed IPC. Product workflows beyond those foundations remain tracked in the implementation plan.
+The v1 product/technical specification and implementation plan are complete. Implementation is underway: the repository currently contains the toolchain, canonical domain contracts, hardened Electron shell with typed IPC, and the durable main-owned Project Library. Product workflows beyond those foundations remain tracked in the implementation plan.
 
 Planning is tracked in GitHub Issues. See the canonical [Open Chords v1 Wayfinder map](https://github.com/qisoft/open-chords/issues/1).
 
 The consolidated planning baseline is [`docs/specification/open-chords-v1.md`](docs/specification/open-chords-v1.md).
 
 Execution is tracked from [`docs/planning/open-chords-v1-implementation-plan.md`](docs/planning/open-chords-v1-implementation-plan.md) and the [Open Chords v1 milestone](https://github.com/qisoft/open-chords/milestone/1).
+
+Implementation notes document the [canonical domain contracts](docs/development/domain-contracts.md), [Project Library](docs/development/project-library.md), and [toolchain foundation](docs/development/toolchain.md).
 
 ## Research
 

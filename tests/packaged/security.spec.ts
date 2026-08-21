@@ -33,6 +33,7 @@ const archivePath = join(
   `${PRODUCT_NAME}-${process.platform}-${process.arch}-0.0.0.zip`,
 );
 const packageRoot = mkdtempSync(join(tmpdir(), "open-chords-installed-"));
+const userDataDirectory = join(packageRoot, "user-data");
 const executablePath =
   process.platform === "darwin"
     ? join(packageRoot, `${PRODUCT_NAME}.app`, "Contents", "MacOS", PRODUCT_NAME)
@@ -91,9 +92,11 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   }
 
   const debuggingPort = await reservePort();
-  const application = spawn(executablePath, [`--remote-debugging-port=${String(debuggingPort)}`], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const application = spawn(
+    executablePath,
+    [`--remote-debugging-port=${String(debuggingPort)}`, `--user-data-dir=${userDataDirectory}`],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
   let applicationOutput = "";
   const captureOutput = (chunk: Buffer) => {
     applicationOutput = `${applicationOutput}${chunk.toString("utf8")}`.slice(-64 * 1024);
@@ -157,7 +160,9 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     expect(renderer.undeclaredAssetStatus).toBe(404);
 
     const secondInstanceExitCode = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn(executablePath, [], { stdio: "ignore" });
+      const child = spawn(executablePath, [`--user-data-dir=${userDataDirectory}`], {
+        stdio: "ignore",
+      });
       const timeout = setTimeout(() => {
         child.kill();
         reject(new Error("Second packaged instance did not exit"));

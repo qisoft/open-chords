@@ -39,7 +39,9 @@ export type ProjectAuthority = {
     expectedProjectRevisionId: string;
     projectId: string;
     transaction: EditTransaction;
-  }): Promise<{ notFound: true } | { projectRevisionId: string } | { stale: true }>;
+  }): Promise<
+    { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
+  >;
   getSnapshot(projectId: string): Promise<{
     eventSequence: number;
     project: ProjectContract;
@@ -230,6 +232,17 @@ export class DesktopCommandGateway {
         return {
           action: "none",
           response: errorResponse("project_not_found", "Project was not found", false, command),
+        };
+      }
+      if ("readOnly" in result) {
+        return {
+          action: "none",
+          response: errorResponse(
+            "project_read_only",
+            "Project schema is newer than this application can write",
+            false,
+            command,
+          ),
         };
       }
       return {
