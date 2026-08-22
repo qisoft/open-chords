@@ -104,6 +104,7 @@ test("selection and persistent loop remain independent in the deterministic fixt
     await pickup.focus();
     await pickup.press("ArrowRight");
     await expect(complete).toHaveAttribute("aria-pressed", "true");
+    await expect(complete).toBeFocused();
     await page.getByRole("button", { name: "Set loop from selection" }).click();
     await pickup.click();
 

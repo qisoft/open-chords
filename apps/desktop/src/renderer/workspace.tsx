@@ -38,6 +38,7 @@ export function ProjectWorkspace({
   const [selectedRegionId, setSelectedRegionId] = useState(timeline.regions[0]?.id ?? null);
   const [loopRegionId, setLoopRegionId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const regionElements = useRef(new Map<string, HTMLButtonElement>());
 
   useEffect(() => {
     document.title = `${snapshot.project.id} · Local Project · Open Chords`;
@@ -122,7 +123,10 @@ export function ProjectWorkspace({
     const current = timeline.regions.findIndex(({ id }) => id === selectedRegionId);
     const next =
       timeline.regions[Math.max(0, Math.min(timeline.regions.length - 1, current + direction))];
-    if (next !== undefined) selectRegion(next);
+    if (next !== undefined) {
+      selectRegion(next);
+      regionElements.current.get(next.id)?.focus();
+    }
   };
 
   const togglePlayback = async () => {
@@ -187,6 +191,10 @@ export function ProjectWorkspace({
                 key={region.id}
                 onClick={() => selectRegion(region)}
                 onKeyDown={(event) => handleRegionKey(event, selectAdjacent)}
+                ref={(element) => {
+                  if (element === null) regionElements.current.delete(region.id);
+                  else regionElements.current.set(region.id, element);
+                }}
                 style={{
                   flexBasis: `${String(((region.endSample - region.startSample) / timeline.durationSamples) * 100)}%`,
                 }}
