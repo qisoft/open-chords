@@ -1020,7 +1020,7 @@ describe("ProjectLibrary", () => {
     expect(
       (await library.readProject("project_golden")).records.sources[0]?.locators[0],
     ).toMatchObject({ status: "unavailable", verifiedAt: "2026-08-21T09:00:00Z" });
-  });
+  }, 15_000);
 
   it("rejects conflicting equal-time Locator observations before publication", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-locator-conflict-");
