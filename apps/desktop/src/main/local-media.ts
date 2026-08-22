@@ -46,14 +46,108 @@ type LocalFileLocator = Extract<
   { kind: "local_file" }
 >;
 
-type SelectionCapability = VerifiedLocalMedia & {
+class VerifiedMediaLease {
+  readonly media: VerifiedLocalMedia;
+  #ownsHandle = true;
+
+  constructor(media: VerifiedLocalMedia) {
+    this.media = media;
+  }
+
+  move(): VerifiedMediaLease {
+    if (!this.#ownsHandle) throw new Error("Verified media lease is no longer owned");
+    this.#ownsHandle = false;
+    return new VerifiedMediaLease(this.media);
+  }
+
+  async release(): Promise<void> {
+    if (!this.#ownsHandle) return;
+    this.#ownsHandle = false;
+    await this.media.handle.close();
+  }
+}
+
+type SelectionCapabilityEntry = {
   generationId: string;
+  lease: VerifiedMediaLease;
 };
 
-type PlaybackCapability = VerifiedLocalMedia & {
+type PlaybackCapabilityEntry = {
   generationId: string;
+  lease: VerifiedMediaLease;
   projectId: string;
 };
+
+class MediaCapabilityRegistry {
+  readonly #playback = new Map<string, PlaybackCapabilityEntry>();
+  readonly #selection = new Map<string, SelectionCapabilityEntry>();
+
+  consumeSelection(capabilityId: string, generationId: string): VerifiedMediaLease | null {
+    const entry = this.#selection.get(capabilityId);
+    if (entry === undefined || entry.generationId !== generationId) return null;
+    this.#selection.delete(capabilityId);
+    return entry.lease;
+  }
+
+  playback(capabilityId: string): VerifiedMediaLease | null {
+    return this.#playback.get(capabilityId)?.lease ?? null;
+  }
+
+  async replaceSelection(generationId: string, lease: VerifiedMediaLease): Promise<string> {
+    const releases: Promise<void>[] = [];
+    for (const [capabilityId, entry] of this.#selection) {
+      if (entry.generationId !== generationId) continue;
+      this.#selection.delete(capabilityId);
+      releases.push(entry.lease.release());
+    }
+    await Promise.all(releases);
+    const capabilityId = opaqueId("mediacapability");
+    this.#selection.set(capabilityId, { generationId, lease: lease.move() });
+    return capabilityId;
+  }
+
+  async replacePlayback(
+    generationId: string,
+    projectId: string,
+    lease: VerifiedMediaLease,
+  ): Promise<string> {
+    const generationCapabilities: string[] = [];
+    const releases: Promise<void>[] = [];
+    for (const [capabilityId, entry] of this.#playback) {
+      if (entry.generationId !== generationId) continue;
+      if (entry.projectId === projectId) {
+        this.#playback.delete(capabilityId);
+        releases.push(entry.lease.release());
+      } else generationCapabilities.push(capabilityId);
+    }
+    while (generationCapabilities.length >= MAX_PLAYBACK_CAPABILITIES_PER_GENERATION) {
+      const oldestCapabilityId = generationCapabilities.shift();
+      if (oldestCapabilityId === undefined) break;
+      const oldest = this.#playback.get(oldestCapabilityId);
+      this.#playback.delete(oldestCapabilityId);
+      if (oldest !== undefined) releases.push(oldest.lease.release());
+    }
+    await Promise.all(releases);
+    const capabilityId = opaqueId("playbackcapability");
+    this.#playback.set(capabilityId, { generationId, lease: lease.move(), projectId });
+    return capabilityId;
+  }
+
+  async revokeGeneration(generationId: string): Promise<void> {
+    const releases: Promise<void>[] = [];
+    for (const [capabilityId, entry] of this.#selection) {
+      if (entry.generationId !== generationId) continue;
+      this.#selection.delete(capabilityId);
+      releases.push(entry.lease.release());
+    }
+    for (const [capabilityId, entry] of this.#playback) {
+      if (entry.generationId !== generationId) continue;
+      this.#playback.delete(capabilityId);
+      releases.push(entry.lease.release());
+    }
+    await Promise.all(releases);
+  }
+}
 
 type MediaSelectionCapability = {
   byteSize: number;
@@ -136,9 +230,8 @@ export type LocalMediaRangeCache = {
 };
 
 export class LocalMediaService {
-  readonly #capabilities = new Map<string, SelectionCapability>();
+  readonly #capabilities = new MediaCapabilityRegistry();
   readonly #fileSystem: LocalMediaFileSystem;
-  readonly #playbackCapabilities = new Map<string, PlaybackCapability>();
   readonly #library: ProjectLibrary;
   readonly #now: () => Date;
   readonly #pickFile: () => Promise<string | null>;
@@ -153,34 +246,27 @@ export class LocalMediaService {
     this.#rangeCache = options.rangeCache;
   }
 
-  revokeGeneration(generationId: string): void {
-    for (const [capabilityId, capability] of this.#capabilities) {
-      if (capability.generationId === generationId) {
-        this.#capabilities.delete(capabilityId);
-        releaseVerifiedMedia(capability);
-      }
-    }
-    for (const [capabilityId, capability] of this.#playbackCapabilities) {
-      if (capability.generationId === generationId) {
-        this.#playbackCapabilities.delete(capabilityId);
-        releaseVerifiedMedia(capability);
-      }
-    }
+  revokeGeneration(generationId: string): Promise<void> {
+    return this.#capabilities.revokeGeneration(generationId);
   }
 
   async pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
-    const verified = await this.#verifyLocalWav(selectedPath);
-    const capabilityId = this.#rememberSelectionCapability(generationId, verified);
-    return {
-      byteSize: verified.byteSize,
-      capabilityId,
-      durationSamples: verified.durationSamples,
-      kind: "selected",
-      mimeType: verified.mimeType,
-      sampleRate: verified.sampleRate,
-    };
+    const lease = await this.#verifyLocalWav(selectedPath);
+    try {
+      const capabilityId = await this.#capabilities.replaceSelection(generationId, lease);
+      return {
+        byteSize: lease.media.byteSize,
+        capabilityId,
+        durationSamples: lease.media.durationSamples,
+        kind: "selected",
+        mimeType: lease.media.mimeType,
+        sampleRate: lease.media.sampleRate,
+      };
+    } finally {
+      await lease.release();
+    }
   }
 
   async createProject(input: {
@@ -189,21 +275,23 @@ export class LocalMediaService {
     generationId: string;
     startSourceSample: number;
   }): Promise<{ projectId: string; projectRevisionId: string; sourceId: string }> {
-    let capability = this.#capabilities.get(input.capabilityId);
-    if (capability === undefined || capability.generationId !== input.generationId) {
+    const selectedLease = this.#capabilities.consumeSelection(
+      input.capabilityId,
+      input.generationId,
+    );
+    if (selectedLease === null) {
       throw new Error("Local media capability is unavailable");
     }
-    this.#capabilities.delete(input.capabilityId);
-    const selectedCapability = capability;
-    let reverified: VerifiedLocalMedia | undefined;
+    let reverifiedLease: VerifiedMediaLease | undefined;
     try {
-      assertProjectRange(input, capability.durationSamples);
-      reverified = await this.#verifyLocalWav(capability.path);
-      if (reverified.byteFingerprint !== capability.byteFingerprint) {
+      const selected = selectedLease.media;
+      assertProjectRange(input, selected.durationSamples);
+      reverifiedLease = await this.#verifyLocalWav(selected.path);
+      const capability = reverifiedLease.media;
+      if (capability.byteFingerprint !== selected.byteFingerprint) {
         throw new Error("Selected media changed before Project creation");
       }
-      assertSameFileIdentity(capability.identity, reverified.identity);
-      capability = { ...reverified, generationId: capability.generationId };
+      assertSameFileIdentity(selected.identity, capability.identity);
 
       const observedAt = this.#now().toISOString();
       const existingSource = this.#library.findLocalFileSourceByFingerprint(
@@ -269,8 +357,8 @@ export class LocalMediaService {
       const created = await this.#library.createProject({ envelope, records });
       return { projectId, projectRevisionId: created.projectRevisionId, sourceId };
     } finally {
-      releaseVerifiedMedia(selectedCapability);
-      if (reverified !== undefined) releaseVerifiedMedia(reverified);
+      await selectedLease.release();
+      if (reverifiedLease !== undefined) await reverifiedLease.release();
     }
   }
 
@@ -280,17 +368,16 @@ export class LocalMediaService {
   }): Promise<LocalMediaRelinkResult> {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
-    const verified = await this.#verifyLocalWav(selectedPath);
-    let retained = false;
+    const lease = await this.#verifyLocalWav(selectedPath);
     try {
+      const verified = lease.media;
       const source = this.#library.getSourceById(input.sourceId);
       if (source === undefined) throw new Error("Source is unavailable");
       if (
         source.identity.kind !== "local_file" ||
         source.identity.fingerprint !== verified.byteFingerprint
       ) {
-        const capabilityId = this.#rememberSelectionCapability(input.generationId, verified);
-        retained = true;
+        const capabilityId = await this.#capabilities.replaceSelection(input.generationId, lease);
         return {
           byteSize: verified.byteSize,
           capabilityId,
@@ -310,7 +397,7 @@ export class LocalMediaService {
       });
       return { kind: "relinked", sourceId: input.sourceId };
     } finally {
-      if (!retained) releaseVerifiedMedia(verified);
+      await lease.release();
     }
   }
 
@@ -332,19 +419,18 @@ export class LocalMediaService {
       .toSorted((left, right) => Date.parse(right.verifiedAt) - Date.parse(left.verifiedAt));
     for (const locator of locators) {
       try {
-        const verified = await this.#verifyLocalWav(locator.path);
-        let retained = false;
+        const lease = await this.#verifyLocalWav(locator.path);
         try {
+          const verified = lease.media;
           if (verified.byteFingerprint !== source.identity.fingerprint) {
             await this.#markLocatorUnavailable(source.id, locator);
             continue;
           }
-          const capabilityId = this.#rememberPlaybackCapability(
+          const capabilityId = await this.#capabilities.replacePlayback(
             input.generationId,
             input.projectId,
-            verified,
+            lease,
           );
-          retained = true;
           return {
             byteSize: verified.byteSize,
             capabilityId,
@@ -357,7 +443,7 @@ export class LocalMediaService {
             startSourceSample: range.startSourceSample,
           };
         } finally {
-          if (!retained) releaseVerifiedMedia(verified);
+          await lease.release();
         }
       } catch {
         await this.#markLocatorUnavailable(source.id, locator);
@@ -377,8 +463,9 @@ export class LocalMediaService {
     mimeType: string;
     startByte: number;
   }> {
-    const capability = this.#playbackCapabilities.get(input.capabilityId);
-    if (capability === undefined) throw new Error("Playback capability is unavailable");
+    const lease = this.#capabilities.playback(input.capabilityId);
+    if (lease === null) throw new Error("Playback capability is unavailable");
+    const capability = lease.media;
     const endByteExclusive =
       input.endByteExclusive ??
       Math.min(capability.byteSize, input.startByte + MAX_PLAYBACK_RANGE_BYTES);
@@ -402,44 +489,6 @@ export class LocalMediaService {
     };
   }
 
-  #rememberSelectionCapability(generationId: string, verified: VerifiedLocalMedia): string {
-    for (const [capabilityId, capability] of this.#capabilities) {
-      if (capability.generationId === generationId) {
-        this.#capabilities.delete(capabilityId);
-        releaseVerifiedMedia(capability);
-      }
-    }
-    const capabilityId = opaqueId("mediacapability");
-    this.#capabilities.set(capabilityId, { ...verified, generationId });
-    return capabilityId;
-  }
-
-  #rememberPlaybackCapability(
-    generationId: string,
-    projectId: string,
-    verified: VerifiedLocalMedia,
-  ): string {
-    const generationCapabilities: string[] = [];
-    for (const [capabilityId, capability] of this.#playbackCapabilities) {
-      if (capability.generationId !== generationId) continue;
-      if (capability.projectId === projectId) {
-        this.#playbackCapabilities.delete(capabilityId);
-        releaseVerifiedMedia(capability);
-      } else generationCapabilities.push(capabilityId);
-    }
-    while (generationCapabilities.length >= MAX_PLAYBACK_CAPABILITIES_PER_GENERATION) {
-      const oldestCapabilityId = generationCapabilities.shift();
-      if (oldestCapabilityId !== undefined) {
-        const oldestCapability = this.#playbackCapabilities.get(oldestCapabilityId);
-        this.#playbackCapabilities.delete(oldestCapabilityId);
-        if (oldestCapability !== undefined) releaseVerifiedMedia(oldestCapability);
-      }
-    }
-    const capabilityId = opaqueId("playbackcapability");
-    this.#playbackCapabilities.set(capabilityId, { ...verified, generationId, projectId });
-    return capabilityId;
-  }
-
   async cacheProjectRange(projectId: string): Promise<void> {
     if (this.#rangeCache === undefined)
       throw new Error("Local media range cache is not configured");
@@ -456,8 +505,9 @@ export class LocalMediaService {
         candidate.kind === "local_file" && candidate.status === "available",
     );
     if (locator === undefined) throw new Error("Project Source Locator is unavailable");
-    const verified = await this.#verifyLocalWav(locator.path);
+    const lease = await this.#verifyLocalWav(locator.path);
     try {
+      const verified = lease.media;
       if (verified.byteFingerprint !== source.identity.fingerprint) {
         await this.#markLocatorUnavailable(source.id, locator);
         throw new Error("Project Source Locator no longer matches its identity");
@@ -489,7 +539,7 @@ export class LocalMediaService {
         startSourceSample: range.startSourceSample,
       });
     } finally {
-      releaseVerifiedMedia(verified);
+      await lease.release();
     }
   }
 
@@ -501,7 +551,7 @@ export class LocalMediaService {
     });
   }
 
-  #verifyLocalWav(path: string): Promise<VerifiedLocalMedia> {
+  #verifyLocalWav(path: string): Promise<VerifiedMediaLease> {
     return verifyLocalWav(path, this.#fileSystem);
   }
 
@@ -540,7 +590,7 @@ async function readVerifiedBytes(
 async function verifyLocalWav(
   candidatePath: string,
   fileSystem: LocalMediaFileSystem,
-): Promise<VerifiedLocalMedia> {
+): Promise<VerifiedMediaLease> {
   const path = resolve(candidatePath);
   const ancestorsBefore = await inspectPathAncestors(path, fileSystem);
   await assertSamePathAncestors(ancestorsBefore, fileSystem);
@@ -550,7 +600,6 @@ async function verifyLocalWav(
   }
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
   const handle = await fileSystem.open(path, constants.O_RDONLY | noFollow);
-  let retained = false;
   try {
     const before = await handle.stat({ bigint: true });
     assertSameFileIdentity(pathBefore, before);
@@ -596,15 +645,11 @@ async function verifyLocalWav(
       path,
       sampleRate: CANONICAL_SAMPLE_RATE,
     };
-    retained = true;
-    return verified;
-  } finally {
-    if (!retained) await handle.close();
+    return new VerifiedMediaLease(verified);
+  } catch (error) {
+    await handle.close();
+    throw error;
   }
-}
-
-function releaseVerifiedMedia(media: VerifiedLocalMedia): void {
-  void media.handle.close().catch(() => undefined);
 }
 
 type PathAncestorIdentity = {

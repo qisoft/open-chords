@@ -465,7 +465,7 @@ describe("LocalMediaService", () => {
       }),
     ).resolves.toMatchObject({ endByteExclusive: 12, startByte: 0 });
 
-    playback.revokeGeneration("generation_reopened");
+    await playback.revokeGeneration("generation_reopened");
     await expect(
       playback.readPlaybackRange({
         capabilityId: replacement.capabilityId,
@@ -490,7 +490,7 @@ describe("LocalMediaService", () => {
         startByte: 0,
       }),
     ).rejects.toThrow(/changed/i);
-    playback.revokeGeneration("generation_replacement_probe");
+    await playback.revokeGeneration("generation_replacement_probe");
   });
 
   it("bounds concurrent playback range reads", async () => {
@@ -560,7 +560,7 @@ describe("LocalMediaService", () => {
     ).rejects.toThrow(/too many local media reads/i);
     releaseReads();
     await expect(Promise.all(activeReads)).resolves.toHaveLength(8);
-    media.revokeGeneration("generation_fixture");
+    await media.revokeGeneration("generation_fixture");
   });
 
   it("reads only through its retained handle during a transient ancestor link swap", async () => {
@@ -629,7 +629,7 @@ describe("LocalMediaService", () => {
     expect(range.bytes.toString("ascii")).toBe("RIFF,\u0000\u0000\u0000WAVE");
     expect(openCalls).toBe(opensBeforePlaybackRead);
     expect(await realpath(mediaPath)).toBe(mediaPath);
-    media.revokeGeneration("generation_fixture");
+    await media.revokeGeneration("generation_fixture");
   });
 
   it("gives a cache adapter only an immutable Project Range and range-bounded PCM reader", async () => {
