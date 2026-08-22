@@ -101,10 +101,7 @@ export function createPlaybackClock(options: PlaybackClockOptions) {
         listeners.delete(listener);
       };
     },
-    subscribeSelection<Value>(
-      select: (snapshot: PlaybackClockSnapshot) => Value,
-      listener: () => void,
-    ) {
+    subscribeSelection(select: (snapshot: PlaybackClockSnapshot) => unknown, listener: () => void) {
       let selected = select(snapshot);
       const publishSelection = () => {
         const next = select(snapshot);
