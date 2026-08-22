@@ -38,7 +38,7 @@ function createMediaService(
   return media;
 }
 
-function controlledReadFileSystem() {
+function controlledReadFileSystem(options: { failFirstClose?: boolean } = {}) {
   let blockReads = false;
   let closeCalls = 0;
   let confirmReadStarted: (() => void) | undefined;
@@ -65,6 +65,9 @@ function controlledReadFileSystem() {
         return {
           close: async () => {
             closeCalls += 1;
+            if (options.failFirstClose === true && closeCalls === 1) {
+              throw new Error("Fixture verification cleanup failed");
+            }
             await handle.close();
           },
           read: async (buffer: Buffer, offset: number, length: number, position: number) => {
@@ -74,7 +77,7 @@ function controlledReadFileSystem() {
             }
             return handle.read(buffer, offset, length, position);
           },
-          stat: (options: { bigint: true }) => handle.stat(options),
+          stat: (statOptions: { bigint: true }) => handle.stat(statOptions),
         };
       },
     },
@@ -165,7 +168,7 @@ describe("LocalMediaService", () => {
     const mediaRoot = await temporaryDirectory("open-chords-local-media-revoke-race-source-");
     const mediaPath = join(mediaRoot, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
-    const controlled = controlledReadFileSystem();
+    const controlled = controlledReadFileSystem({ failFirstClose: true });
     const verificationStarted = controlled.block();
     const media = createMediaService(
       {
@@ -178,10 +181,11 @@ describe("LocalMediaService", () => {
 
     const selection = media.pickLocalFile("generation_revoked");
     await verificationStarted;
-    await media.revokeGeneration("generation_revoked");
+    const revocation = media.revokeGeneration("generation_revoked");
     controlled.release();
     await expect(selection).rejects.toThrow(/generation was revoked|capability is unavailable/i);
-    expect(controlled.closeCalls).toBe(1);
+    await revocation;
+    expect(controlled.closeCalls).toBe(2);
   });
 
   it("cannot publish a Project after revocation during selection revalidation", async () => {
@@ -207,10 +211,11 @@ describe("LocalMediaService", () => {
       startSourceSample: 0,
     });
     await verificationStarted;
-    await media.revokeGeneration("generation_fixture");
+    const revocation = media.revokeGeneration("generation_fixture");
     controlled.release();
 
     await expect(creation).rejects.toThrow(/generation was revoked|capability is unavailable/i);
+    await revocation;
     expect(library.listProjects()).toEqual([]);
   });
 
@@ -245,10 +250,11 @@ describe("LocalMediaService", () => {
       sourceId: created.sourceId,
     });
     await verificationStarted;
-    await relink.revokeGeneration("generation_fixture");
+    const revocation = relink.revokeGeneration("generation_fixture");
     controlled.release();
 
     await expect(relinking).rejects.toThrow(/generation was revoked|capability is unavailable/i);
+    await revocation;
     expect((await library.readProject(created.projectId)).records.sources[0]?.locators).toEqual([
       expect.objectContaining({ path: originalPath, status: "available" }),
     ]);

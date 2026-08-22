@@ -125,6 +125,7 @@ type PlaybackCapabilityEntry = {
 };
 
 class MediaCapabilityRegistry {
+  readonly #activeOperations = new Map<string, Set<Promise<void>>>();
   readonly #activeGenerations = new Set<string>();
   readonly #cleanup: MediaHandleCleanup;
   readonly #generationQueues = new Map<string, Promise<void>>();
@@ -140,6 +141,25 @@ class MediaCapabilityRegistry {
       throw new Error("Local media generation is already active");
     }
     this.#activeGenerations.add(generationId);
+  }
+
+  beginOperation(generationId: string): () => void {
+    this.#assertGenerationActive(generationId);
+    let finish!: () => void;
+    const completed = new Promise<void>((completeOperation) => {
+      finish = completeOperation;
+    });
+    const operations = this.#activeOperations.get(generationId) ?? new Set();
+    operations.add(completed);
+    this.#activeOperations.set(generationId, operations);
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      operations.delete(completed);
+      if (operations.size === 0) this.#activeOperations.delete(generationId);
+      finish();
+    };
   }
 
   consumeSelection(capabilityId: string, generationId: string): Promise<VerifiedMediaLease | null> {
@@ -213,6 +233,7 @@ class MediaCapabilityRegistry {
 
   async revokeGeneration(generationId: string): Promise<void> {
     this.#activeGenerations.delete(generationId);
+    await Promise.all([...(this.#activeOperations.get(generationId) ?? [])]);
     await this.#runGenerationTask(generationId, false, async () => {
       const releases: VerifiedMediaLease[] = [];
       for (const [capabilityId, entry] of this.#selection) {
@@ -387,7 +408,11 @@ export class LocalMediaService {
     return this.#capabilities.revokeGeneration(generationId);
   }
 
-  async pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
+  pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
+    return this.#runGenerationOperation(generationId, () => this.#pickLocalFile(generationId));
+  }
+
+  async #pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
     const lease = await this.#verifyLocalWav(selectedPath);
@@ -406,7 +431,16 @@ export class LocalMediaService {
     }
   }
 
-  async createProject(input: {
+  createProject(input: {
+    capabilityId: string;
+    endSourceSample: number;
+    generationId: string;
+    startSourceSample: number;
+  }): Promise<{ projectId: string; projectRevisionId: string; sourceId: string }> {
+    return this.#runGenerationOperation(input.generationId, () => this.#createProject(input));
+  }
+
+  async #createProject(input: {
     capabilityId: string;
     endSourceSample: number;
     generationId: string;
@@ -509,7 +543,11 @@ export class LocalMediaService {
     }
   }
 
-  async relinkSource(input: {
+  relinkSource(input: { generationId: string; sourceId: string }): Promise<LocalMediaRelinkResult> {
+    return this.#runGenerationOperation(input.generationId, () => this.#relinkSource(input));
+  }
+
+  async #relinkSource(input: {
     generationId: string;
     sourceId: string;
   }): Promise<LocalMediaRelinkResult> {
@@ -555,7 +593,11 @@ export class LocalMediaService {
     }
   }
 
-  async openPlayback(input: {
+  openPlayback(input: { generationId: string; projectId: string }): Promise<LocalMediaPlayback> {
+    return this.#runGenerationOperation(input.generationId, () => this.#openPlayback(input));
+  }
+
+  async #openPlayback(input: {
     generationId: string;
     projectId: string;
   }): Promise<LocalMediaPlayback> {
@@ -709,6 +751,15 @@ export class LocalMediaService {
 
   #verifyLocalWav(path: string): Promise<VerifiedMediaLease> {
     return verifyLocalWav(path, this.#fileSystem, this.#cleanup);
+  }
+
+  async #runGenerationOperation<T>(generationId: string, operation: () => Promise<T>): Promise<T> {
+    const finish = this.#capabilities.beginOperation(generationId);
+    try {
+      return await operation();
+    } finally {
+      finish();
+    }
   }
 
   async #readVerifiedBytes(
