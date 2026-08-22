@@ -16,9 +16,15 @@ import {
 } from "@open-chords/domain";
 
 import { APP_ENTRY_URL } from "./desktop-origin.ts";
+import type {
+  LocalMediaPlayback,
+  LocalMediaRelinkResult,
+  LocalMediaSelection,
+} from "./local-media.ts";
 import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
 
 const MAX_COMMAND_BYTES = 256 * 1024;
+const MAX_CONCURRENT_MEDIA_COMMANDS = 1;
 const MAX_CONCURRENT_READS = 32;
 const MAX_INVALID_COMMANDS = 3;
 const MAX_PENDING_MUTATIONS = 32;
@@ -49,6 +55,18 @@ export type ProjectAuthority = {
   } | null>;
 };
 
+export type LocalMediaAuthority = {
+  createProject(input: {
+    capabilityId: string;
+    endSourceSample: number;
+    generationId: string;
+    startSourceSample: number;
+  }): Promise<{ projectId: string; projectRevisionId: string; sourceId: string }>;
+  openPlayback(input: { generationId: string; projectId: string }): Promise<LocalMediaPlayback>;
+  pickLocalFile(generationId: string): Promise<LocalMediaSelection>;
+  relinkSource(input: { generationId: string; sourceId: string }): Promise<LocalMediaRelinkResult>;
+};
+
 export type DesktopGatewayAction = "destroy_sender" | "none" | "reload_generation";
 
 export type DesktopGatewayResult = {
@@ -59,13 +77,16 @@ export type DesktopGatewayResult = {
 export class DesktopCommandGateway {
   readonly #authority: ProjectAuthority;
   readonly #invalidCounts = new Map<string, number>();
+  readonly #mediaAuthority: LocalMediaAuthority | undefined;
   readonly #mutationDepths = new Map<string, number>();
   readonly #mutationQueues = new Map<string, Promise<void>>();
+  #activeMediaCommands = 0;
   #activeReads = 0;
   #pendingMutations = 0;
 
-  constructor(authority: ProjectAuthority) {
+  constructor(authority: ProjectAuthority, mediaAuthority?: LocalMediaAuthority) {
     this.#authority = authority;
+    this.#mediaAuthority = mediaAuthority;
   }
 
   async execute(
@@ -121,7 +142,101 @@ export class DesktopCommandGateway {
     }
 
     if (command.type === "project.get_snapshot") return this.#readSnapshot(command);
-    return this.#enqueueMutation(command);
+    if (command.type === "project.commit_edit_transaction") return this.#enqueueMutation(command);
+    return this.#executeMedia(command);
+  }
+
+  async #executeMedia(
+    command: Extract<DesktopCommand, { type: `media.${string}` }>,
+  ): Promise<DesktopGatewayResult> {
+    if (this.#mediaAuthority === undefined) {
+      return {
+        action: "none",
+        response: errorResponse("source_unavailable", "Local media is unavailable", false, command),
+      };
+    }
+    if (this.#activeMediaCommands >= MAX_CONCURRENT_MEDIA_COMMANDS) {
+      return {
+        action: "none",
+        response: errorResponse("busy", "A local media operation is already active", true, command),
+      };
+    }
+    this.#activeMediaCommands += 1;
+    try {
+      if (command.type === "media.pick_local_file") {
+        const result = await this.#mediaAuthority.pickLocalFile(command.generationId);
+        return this.#mediaResult(
+          command,
+          result.kind === "cancelled"
+            ? { operation: "pick", type: "media.selection_cancelled" }
+            : { ...omitKind(result), type: "media.selected" },
+        );
+      }
+      if (command.type === "media.create_project") {
+        const result = await this.#mediaAuthority.createProject({
+          capabilityId: command.capabilityId,
+          endSourceSample: command.endSourceSample,
+          generationId: command.generationId,
+          startSourceSample: command.startSourceSample,
+        });
+        return this.#mediaResult(command, { ...result, type: "media.project_created" });
+      }
+      if (command.type === "media.relink_source") {
+        const result = await this.#mediaAuthority.relinkSource({
+          generationId: command.generationId,
+          sourceId: command.sourceId,
+        });
+        if (result.kind === "cancelled") {
+          return this.#mediaResult(command, {
+            operation: "relink",
+            type: "media.selection_cancelled",
+          });
+        }
+        if (result.kind === "relinked") {
+          return this.#mediaResult(command, { sourceId: result.sourceId, type: "media.relinked" });
+        }
+        return this.#mediaResult(command, {
+          ...omitKind(result),
+          type: "media.different_source",
+        });
+      }
+      const result = await this.#mediaAuthority.openPlayback({
+        generationId: command.generationId,
+        projectId: command.projectId,
+      });
+      return this.#mediaResult(
+        command,
+        result.kind === "unavailable"
+          ? { ...omitKind(result), type: "media.source_unavailable" }
+          : { ...omitKind(result), type: "media.playback_ready" },
+      );
+    } catch (error) {
+      const capabilityUnavailable =
+        error instanceof Error && /capability.*unavailable/i.test(error.message);
+      return {
+        action: "none",
+        response: errorResponse(
+          capabilityUnavailable ? "capability_unavailable" : "invalid_media",
+          capabilityUnavailable
+            ? "Local media capability is unavailable"
+            : "Local media operation failed",
+          false,
+          command,
+        ),
+      };
+    } finally {
+      this.#activeMediaCommands -= 1;
+    }
+  }
+
+  #mediaResult(
+    command: Extract<DesktopCommand, { type: `media.${string}` }>,
+    result: Record<string, unknown>,
+  ): DesktopGatewayResult {
+    return {
+      action: "none",
+      response: DesktopResponseSchema.parse({ ...responseEnvelope(command), ...result }),
+    };
   }
 
   async #readSnapshot(
@@ -283,6 +398,11 @@ export class DesktopCommandGateway {
       response: errorResponse("invalid_command", message, false, correlationEnvelope(rawCommand)),
     };
   }
+}
+
+function omitKind<T extends { kind: string }>(value: T): Omit<T, "kind"> {
+  const { kind: _kind, ...rest } = value;
+  return rest;
 }
 
 function isSecureRendererConfiguration(configuration: DesktopSecurityConfiguration): boolean {

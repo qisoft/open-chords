@@ -36,6 +36,19 @@ for (const fixture of cases) {
     );
 }
 
+let standaloneInvalidCount = 0;
+for (const name of readdirSync(join(root, "invalid"))) {
+  if (!name.endsWith("envelope.json")) continue;
+  let accepted = true;
+  try {
+    parseContractEnvelope(readJson(join(root, "invalid", name)));
+  } catch {
+    accepted = false;
+  }
+  if (accepted) throw new Error(`Invalid fixture was accepted: ${name}`);
+  standaloneInvalidCount += 1;
+}
+
 process.stdout.write(
-  `TypeScript contract fixtures: ${String(validCount)} valid, ${String(cases.length)} invalid\n`,
+  `TypeScript contract fixtures: ${String(validCount)} valid, ${String(cases.length + standaloneInvalidCount)} invalid\n`,
 );

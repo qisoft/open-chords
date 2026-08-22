@@ -22,6 +22,6 @@ export function parseProjectContract(input: unknown): ProjectContract {
   if (major !== 1) throw new Error(`Unsupported Project contract major version ${String(major)}`);
   validateProjectInvariants(project);
   validateCommittedEditLayerProjections(project);
-  materializeEffectiveTimeline(project);
+  if (project.activeView !== null) materializeEffectiveTimeline(project);
   return project;
 }

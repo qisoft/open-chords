@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { app, BrowserWindow, type Session, type WebContents } from "electron";
 
-import { APP_ENTRY_URL } from "./desktop-origin.ts";
+import { APP_ENTRY_URL, parseApplicationUrl } from "./desktop-origin.ts";
 import { PRIMARY_RENDERER_SECURITY_CONFIGURATION } from "./renderer-security.ts";
 
 export const PRIMARY_RENDERER_PARTITION = "open-chords-primary";
@@ -12,8 +12,14 @@ const hardenedContents = new WeakSet<WebContents>();
 
 function isPrimaryRendererUrl(value: string): boolean {
   try {
-    const url = new URL(value);
-    return url.protocol === "open-chords:" && url.host === "app";
+    const schemeEnd = value.indexOf("://");
+    const pathStart = schemeEnd === -1 ? -1 : value.indexOf("/", schemeEnd + 3);
+    const rawPath = pathStart === -1 ? "" : (value.slice(pathStart).split(/[?#]/, 1)[0] ?? "");
+    const decodedPath = decodeURIComponent(rawPath);
+    if (decodedPath.split("/").some((segment) => segment === "." || segment === "..")) {
+      return false;
+    }
+    return parseApplicationUrl(value) !== null;
   } catch {
     return false;
   }

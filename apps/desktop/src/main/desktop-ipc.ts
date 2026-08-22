@@ -10,18 +10,24 @@ import {
   DesktopCommandGateway,
   type DesktopGatewayAction,
   type DesktopSenderContext,
+  type LocalMediaAuthority,
   type ProjectAuthority,
 } from "./desktop-command-gateway.ts";
 
 type CommandType = DesktopCommand["type"];
 
 const commandChannels = [
+  [DESKTOP_IPC_CHANNELS.mediaCreateProject, "media.create_project"],
+  [DESKTOP_IPC_CHANNELS.mediaOpenPlayback, "media.open_playback"],
+  [DESKTOP_IPC_CHANNELS.mediaPickLocalFile, "media.pick_local_file"],
+  [DESKTOP_IPC_CHANNELS.mediaRelinkSource, "media.relink_source"],
   [DESKTOP_IPC_CHANNELS.shellGetSecuritySnapshot, "shell.get_security_snapshot"],
   [DESKTOP_IPC_CHANNELS.projectGetSnapshot, "project.get_snapshot"],
   [DESKTOP_IPC_CHANNELS.projectCommitEditTransaction, "project.commit_edit_transaction"],
 ] as const satisfies ReadonlyArray<readonly [string, CommandType]>;
 
 export type DesktopIpcOptions = {
+  mediaAuthority: LocalMediaAuthority;
   onSenderAction(action: Exclude<DesktopGatewayAction, "none">, sender: WebContents): void;
   rendererContextFor(
     sender: WebContents,
@@ -29,7 +35,7 @@ export type DesktopIpcOptions = {
 };
 
 export function installDesktopIpc(authority: ProjectAuthority, options: DesktopIpcOptions): void {
-  const gateway = new DesktopCommandGateway(authority);
+  const gateway = new DesktopCommandGateway(authority, options.mediaAuthority);
 
   for (const [channel, expectedType] of commandChannels) {
     ipcMain.handle(channel, async (event, rawCommand: unknown) => {

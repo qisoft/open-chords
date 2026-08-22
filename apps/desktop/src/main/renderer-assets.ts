@@ -3,6 +3,8 @@ import { isAbsolute, join, posix } from "node:path";
 
 import { z } from "zod";
 
+import { parseApplicationUrl } from "./desktop-origin.ts";
+
 const RendererManifestChunkSchema = z.strictObject({
   assets: z.array(z.string()).optional(),
   css: z.array(z.string()).optional(),
@@ -51,20 +53,8 @@ export function loadRendererAssetManifest(rendererRoot: string): RendererAssetMa
 
   return {
     resolve(requestUrl) {
-      let url: URL;
-      try {
-        url = new URL(requestUrl);
-      } catch {
-        return null;
-      }
-      if (
-        url.protocol !== "open-chords:" ||
-        url.host !== "app" ||
-        url.username !== "" ||
-        url.password !== "" ||
-        url.port !== "" ||
-        url.search !== ""
-      ) {
+      const url = parseApplicationUrl(requestUrl);
+      if (url === null || url.search !== "") {
         return null;
       }
       let path: string;

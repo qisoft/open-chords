@@ -10,7 +10,7 @@ The consolidated planning baseline is [`docs/specification/open-chords-v1.md`](d
 
 Execution is tracked from [`docs/planning/open-chords-v1-implementation-plan.md`](docs/planning/open-chords-v1-implementation-plan.md) and the [Open Chords v1 milestone](https://github.com/qisoft/open-chords/milestone/1).
 
-Implementation notes document the [canonical domain contracts](docs/development/domain-contracts.md), [Project Library](docs/development/project-library.md), and [toolchain foundation](docs/development/toolchain.md).
+Implementation notes document the [canonical domain contracts](docs/development/domain-contracts.md), [Project Library](docs/development/project-library.md), [local media capabilities](docs/development/local-media.md), and [toolchain foundation](docs/development/toolchain.md).
 
 ## Research
 

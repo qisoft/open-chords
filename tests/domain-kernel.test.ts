@@ -36,6 +36,7 @@ function projectWithOperation(operation: EditOperation): ParsedProject {
   const project = structuredClone(parseProjectContract(readGoldenProject()));
   const layer = project.editLayers[0];
   if (layer === undefined) throw new Error("Golden fixture Edit Layer is missing");
+  if (project.activeView === null) throw new Error("Golden fixture Active View is missing");
   layer.transactions.push({
     id: "transaction_projection",
     operations: [operation],
@@ -46,9 +47,36 @@ function projectWithOperation(operation: EditOperation): ParsedProject {
 }
 
 describe("canonical domain kernel", () => {
+  it("accepts a Project before analysis without fabricating a Revision or musical assertion", () => {
+    const envelope = ProjectEnvelopeSchema.parse(
+      readFixture("valid/unanalyzed-project-envelope.json"),
+    );
+    const project = parseProjectContract(envelope.payload);
+    expect(project).toMatchObject({
+      activeView: null,
+      analysisRevisions: [],
+      editLayers: [],
+    });
+    expect(() => materializeEffectiveTimeline(project)).toThrow(/no Analysis Revision/i);
+
+    const invalid = structuredClone(project);
+    const revision = structuredClone(readGoldenEnvelope().payload.analysisRevisions[0]!);
+    revision.projectId = project.id;
+    revision.supportClaimIds = [];
+    invalid.analysisRevisions.push(revision);
+    expect(() => parseProjectContract(invalid)).toThrow(/without an Active View/i);
+
+    const invalidClaims = structuredClone(project);
+    invalidClaims.supportClaims.push(readGoldenEnvelope().payload.supportClaims[0]!);
+    expect(() => parseProjectContract(invalidClaims)).toThrow(
+      /without an Active View.*Support Claims/i,
+    );
+  });
+
   it("parses the golden Project contract and materializes its explicitly selected stale revision", () => {
     const project = parseProjectContract(readGoldenProject());
     const effective = materializeEffectiveTimeline(project);
+    if (project.activeView === null) throw new Error("Golden fixture Active View is missing");
     expect(project.activeView.analysisRevisionId).toBe("revision_original");
     expect(project.analysisRevisions.at(-1)?.id).toBe("revision_reviewable");
     expect(effective.chordEvents.map((event) => event.value.kind)).toEqual([
@@ -57,7 +85,10 @@ describe("canonical domain kernel", () => {
       "no_chord",
       "chord",
     ]);
-    expect(effective.chordEvents[0]?.value).toMatchObject({ quality: "minor7", root: "A" });
+    expect(effective.chordEvents[0]?.value).toMatchObject({
+      quality: "minor7",
+      root: "A",
+    });
   });
 
   it("serializes independent of object insertion order", () => {
@@ -143,6 +174,7 @@ describe("canonical domain kernel", () => {
 
   it("projects only the selected committed Edit Layer history position without mutating machine output", () => {
     const input = structuredClone(parseProjectContract(readGoldenProject()));
+    if (input.activeView === null) throw new Error("Golden fixture Active View is missing");
     input.activeView.editHistoryPosition = 1;
     const project = parseProjectContract(input);
     const effective = materializeEffectiveTimeline(project);
@@ -196,6 +228,7 @@ describe("canonical domain kernel", () => {
         parentTransactionId: null,
       },
     );
+    if (input.activeView === null) throw new Error("Golden fixture Active View is missing");
     input.activeView.editHistoryPosition = 3;
     expect(
       materializeEffectiveTimeline(parseProjectContract(input)).chordEvents[0]?.value,
@@ -204,7 +237,11 @@ describe("canonical domain kernel", () => {
 
   it("projects committed Beat, Bar/meter, and lyric timing operations", () => {
     const beat = materializeEffectiveTimeline(
-      projectWithOperation({ atSample: 17000, beatId: "beat_three_2", type: "move_beat" }),
+      projectWithOperation({
+        atSample: 17000,
+        beatId: "beat_three_2",
+        type: "move_beat",
+      }),
     );
     expect(beat.bars[1]?.beats[1]?.atSample).toBe(17000);
 
@@ -253,7 +290,11 @@ describe("canonical domain kernel", () => {
       projectWithOperation({
         alignmentId: "alignment_repeated",
         timing: {
-          assertion: { evidence: [], reasonCodes: ["user_authored"], state: "asserted" },
+          assertion: {
+            evidence: [],
+            reasonCodes: ["user_authored"],
+            state: "asserted",
+          },
           endSample: 5000,
           startSample: 3000,
           state: "matched",
@@ -273,7 +314,11 @@ describe("canonical domain kernel", () => {
         alignmentId: "alignment_repeated",
         lineId: "line_second",
         timing: {
-          assertion: { evidence: [], reasonCodes: ["user_authored"], state: "asserted" },
+          assertion: {
+            evidence: [],
+            reasonCodes: ["user_authored"],
+            state: "asserted",
+          },
           endSample: 29000,
           startSample: 21000,
           state: "matched",
@@ -330,7 +375,10 @@ describe("canonical domain kernel", () => {
         type: "merge_bars",
       }),
     );
-    expect(merged.bars[0]).toMatchObject({ endSample: 32000, id: "bar_pickup" });
+    expect(merged.bars[0]).toMatchObject({
+      endSample: 32000,
+      id: "bar_pickup",
+    });
   });
 
   it.each(parseMutationCases(readFixture("invalid/cases.json")))(
@@ -382,7 +430,9 @@ describe("canonical domain kernel", () => {
     expect(parseContractEnvelope(newerMinor)).toMatchObject({
       compatibility: "read_only",
       envelope: {
-        extensions: { "org.openchords.fixture": { purpose: "golden cross-language corpus" } },
+        extensions: {
+          "org.openchords.fixture": { purpose: "golden cross-language corpus" },
+        },
       },
     });
     newerMinor.schemaVersion = "2.0";

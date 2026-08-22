@@ -317,6 +317,10 @@ def validate_domain(envelope: dict[str, Any]) -> None:
             except (KeyError, StopIteration) as error:
                 raise ContractError("Edit operation has an unstable reference") from error
     active = project["activeView"]
+    if active is None:
+        if project["supportClaims"] or project["analysisRevisions"] or project["editLayers"] or project["lyricsDocuments"] or project["lyricsAlignments"]:
+            raise ContractError("unanalyzed Project contains analysis-owned records")
+        return
     layer = layers.get(active["editLayerId"])
     if layer is None or active["analysisRevisionId"] not in revisions or layer["analysisRevisionId"] != active["analysisRevisionId"]:
         raise ContractError("invalid Active View reference")
@@ -393,7 +397,16 @@ def main() -> None:
         except ContractError:
             continue
         raise ContractError(f"Python accepted invalid fixture: {case['name']}")
-    print(f"Python contract fixtures: {valid_count} valid, {len(cases)} invalid")
+    invalid_count = len(cases)
+    for path in (ROOT / "invalid").glob("*envelope.json"):
+        invalid = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            validate_envelope(invalid, schema)
+        except ContractError:
+            invalid_count += 1
+            continue
+        raise ContractError(f"Python accepted invalid fixture: {path.name}")
+    print(f"Python contract fixtures: {valid_count} valid, {invalid_count} invalid")
 
 
 if __name__ == "__main__":

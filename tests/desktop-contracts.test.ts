@@ -105,4 +105,53 @@ describe("desktop IPC contracts", () => {
       }),
     ).toThrow(/too big|maximum|<=256/i);
   });
+
+  it("defines only opaque local-media capabilities and never accepts a renderer path", () => {
+    const base = {
+      generationId: "generation_fixture",
+      protocol: "open-chords/desktop-ipc",
+      protocolVersion: "1.0",
+      requestId: "request_media",
+    } as const;
+    const pick = { ...base, type: "media.pick_local_file" } as const;
+    const create = {
+      ...base,
+      capabilityId: "mediacapability_11111111111141118111111111111111",
+      endSourceSample: 48_000,
+      startSourceSample: 0,
+      type: "media.create_project",
+    } as const;
+
+    expect(DesktopCommandSchema.parse(pick)).toEqual(pick);
+    expect(DesktopCommandSchema.parse(create)).toEqual(create);
+    expect(() => DesktopCommandSchema.parse({ ...pick, path: "/private/recording.wav" })).toThrow(
+      /unrecognized|unknown/i,
+    );
+    expect(() => DesktopCommandSchema.parse({ ...pick, directory: true })).toThrow(
+      /unrecognized|unknown/i,
+    );
+    expect(
+      DesktopResponseSchema.parse({
+        ...base,
+        byteSize: 1_024,
+        capabilityId: create.capabilityId,
+        durationSamples: 48_000,
+        mimeType: "audio/wav",
+        sampleRate: 48_000,
+        type: "media.selected",
+      }),
+    ).toMatchObject({ type: "media.selected" });
+    expect(() =>
+      DesktopResponseSchema.parse({
+        ...base,
+        byteSize: 1_024,
+        capabilityId: create.capabilityId,
+        durationSamples: 48_000,
+        mimeType: "audio/wav",
+        path: "/private/recording.wav",
+        sampleRate: 48_000,
+        type: "media.selected",
+      }),
+    ).toThrow(/unrecognized|unknown/i);
+  });
 });

@@ -6,9 +6,11 @@ import {
   DESKTOP_IPC_VERSION,
   ProjectEventSchema,
 } from "@open-chords/contracts";
-import { app, type BrowserWindow, type WebContents } from "electron";
+import { app, dialog, type BrowserWindow, type WebContents } from "electron";
 
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
+import { LocalMediaService } from "./local-media.ts";
+import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
 import {
@@ -20,8 +22,10 @@ import { presentDesktopWindow } from "./window-lifecycle.ts";
 
 registerRendererScheme();
 
+const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
+let localMediaAuthority: LocalMediaService | null = null;
 const rendererContexts = new Map<
   number,
   {
@@ -33,6 +37,15 @@ const rendererContexts = new Map<
 if (!ownsSingleInstance) {
   app.quit();
 } else {
+  app.on(
+    "before-quit",
+    createMediaCleanupBeforeQuitHandler({
+      dispose: () => localMediaAuthority?.dispose() ?? Promise.resolve(),
+      exitWithFailure: () => app.exit(1),
+      quit: () => app.quit(),
+      timeoutMs: MEDIA_CLEANUP_TIMEOUT_MS,
+    }),
+  );
   app.on("web-contents-created", (_event, contents) => hardenWebContents(contents));
   app.on("second-instance", () => {
     void desktopReady.then(() => presentDesktopWindow(getOrCreateWindow()));
@@ -49,8 +62,19 @@ if (!ownsSingleInstance) {
   const desktopReady = app
     .whenReady()
     .then(async () => {
-      installRendererProtocol(join(__dirname, "../renderer"));
       const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
+      const localMedia = new LocalMediaService({
+        library: projectLibrary,
+        pickFile: async () => {
+          const result = await dialog.showOpenDialog(getOrCreateWindow(), {
+            filters: [{ extensions: ["wav", "wave"], name: "Wave audio" }],
+            properties: ["openFile"],
+          });
+          return result.canceled || result.filePaths.length !== 1 ? null : result.filePaths[0]!;
+        },
+      });
+      localMediaAuthority = localMedia;
+      installRendererProtocol(join(__dirname, "../renderer"), localMedia);
       projectLibrary.subscribe(({ projectId, projectRevisionId, sequence }) => {
         const window = mainWindow;
         if (window === null || window.isDestroyed()) return;
@@ -70,6 +94,7 @@ if (!ownsSingleInstance) {
         );
       });
       installDesktopIpc(projectLibrary, {
+        mediaAuthority: localMedia,
         onSenderAction: (_action, sender) => replaceCompromisedRenderer(sender),
         rendererContextFor: (sender) => rendererContexts.get(sender.id) ?? null,
       });
@@ -85,6 +110,7 @@ function getOrCreateWindow() {
   if (mainWindow === null || mainWindow.isDestroyed()) {
     const generationId = `generation_${randomUUID().replaceAll("-", "")}`;
     const window = createDesktopWindow(generationId);
+    localMediaAuthority?.activateGeneration(generationId);
     mainWindow = window;
     const webContentsId = window.webContents.id;
     rendererContexts.set(webContentsId, {
@@ -95,7 +121,7 @@ function getOrCreateWindow() {
       },
     });
     window.webContents.once("destroyed", () => {
-      rendererContexts.delete(webContentsId);
+      revokeRendererGeneration(webContentsId);
     });
     window.once("closed", () => {
       if (mainWindow === window) mainWindow = null;
@@ -106,10 +132,18 @@ function getOrCreateWindow() {
 
 function replaceCompromisedRenderer(sender: WebContents): void {
   const isMainRenderer = mainWindow?.webContents === sender;
-  rendererContexts.delete(sender.id);
+  revokeRendererGeneration(sender.id);
   if (!sender.isDestroyed()) sender.close({ waitForBeforeUnload: false });
   if (isMainRenderer) {
     mainWindow = null;
     queueMicrotask(() => getOrCreateWindow());
+  }
+}
+
+function revokeRendererGeneration(webContentsId: number): void {
+  const context = rendererContexts.get(webContentsId);
+  rendererContexts.delete(webContentsId);
+  if (context !== undefined && localMediaAuthority !== null) {
+    void localMediaAuthority.revokeGeneration(context.generationId).catch(() => app.exit(1));
   }
 }

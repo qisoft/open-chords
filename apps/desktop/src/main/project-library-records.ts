@@ -105,6 +105,20 @@ export const SourceRecordSchema = z.strictObject({
   snapshots: z.array(SourceSnapshotSchema),
 });
 
+export function locatorMatchesSourceIdentity(
+  source: z.infer<typeof SourceRecordSchema>,
+  locator: z.infer<typeof SourceLocatorSchema>,
+): boolean {
+  return (
+    (source.identity.kind === "local_file" &&
+      locator.kind === "local_file" &&
+      source.identity.fingerprint === locator.fingerprint) ||
+    (source.identity.kind === "youtube" &&
+      locator.kind === "youtube" &&
+      source.identity.videoId === locator.videoId)
+  );
+}
+
 export const ExportReceiptSchema = z.strictObject({
   activeViewHash: Sha256Schema,
   createdAt: TimestampSchema,
@@ -150,14 +164,7 @@ export const ProjectOwnedRecordsSchema = z
         context,
       );
       for (const [locatorIndex, locator] of source.locators.entries()) {
-        const identityMatches =
-          (source.identity.kind === "local_file" &&
-            locator.kind === "local_file" &&
-            source.identity.fingerprint === locator.fingerprint) ||
-          (source.identity.kind === "youtube" &&
-            locator.kind === "youtube" &&
-            source.identity.videoId === locator.videoId);
-        if (!identityMatches) {
+        if (!locatorMatchesSourceIdentity(source, locator)) {
           context.addIssue({
             code: "custom",
             message: "Source Locator does not match Source identity",
