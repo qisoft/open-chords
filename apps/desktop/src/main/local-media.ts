@@ -474,36 +474,37 @@ export class LocalMediaService {
       )
       .toSorted((left, right) => Date.parse(right.verifiedAt) - Date.parse(left.verifiedAt));
     for (const locator of locators) {
+      let lease: VerifiedMediaLease;
       try {
-        const lease = await this.#verifyLocalWav(locator.path);
-        try {
-          const verified = lease.media;
-          if (verified.byteFingerprint !== source.identity.fingerprint) {
-            await this.#markLocatorUnavailable(source.id, locator);
-            continue;
-          }
-          const capabilityId = await this.#capabilities.replacePlayback(
-            input.generationId,
-            input.projectId,
-            lease,
-          );
-          return {
-            byteSize: verified.byteSize,
-            capabilityId,
-            endSourceSample: range.endSourceSample,
-            kind: "ready",
-            mimeType: verified.mimeType,
-            playbackUrl: `open-chords://app/media/${capabilityId}`,
-            projectId: input.projectId,
-            sampleRate: verified.sampleRate,
-            startSourceSample: range.startSourceSample,
-          };
-        } finally {
-          await lease.release();
-        }
-      } catch (error) {
-        if (error instanceof RevokedMediaGenerationError) throw error;
+        lease = await this.#verifyLocalWav(locator.path);
+      } catch {
         await this.#markLocatorUnavailable(source.id, locator);
+        continue;
+      }
+      try {
+        const verified = lease.media;
+        if (verified.byteFingerprint !== source.identity.fingerprint) {
+          await this.#markLocatorUnavailable(source.id, locator);
+          continue;
+        }
+        const capabilityId = await this.#capabilities.replacePlayback(
+          input.generationId,
+          input.projectId,
+          lease,
+        );
+        return {
+          byteSize: verified.byteSize,
+          capabilityId,
+          endSourceSample: range.endSourceSample,
+          kind: "ready",
+          mimeType: verified.mimeType,
+          playbackUrl: `open-chords://app/media/${capabilityId}`,
+          projectId: input.projectId,
+          sampleRate: verified.sampleRate,
+          startSourceSample: range.startSourceSample,
+        };
+      } finally {
+        await lease.release();
       }
     }
     return { kind: "unavailable", projectId: input.projectId, sourceId: source.id };

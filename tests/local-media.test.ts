@@ -716,6 +716,63 @@ describe("LocalMediaService", () => {
     await media.revokeGeneration("generation_fixture");
   });
 
+  it("does not invalidate a verified Locator when playback capability cleanup fails", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-cleanup-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-cleanup-source-");
+    const mediaPath = join(mediaRoot, "recording.wav");
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    const library = await openProjectLibrary({ stateRoot });
+    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const selected = await ingestion.pickLocalFile("generation_fixture");
+    if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
+    const created = await ingestion.createProject({
+      capabilityId: selected.capabilityId,
+      endSourceSample: 4,
+      generationId: "generation_fixture",
+      startSourceSample: 0,
+    });
+
+    let openedHandles = 0;
+    const playback = createMediaService({
+      fileSystem: {
+        ...nodeLocalMediaFileSystem,
+        open: async (path, flags) => {
+          const handle = await nodeLocalMediaFileSystem.open(path, flags);
+          openedHandles += 1;
+          const handleNumber = openedHandles;
+          return {
+            close: async () => {
+              await handle.close();
+              if (handleNumber === 1) throw new Error("Fixture capability cleanup failed");
+            },
+            read: (buffer, offset, length, position) =>
+              handle.read(buffer, offset, length, position),
+            stat: (options) => handle.stat(options),
+          };
+        },
+      },
+      library,
+      pickFile: async () => null,
+    });
+    await expect(
+      playback.openPlayback({
+        generationId: "generation_fixture",
+        projectId: created.projectId,
+      }),
+    ).resolves.toMatchObject({ kind: "ready" });
+    await expect(
+      playback.openPlayback({
+        generationId: "generation_fixture",
+        projectId: created.projectId,
+      }),
+    ).rejects.toThrow("Fixture capability cleanup failed");
+
+    expect((await library.readProject(created.projectId)).records.sources[0]?.locators).toEqual([
+      expect.objectContaining({ path: mediaPath, status: "available" }),
+    ]);
+    await playback.revokeGeneration("generation_fixture");
+  });
+
   it("reads only through its retained handle during a transient ancestor link swap", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-playback-link-state-");
     const mediaRoot = await temporaryDirectory("open-chords-local-media-playback-link-source-");
