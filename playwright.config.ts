@@ -7,4 +7,5 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
   timeout: 30_000,
+  workers: 1,
 });

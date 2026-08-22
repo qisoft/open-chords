@@ -9,6 +9,7 @@ import {
   OpenMediaPlaybackCommandSchema,
   PickLocalFileCommandSchema,
   ProjectEventSchema,
+  ProjectListCommandSchema,
   ProjectSnapshotCommandSchema,
   RelinkMediaSourceCommandSchema,
   ShellSecuritySnapshotCommandSchema,
@@ -21,6 +22,7 @@ import {
   type MediaRelinkResponse,
   type MediaSelectedResponse,
   type ProjectCommittedResponse,
+  type ProjectListResponse,
   type ProjectSnapshotResponse,
   type ShellSecuritySnapshotResponse,
 } from "@open-chords/contracts";
@@ -81,6 +83,19 @@ async function getProjectSnapshot(projectId: string) {
     command,
     (response): response is ProjectSnapshotResponse => response.type === "project.snapshot",
     "Unexpected project snapshot response",
+  );
+}
+
+async function listProjects() {
+  const command = ProjectListCommandSchema.parse({
+    ...envelope(),
+    type: "project.list",
+  });
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.projectList,
+    command,
+    (response): response is ProjectListResponse => response.type === "project.list",
+    "Unexpected Project list response",
   );
 }
 
@@ -214,6 +229,7 @@ const api: OpenChordsDesktopApi = {
       }
       return response;
     },
+    list: listProjects,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

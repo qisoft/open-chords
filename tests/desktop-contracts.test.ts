@@ -43,6 +43,7 @@ describe("desktop IPC contracts", () => {
       projectId: "project_fixture",
       type: "project.get_snapshot",
     };
+    const list = { ...base, type: "project.list" } as const;
     const mutation = {
       ...base,
       expectedProjectRevisionId: "projectrevision_current",
@@ -61,6 +62,7 @@ describe("desktop IPC contracts", () => {
       type: "project.commit_edit_transaction",
     };
 
+    expect(DesktopCommandSchema.parse(list)).toEqual(list);
     expect(DesktopCommandSchema.parse(snapshot)).toEqual(snapshot);
     expect(DesktopCommandSchema.parse(mutation)).toEqual(mutation);
     expect(() =>
@@ -104,6 +106,19 @@ describe("desktop IPC contracts", () => {
         type: "desktop.error",
       }),
     ).toThrow(/too big|maximum|<=256/i);
+    expect(
+      DesktopResponseSchema.parse({
+        ...base,
+        projects: [
+          {
+            compatibility: "writable",
+            projectId: "project_fixture",
+            projectRevisionId: "projectrevision_current",
+          },
+        ],
+        type: "project.list",
+      }),
+    ).toMatchObject({ projects: [{ projectId: "project_fixture" }], type: "project.list" });
   });
 
   it("defines only opaque local-media capabilities and never accepts a renderer path", () => {

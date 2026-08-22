@@ -87,6 +87,7 @@ function createAuthority(overrides: Partial<ProjectAuthority> = {}): ProjectAuth
   return {
     commitEditTransaction: async () => ({ projectRevisionId: "projectrevision_next" }),
     getSnapshot: async () => null,
+    listProjects: () => [],
     ...overrides,
   };
 }
@@ -123,6 +124,74 @@ function createMediaAuthority(overrides: Partial<LocalMediaAuthority> = {}): Loc
 }
 
 describe("DesktopCommandGateway", () => {
+  it("lists only active readable Projects through a bounded renderer capability", async () => {
+    const gateway = new DesktopCommandGateway(
+      createAuthority({
+        listProjects: () => [
+          {
+            compatibility: "writable",
+            projectId: "project_alpha",
+            projectRevisionId: "projectrevision_alpha",
+            status: "active",
+          },
+          { projectId: "project_damaged", status: "damaged" },
+          {
+            compatibility: "writable",
+            projectId: "project_trashed",
+            projectRevisionId: "projectrevision_trashed",
+            status: "trashed",
+          },
+        ],
+      }),
+    );
+
+    const result = await gateway.execute(
+      { ...commandEnvelope("request_project_list"), type: "project.list" },
+      sender,
+      "project.list",
+    );
+
+    expect(result.response).toMatchObject({
+      projects: [
+        {
+          compatibility: "writable",
+          projectId: "project_alpha",
+          projectRevisionId: "projectrevision_alpha",
+        },
+      ],
+      type: "project.list",
+    });
+  });
+
+  it("deterministically bounds a Project listing at the response contract limit", async () => {
+    const gateway = new DesktopCommandGateway(
+      createAuthority({
+        listProjects: () =>
+          Array.from({ length: 10_001 }, (_, index) => {
+            const suffix = String(10_000 - index).padStart(5, "0");
+            return {
+              compatibility: "writable" as const,
+              projectId: `project_${suffix}`,
+              projectRevisionId: `projectrevision_${suffix}`,
+              status: "active" as const,
+            };
+          }),
+      }),
+    );
+
+    const result = await gateway.execute(
+      { ...commandEnvelope("request_bounded_project_list"), type: "project.list" },
+      sender,
+      "project.list",
+    );
+
+    expect(result.response).toMatchObject({ type: "project.list" });
+    if (result.response.type !== "project.list") throw new Error("Project listing failed");
+    expect(result.response.projects).toHaveLength(10_000);
+    expect(result.response.projects[0]?.projectId).toBe("project_00000");
+    expect(result.response.projects.at(-1)?.projectId).toBe("project_09999");
+  });
+
   it("returns only an opaque media capability and rejects renderer-supplied paths", async () => {
     let pickerCalls = 0;
     const gateway = new DesktopCommandGateway(

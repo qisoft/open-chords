@@ -1,0 +1,507 @@
+import { Button } from "@base-ui/react/button";
+import { Tooltip } from "@base-ui/react/tooltip";
+import type {
+  MediaPlaybackResponse,
+  OpenChordsDesktopApi,
+  ProjectSnapshotResponse,
+} from "@open-chords/contracts";
+import { FolderOpen, Pause, Play, Repeat2, RotateCcw } from "lucide-react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+
+import { createPlaybackClock, type PlaybackClock } from "./playback-clock.ts";
+import { continueLoopAtBoundary, requestProjectPlayback } from "./workspace-playback.ts";
+import {
+  buildWorkspaceTimeline,
+  reconcileWorkspaceRegionState,
+  shouldRestoreRegionFocus,
+  type WorkspaceTimeline,
+  type WorkspaceTimelineRegion,
+} from "./workspace-timeline.ts";
+
+export function ProjectWorkspace({
+  api,
+  snapshot,
+}: {
+  api: OpenChordsDesktopApi;
+  snapshot: ProjectSnapshotResponse;
+}) {
+  const timeline = useMemo(() => buildWorkspaceTimeline(snapshot.project), [snapshot.project]);
+  const [playback, setPlayback] = useState<MediaPlaybackResponse | null>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [clock, setClock] = useState<PlaybackClock | null>(null);
+  const [selectedRegionId, setSelectedRegionId] = useState(timeline.regions[0]?.id ?? null);
+  const [loopRegionId, setLoopRegionId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const regionElements = useRef(new Map<string, HTMLButtonElement>());
+  const timelineOwnedFocus = useRef(false);
+  const regionState = reconcileWorkspaceRegionState(timeline.regions, {
+    loopRegionId,
+    selectedRegionId,
+  });
+
+  useEffect(() => {
+    document.title = `${snapshot.project.id} · Local Project · Open Chords`;
+    return () => {
+      document.title = "Open Chords";
+    };
+  }, [snapshot.project.id]);
+
+  useEffect(() => {
+    if (regionState.loopRegionId !== loopRegionId) setLoopRegionId(regionState.loopRegionId);
+    if (regionState.selectedRegionId !== selectedRegionId) {
+      setSelectedRegionId(regionState.selectedRegionId);
+      if (
+        regionState.selectedRegionId !== null &&
+        shouldRestoreRegionFocus(
+          timelineOwnedFocus.current,
+          selectedRegionId,
+          regionState.selectedRegionId,
+        )
+      ) {
+        regionElements.current.get(regionState.selectedRegionId)?.focus();
+      }
+    }
+  }, [loopRegionId, regionState.loopRegionId, regionState.selectedRegionId, selectedRegionId]);
+
+  useEffect(() => {
+    const audio = new Audio();
+    audio.preload = "metadata";
+    audioRef.current = audio;
+    return () => {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      audioRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    let current = true;
+    void requestProjectPlayback(api.media, snapshot.project.id).then((result) => {
+      if (!current) return undefined;
+      if (result.kind === "error") {
+        setPlaybackError(result.message);
+        return undefined;
+      }
+      const { response } = result;
+      if (response.type === "desktop.error") {
+        setPlaybackError(response.message);
+        return undefined;
+      }
+      setPlayback(response);
+      if (response.type === "media.source_unavailable") {
+        setPlaybackError("The verified Source is unavailable. Relink it to enable playback.");
+      }
+      return undefined;
+    });
+    return () => {
+      current = false;
+    };
+  }, [api, snapshot.project.id]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio === null || playback?.type !== "media.playback_ready") return undefined;
+    audio.src = playback.playbackUrl;
+    audio.currentTime = playback.startSourceSample / playback.sampleRate;
+    const nextClock = createPlaybackClock({
+      cancelFrame: cancelAnimationFrame,
+      durationSamples: playback.endSourceSample - playback.startSourceSample,
+      requestFrame: requestAnimationFrame,
+      sampleRate: playback.sampleRate,
+      source: audio,
+      startSourceSample: playback.startSourceSample,
+    });
+    setClock(nextClock);
+    return () => {
+      nextClock.dispose();
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      setClock(null);
+    };
+  }, [playback]);
+
+  useEffect(() => {
+    if (clock === null) return undefined;
+    let current = true;
+    const loop = timeline.regions.find(({ id }) => id === regionState.loopRegionId);
+    const unsubscribe = clock.subscribe(() => {
+      const { playing, positionSamples } = clock.getSnapshot();
+      if (loop !== undefined && positionSamples >= loop.endSample) {
+        const audio = audioRef.current;
+        if (audio === null) {
+          clock.seek(loop.startSample);
+          return;
+        }
+        void continueLoopAtBoundary(audio, loop.startSample, (nextPositionSamples) =>
+          clock.seek(nextPositionSamples),
+        ).then((message) => {
+          if (current && message !== null) setPlaybackError(message);
+          return undefined;
+        });
+        return;
+      }
+      if (loop === undefined && playing && positionSamples >= timeline.durationSamples) {
+        audioRef.current?.pause();
+      }
+    });
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+  }, [clock, regionState.loopRegionId, timeline.durationSamples, timeline.regions]);
+
+  const selectedRegion = timeline.regions.find(({ id }) => id === regionState.selectedRegionId);
+  const readyPlayback = playback?.type === "media.playback_ready" ? playback : null;
+
+  const selectRegion = (region: WorkspaceTimelineRegion) => {
+    setSelectedRegionId(region.id);
+    clock?.seek(region.startSample);
+  };
+
+  const selectAdjacent = (direction: -1 | 1) => {
+    const current = timeline.regions.findIndex(({ id }) => id === regionState.selectedRegionId);
+    const next =
+      timeline.regions[Math.max(0, Math.min(timeline.regions.length - 1, current + direction))];
+    if (next !== undefined) {
+      selectRegion(next);
+      regionElements.current.get(next.id)?.focus();
+    }
+  };
+
+  const togglePlayback = async () => {
+    const audio = audioRef.current;
+    if (audio === null || readyPlayback === null || clock === null) return;
+    if (!audio.paused) {
+      audio.pause();
+      return;
+    }
+    const loop = timeline.regions.find(({ id }) => id === regionState.loopRegionId);
+    if (loop !== undefined) {
+      const position = clock.getSnapshot().positionSamples;
+      if (position < loop.startSample || position >= loop.endSample) clock.seek(loop.startSample);
+    } else if (clock.getSnapshot().positionSamples >= timeline.durationSamples) {
+      clock.seek(0);
+    }
+    try {
+      await audio.play();
+      setPlaybackError(null);
+    } catch {
+      setPlaybackError("Playback could not start. Check the verified Source.");
+    }
+  };
+
+  return (
+    <main
+      className="workspace"
+      aria-labelledby="workspace-heading"
+      onFocusCapture={(event) => {
+        timelineOwnedFocus.current =
+          event.target instanceof Element && event.target.matches(".timeline-region");
+      }}
+      onPointerDownCapture={(event) => {
+        timelineOwnedFocus.current =
+          event.target instanceof Element && event.target.closest(".timeline-region") !== null;
+      }}
+    >
+      <header className="workspace-header">
+        <div>
+          <p className="eyebrow">Committed Project</p>
+          <h1 id="workspace-heading">Local Project</h1>
+          <p className="project-identity">{snapshot.project.id}</p>
+        </div>
+        <div className="project-facts" aria-label="Project facts">
+          <span>{formatDuration(timeline.durationSamples, snapshot.project.sampleRate)}</span>
+          <span>{snapshot.project.sampleRate.toLocaleString("en-US")} Hz</span>
+          <span>
+            {snapshot.project.activeView === null ? "Awaiting analysis" : "Analysis ready"}
+          </span>
+        </div>
+      </header>
+
+      <section className="timeline-section" aria-labelledby="timeline-heading">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Project Time</p>
+            <h2 id="timeline-heading">Musical timeline</h2>
+          </div>
+          <div className="timeline-legend" aria-label="Timeline state legend">
+            <span>
+              <i className="selection-key" />
+              Selected
+            </span>
+            <span>
+              <i className="loop-key" />
+              Loop
+            </span>
+          </div>
+        </div>
+        <div className="timeline-viewport">
+          <div className="fixed-playhead" aria-hidden="true" />
+          <TimelineMotion clock={clock} timeline={timeline}>
+            {timeline.regions.map((region) => (
+              <button
+                aria-label={`${region.label}. ${region.chordLabels.length === 0 ? "No chord assertions" : `Chords: ${region.chordLabels.join(", ")}`}`}
+                aria-pressed={regionState.selectedRegionId === region.id}
+                className="timeline-region"
+                data-kind={region.kind}
+                data-looped={regionState.loopRegionId === region.id ? "true" : undefined}
+                key={region.id}
+                onClick={() => selectRegion(region)}
+                onKeyDown={(event) => handleRegionKey(event, selectAdjacent)}
+                ref={(element) => {
+                  if (element === null) regionElements.current.delete(region.id);
+                  else regionElements.current.set(region.id, element);
+                }}
+                style={{
+                  flexBasis: `${String(((region.endSample - region.startSample) / timeline.durationSamples) * 100)}%`,
+                }}
+                tabIndex={regionState.selectedRegionId === region.id ? 0 : -1}
+                type="button"
+              >
+                <span className="region-name">{region.label}</span>
+                <span className="region-chords">
+                  {region.chordLabels.length === 0 ? "No analysis" : region.chordLabels.join(" · ")}
+                </span>
+              </button>
+            ))}
+          </TimelineMotion>
+        </div>
+
+        <div className="selection-actions" aria-label="Timeline selection actions">
+          <span>
+            Selection: <strong>{selectedRegion?.label ?? "None"}</strong>
+          </span>
+          <Button
+            className="secondary-button"
+            disabled={selectedRegion?.kind !== "bar"}
+            onClick={() => {
+              if (selectedRegion?.kind === "bar") setLoopRegionId(selectedRegion.id);
+            }}
+          >
+            <Repeat2 aria-hidden="true" size={16} />
+            Set loop from selection
+          </Button>
+          <Button
+            className="quiet-button"
+            disabled={regionState.loopRegionId === null}
+            onClick={() => setLoopRegionId(null)}
+          >
+            <RotateCcw aria-hidden="true" size={15} />
+            Clear loop
+          </Button>
+          <output className="loop-status">
+            Loop:{" "}
+            {timeline.regions.find(({ id }) => id === regionState.loopRegionId)?.label ?? "Off"}
+          </output>
+        </div>
+      </section>
+
+      <section className="content-section" aria-labelledby="content-heading">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Reference content</p>
+            <h2 id="content-heading">Lyrics and instrumental sections</h2>
+          </div>
+        </div>
+        <ProjectContent snapshot={snapshot} />
+      </section>
+
+      <footer className="transport" aria-label="Playback controls">
+        <PlaybackButton
+          clock={clock}
+          disabled={readyPlayback === null || clock === null}
+          onToggle={() => void togglePlayback()}
+        />
+        <PositionReadout clock={clock} sampleRate={snapshot.project.sampleRate} />
+        <span className="source-status" role={playbackError === null ? "status" : "alert"}>
+          {playbackError ??
+            (readyPlayback === null ? "Preparing verified Source…" : "Verified local playback")}
+        </span>
+      </footer>
+    </main>
+  );
+}
+
+function TimelineMotion({
+  children,
+  clock,
+  timeline,
+}: {
+  children: ReactNode;
+  clock: PlaybackClock | null;
+  timeline: WorkspaceTimeline;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const renderPosition = () => {
+      const position = clock?.getSnapshot().positionSamples ?? 0;
+      const percentage = (position / timeline.durationSamples) * 100;
+      const track = trackRef.current;
+      if (track === null) return;
+      track.dataset.positionSamples = String(position);
+      track.style.transform = `translateX(calc(50% - ${String(percentage)}%))`;
+    };
+    renderPosition();
+    return clock?.subscribe(renderPosition);
+  }, [clock, timeline.durationSamples]);
+  return (
+    <div className="timeline-track" ref={trackRef}>
+      {children}
+    </div>
+  );
+}
+
+function PlaybackButton({
+  clock,
+  disabled,
+  onToggle,
+}: {
+  clock: PlaybackClock | null;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  const playing = useClockPlaying(clock);
+  return (
+    <Tooltip.Provider>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          aria-label={playing ? "Pause" : "Play"}
+          className="play-button"
+          onClick={onToggle}
+          render={<Button disabled={disabled} />}
+        >
+          {playing ? <Pause aria-hidden="true" size={19} /> : <Play aria-hidden="true" size={19} />}
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Positioner sideOffset={8}>
+            <Tooltip.Popup className="control-tooltip" role="tooltip">
+              {playing ? "Pause" : "Play"}
+            </Tooltip.Popup>
+          </Tooltip.Positioner>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
+}
+
+function PositionReadout({
+  clock,
+  sampleRate,
+}: {
+  clock: PlaybackClock | null;
+  sampleRate: number;
+}) {
+  const elapsedSeconds = useClockElapsedSeconds(clock, sampleRate);
+  return (
+    <output aria-label="Current Project Time" aria-live="off" className="position-readout">
+      {formatElapsedSeconds(elapsedSeconds)}
+    </output>
+  );
+}
+
+function useClockPlaying(clock: PlaybackClock | null) {
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      clock?.subscribeSelection(({ playing }) => playing, listener) ?? emptySubscribe(),
+    [clock],
+  );
+  const getSnapshot = useCallback(() => clock?.getSnapshot().playing ?? false, [clock]);
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+function useClockElapsedSeconds(clock: PlaybackClock | null, sampleRate: number) {
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      clock?.subscribeSelection(
+        ({ positionSamples }) => Math.floor(positionSamples / sampleRate),
+        listener,
+      ) ?? emptySubscribe(),
+    [clock, sampleRate],
+  );
+  const getSnapshot = useCallback(
+    () => Math.floor((clock?.getSnapshot().positionSamples ?? 0) / sampleRate),
+    [clock, sampleRate],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+function ProjectContent({ snapshot }: { snapshot: ProjectSnapshotResponse }) {
+  const active = snapshot.project.activeView;
+  const lyricsDocument = snapshot.project.lyricsDocuments.find(
+    ({ id }) => id === active?.lyricsDocumentId,
+  );
+  if (lyricsDocument === undefined) {
+    return (
+      <div className="instrumental-message">
+        <strong>Instrumental or no Reference Lyrics</strong>
+        <p>The chord timeline remains available without fabricating lyrical content.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="lyrics-lines">
+      {lyricsDocument.lines.map((line) => (
+        <p key={line.id}>{lyricsDocument.text.slice(line.startOffset, line.endOffset)}</p>
+      ))}
+    </div>
+  );
+}
+
+function handleRegionKey(
+  event: KeyboardEvent<HTMLButtonElement>,
+  selectAdjacent: (direction: -1 | 1) => void,
+) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  selectAdjacent(event.key === "ArrowLeft" ? -1 : 1);
+}
+
+function formatDuration(samples: number, sampleRate: number): string {
+  return formatElapsedSeconds(samples / sampleRate);
+}
+
+function formatElapsedSeconds(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes)}:${Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+const emptySubscribe = () => () => undefined;
+
+export function EmptyWorkspace({
+  busy,
+  error,
+  onChoose,
+}: {
+  busy: boolean;
+  error: string | null;
+  onChoose: () => void;
+}) {
+  return (
+    <main className="empty-workspace" aria-labelledby="empty-heading">
+      <div className="brand-mark" aria-hidden="true">
+        OC
+      </div>
+      <p className="eyebrow">Local-first workspace</p>
+      <h1 id="empty-heading">Open a local recording</h1>
+      <p>Select a WAV recording to create a durable Project and verify playback locally.</p>
+      <Button className="primary-button" disabled={busy} onClick={onChoose}>
+        <FolderOpen aria-hidden="true" size={18} />
+        {busy ? "Creating Project…" : "Choose local recording"}
+      </Button>
+      {error === null ? null : <p role="alert">{error}</p>}
+    </main>
+  );
+}

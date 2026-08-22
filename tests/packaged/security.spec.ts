@@ -162,7 +162,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },
       externalFetch: "rejected",
-      heading: "Open Chords foundation",
+      heading: "Local Project",
       mediaKeys: ["createProject", "openPlayback", "pickLocalFile", "relinkSource"],
       missingProject: { code: "project_not_found", type: "desktop.error" },
       nodeGlobals: {
@@ -177,14 +177,21 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
         error: null,
         pathKeyExposed: false,
         played: true,
+        playAligned: true,
         seeked: true,
         status: 206,
         type: "media.playback_ready",
         urlProtocol: "open-chords:",
+        workspacePlayed: true,
+        timelineMoved: true,
       },
       permissionDenied: true,
       popupDenied: true,
-      projectKeys: ["commitEditTransaction", "getSnapshot", "subscribe"],
+      projectKeys: ["commitEditTransaction", "getSnapshot", "list", "subscribe"],
+      projectList: {
+        projects: [expect.objectContaining({ projectId: packagedProjectId })],
+        type: "project.list",
+      },
       security: {
         security: {
           contextIsolation: true,
@@ -291,10 +298,13 @@ const OfflinePlaybackSchema = z.object({
   error: z.string().nullable(),
   pathKeyExposed: z.boolean(),
   played: z.boolean(),
+  playAligned: z.boolean(),
   seeked: z.boolean(),
   status: z.number().int(),
   type: z.string(),
   urlProtocol: z.string(),
+  workspacePlayed: z.boolean(),
+  timelineMoved: z.boolean(),
 });
 
 const RendererSnapshotSchema = z.object({
@@ -319,6 +329,10 @@ const RendererSnapshotSchema = z.object({
   permissionDenied: z.literal(true),
   popupDenied: z.literal(true),
   projectKeys: z.array(z.string()),
+  projectList: z.object({
+    projects: z.array(z.object({ projectId: z.string() })),
+    type: z.literal("project.list"),
+  }),
   resourceUrls: z.array(z.string()),
   security: z.object({
     security: z.object({
@@ -440,6 +454,10 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         window.openChords.project.getSnapshot("project_missing"),
         new Promise((_, reject) => setTimeout(() => reject(new Error("Project IPC timed out")), 1000)),
       ]);
+      const projectList = await Promise.race([
+        window.openChords.project.list(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Project list IPC timed out")), 1000)),
+      ]);
       const security = await Promise.race([
         window.openChords.shell.getSecuritySnapshot(),
         new Promise((_, reject) => setTimeout(() => reject(new Error("Shell IPC timed out")), 1000)),
@@ -460,6 +478,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       permissionDenied,
       popupDenied,
       projectKeys: Object.keys(window.openChords.project).sort(),
+      projectList,
       resourceUrls: Array.from(document.querySelectorAll("script[src], link[rel=stylesheet][href]"))
         .map((element) => element instanceof HTMLScriptElement ? element.src : element.href)
         .filter((url) => url.startsWith("open-chords://")),
@@ -648,8 +667,51 @@ async function evaluatePackagedMedia(
     let body = "";
     let error = null;
     let played = false;
+    let playAligned = false;
     let seeked = false;
+    let workspacePlayed = false;
+    let timelineMoved = false;
     try {
+      const waitFor = async (read, message) => {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const value = read();
+          if (value) return value;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        throw new Error(message);
+      };
+      const playButton = await waitFor(
+        () => {
+          const candidate = document.querySelector('button[aria-label="Play"]');
+          return candidate instanceof HTMLButtonElement && !candidate.disabled ? candidate : null;
+        },
+        "workspace Play control timed out",
+      );
+      const track = document.querySelector(".timeline-track");
+      const playhead = document.querySelector(".fixed-playhead");
+      if (!(playButton instanceof HTMLElement) || !(track instanceof HTMLElement) || !(playhead instanceof HTMLElement)) {
+        throw new Error("workspace playback geometry is unavailable");
+      }
+      const playBounds = playButton.getBoundingClientRect();
+      const playheadBounds = playhead.getBoundingClientRect();
+      playAligned = Math.abs(
+        playBounds.left + playBounds.width / 2 - (playheadBounds.left + playheadBounds.width / 2),
+      ) < 1;
+      const transformBeforePlay = track.style.transform;
+      playButton.click();
+      await waitFor(
+        () => document.querySelector('button[aria-label="Pause"]'),
+        "workspace playback did not start",
+      );
+      workspacePlayed = true;
+      await waitFor(
+        () => track.style.transform !== transformBeforePlay,
+        "workspace timeline did not move",
+      );
+      timelineMoved = true;
+      document.querySelector('button[aria-label="Pause"]')?.click();
+
       playback = await Promise.race([
         window.openChords.media.openPlayback(${projectIdLiteral}),
         new Promise((_, reject) => setTimeout(() => reject(new Error("openPlayback timed out")), 3000)),
@@ -697,12 +759,15 @@ async function evaluatePackagedMedia(
       error,
       pathKeyExposed: Object.keys(playback).some((key) => /path|directory/i.test(key)),
       played,
+      playAligned,
       seeked,
       status: response?.status ?? 0,
       type: playback.type,
       urlProtocol: playback.type === "media.playback_ready"
         ? new URL(playback.playbackUrl).protocol
         : "",
+      workspacePlayed,
+      timelineMoved,
     };
   })()`;
 
