@@ -188,6 +188,37 @@ describe("LocalMediaService", () => {
     expect(controlled.closeCalls).toBe(2);
   });
 
+  it("drains blocked verification before terminal disposal and rejects later operations", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-dispose-race-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-dispose-race-source-");
+    const mediaPath = join(mediaRoot, "recording.wav");
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    const controlled = controlledReadFileSystem();
+    const verificationStarted = controlled.block();
+    const media = createMediaService({
+      fileSystem: controlled.fileSystem,
+      library: await openProjectLibrary({ stateRoot }),
+      pickFile: async () => mediaPath,
+    });
+
+    const selection = media.pickLocalFile("generation_fixture");
+    await verificationStarted;
+    let disposalFinished = false;
+    const disposal = media.dispose().then(() => {
+      disposalFinished = true;
+      return undefined;
+    });
+    await Promise.resolve();
+    expect(disposalFinished).toBe(false);
+    controlled.release();
+    await expect(selection).rejects.toThrow(/disposed/);
+    await disposal;
+    expect(disposalFinished).toBe(true);
+    expect(controlled.closeCalls).toBe(1);
+    await expect(media.pickLocalFile("generation_fixture")).rejects.toThrow(/disposed/);
+    expect(() => media.activateGeneration("generation_after_dispose")).toThrow(/disposed/);
+  });
+
   it("cannot publish a Project after revocation during selection revalidation", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-create-revoke-state-");
     const mediaRoot = await temporaryDirectory("open-chords-local-media-create-revoke-source-");

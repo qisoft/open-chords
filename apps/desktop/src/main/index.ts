@@ -21,6 +21,7 @@ import { presentDesktopWindow } from "./window-lifecycle.ts";
 
 registerRendererScheme();
 
+const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let localMediaAuthority: LocalMediaService | null = null;
@@ -41,9 +42,24 @@ if (!ownsSingleInstance) {
     event.preventDefault();
     mediaCleanupStarted = true;
     const cleanup = localMediaAuthority?.dispose() ?? Promise.resolve();
-    void cleanup.then(
-      () => app.quit(),
-      () => app.exit(1),
+    let cleanupTimeout: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      cleanupTimeout = setTimeout(
+        () => reject(new Error("Local media cleanup timed out")),
+        MEDIA_CLEANUP_TIMEOUT_MS,
+      );
+    });
+    void Promise.race([cleanup, timeout]).then(
+      () => {
+        clearTimeout(cleanupTimeout);
+        app.quit();
+        return undefined;
+      },
+      () => {
+        clearTimeout(cleanupTimeout);
+        app.exit(1);
+        return undefined;
+      },
     );
   });
   app.on("web-contents-created", (_event, contents) => hardenWebContents(contents));

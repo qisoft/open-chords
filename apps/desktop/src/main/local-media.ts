@@ -141,12 +141,16 @@ class MediaCapabilityRegistry {
   readonly #generationQueues = new Map<string, Promise<void>>();
   readonly #playback = new Map<string, PlaybackCapabilityEntry>();
   readonly #selection = new Map<string, SelectionCapabilityEntry>();
+  readonly #serviceOperations = new Set<Promise<void>>();
+  #disposePromise: Promise<void> | undefined;
+  #disposed = false;
 
   constructor(cleanup: MediaHandleCleanup) {
     this.#cleanup = cleanup;
   }
 
   activateGeneration(generationId: string): void {
+    this.#assertNotDisposed();
     if (this.#activeGenerations.has(generationId)) {
       throw new Error("Local media generation is already active");
     }
@@ -154,6 +158,7 @@ class MediaCapabilityRegistry {
   }
 
   beginOperation(generationId: string): () => void {
+    this.#assertNotDisposed();
     this.#assertGenerationActive(generationId);
     let finish!: () => void;
     const completed = new Promise<void>((completeOperation) => {
@@ -162,12 +167,30 @@ class MediaCapabilityRegistry {
     const operations = this.#activeOperations.get(generationId) ?? new Set();
     operations.add(completed);
     this.#activeOperations.set(generationId, operations);
+    this.#serviceOperations.add(completed);
     let finished = false;
     return () => {
       if (finished) return;
       finished = true;
       operations.delete(completed);
       if (operations.size === 0) this.#activeOperations.delete(generationId);
+      this.#serviceOperations.delete(completed);
+      finish();
+    };
+  }
+
+  beginServiceOperation(): () => void {
+    this.#assertNotDisposed();
+    let finish!: () => void;
+    const completed = new Promise<void>((completeOperation) => {
+      finish = completeOperation;
+    });
+    this.#serviceOperations.add(completed);
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      this.#serviceOperations.delete(completed);
       finish();
     };
   }
@@ -242,6 +265,7 @@ class MediaCapabilityRegistry {
   }
 
   async revokeGeneration(generationId: string): Promise<void> {
+    if (this.#disposed) return this.#disposePromise;
     this.#activeGenerations.delete(generationId);
     await Promise.all([...(this.#activeOperations.get(generationId) ?? [])]);
     await this.#runGenerationTask(generationId, false, async () => {
@@ -261,8 +285,29 @@ class MediaCapabilityRegistry {
     });
   }
 
+  dispose(): Promise<void> {
+    if (this.#disposePromise !== undefined) return this.#disposePromise;
+    this.#disposed = true;
+    this.#activeGenerations.clear();
+    this.#disposePromise = this.#drainForDisposal();
+    return this.#disposePromise;
+  }
+
   #assertGenerationActive(generationId: string): void {
+    this.#assertNotDisposed();
     if (!this.#activeGenerations.has(generationId)) throw new RevokedMediaGenerationError();
+  }
+
+  #assertNotDisposed(): void {
+    if (this.#disposed) throw new Error("Local media service is disposed");
+  }
+
+  async #drainForDisposal(): Promise<void> {
+    await Promise.all([...this.#serviceOperations]);
+    await Promise.all([...this.#generationQueues.values()]);
+    this.#selection.clear();
+    this.#playback.clear();
+    await this.#cleanup.releaseAllRetained();
   }
 
   async #runGenerationTask<T>(
@@ -419,7 +464,7 @@ export class LocalMediaService {
   }
 
   dispose(): Promise<void> {
-    return this.#cleanup.releaseAllRetained();
+    return this.#capabilities.dispose();
   }
 
   pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
@@ -664,7 +709,21 @@ export class LocalMediaService {
     return { kind: "unavailable", projectId: input.projectId, sourceId: source.id };
   }
 
-  async readPlaybackRange(input: {
+  readPlaybackRange(input: {
+    capabilityId: string;
+    endByteExclusive?: number;
+    startByte: number;
+  }): Promise<{
+    byteSize: number;
+    bytes: Buffer;
+    endByteExclusive: number;
+    mimeType: string;
+    startByte: number;
+  }> {
+    return this.#runServiceOperation(() => this.#readPlaybackRange(input));
+  }
+
+  async #readPlaybackRange(input: {
     capabilityId: string;
     endByteExclusive?: number;
     startByte: number;
@@ -701,7 +760,11 @@ export class LocalMediaService {
     };
   }
 
-  async cacheProjectRange(projectId: string): Promise<void> {
+  cacheProjectRange(projectId: string): Promise<void> {
+    return this.#runServiceOperation(() => this.#cacheProjectRange(projectId));
+  }
+
+  async #cacheProjectRange(projectId: string): Promise<void> {
     if (this.#rangeCache === undefined)
       throw new Error("Local media range cache is not configured");
     const project = await this.#library.readProject(projectId);
@@ -770,6 +833,15 @@ export class LocalMediaService {
 
   async #runGenerationOperation<T>(generationId: string, operation: () => Promise<T>): Promise<T> {
     const finish = this.#capabilities.beginOperation(generationId);
+    try {
+      return await operation();
+    } finally {
+      finish();
+    }
+  }
+
+  async #runServiceOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const finish = this.#capabilities.beginServiceOperation();
     try {
       return await operation();
     } finally {
