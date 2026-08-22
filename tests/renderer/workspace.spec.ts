@@ -26,9 +26,9 @@ test("a durable local-media Project reopens into the centered workspace and play
   if (selected.kind !== "selected") throw new Error("Local fixture selection failed");
   await media.createProject({
     capabilityId: selected.capabilityId,
-    endSourceSample: selected.durationSamples,
+    endSourceSample: 96_000,
     generationId: "generation_seed",
-    startSourceSample: 0,
+    startSourceSample: 48_000,
   });
   await media.dispose();
 
@@ -59,6 +59,14 @@ test("a durable local-media Project reopens into the centered workspace and play
     await play.click();
     await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
     await expect.poll(() => page.locator(".timeline-track").getAttribute("style")).not.toBe(before);
+    await expect(page.getByRole("button", { name: "Play" })).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole("status", { name: "Current Project Time" })).toHaveText("0:01");
+    const endPosition = await page.locator(".timeline-track").getAttribute("style");
+    await page.getByRole("button", { name: "Play" }).click();
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+    await expect
+      .poll(() => page.locator(".timeline-track").getAttribute("style"))
+      .not.toBe(endPosition);
     await page.getByRole("button", { name: "Pause" }).click();
     await page.evaluate(() => {
       Object.defineProperty(HTMLMediaElement.prototype, "play", {
@@ -120,10 +128,14 @@ test("selection and persistent loop remain independent in the deterministic fixt
       throw new Error("Timeline region geometry is unavailable");
     }
     expect(pickupBounds.width / completeBounds.width).toBeCloseTo(1 / 3, 2);
+    await expect(pickup).toHaveAttribute("tabindex", "0");
+    await expect(complete).toHaveAttribute("tabindex", "-1");
     await pickup.focus();
     await pickup.press("ArrowRight");
     await expect(complete).toHaveAttribute("aria-pressed", "true");
     await expect(complete).toBeFocused();
+    await expect(pickup).toHaveAttribute("tabindex", "-1");
+    await expect(complete).toHaveAttribute("tabindex", "0");
     await page.getByRole("button", { name: "Set loop from selection" }).click();
     await pickup.click();
 

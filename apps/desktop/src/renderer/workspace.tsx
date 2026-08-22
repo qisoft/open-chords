@@ -20,6 +20,7 @@ import {
 import { createPlaybackClock, type PlaybackClock } from "./playback-clock.ts";
 import {
   buildWorkspaceTimeline,
+  reconcileWorkspaceRegionState,
   type WorkspaceTimeline,
   type WorkspaceTimelineRegion,
 } from "./workspace-timeline.ts";
@@ -46,6 +47,20 @@ export function ProjectWorkspace({
       document.title = "Open Chords";
     };
   }, [snapshot.project.id]);
+
+  useEffect(() => {
+    const next = reconcileWorkspaceRegionState(timeline.regions, {
+      loopRegionId,
+      selectedRegionId,
+    });
+    if (next.loopRegionId !== loopRegionId) setLoopRegionId(next.loopRegionId);
+    if (next.selectedRegionId !== selectedRegionId) {
+      setSelectedRegionId(next.selectedRegionId);
+      if (next.selectedRegionId !== null) {
+        regionElements.current.get(next.selectedRegionId)?.focus();
+      }
+    }
+  }, [loopRegionId, selectedRegionId, timeline.regions]);
 
   useEffect(() => {
     const audio = new Audio();
@@ -102,14 +117,19 @@ export function ProjectWorkspace({
   }, [playback]);
 
   useEffect(() => {
-    if (clock === null || loopRegionId === null) return undefined;
+    if (clock === null) return undefined;
     const loop = timeline.regions.find(({ id }) => id === loopRegionId);
-    if (loop === undefined) return undefined;
     return clock.subscribe(() => {
-      const position = clock.getSnapshot().positionSamples;
-      if (position >= loop.endSample) clock.seek(loop.startSample);
+      const { playing, positionSamples } = clock.getSnapshot();
+      if (loop !== undefined && positionSamples >= loop.endSample) {
+        clock.seek(loop.startSample);
+        return;
+      }
+      if (loop === undefined && playing && positionSamples >= timeline.durationSamples) {
+        audioRef.current?.pause();
+      }
     });
-  }, [clock, loopRegionId, timeline.regions]);
+  }, [clock, loopRegionId, timeline.durationSamples, timeline.regions]);
 
   const selectedRegion = timeline.regions.find(({ id }) => id === selectedRegionId);
   const readyPlayback = playback?.type === "media.playback_ready" ? playback : null;
@@ -140,6 +160,8 @@ export function ProjectWorkspace({
     if (loop !== undefined) {
       const position = clock.getSnapshot().positionSamples;
       if (position < loop.startSample || position >= loop.endSample) clock.seek(loop.startSample);
+    } else if (clock.getSnapshot().positionSamples >= timeline.durationSamples) {
+      clock.seek(0);
     }
     try {
       await audio.play();
@@ -203,6 +225,7 @@ export function ProjectWorkspace({
                 style={{
                   flexBasis: `${String(((region.endSample - region.startSample) / timeline.durationSamples) * 100)}%`,
                 }}
+                tabIndex={selectedRegionId === region.id ? 0 : -1}
                 type="button"
               >
                 <span className="region-name">{region.label}</span>
@@ -373,10 +396,10 @@ function useClockElapsedSeconds(clock: PlaybackClock | null, sampleRate: number)
 
 function ProjectContent({ snapshot }: { snapshot: ProjectSnapshotResponse }) {
   const active = snapshot.project.activeView;
-  const document = snapshot.project.lyricsDocuments.find(
+  const lyricsDocument = snapshot.project.lyricsDocuments.find(
     ({ id }) => id === active?.lyricsDocumentId,
   );
-  if (document === undefined) {
+  if (lyricsDocument === undefined) {
     return (
       <div className="instrumental-message">
         <strong>Instrumental or no Reference Lyrics</strong>
@@ -386,8 +409,8 @@ function ProjectContent({ snapshot }: { snapshot: ProjectSnapshotResponse }) {
   }
   return (
     <div className="lyrics-lines">
-      {document.lines.map((line) => (
-        <p key={line.id}>{document.text.slice(line.startOffset, line.endOffset)}</p>
+      {lyricsDocument.lines.map((line) => (
+        <p key={line.id}>{lyricsDocument.text.slice(line.startOffset, line.endOffset)}</p>
       ))}
     </div>
   );

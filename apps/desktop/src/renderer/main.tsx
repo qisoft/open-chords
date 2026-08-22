@@ -1,7 +1,10 @@
 import { StrictMode, useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
-import { createCommittedProjectStore } from "./committed-project-store.ts";
+import {
+  createCommittedProjectStore,
+  openFirstCommittedProject,
+} from "./committed-project-store.ts";
 
 import "./styles.css";
 import { EmptyWorkspace, ProjectWorkspace } from "./workspace.tsx";
@@ -26,14 +29,9 @@ function App() {
   useEffect(() => {
     if (api === undefined || projectStore === null) return undefined;
     let current = true;
-    void api.project.list().then((response) => {
+    void openFirstCommittedProject(api.project, projectStore).then((message) => {
       if (!current) return undefined;
-      if (response.type === "desktop.error") {
-        setError(response.message);
-        return undefined;
-      }
-      const first = response.projects[0];
-      if (first !== undefined) void projectStore.open(first.projectId);
+      if (message !== null) setError(message);
       return undefined;
     });
     return () => {

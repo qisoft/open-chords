@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { parseProjectContract } from "@open-chords/domain";
 import { describe, expect, it } from "vitest";
 
-import { buildWorkspaceTimeline } from "../apps/desktop/src/renderer/workspace-timeline.ts";
+import {
+  buildWorkspaceTimeline,
+  reconcileWorkspaceRegionState,
+} from "../apps/desktop/src/renderer/workspace-timeline.ts";
 
 describe("workspace timeline projection", () => {
   it("projects the committed Active View into deterministic semantic regions", () => {
@@ -61,5 +64,25 @@ describe("workspace timeline projection", () => {
         startSample: 0,
       },
     ]);
+  });
+
+  it("reconciles stale selection and loop identities after a committed revision changes", () => {
+    const regions = [
+      {
+        chordLabels: [],
+        endSample: 24_000,
+        id: "bar_reanalyzed",
+        kind: "bar" as const,
+        label: "Complete, 4/4",
+        startSample: 0,
+      },
+    ];
+
+    expect(
+      reconcileWorkspaceRegionState(regions, {
+        loopRegionId: "bar_previous_revision",
+        selectedRegionId: "bar_previous_revision",
+      }),
+    ).toEqual({ loopRegionId: null, selectedRegionId: "bar_reanalyzed" });
   });
 });

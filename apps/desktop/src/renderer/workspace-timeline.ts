@@ -14,6 +14,24 @@ export type WorkspaceTimeline = {
   regions: WorkspaceTimelineRegion[];
 };
 
+export type WorkspaceRegionState = {
+  loopRegionId: string | null;
+  selectedRegionId: string | null;
+};
+
+export function reconcileWorkspaceRegionState(
+  regions: readonly WorkspaceTimelineRegion[],
+  state: WorkspaceRegionState,
+): WorkspaceRegionState {
+  const selectedRegionId = regions.some(({ id }) => id === state.selectedRegionId)
+    ? state.selectedRegionId
+    : (regions[0]?.id ?? null);
+  const loopRegionId = regions.some(({ id, kind }) => id === state.loopRegionId && kind === "bar")
+    ? state.loopRegionId
+    : null;
+  return { loopRegionId, selectedRegionId };
+}
+
 export function buildWorkspaceTimeline(project: ProjectContract): WorkspaceTimeline {
   if (project.activeView === null) {
     return {

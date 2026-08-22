@@ -7,6 +7,7 @@ export type CommittedProjectState =
   | { kind: "ready"; snapshot: ProjectSnapshotResponse };
 
 type ProjectReadApi = Pick<OpenChordsDesktopApi["project"], "getSnapshot" | "subscribe">;
+type ProjectListApi = Pick<OpenChordsDesktopApi["project"], "list">;
 
 const idleState: CommittedProjectState = { kind: "idle" };
 
@@ -26,7 +27,15 @@ export function createCommittedProjectStore(api: ProjectReadApi) {
     const request = ++requestSequence;
     activeProjectId = projectId;
     if (showLoading) publish({ kind: "loading", projectId });
-    const response = await api.getSnapshot(projectId);
+    let response: Awaited<ReturnType<ProjectReadApi["getSnapshot"]>>;
+    try {
+      response = await api.getSnapshot(projectId);
+    } catch {
+      if (request === requestSequence && activeProjectId === projectId) {
+        publish({ kind: "error", message: "Project read failed", projectId });
+      }
+      return;
+    }
     if (request !== requestSequence || activeProjectId !== projectId) return;
     publish(
       response.type === "project.snapshot"
@@ -66,3 +75,18 @@ export function createCommittedProjectStore(api: ProjectReadApi) {
 }
 
 export type CommittedProjectStore = ReturnType<typeof createCommittedProjectStore>;
+
+export async function openFirstCommittedProject(
+  api: ProjectListApi,
+  store: Pick<CommittedProjectStore, "open">,
+): Promise<string | null> {
+  try {
+    const response = await api.list();
+    if (response.type === "desktop.error") return response.message;
+    const first = response.projects[0];
+    if (first !== undefined) await store.open(first.projectId);
+    return null;
+  } catch {
+    return "Project listing failed";
+  }
+}
