@@ -3,7 +3,12 @@ import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ProjectEnvelopeSchema } from "@open-chords/contracts";
+import {
+  DESKTOP_IPC_CHANNELS,
+  DesktopResponseSchema,
+  ProjectEnvelopeSchema,
+  type ProjectSnapshotResponse,
+} from "@open-chords/contracts";
 import { monoPcmWav } from "@open-chords/testkit/media";
 import { _electron as electron, expect, test } from "@playwright/test";
 
@@ -143,6 +148,41 @@ test("selection and persistent loop remain independent in the deterministic fixt
     await expect(complete).toHaveAttribute("data-looped", "true");
     await expect(page.locator(".loop-status")).toContainText("Loop: Complete, 3/4");
 
+    const projectId = (await page.locator(".project-identity").textContent())?.trim();
+    if (projectId === undefined || projectId.length === 0) throw new Error("Project ID is missing");
+    const currentSnapshot = await page.evaluate(
+      async (id) => window.openChords?.project.getSnapshot(id),
+      projectId,
+    );
+    if (currentSnapshot?.type !== "project.snapshot") {
+      throw new Error("Committed Project snapshot is unavailable");
+    }
+
+    const setLoop = page.getByRole("button", { name: "Set loop from selection" });
+    await setLoop.focus();
+    await expect(setLoop).toBeFocused();
+    await pickup.evaluate((element) => element.setAttribute("data-stale-region", "true"));
+    const secondSnapshot = revisedSnapshot(currentSnapshot, "second", 2);
+    await installSnapshotResponse(application, secondSnapshot);
+    await publishProjectChange(application, secondSnapshot);
+    await expect(pickup).not.toHaveAttribute("data-stale-region", "true");
+    await expect(setLoop).toBeFocused();
+
+    await pickup.focus();
+    await expect(pickup).toBeFocused();
+    await pickup.evaluate((element) => element.setAttribute("data-stale-region", "true"));
+    const thirdSnapshot = revisedSnapshot(secondSnapshot, "third", 3);
+    await installSnapshotResponse(application, thirdSnapshot);
+    await publishProjectChange(application, thirdSnapshot);
+    await expect(pickup).not.toHaveAttribute("data-stale-region", "true");
+    await expect(pickup).toBeFocused();
+
+    await rejectPlaybackRequests(application);
+    await page.reload();
+    await expect(page.getByRole("alert")).toContainText(
+      "Could not prepare the verified Source for playback.",
+    );
+
     await page.emulateMedia({ reducedMotion: "reduce" });
     const playheadBounds = await page.locator(".fixed-playhead").boundingBox();
     const viewportBounds = await page.locator(".timeline-viewport").boundingBox();
@@ -222,4 +262,90 @@ function goldenRecords(): ProjectOwnedRecords {
       },
     ],
   };
+}
+
+function revisedSnapshot(
+  snapshot: ProjectSnapshotResponse,
+  suffix: string,
+  eventSequence: number,
+): ProjectSnapshotResponse {
+  const project = structuredClone(snapshot.project);
+  const activeAnalysis = project.analysisRevisions.find(
+    ({ id }) => id === project.activeView?.analysisRevisionId,
+  );
+  if (activeAnalysis === undefined) throw new Error("Active Analysis Revision is missing");
+  activeAnalysis.timeline.bars = activeAnalysis.timeline.bars.map((bar) => ({
+    ...bar,
+    id: `${bar.id}_${suffix}`,
+  }));
+  activeAnalysis.timeline.unmeteredRegions = activeAnalysis.timeline.unmeteredRegions.map(
+    (region) => ({ ...region, id: `${region.id}_${suffix}` }),
+  );
+  const response = DesktopResponseSchema.parse({
+    ...snapshot,
+    eventSequence,
+    project,
+    projectRevisionId: `projectrevision_${eventSequence.toString(16).padStart(32, "0")}`,
+  });
+  if (response.type !== "project.snapshot") throw new Error("Revised snapshot is invalid");
+  return response;
+}
+
+async function installSnapshotResponse(
+  application: Awaited<ReturnType<typeof launch>>,
+  snapshot: ProjectSnapshotResponse,
+) {
+  await application.evaluate(
+    ({ ipcMain }, input) => {
+      ipcMain.removeHandler(input.channel);
+      ipcMain.handle(input.channel, (_event, rawCommand: unknown) => {
+        if (
+          typeof rawCommand !== "object" ||
+          rawCommand === null ||
+          !("generationId" in rawCommand) ||
+          typeof rawCommand.generationId !== "string" ||
+          !("requestId" in rawCommand) ||
+          typeof rawCommand.requestId !== "string"
+        ) {
+          throw new Error("Snapshot command envelope is invalid");
+        }
+        return {
+          ...input.snapshot,
+          generationId: rawCommand.generationId,
+          requestId: rawCommand.requestId,
+        };
+      });
+    },
+    { channel: DESKTOP_IPC_CHANNELS.projectGetSnapshot, snapshot },
+  );
+}
+
+async function publishProjectChange(
+  application: Awaited<ReturnType<typeof launch>>,
+  snapshot: ProjectSnapshotResponse,
+) {
+  await application.evaluate(
+    ({ BrowserWindow }, input) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send(input.channel, input.event);
+    },
+    {
+      channel: DESKTOP_IPC_CHANNELS.projectChanged,
+      event: {
+        generationId: snapshot.generationId,
+        projectId: snapshot.project.id,
+        projectRevisionId: snapshot.projectRevisionId,
+        protocol: snapshot.protocol,
+        protocolVersion: snapshot.protocolVersion,
+        sequence: snapshot.eventSequence,
+        type: "project.changed" as const,
+      },
+    },
+  );
+}
+
+async function rejectPlaybackRequests(application: Awaited<ReturnType<typeof launch>>) {
+  await application.evaluate(({ ipcMain }, channel) => {
+    ipcMain.removeHandler(channel);
+    ipcMain.handle(channel, () => Promise.reject(new Error("forced playback IPC rejection")));
+  }, DESKTOP_IPC_CHANNELS.mediaOpenPlayback);
 }

@@ -43,6 +43,10 @@ export function ProjectWorkspace({
   const audioRef = useRef<HTMLAudioElement>(null);
   const regionElements = useRef(new Map<string, HTMLButtonElement>());
   const timelineOwnedFocus = useRef(false);
+  const regionState = reconcileWorkspaceRegionState(timeline.regions, {
+    loopRegionId,
+    selectedRegionId,
+  });
 
   useEffect(() => {
     document.title = `${snapshot.project.id} · Local Project · Open Chords`;
@@ -52,25 +56,21 @@ export function ProjectWorkspace({
   }, [snapshot.project.id]);
 
   useEffect(() => {
-    const next = reconcileWorkspaceRegionState(timeline.regions, {
-      loopRegionId,
-      selectedRegionId,
-    });
-    if (next.loopRegionId !== loopRegionId) setLoopRegionId(next.loopRegionId);
-    if (next.selectedRegionId !== selectedRegionId) {
-      setSelectedRegionId(next.selectedRegionId);
+    if (regionState.loopRegionId !== loopRegionId) setLoopRegionId(regionState.loopRegionId);
+    if (regionState.selectedRegionId !== selectedRegionId) {
+      setSelectedRegionId(regionState.selectedRegionId);
       if (
-        next.selectedRegionId !== null &&
+        regionState.selectedRegionId !== null &&
         shouldRestoreRegionFocus(
           timelineOwnedFocus.current,
           selectedRegionId,
-          next.selectedRegionId,
+          regionState.selectedRegionId,
         )
       ) {
-        regionElements.current.get(next.selectedRegionId)?.focus();
+        regionElements.current.get(regionState.selectedRegionId)?.focus();
       }
     }
-  }, [loopRegionId, selectedRegionId, timeline.regions]);
+  }, [loopRegionId, regionState.loopRegionId, regionState.selectedRegionId, selectedRegionId]);
 
   useEffect(() => {
     const audio = new Audio();
@@ -133,7 +133,7 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     if (clock === null) return undefined;
-    const loop = timeline.regions.find(({ id }) => id === loopRegionId);
+    const loop = timeline.regions.find(({ id }) => id === regionState.loopRegionId);
     return clock.subscribe(() => {
       const { playing, positionSamples } = clock.getSnapshot();
       if (loop !== undefined && positionSamples >= loop.endSample) {
@@ -144,9 +144,9 @@ export function ProjectWorkspace({
         audioRef.current?.pause();
       }
     });
-  }, [clock, loopRegionId, timeline.durationSamples, timeline.regions]);
+  }, [clock, regionState.loopRegionId, timeline.durationSamples, timeline.regions]);
 
-  const selectedRegion = timeline.regions.find(({ id }) => id === selectedRegionId);
+  const selectedRegion = timeline.regions.find(({ id }) => id === regionState.selectedRegionId);
   const readyPlayback = playback?.type === "media.playback_ready" ? playback : null;
 
   const selectRegion = (region: WorkspaceTimelineRegion) => {
@@ -155,7 +155,7 @@ export function ProjectWorkspace({
   };
 
   const selectAdjacent = (direction: -1 | 1) => {
-    const current = timeline.regions.findIndex(({ id }) => id === selectedRegionId);
+    const current = timeline.regions.findIndex(({ id }) => id === regionState.selectedRegionId);
     const next =
       timeline.regions[Math.max(0, Math.min(timeline.regions.length - 1, current + direction))];
     if (next !== undefined) {
@@ -171,7 +171,7 @@ export function ProjectWorkspace({
       audio.pause();
       return;
     }
-    const loop = timeline.regions.find(({ id }) => id === loopRegionId);
+    const loop = timeline.regions.find(({ id }) => id === regionState.loopRegionId);
     if (loop !== undefined) {
       const position = clock.getSnapshot().positionSamples;
       if (position < loop.startSample || position >= loop.endSample) clock.seek(loop.startSample);
@@ -237,10 +237,10 @@ export function ProjectWorkspace({
             {timeline.regions.map((region) => (
               <button
                 aria-label={`${region.label}. ${region.chordLabels.length === 0 ? "No chord assertions" : `Chords: ${region.chordLabels.join(", ")}`}`}
-                aria-pressed={selectedRegionId === region.id}
+                aria-pressed={regionState.selectedRegionId === region.id}
                 className="timeline-region"
                 data-kind={region.kind}
-                data-looped={loopRegionId === region.id ? "true" : undefined}
+                data-looped={regionState.loopRegionId === region.id ? "true" : undefined}
                 key={region.id}
                 onClick={() => selectRegion(region)}
                 onKeyDown={(event) => handleRegionKey(event, selectAdjacent)}
@@ -251,7 +251,7 @@ export function ProjectWorkspace({
                 style={{
                   flexBasis: `${String(((region.endSample - region.startSample) / timeline.durationSamples) * 100)}%`,
                 }}
-                tabIndex={selectedRegionId === region.id ? 0 : -1}
+                tabIndex={regionState.selectedRegionId === region.id ? 0 : -1}
                 type="button"
               >
                 <span className="region-name">{region.label}</span>
@@ -279,14 +279,15 @@ export function ProjectWorkspace({
           </Button>
           <Button
             className="quiet-button"
-            disabled={loopRegionId === null}
+            disabled={regionState.loopRegionId === null}
             onClick={() => setLoopRegionId(null)}
           >
             <RotateCcw aria-hidden="true" size={15} />
             Clear loop
           </Button>
           <output className="loop-status">
-            Loop: {timeline.regions.find(({ id }) => id === loopRegionId)?.label ?? "Off"}
+            Loop:{" "}
+            {timeline.regions.find(({ id }) => id === regionState.loopRegionId)?.label ?? "Off"}
           </output>
         </div>
       </section>
