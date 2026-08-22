@@ -10,6 +10,7 @@ import { app, dialog, type BrowserWindow, type WebContents } from "electron";
 
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
+import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
 import {
@@ -25,7 +26,6 @@ const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let localMediaAuthority: LocalMediaService | null = null;
-let mediaCleanupStarted = false;
 const rendererContexts = new Map<
   number,
   {
@@ -37,31 +37,15 @@ const rendererContexts = new Map<
 if (!ownsSingleInstance) {
   app.quit();
 } else {
-  app.on("before-quit", (event) => {
-    if (mediaCleanupStarted) return;
-    event.preventDefault();
-    mediaCleanupStarted = true;
-    const cleanup = localMediaAuthority?.dispose() ?? Promise.resolve();
-    let cleanupTimeout: ReturnType<typeof setTimeout>;
-    const timeout = new Promise<never>((_resolve, reject) => {
-      cleanupTimeout = setTimeout(
-        () => reject(new Error("Local media cleanup timed out")),
-        MEDIA_CLEANUP_TIMEOUT_MS,
-      );
-    });
-    void Promise.race([cleanup, timeout]).then(
-      () => {
-        clearTimeout(cleanupTimeout);
-        app.quit();
-        return undefined;
-      },
-      () => {
-        clearTimeout(cleanupTimeout);
-        app.exit(1);
-        return undefined;
-      },
-    );
-  });
+  app.on(
+    "before-quit",
+    createMediaCleanupBeforeQuitHandler({
+      dispose: () => localMediaAuthority?.dispose() ?? Promise.resolve(),
+      exitWithFailure: () => app.exit(1),
+      quit: () => app.quit(),
+      timeoutMs: MEDIA_CLEANUP_TIMEOUT_MS,
+    }),
+  );
   app.on("web-contents-created", (_event, contents) => hardenWebContents(contents));
   app.on("second-instance", () => {
     void desktopReady.then(() => presentDesktopWindow(getOrCreateWindow()));
