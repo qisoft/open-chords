@@ -1,0 +1,32 @@
+{
+  "protocol": "open-chords/contracts",
+  "schemaVersion": "1.0",
+  "type": "project_snapshot",
+  "extensions": {},
+  "payload": {
+    "format": "open-chords/project",
+    "schemaVersion": "1.0",
+    "id": "project_unanalyzed_with_orphan_claim",
+    "sampleRate": 48000,
+    "durationSamples": 48000,
+    "extensions": {},
+    "supportClaims": [
+      {
+        "benchmarkPolicyHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "id": "claim_orphan",
+        "releaseVersion": "fixture-1",
+        "capability": "chords",
+        "inputs": ["synthetic fixture"],
+        "operatingConditions": ["deterministic fixture runtime"],
+        "slices": ["orphan claim"],
+        "platformProfiles": ["contract-test"],
+        "evidenceStatus": "insufficient_evidence"
+      }
+    ],
+    "analysisRevisions": [],
+    "editLayers": [],
+    "lyricsDocuments": [],
+    "lyricsAlignments": [],
+    "activeView": null
+  }
+}
