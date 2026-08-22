@@ -79,9 +79,11 @@ export type CommittedProjectStore = ReturnType<typeof createCommittedProjectStor
 export async function openFirstCommittedProject(
   api: ProjectListApi,
   store: Pick<CommittedProjectStore, "open">,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   try {
     const response = await api.list();
+    if (signal?.aborted === true) return null;
     if (response.type === "desktop.error") return response.message;
     const first = response.projects[0];
     if (first !== undefined) await store.open(first.projectId);

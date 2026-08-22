@@ -18,7 +18,7 @@ import {
 } from "react";
 
 import { createPlaybackClock, type PlaybackClock } from "./playback-clock.ts";
-import { requestProjectPlayback } from "./workspace-playback.ts";
+import { continueLoopAtBoundary, requestProjectPlayback } from "./workspace-playback.ts";
 import {
   buildWorkspaceTimeline,
   reconcileWorkspaceRegionState,
@@ -133,17 +133,32 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     if (clock === null) return undefined;
+    let current = true;
     const loop = timeline.regions.find(({ id }) => id === regionState.loopRegionId);
-    return clock.subscribe(() => {
+    const unsubscribe = clock.subscribe(() => {
       const { playing, positionSamples } = clock.getSnapshot();
       if (loop !== undefined && positionSamples >= loop.endSample) {
-        clock.seek(loop.startSample);
+        const audio = audioRef.current;
+        if (audio === null) {
+          clock.seek(loop.startSample);
+          return;
+        }
+        void continueLoopAtBoundary(audio, loop.startSample, (nextPositionSamples) =>
+          clock.seek(nextPositionSamples),
+        ).then((message) => {
+          if (current && message !== null) setPlaybackError(message);
+          return undefined;
+        });
         return;
       }
       if (loop === undefined && playing && positionSamples >= timeline.durationSamples) {
         audioRef.current?.pause();
       }
     });
+    return () => {
+      current = false;
+      unsubscribe();
+    };
   }, [clock, regionState.loopRegionId, timeline.durationSamples, timeline.regions]);
 
   const selectedRegion = timeline.regions.find(({ id }) => id === regionState.selectedRegionId);

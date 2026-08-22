@@ -44,6 +44,57 @@ function snapshot(projectRevisionId: string): ProjectSnapshotResponse {
 }
 
 describe("committed Project store", () => {
+  it("does not open a Project after its startup listing is cancelled", async () => {
+    let resolveList:
+      | ((response: Awaited<ReturnType<OpenChordsDesktopApi["project"]["list"]>>) => void)
+      | undefined;
+    const olderListResponse = DesktopResponseSchema.parse({
+      ...envelope,
+      projects: [
+        {
+          compatibility: "writable",
+          projectId: "project_older",
+          projectRevisionId: "projectrevision_older",
+        },
+      ],
+      type: "project.list",
+    });
+    const newerListResponse = DesktopResponseSchema.parse({
+      ...envelope,
+      projects: [
+        {
+          compatibility: "writable",
+          projectId: "project_newer",
+          projectRevisionId: "projectrevision_newer",
+        },
+      ],
+      type: "project.list",
+    });
+    if (olderListResponse.type !== "project.list" || newerListResponse.type !== "project.list") {
+      throw new Error("Project list fixture is invalid");
+    }
+    const opened: string[] = [];
+    const store = { open: async (projectId: string) => void opened.push(projectId) };
+    const controller = new AbortController();
+    const opening = openFirstCommittedProject(
+      {
+        list: () =>
+          new Promise((resolve) => {
+            resolveList = resolve;
+          }),
+      },
+      store,
+      controller.signal,
+    );
+
+    controller.abort();
+    await openFirstCommittedProject({ list: async () => newerListResponse }, store);
+    resolveList?.(olderListResponse);
+    await opening;
+
+    expect(opened).toEqual(["project_newer"]);
+  });
+
   it("turns rejected startup and snapshot reads into visible error states", async () => {
     const store = createCommittedProjectStore({
       getSnapshot: async () => Promise.reject(new Error("transport unavailable")),

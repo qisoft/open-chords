@@ -6,6 +6,24 @@ export type ProjectPlaybackRequest =
   | { kind: "error"; message: string }
   | { kind: "response"; response: Awaited<ReturnType<MediaPlaybackApi["openPlayback"]>> };
 
+type LoopPlaybackSource = Pick<HTMLMediaElement, "ended" | "play">;
+
+export async function continueLoopAtBoundary(
+  source: LoopPlaybackSource,
+  loopStartSample: number,
+  seek: (positionSamples: number) => void,
+): Promise<string | null> {
+  const ended = source.ended;
+  seek(loopStartSample);
+  if (!ended) return null;
+  try {
+    await source.play();
+    return null;
+  } catch {
+    return "Playback could not resume the loop. Check the verified Source.";
+  }
+}
+
 export async function requestProjectPlayback(
   api: MediaPlaybackApi,
   projectId: string,

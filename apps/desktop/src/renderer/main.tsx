@@ -28,13 +28,15 @@ function App() {
 
   useEffect(() => {
     if (api === undefined || projectStore === null) return undefined;
+    const controller = new AbortController();
     let current = true;
-    void openFirstCommittedProject(api.project, projectStore).then((message) => {
+    void openFirstCommittedProject(api.project, projectStore, controller.signal).then((message) => {
       if (!current) return undefined;
       if (message !== null) setError(message);
       return undefined;
     });
     return () => {
+      controller.abort();
       current = false;
     };
   }, []);
