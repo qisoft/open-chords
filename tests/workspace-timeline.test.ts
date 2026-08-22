@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildWorkspaceTimeline,
   reconcileWorkspaceRegionState,
+  shouldRestoreRegionFocus,
 } from "../apps/desktop/src/renderer/workspace-timeline.ts";
 
 describe("workspace timeline projection", () => {
@@ -84,5 +85,12 @@ describe("workspace timeline projection", () => {
         selectedRegionId: "bar_previous_revision",
       }),
     ).toEqual({ loopRegionId: null, selectedRegionId: "bar_reanalyzed" });
+  });
+
+  it("restores focus only when a disappearing timeline region owned it", () => {
+    expect(shouldRestoreRegionFocus(true, "bar_previous", "bar_reanalyzed")).toBe(true);
+    expect(shouldRestoreRegionFocus(false, "bar_previous", "bar_reanalyzed")).toBe(false);
+    expect(shouldRestoreRegionFocus(true, "bar_stable", "bar_stable")).toBe(false);
+    expect(shouldRestoreRegionFocus(true, "bar_previous", null)).toBe(false);
   });
 });

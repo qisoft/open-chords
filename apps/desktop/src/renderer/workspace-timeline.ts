@@ -32,6 +32,18 @@ export function reconcileWorkspaceRegionState(
   return { loopRegionId, selectedRegionId };
 }
 
+export function shouldRestoreRegionFocus(
+  timelineOwnedFocus: boolean,
+  previousSelectedRegionId: string | null,
+  nextSelectedRegionId: string | null,
+): boolean {
+  return (
+    timelineOwnedFocus &&
+    nextSelectedRegionId !== null &&
+    nextSelectedRegionId !== previousSelectedRegionId
+  );
+}
+
 export function buildWorkspaceTimeline(project: ProjectContract): WorkspaceTimeline {
   if (project.activeView === null) {
     return {

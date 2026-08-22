@@ -11,6 +11,7 @@
     "apps/desktop/src/renderer/committed-project-store.ts",
     "apps/desktop/src/renderer/**/*.d.ts",
     "apps/desktop/src/renderer/playback-clock.ts",
+    "apps/desktop/src/renderer/workspace-playback.ts",
     "apps/desktop/src/renderer/workspace-timeline.ts",
     "packages/contracts/src/**/*.ts",
     "packages/domain/src/**/*.ts",

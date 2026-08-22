@@ -18,9 +18,11 @@ import {
 } from "react";
 
 import { createPlaybackClock, type PlaybackClock } from "./playback-clock.ts";
+import { requestProjectPlayback } from "./workspace-playback.ts";
 import {
   buildWorkspaceTimeline,
   reconcileWorkspaceRegionState,
+  shouldRestoreRegionFocus,
   type WorkspaceTimeline,
   type WorkspaceTimelineRegion,
 } from "./workspace-timeline.ts";
@@ -40,6 +42,7 @@ export function ProjectWorkspace({
   const [loopRegionId, setLoopRegionId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const regionElements = useRef(new Map<string, HTMLButtonElement>());
+  const timelineOwnedFocus = useRef(false);
 
   useEffect(() => {
     document.title = `${snapshot.project.id} · Local Project · Open Chords`;
@@ -56,7 +59,14 @@ export function ProjectWorkspace({
     if (next.loopRegionId !== loopRegionId) setLoopRegionId(next.loopRegionId);
     if (next.selectedRegionId !== selectedRegionId) {
       setSelectedRegionId(next.selectedRegionId);
-      if (next.selectedRegionId !== null) {
+      if (
+        next.selectedRegionId !== null &&
+        shouldRestoreRegionFocus(
+          timelineOwnedFocus.current,
+          selectedRegionId,
+          next.selectedRegionId,
+        )
+      ) {
         regionElements.current.get(next.selectedRegionId)?.focus();
       }
     }
@@ -76,8 +86,13 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     let current = true;
-    void api.media.openPlayback(snapshot.project.id).then((response) => {
+    void requestProjectPlayback(api.media, snapshot.project.id).then((result) => {
       if (!current) return undefined;
+      if (result.kind === "error") {
+        setPlaybackError(result.message);
+        return undefined;
+      }
+      const { response } = result;
       if (response.type === "desktop.error") {
         setPlaybackError(response.message);
         return undefined;
@@ -172,7 +187,18 @@ export function ProjectWorkspace({
   };
 
   return (
-    <main className="workspace" aria-labelledby="workspace-heading">
+    <main
+      className="workspace"
+      aria-labelledby="workspace-heading"
+      onFocusCapture={(event) => {
+        timelineOwnedFocus.current =
+          event.target instanceof Element && event.target.matches(".timeline-region");
+      }}
+      onPointerDownCapture={(event) => {
+        timelineOwnedFocus.current =
+          event.target instanceof Element && event.target.closest(".timeline-region") !== null;
+      }}
+    >
       <header className="workspace-header">
         <div>
           <p className="eyebrow">Committed Project</p>
