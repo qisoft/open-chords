@@ -6,9 +6,10 @@ import {
   DESKTOP_IPC_VERSION,
   ProjectEventSchema,
 } from "@open-chords/contracts";
-import { app, type BrowserWindow, type WebContents } from "electron";
+import { app, dialog, type BrowserWindow, type WebContents } from "electron";
 
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
+import { LocalMediaService } from "./local-media.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
 import {
@@ -49,8 +50,18 @@ if (!ownsSingleInstance) {
   const desktopReady = app
     .whenReady()
     .then(async () => {
-      installRendererProtocol(join(__dirname, "../renderer"));
       const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
+      const localMedia = new LocalMediaService({
+        library: projectLibrary,
+        pickFile: async () => {
+          const result = await dialog.showOpenDialog(getOrCreateWindow(), {
+            filters: [{ extensions: ["wav", "wave"], name: "Wave audio" }],
+            properties: ["openFile"],
+          });
+          return result.canceled || result.filePaths.length !== 1 ? null : result.filePaths[0]!;
+        },
+      });
+      installRendererProtocol(join(__dirname, "../renderer"), localMedia);
       projectLibrary.subscribe(({ projectId, projectRevisionId, sequence }) => {
         const window = mainWindow;
         if (window === null || window.isDestroyed()) return;
@@ -70,6 +81,7 @@ if (!ownsSingleInstance) {
         );
       });
       installDesktopIpc(projectLibrary, {
+        mediaAuthority: localMedia,
         onSenderAction: (_action, sender) => replaceCompromisedRenderer(sender),
         rendererContextFor: (sender) => rendererContexts.get(sender.id) ?? null,
       });

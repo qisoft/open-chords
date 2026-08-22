@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,14 +10,18 @@ import { expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 import { z } from "zod";
 
+import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
+import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
+
 const PRODUCT_NAME = "Open Chords";
 const EXPECTED_RENDERER_CSP = [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data:",
-  "connect-src 'none'",
+  "connect-src open-chords:",
   "font-src 'self'",
+  "media-src open-chords:",
   "object-src 'none'",
   "frame-src 'none'",
   "base-uri 'none'",
@@ -32,7 +36,7 @@ const archivePath = join(
   process.arch,
   `${PRODUCT_NAME}-${process.platform}-${process.arch}-0.0.0.zip`,
 );
-const packageRoot = mkdtempSync(join(tmpdir(), "open-chords-installed-"));
+const packageRoot = realpathSync(mkdtempSync(join(tmpdir(), "open-chords-installed-")));
 const userDataDirectory = join(packageRoot, "user-data");
 const executablePath =
   process.platform === "darwin"
@@ -42,13 +46,35 @@ const resourcesPath =
   process.platform === "darwin"
     ? join(packageRoot, `${PRODUCT_NAME}.app`, "Contents", "Resources")
     : join(packageRoot, "resources");
+let packagedProjectId = "";
 
 test.beforeAll(async () => {
   await extractZip(archivePath, { dir: packageRoot });
+  const mediaPath = join(packageRoot, "offline-playback.wav");
+  writeFileSync(mediaPath, monoPcmWav([0, 100, -100, 200, -200, 0]));
+  const library = await openProjectLibrary({ stateRoot: userDataDirectory });
+  const media = new LocalMediaService({
+    library,
+    pickFile: async () => mediaPath,
+  });
+  const selected = await media.pickLocalFile("generation_packaged_seed");
+  if (selected.kind !== "selected") throw new Error("Packaged media fixture was not selected");
+  const created = await media.createProject({
+    capabilityId: selected.capabilityId,
+    endSourceSample: 5,
+    generationId: "generation_packaged_seed",
+    startSourceSample: 1,
+  });
+  packagedProjectId = created.projectId;
 });
 
 test.afterAll(() => {
-  rmSync(packageRoot, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
+  rmSync(packageRoot, {
+    force: true,
+    maxRetries: 10,
+    recursive: true,
+    retryDelay: 100,
+  });
 });
 
 test("packaged shell flips every security fuse explicitly", async () => {
@@ -116,18 +142,22 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   try {
     let renderer: z.infer<typeof RendererSnapshotSchema>;
     try {
-      renderer = await Promise.race([inspectPackagedRenderer(debuggingPort), startupFailure]);
+      renderer = await Promise.race([
+        inspectPackagedRenderer(debuggingPort, packagedProjectId),
+        startupFailure,
+      ]);
     } catch (error) {
       throw new Error(`Packaged renderer inspection failed\n${applicationOutput}`, {
         cause: error,
       });
     }
     expect(renderer).toMatchObject({
-      apiKeys: ["project", "shell"],
+      apiKeys: ["media", "project", "shell"],
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },
       externalFetch: "rejected",
       heading: "Open Chords foundation",
+      mediaKeys: ["createProject", "openPlayback", "pickLocalFile", "relinkSource"],
       missingProject: { code: "project_not_found", type: "desktop.error" },
       nodeGlobals: {
         Buffer: "undefined",
@@ -136,6 +166,14 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
         require: "undefined",
       },
       navigationDenied: true,
+      offlinePlayback: {
+        body: "RIFF0\u0000\u0000\u0000WAVE",
+        error: null,
+        pathKeyExposed: false,
+        status: 206,
+        type: "media.playback_ready",
+        urlProtocol: "open-chords:",
+      },
       permissionDenied: true,
       popupDenied: true,
       projectKeys: ["commitEditTransaction", "getSnapshot", "subscribe"],
@@ -240,12 +278,22 @@ const EffectiveCspProbeSchema = z.object({
   inlineScriptBlocked: z.literal(true),
 });
 
+const OfflinePlaybackSchema = z.object({
+  body: z.string(),
+  error: z.string().nullable(),
+  pathKeyExposed: z.boolean(),
+  status: z.number().int(),
+  type: z.string(),
+  urlProtocol: z.string(),
+});
+
 const RendererSnapshotSchema = z.object({
   apiKeys: z.array(z.string()),
   contentSecurityPolicy: z.literal(EXPECTED_RENDERER_CSP),
   effectiveCsp: EffectiveCspProbeSchema,
   externalFetch: z.literal("rejected"),
   heading: z.string().nullable(),
+  mediaKeys: z.array(z.string()),
   missingProject: z.object({
     code: z.literal("project_not_found"),
     type: z.literal("desktop.error"),
@@ -257,6 +305,7 @@ const RendererSnapshotSchema = z.object({
     require: z.string(),
   }),
   navigationDenied: z.literal(true),
+  offlinePlayback: OfflinePlaybackSchema,
   permissionDenied: z.literal(true),
   popupDenied: z.literal(true),
   projectKeys: z.array(z.string()),
@@ -276,9 +325,13 @@ const RendererSnapshotSchema = z.object({
   url: z.string(),
   webSecurityEnforced: z.literal(true),
 });
+const RendererSecuritySnapshotSchema = RendererSnapshotSchema.omit({
+  offlinePlayback: true,
+});
 
 async function inspectPackagedRenderer(
   port: number,
+  projectId: string,
 ): Promise<z.infer<typeof RendererSnapshotSchema>> {
   const endpoint = `http://127.0.0.1:${String(port)}`;
   const deadline = Date.now() + 30_000;
@@ -294,32 +347,51 @@ async function inspectPackagedRenderer(
     } catch (error) {
       lastError = error;
     }
-    if (target !== undefined) return await evaluateRendererTarget(target.webSocketDebuggerUrl);
+    if (target !== undefined) {
+      const offlinePlayback = await evaluatePackagedMedia(target.webSocketDebuggerUrl, projectId);
+      const security = await evaluateRendererTarget(target.webSocketDebuggerUrl);
+      return RendererSnapshotSchema.parse({ ...security, offlinePlayback });
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Could not inspect packaged renderer", { cause: lastError });
 }
 
 async function evaluateRendererTarget(webSocketUrl: string) {
-  const expression = `new Promise((resolve) => {
+  const expression = `new Promise((resolve, reject) => {
     const inspect = async () => {
       await new Promise((probeComplete) => {
         const image = new Image();
-        image.addEventListener("load", probeComplete, { once: true });
-        image.addEventListener("error", probeComplete, { once: true });
+        const timeout = setTimeout(probeComplete, 500);
+        const finish = () => {
+          clearTimeout(timeout);
+          probeComplete();
+        };
+        image.addEventListener("load", finish, { once: true });
+        image.addEventListener("error", finish, { once: true });
         image.src = "open-chords://app/index.html?csp-probe";
         document.body.append(image);
       });
       await new Promise((probeComplete) => {
         const image = new Image();
-        image.addEventListener("load", probeComplete, { once: true });
-        image.addEventListener("error", probeComplete, { once: true });
+        const timeout = setTimeout(probeComplete, 500);
+        const finish = () => {
+          clearTimeout(timeout);
+          probeComplete();
+        };
+        image.addEventListener("load", finish, { once: true });
+        image.addEventListener("error", finish, { once: true });
         image.src = "open-chords://app/asset-manifest.json";
         document.body.append(image);
       });
       const webSecurityEnforced = await new Promise((probeComplete) => {
         const frame = document.createElement("iframe");
+        const timeout = setTimeout(() => {
+          frame.remove();
+          probeComplete(true);
+        }, 500);
         frame.addEventListener("load", () => {
+          clearTimeout(timeout);
           try {
             void frame.contentWindow.document.body;
             probeComplete(false);
@@ -332,10 +404,13 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         frame.src = "data:text/html,<p>cross-origin probe</p>";
         document.body.append(frame);
       });
-      const permissionDenied = await Notification.requestPermission().then(
-        (permission) => permission === "denied",
-        () => true,
-      );
+      const permissionDenied = await Promise.race([
+        Notification.requestPermission().then(
+          (permission) => permission === "denied",
+          () => true,
+        ),
+        new Promise((resolvePermission) => setTimeout(() => resolvePermission(true), 500)),
+      ]);
       const popupDenied = window.open("https://example.com/", "_blank") === null;
       const originalUrl = window.location.href;
       const navigation = document.createElement("a");
@@ -344,14 +419,27 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       navigation.click();
       await new Promise((navigationSettled) => setTimeout(navigationSettled, 100));
       navigation.remove();
+      const externalFetch = await Promise.race([
+        fetch("https://www.youtube.com/iframe_api").then(
+          () => "resolved",
+          () => "rejected",
+        ),
+        new Promise((resolveFetch) => setTimeout(() => resolveFetch("rejected"), 500)),
+      ]);
+      const missingProject = await Promise.race([
+        window.openChords.project.getSnapshot("project_missing"),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Project IPC timed out")), 1000)),
+      ]);
+      const security = await Promise.race([
+        window.openChords.shell.getSecuritySnapshot(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Shell IPC timed out")), 1000)),
+      ]);
       resolve({
       apiKeys: Object.keys(window.openChords).sort(),
-      externalFetch: await fetch("https://www.youtube.com/iframe_api").then(
-        () => "resolved",
-        () => "rejected",
-      ),
+      externalFetch,
       heading: document.querySelector("h1")?.textContent ?? null,
-      missingProject: await window.openChords.project.getSnapshot("project_missing"),
+      mediaKeys: Object.keys(window.openChords.media).sort(),
+      missingProject,
       nodeGlobals: {
         Buffer: typeof globalThis.Buffer,
         ipcRenderer: typeof Reflect.get(globalThis, "ipcRenderer"),
@@ -365,17 +453,18 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       resourceUrls: Array.from(document.querySelectorAll("script[src], link[rel=stylesheet][href]"))
         .map((element) => element instanceof HTMLScriptElement ? element.src : element.href)
         .filter((url) => url.startsWith("open-chords://")),
-      security: await window.openChords.shell.getSecuritySnapshot(),
+      security,
       shellKeys: Object.keys(window.openChords.shell).sort(),
       url: window.location.href,
       webSecurityEnforced,
       });
     };
-    if (document.readyState === "complete") void inspect();
-    else window.addEventListener("load", () => void inspect(), { once: true });
+    const runInspection = () => void inspect().catch(reject);
+    if (document.readyState === "complete") runInspection();
+    else window.addEventListener("load", runInspection, { once: true });
   })`;
 
-  return new Promise<z.infer<typeof RendererSnapshotSchema>>((resolve, reject) => {
+  return new Promise<z.infer<typeof RendererSecuritySnapshotSchema>>((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
     let contentSecurityPolicy: string | undefined;
     let effectiveCsp: z.infer<typeof EffectiveCspProbeSchema> | undefined;
@@ -515,10 +604,12 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         if (!z.object({ id: z.literal(4) }).safeParse(rawResponse).success) return;
         const response = CdpEvaluationResponseSchema.parse(rawResponse);
         if (response.result.exceptionDetails !== undefined) {
-          throw new Error("Renderer CDP evaluation threw");
+          throw new Error(
+            `Renderer CDP evaluation threw: ${JSON.stringify(response.result.exceptionDetails)}`,
+          );
         }
         const snapshotValue = z.record(z.string(), z.unknown()).parse(response.result.result.value);
-        const snapshot = RendererSnapshotSchema.parse({
+        const snapshot = RendererSecuritySnapshotSchema.parse({
           ...snapshotValue,
           contentSecurityPolicy,
           effectiveCsp,
@@ -534,6 +625,137 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       }
     }
   });
+}
+
+async function evaluatePackagedMedia(
+  webSocketUrl: string,
+  projectId: string,
+): Promise<z.infer<typeof OfflinePlaybackSchema>> {
+  const projectIdLiteral = JSON.stringify(projectId);
+  const expression = `(async () => {
+    let playback = { type: "media.probe_failed" };
+    let response = null;
+    let body = "";
+    let error = null;
+    try {
+      playback = await Promise.race([
+        window.openChords.media.openPlayback(${projectIdLiteral}),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("openPlayback timed out")), 3000)),
+      ]);
+      if (playback.type === "media.playback_ready") {
+        response = await Promise.race([
+          fetch(playback.playbackUrl, { headers: { Range: "bytes=0-11" } }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("media fetch timed out")), 3000)),
+        ]);
+        const bytes = await Promise.race([
+          response.arrayBuffer(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("media body timed out")), 2000)),
+        ]);
+        body = Array.from(new Uint8Array(bytes)).map((byte) => String.fromCharCode(byte)).join("");
+      }
+    } catch (cause) {
+      error = String(cause);
+    }
+    return {
+      body,
+      error,
+      pathKeyExposed: Object.keys(playback).some((key) => /path|directory/i.test(key)),
+      status: response?.status ?? 0,
+      type: playback.type,
+      urlProtocol: playback.type === "media.playback_ready"
+        ? new URL(playback.playbackUrl).protocol
+        : "",
+    };
+  })()`;
+
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(webSocketUrl);
+    let requestId = 0;
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error("Packaged media CDP evaluation timed out"));
+    }, 10_000);
+    const fail = (error: Error) => {
+      clearTimeout(timeout);
+      socket.close();
+      reject(error);
+    };
+    socket.addEventListener("error", () => fail(new Error("Packaged media CDP connection failed")));
+    const evaluate = () => {
+      requestId += 1;
+      socket.send(
+        JSON.stringify({
+          id: requestId,
+          method: "Runtime.evaluate",
+          params: { awaitPromise: true, expression, returnByValue: true },
+        }),
+      );
+    };
+    socket.addEventListener("open", evaluate);
+    socket.addEventListener("message", (message) => {
+      void handleMediaMessage(message.data);
+    });
+
+    async function handleMediaMessage(data: unknown): Promise<void> {
+      try {
+        const text = await decodeWebSocketMessage(data);
+        if (text === null) return;
+        const raw: unknown = JSON.parse(text);
+        if (!z.object({ id: z.literal(requestId) }).safeParse(raw).success) return;
+        const protocolError = z
+          .object({
+            error: z.object({ code: z.number(), message: z.string() }),
+          })
+          .safeParse(raw);
+        if (protocolError.success) {
+          if (
+            protocolError.data.error.code === -32_000 &&
+            protocolError.data.error.message === "Cannot find default execution context"
+          ) {
+            setTimeout(evaluate, 50);
+            return;
+          }
+          fail(
+            new Error(
+              `Packaged media CDP protocol error ${String(protocolError.data.error.code)}: ${protocolError.data.error.message}`,
+            ),
+          );
+          return;
+        }
+        const response = CdpEvaluationResponseSchema.parse(raw);
+        if (response.result.exceptionDetails !== undefined) {
+          fail(new Error("Packaged media CDP evaluation threw"));
+          return;
+        }
+        const result = OfflinePlaybackSchema.parse(response.result.result.value);
+        clearTimeout(timeout);
+        socket.close();
+        resolve(result);
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error("Packaged media inspection failed"));
+      }
+    }
+  });
+}
+
+function monoPcmWav(samples: readonly number[], sampleRate = 48_000): Buffer {
+  const dataSize = samples.length * 2;
+  const wav = Buffer.alloc(44 + dataSize);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + dataSize, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(dataSize, 40);
+  samples.forEach((sample, index) => wav.writeInt16LE(sample, 44 + index * 2));
+  return wav;
 }
 
 async function decodeWebSocketMessage(data: unknown): Promise<string | null> {

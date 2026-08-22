@@ -350,6 +350,38 @@ export class ProjectLibrary {
     return () => this.#subscribers.delete(listener);
   }
 
+  async observeSourceLocator(sourceId: string, rawLocator: unknown): Promise<void> {
+    return this.#serializeMutation(async () => {
+      const locator = SourceLocatorSchema.parse(rawLocator);
+      const candidateEntries = new Map(this.#entries);
+      let found = false;
+      for (const [projectId, entry] of this.#entries) {
+        if (entry.revision === undefined) continue;
+        const source = entry.revision.payload.records.sources.find(({ id }) => id === sourceId);
+        if (source === undefined) continue;
+        const identityMatches =
+          (source.identity.kind === "local_file" &&
+            locator.kind === "local_file" &&
+            source.identity.fingerprint === locator.fingerprint) ||
+          (source.identity.kind === "youtube" &&
+            locator.kind === "youtube" &&
+            source.identity.videoId === locator.videoId);
+        if (!identityMatches) throw new Error("Source Locator does not match Source identity");
+        const candidate = structuredClone(entry);
+        const candidateSource = candidate.revision?.payload.records.sources.find(
+          ({ id }) => id === sourceId,
+        );
+        if (candidateSource === undefined) throw new Error("Source record clone is unavailable");
+        candidateSource.locators.push(locator);
+        candidateEntries.set(projectId, candidate);
+        found = true;
+        break;
+      }
+      if (!found) throw new Error(`Source ${sourceId} was not found`);
+      this.#locatorCatalog = await this.#refreshLocatorCatalog(candidateEntries);
+    });
+  }
+
   async createProject(input: {
     envelope: unknown;
     records: ProjectOwnedRecords;

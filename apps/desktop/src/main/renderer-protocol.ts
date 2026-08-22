@@ -2,6 +2,8 @@ import { pathToFileURL } from "node:url";
 
 import { net, protocol, session } from "electron";
 
+import { handleLocalMediaRequest } from "./local-media-protocol.ts";
+import type { LocalMediaService } from "./local-media.ts";
 import { loadRendererAssetManifest } from "./renderer-assets.ts";
 import { PRIMARY_RENDERER_PARTITION } from "./shell.ts";
 
@@ -10,8 +12,9 @@ export const RENDERER_CSP = [
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data:",
-  "connect-src 'none'",
+  "connect-src open-chords:",
   "font-src 'self'",
+  "media-src open-chords:",
   "object-src 'none'",
   "frame-src 'none'",
   "base-uri 'none'",
@@ -37,20 +40,23 @@ export function registerRendererScheme(): void {
         corsEnabled: false,
         secure: true,
         standard: true,
-        stream: false,
-        supportFetchAPI: false,
+        stream: true,
+        supportFetchAPI: true,
       },
       scheme: "open-chords",
     },
   ]);
 }
 
-export function installRendererProtocol(rendererRoot: string): void {
+export function installRendererProtocol(rendererRoot: string, media: LocalMediaService): void {
   const assets = loadRendererAssetManifest(rendererRoot);
 
   session
     .fromPartition(PRIMARY_RENDERER_PARTITION)
     .protocol.handle("open-chords", async (request) => {
+      if (new URL(request.url).pathname.startsWith("/media/")) {
+        return handleLocalMediaRequest(media, request);
+      }
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method Not Allowed", { status: 405, headers: responseHeaders });
       }

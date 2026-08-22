@@ -26,6 +26,19 @@ describe("desktop shell denial policy", () => {
     expect(rendererRequestPolicy("https://example.com/")).toEqual({ cancel: true });
     expect(rendererRequestPolicy("open-chords://app/index.html")).toEqual({ cancel: false });
     expect(rendererRequestPolicy("open-chords://other/index.html")).toEqual({ cancel: true });
+    expect(
+      rendererRequestPolicy(
+        "open-chords://app/media/playbackcapability_11111111111141118111111111111111",
+      ),
+    ).toEqual({ cancel: false });
+    expect(rendererRequestPolicy("open-chords-media://stream/../private.wav")).toEqual({
+      cancel: true,
+    });
+    expect(
+      rendererRequestPolicy(
+        "open-chords-media://other/playbackcapability_11111111111141118111111111111111",
+      ),
+    ).toEqual({ cancel: true });
   });
 
   it("denies popup, webview, navigation, and redirect escape at the WebContents seam", () => {

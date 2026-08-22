@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DesktopCommandGateway,
+  type LocalMediaAuthority,
   type ProjectAuthority,
 } from "../apps/desktop/src/main/desktop-command-gateway.ts";
 
@@ -90,7 +91,78 @@ function createAuthority(overrides: Partial<ProjectAuthority> = {}): ProjectAuth
   };
 }
 
+function createMediaAuthority(overrides: Partial<LocalMediaAuthority> = {}): LocalMediaAuthority {
+  return {
+    createProject: async () => ({
+      projectId: "project_media",
+      projectRevisionId: "projectrevision_11111111111111111111111111111111",
+      sourceId: "source_media",
+    }),
+    openPlayback: async ({ projectId }) => ({
+      byteSize: 1_024,
+      capabilityId: "playbackcapability_11111111111141118111111111111111",
+      endSourceSample: 48_000,
+      kind: "ready",
+      mimeType: "audio/wav",
+      playbackUrl: "open-chords://app/media/playbackcapability_11111111111141118111111111111111",
+      projectId,
+      sampleRate: 48_000,
+      startSourceSample: 0,
+    }),
+    pickLocalFile: async () => ({
+      byteSize: 1_024,
+      capabilityId: "mediacapability_11111111111141118111111111111111",
+      durationSamples: 48_000,
+      kind: "selected",
+      mimeType: "audio/wav",
+      sampleRate: 48_000,
+    }),
+    relinkSource: async ({ sourceId }) => ({ kind: "relinked", sourceId }),
+    ...overrides,
+  };
+}
+
 describe("DesktopCommandGateway", () => {
+  it("returns only an opaque media capability and rejects renderer-supplied paths", async () => {
+    let pickerCalls = 0;
+    const gateway = new DesktopCommandGateway(
+      createAuthority(),
+      createMediaAuthority({
+        pickLocalFile: async () => {
+          pickerCalls += 1;
+          return {
+            byteSize: 1_024,
+            capabilityId: "mediacapability_11111111111141118111111111111111",
+            durationSamples: 48_000,
+            kind: "selected",
+            mimeType: "audio/wav",
+            sampleRate: 48_000,
+          };
+        },
+      }),
+    );
+    const command = {
+      ...commandEnvelope("request_media"),
+      type: "media.pick_local_file",
+    } as const;
+
+    const result = await gateway.execute(command, sender, "media.pick_local_file");
+    expect(result.response).toMatchObject({
+      capabilityId: expect.stringMatching(/^mediacapability_/),
+      type: "media.selected",
+    });
+    expect(JSON.stringify(result.response)).not.toMatch(/path|directory/i);
+    expect(pickerCalls).toBe(1);
+
+    const hostile = await gateway.execute(
+      { ...command, path: "/private/recording.wav" },
+      sender,
+      "media.pick_local_file",
+    );
+    expect(hostile.response).toMatchObject({ code: "invalid_command", type: "desktop.error" });
+    expect(pickerCalls).toBe(1);
+  });
+
   it("destroys hostile frames before parsing their command", async () => {
     const gateway = new DesktopCommandGateway(createAuthority());
     const result = await gateway.execute(shellCommand(), {
