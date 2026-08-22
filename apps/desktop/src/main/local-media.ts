@@ -67,6 +67,12 @@ class VerifiedMediaLease {
   }
 }
 
+class RevokedMediaGenerationError extends Error {
+  constructor() {
+    super("Local media capability is unavailable because its generation was revoked");
+  }
+}
+
 type SelectionCapabilityEntry = {
   generationId: string;
   lease: VerifiedMediaLease;
@@ -80,6 +86,7 @@ type PlaybackCapabilityEntry = {
 
 class MediaCapabilityRegistry {
   readonly #playback = new Map<string, PlaybackCapabilityEntry>();
+  readonly #revokedGenerations = new Set<string>();
   readonly #selection = new Map<string, SelectionCapabilityEntry>();
 
   consumeSelection(capabilityId: string, generationId: string): VerifiedMediaLease | null {
@@ -94,6 +101,7 @@ class MediaCapabilityRegistry {
   }
 
   async replaceSelection(generationId: string, lease: VerifiedMediaLease): Promise<string> {
+    this.#assertGenerationActive(generationId);
     const releases: Promise<void>[] = [];
     for (const [capabilityId, entry] of this.#selection) {
       if (entry.generationId !== generationId) continue;
@@ -101,6 +109,7 @@ class MediaCapabilityRegistry {
       releases.push(entry.lease.release());
     }
     await Promise.all(releases);
+    this.#assertGenerationActive(generationId);
     const capabilityId = opaqueId("mediacapability");
     this.#selection.set(capabilityId, { generationId, lease: lease.move() });
     return capabilityId;
@@ -111,6 +120,7 @@ class MediaCapabilityRegistry {
     projectId: string,
     lease: VerifiedMediaLease,
   ): Promise<string> {
+    this.#assertGenerationActive(generationId);
     const generationCapabilities: string[] = [];
     const releases: Promise<void>[] = [];
     for (const [capabilityId, entry] of this.#playback) {
@@ -128,12 +138,14 @@ class MediaCapabilityRegistry {
       if (oldest !== undefined) releases.push(oldest.lease.release());
     }
     await Promise.all(releases);
+    this.#assertGenerationActive(generationId);
     const capabilityId = opaqueId("playbackcapability");
     this.#playback.set(capabilityId, { generationId, lease: lease.move(), projectId });
     return capabilityId;
   }
 
   async revokeGeneration(generationId: string): Promise<void> {
+    this.#revokedGenerations.add(generationId);
     const releases: Promise<void>[] = [];
     for (const [capabilityId, entry] of this.#selection) {
       if (entry.generationId !== generationId) continue;
@@ -146,6 +158,10 @@ class MediaCapabilityRegistry {
       releases.push(entry.lease.release());
     }
     await Promise.all(releases);
+  }
+
+  #assertGenerationActive(generationId: string): void {
+    if (this.#revokedGenerations.has(generationId)) throw new RevokedMediaGenerationError();
   }
 }
 
@@ -445,7 +461,8 @@ export class LocalMediaService {
         } finally {
           await lease.release();
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof RevokedMediaGenerationError) throw error;
         await this.#markLocatorUnavailable(source.id, locator);
       }
     }

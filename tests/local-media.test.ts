@@ -70,6 +70,51 @@ describe("LocalMediaService", () => {
     ).resolves.toMatchObject({ projectId: expect.stringMatching(/^project_/) });
   });
 
+  it("cannot publish a capability after its renderer generation is revoked", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-revoke-race-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-revoke-race-source-");
+    const mediaPath = join(mediaRoot, "recording.wav");
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    let confirmVerificationStarted!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => {
+      confirmVerificationStarted = resolve;
+    });
+    let releaseVerification!: () => void;
+    const verificationBlocked = new Promise<void>((resolve) => {
+      releaseVerification = resolve;
+    });
+    let closeCalls = 0;
+    const media = new LocalMediaService({
+      fileSystem: {
+        ...nodeLocalMediaFileSystem,
+        open: async (path, flags) => {
+          const handle = await nodeLocalMediaFileSystem.open(path, flags);
+          return {
+            close: async () => {
+              closeCalls += 1;
+              await handle.close();
+            },
+            read: async (buffer, offset, length, position) => {
+              confirmVerificationStarted();
+              await verificationBlocked;
+              return handle.read(buffer, offset, length, position);
+            },
+            stat: (options) => handle.stat(options),
+          };
+        },
+      },
+      library: await openProjectLibrary({ stateRoot }),
+      pickFile: async () => mediaPath,
+    });
+
+    const selection = media.pickLocalFile("generation_revoked");
+    await verificationStarted;
+    await media.revokeGeneration("generation_revoked");
+    releaseVerification();
+    await expect(selection).rejects.toThrow(/generation was revoked|capability is unavailable/i);
+    expect(closeCalls).toBe(1);
+  });
+
   it("creates a durable immutable Project Range through an opaque native-picker capability", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-state-");
     const mediaRoot = await temporaryDirectory("open-chords-local-media-source-");

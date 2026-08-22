@@ -109,11 +109,7 @@ function getOrCreateWindow() {
       },
     });
     window.webContents.once("destroyed", () => {
-      const context = rendererContexts.get(webContentsId);
-      if (context !== undefined && localMediaAuthority !== null) {
-        void localMediaAuthority.revokeGeneration(context.generationId).catch(() => app.exit(1));
-      }
-      rendererContexts.delete(webContentsId);
+      revokeRendererGeneration(webContentsId);
     });
     window.once("closed", () => {
       if (mainWindow === window) mainWindow = null;
@@ -124,14 +120,18 @@ function getOrCreateWindow() {
 
 function replaceCompromisedRenderer(sender: WebContents): void {
   const isMainRenderer = mainWindow?.webContents === sender;
-  const context = rendererContexts.get(sender.id);
-  if (context !== undefined && localMediaAuthority !== null) {
-    void localMediaAuthority.revokeGeneration(context.generationId).catch(() => app.exit(1));
-  }
-  rendererContexts.delete(sender.id);
+  revokeRendererGeneration(sender.id);
   if (!sender.isDestroyed()) sender.close({ waitForBeforeUnload: false });
   if (isMainRenderer) {
     mainWindow = null;
     queueMicrotask(() => getOrCreateWindow());
+  }
+}
+
+function revokeRendererGeneration(webContentsId: number): void {
+  const context = rendererContexts.get(webContentsId);
+  rendererContexts.delete(webContentsId);
+  if (context !== undefined && localMediaAuthority !== null) {
+    void localMediaAuthority.revokeGeneration(context.generationId).catch(() => app.exit(1));
   }
 }
