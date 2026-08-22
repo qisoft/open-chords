@@ -1,3 +1,4 @@
+import { parseApplicationUrl } from "./desktop-origin.ts";
 import type { LocalMediaService } from "./local-media.ts";
 
 const baseHeaders = {
@@ -42,13 +43,9 @@ export function isLocalMediaRequestUrl(value: string): boolean {
 
 function capabilityFromUrl(value: string): string | null {
   try {
-    const url = new URL(value);
+    const url = parseApplicationUrl(value);
     if (
-      url.protocol !== "open-chords:" ||
-      url.host !== "app" ||
-      url.username !== "" ||
-      url.password !== "" ||
-      url.port !== "" ||
+      url === null ||
       url.search !== "" ||
       url.hash !== "" ||
       !/^\/media\/playbackcapability_[a-f0-9]{32}$/.test(url.pathname)

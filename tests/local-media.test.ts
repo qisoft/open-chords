@@ -9,7 +9,10 @@ import {
   handleLocalMediaRequest,
   isLocalMediaRequestUrl,
 } from "../apps/desktop/src/main/local-media-protocol.ts";
-import { LocalMediaService } from "../apps/desktop/src/main/local-media.ts";
+import {
+  LocalMediaService,
+  nodeLocalMediaFileSystem,
+} from "../apps/desktop/src/main/local-media.ts";
 import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
 
 const temporaryRoots: string[] = [];
@@ -193,14 +196,21 @@ describe("LocalMediaService", () => {
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     await writeFile(join(replacementRoot, "recording.wav"), monoPcmWav([4, 5, 6, 7]));
     const library = await openProjectLibrary({ stateRoot });
+    let selectedRootChecks = 0;
     const media = new LocalMediaService({
-      afterAncestorVerification: async () => {
-        await rename(selectedRoot, displacedRoot);
-        await symlink(
-          replacementRoot,
-          selectedRoot,
-          process.platform === "win32" ? "junction" : "dir",
-        );
+      fileSystem: {
+        ...nodeLocalMediaFileSystem,
+        lstat: async (path) => {
+          if (path === selectedRoot && (selectedRootChecks += 1) === 2) {
+            await rename(selectedRoot, displacedRoot);
+            await symlink(
+              replacementRoot,
+              selectedRoot,
+              process.platform === "win32" ? "junction" : "dir",
+            );
+          }
+          return nodeLocalMediaFileSystem.lstat(path);
+        },
       },
       library,
       pickFile: async () => mediaPath,
@@ -219,10 +229,17 @@ describe("LocalMediaService", () => {
     const displacedPath = join(mediaRoot, "recording-before-swap.wav");
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     const library = await openProjectLibrary({ stateRoot });
+    let mediaPathChecks = 0;
     const media = new LocalMediaService({
-      afterVerificationRead: async () => {
-        await rename(mediaPath, displacedPath);
-        await writeFile(mediaPath, monoPcmWav([4, 5, 6, 7]));
+      fileSystem: {
+        ...nodeLocalMediaFileSystem,
+        lstat: async (path) => {
+          if (path === mediaPath && (mediaPathChecks += 1) === 2) {
+            await rename(mediaPath, displacedPath);
+            await writeFile(mediaPath, monoPcmWav([4, 5, 6, 7]));
+          }
+          return nodeLocalMediaFileSystem.lstat(path);
+        },
       },
       library,
       pickFile: async () => mediaPath,
@@ -473,6 +490,110 @@ describe("LocalMediaService", () => {
         startByte: 0,
       }),
     ).rejects.toThrow(/changed/i);
+  });
+
+  it("bounds concurrent playback range reads", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-range-limit-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-range-limit-source-");
+    const mediaPath = join(mediaRoot, "recording.wav");
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    const library = await openProjectLibrary({ stateRoot });
+    let blockReads = false;
+    let blockedReads = 0;
+    let releaseReads!: () => void;
+    const readsBlocked = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    let confirmLimitReached!: () => void;
+    const limitReached = new Promise<void>((resolve) => {
+      confirmLimitReached = resolve;
+    });
+    const fileSystem = {
+      ...nodeLocalMediaFileSystem,
+      open: async (path: string, flags: number) => {
+        const handle = await nodeLocalMediaFileSystem.open(path, flags);
+        return {
+          close: () => handle.close(),
+          read: async (buffer: Buffer, offset: number, length: number, position: number) => {
+            if (blockReads) {
+              blockedReads += 1;
+              if (blockedReads === 8) confirmLimitReached();
+              await readsBlocked;
+            }
+            return handle.read(buffer, offset, length, position);
+          },
+          stat: (options: { bigint: true }) => handle.stat(options),
+        };
+      },
+    };
+    const media = new LocalMediaService({ library, fileSystem, pickFile: async () => mediaPath });
+    const selected = await media.pickLocalFile("generation_fixture");
+    if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
+    const created = await media.createProject({
+      capabilityId: selected.capabilityId,
+      endSourceSample: 4,
+      generationId: "generation_fixture",
+      startSourceSample: 0,
+    });
+    const playback = await media.openPlayback({
+      generationId: "generation_fixture",
+      projectId: created.projectId,
+    });
+    if (playback.kind !== "ready") throw new Error("Fixture Source was unavailable");
+
+    blockReads = true;
+    const activeReads = Array.from({ length: 8 }, () =>
+      media.readPlaybackRange({
+        capabilityId: playback.capabilityId,
+        endByteExclusive: 12,
+        startByte: 0,
+      }),
+    );
+    await limitReached;
+    await expect(
+      media.readPlaybackRange({
+        capabilityId: playback.capabilityId,
+        endByteExclusive: 12,
+        startByte: 0,
+      }),
+    ).rejects.toThrow(/too many local media reads/i);
+    releaseReads();
+    await expect(Promise.all(activeReads)).resolves.toHaveLength(8);
+  });
+
+  it("rejects playback after a verified ancestor becomes a symlink or junction", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-playback-link-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-playback-link-source-");
+    const selectedRoot = join(mediaRoot, "selected");
+    const displacedRoot = join(mediaRoot, "selected-before-link");
+    const mediaPath = join(selectedRoot, "recording.wav");
+    await mkdir(selectedRoot);
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    const library = await openProjectLibrary({ stateRoot });
+    const media = new LocalMediaService({ library, pickFile: async () => mediaPath });
+    const selected = await media.pickLocalFile("generation_fixture");
+    if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
+    const created = await media.createProject({
+      capabilityId: selected.capabilityId,
+      endSourceSample: 4,
+      generationId: "generation_fixture",
+      startSourceSample: 0,
+    });
+    const playback = await media.openPlayback({
+      generationId: "generation_fixture",
+      projectId: created.projectId,
+    });
+    if (playback.kind !== "ready") throw new Error("Fixture Source was unavailable");
+
+    await rename(selectedRoot, displacedRoot);
+    await symlink(displacedRoot, selectedRoot, process.platform === "win32" ? "junction" : "dir");
+    await expect(
+      media.readPlaybackRange({
+        capabilityId: playback.capabilityId,
+        endByteExclusive: 12,
+        startByte: 0,
+      }),
+    ).rejects.toThrow(/ancestor|symbolic link|junction/i);
   });
 
   it("gives a cache adapter only an immutable Project Range and range-bounded PCM reader", async () => {

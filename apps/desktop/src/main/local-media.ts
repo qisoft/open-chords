@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -12,11 +12,13 @@ import type { ProjectLibrary } from "./project-library.ts";
 const MAX_PROBE_BYTES = 64 * 1024;
 const HASH_CHUNK_BYTES = 1024 * 1024;
 const MAX_PLAYBACK_RANGE_BYTES = 8 * 1024 * 1024;
+const MAX_CONCURRENT_VERIFIED_READS = 8;
 const MAX_PLAYBACK_CAPABILITIES_PER_GENERATION = 8;
 const CANONICAL_SAMPLE_RATE = 48_000;
 const LOCAL_MEDIA_COMPONENT_HASH = sha256("open-chords/local-media/wav-pcm-s16le/v1");
 
 type VerifiedLocalMedia = {
+  ancestors: readonly PathAncestorIdentity[];
   audioCodec: "pcm_s16le";
   byteFingerprint: string;
   byteSize: number;
@@ -89,12 +91,32 @@ export type LocalMediaPlayback =
     };
 
 export type LocalMediaServiceOptions = {
-  afterAncestorVerification?: () => Promise<void> | void;
-  afterVerificationRead?: () => Promise<void> | void;
+  fileSystem?: LocalMediaFileSystem;
   library: ProjectLibrary;
   now?: () => Date;
   pickFile: () => Promise<string | null>;
   rangeCache?: LocalMediaRangeCache;
+};
+
+export type LocalMediaFileHandle = {
+  close(): Promise<void>;
+  read(
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number,
+  ): Promise<{ bytesRead: number }>;
+  stat(options: { bigint: true }): Promise<BigIntStats>;
+};
+
+export type LocalMediaFileSystem = {
+  lstat(path: string): Promise<BigIntStats>;
+  open(path: string, flags: number): Promise<LocalMediaFileHandle>;
+};
+
+export const nodeLocalMediaFileSystem: LocalMediaFileSystem = {
+  lstat: (path) => lstat(path, { bigint: true }),
+  open,
 };
 
 export type LocalMediaRangeCache = {
@@ -114,18 +136,17 @@ export type LocalMediaRangeCache = {
 };
 
 export class LocalMediaService {
-  readonly #afterAncestorVerification: () => Promise<void> | void;
-  readonly #afterVerificationRead: () => Promise<void> | void;
   readonly #capabilities = new Map<string, SelectionCapability>();
+  readonly #fileSystem: LocalMediaFileSystem;
   readonly #playbackCapabilities = new Map<string, PlaybackCapability>();
   readonly #library: ProjectLibrary;
   readonly #now: () => Date;
   readonly #pickFile: () => Promise<string | null>;
   readonly #rangeCache: LocalMediaRangeCache | undefined;
+  #activeVerifiedReads = 0;
 
   constructor(options: LocalMediaServiceOptions) {
-    this.#afterAncestorVerification = options.afterAncestorVerification ?? (() => undefined);
-    this.#afterVerificationRead = options.afterVerificationRead ?? (() => undefined);
+    this.#fileSystem = options.fileSystem ?? nodeLocalMediaFileSystem;
     this.#library = options.library;
     this.#now = options.now ?? (() => new Date());
     this.#pickFile = options.pickFile;
@@ -346,7 +367,7 @@ export class LocalMediaService {
     ) {
       throw new Error("Playback byte range is invalid or exceeds its limit");
     }
-    const bytes = await readVerifiedBytes(capability, input.startByte, endByteExclusive);
+    const bytes = await this.#readVerifiedBytes(capability, input.startByte, endByteExclusive);
     return {
       byteSize: capability.byteSize,
       bytes,
@@ -423,7 +444,7 @@ export class LocalMediaService {
         ) {
           throw new Error("Cache read must stay inside the immutable Project Range");
         }
-        return readVerifiedBytes(
+        return this.#readVerifiedBytes(
           verified,
           verified.dataOffset + (range.startSourceSample + startProjectSample) * 2,
           verified.dataOffset + (range.startSourceSample + endProjectSample) * 2,
@@ -445,7 +466,23 @@ export class LocalMediaService {
   }
 
   #verifyLocalWav(path: string): Promise<VerifiedLocalMedia> {
-    return verifyLocalWav(path, this.#afterAncestorVerification, this.#afterVerificationRead);
+    return verifyLocalWav(path, this.#fileSystem);
+  }
+
+  async #readVerifiedBytes(
+    media: VerifiedLocalMedia,
+    startByte: number,
+    endByteExclusive: number,
+  ): Promise<Buffer> {
+    if (this.#activeVerifiedReads >= MAX_CONCURRENT_VERIFIED_READS) {
+      throw new Error("Too many local media reads are active");
+    }
+    this.#activeVerifiedReads += 1;
+    try {
+      return await readVerifiedBytes(media, startByte, endByteExclusive, this.#fileSystem);
+    } finally {
+      this.#activeVerifiedReads -= 1;
+    }
   }
 }
 
@@ -453,9 +490,11 @@ async function readVerifiedBytes(
   media: VerifiedLocalMedia,
   startByte: number,
   endByteExclusive: number,
+  fileSystem: LocalMediaFileSystem,
 ): Promise<Buffer> {
+  await assertSamePathAncestors(media.ancestors, fileSystem);
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-  const handle = await open(media.path, constants.O_RDONLY | noFollow);
+  const handle = await fileSystem.open(media.path, constants.O_RDONLY | noFollow);
   try {
     const identity = await handle.stat({ bigint: true });
     assertSameFileIdentity(media.identity, identity);
@@ -464,6 +503,7 @@ async function readVerifiedBytes(
     if (read.bytesRead !== bytes.length) throw new Error("Local media changed while reading");
     const identityAfter = await handle.stat({ bigint: true });
     assertSameFileIdentity(identity, identityAfter);
+    await assertSamePathAncestors(media.ancestors, fileSystem);
     return bytes;
   } finally {
     await handle.close();
@@ -472,19 +512,17 @@ async function readVerifiedBytes(
 
 async function verifyLocalWav(
   candidatePath: string,
-  afterAncestorVerification: () => Promise<void> | void,
-  afterVerificationRead: () => Promise<void> | void,
+  fileSystem: LocalMediaFileSystem,
 ): Promise<VerifiedLocalMedia> {
   const path = resolve(candidatePath);
-  const ancestorsBefore = await inspectPathAncestors(path);
-  await afterAncestorVerification();
-  await assertSamePathAncestors(ancestorsBefore);
-  const pathBefore = await lstat(path, { bigint: true });
+  const ancestorsBefore = await inspectPathAncestors(path, fileSystem);
+  await assertSamePathAncestors(ancestorsBefore, fileSystem);
+  const pathBefore = await fileSystem.lstat(path);
   if (!pathBefore.isFile() || pathBefore.isSymbolicLink()) {
     throw new Error("Selected media must be a regular file, not a symbolic link or junction");
   }
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-  const handle = await open(path, constants.O_RDONLY | noFollow);
+  const handle = await fileSystem.open(path, constants.O_RDONLY | noFollow);
   try {
     const before = await handle.stat({ bigint: true });
     assertSameFileIdentity(pathBefore, before);
@@ -511,13 +549,13 @@ async function verifyLocalWav(
       }
       position += read.bytesRead;
     }
-    await afterVerificationRead();
     const after = await handle.stat({ bigint: true });
-    const pathAfter = await lstat(path, { bigint: true });
-    await assertSamePathAncestors(ancestorsBefore);
+    const pathAfter = await fileSystem.lstat(path);
+    await assertSamePathAncestors(ancestorsBefore, fileSystem);
     assertSameFileIdentity(before, after);
     assertSameFileIdentity(after, pathAfter);
     return {
+      ancestors: ancestorsBefore,
       audioCodec: "pcm_s16le",
       byteFingerprint: `sha256:${byteHash.digest("hex")}`,
       byteSize,
@@ -542,14 +580,17 @@ type PathAncestorIdentity = {
   path: string;
 };
 
-async function inspectPathAncestors(path: string): Promise<PathAncestorIdentity[]> {
+async function inspectPathAncestors(
+  path: string,
+  fileSystem: LocalMediaFileSystem,
+): Promise<PathAncestorIdentity[]> {
   const ancestors: string[] = [];
   for (let current = dirname(path); current !== dirname(current); current = dirname(current)) {
     ancestors.push(current);
   }
   const identities: PathAncestorIdentity[] = [];
   for (const ancestor of ancestors.reverse()) {
-    const identity = await lstat(ancestor, { bigint: true });
+    const identity = await fileSystem.lstat(ancestor);
     if (identity.isSymbolicLink()) {
       throw new Error("Selected media path must not traverse a symbolic link or junction");
     }
@@ -558,9 +599,12 @@ async function inspectPathAncestors(path: string): Promise<PathAncestorIdentity[
   return identities;
 }
 
-async function assertSamePathAncestors(expected: readonly PathAncestorIdentity[]): Promise<void> {
+async function assertSamePathAncestors(
+  expected: readonly PathAncestorIdentity[],
+  fileSystem: LocalMediaFileSystem,
+): Promise<void> {
   for (const ancestor of expected) {
-    const current = await lstat(ancestor.path, { bigint: true });
+    const current = await fileSystem.lstat(ancestor.path);
     if (
       current.isSymbolicLink() ||
       current.dev !== ancestor.dev ||

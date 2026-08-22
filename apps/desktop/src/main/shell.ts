@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { app, BrowserWindow, type Session, type WebContents } from "electron";
 
-import { APP_ENTRY_URL } from "./desktop-origin.ts";
+import { APP_ENTRY_URL, parseApplicationUrl } from "./desktop-origin.ts";
 import { PRIMARY_RENDERER_SECURITY_CONFIGURATION } from "./renderer-security.ts";
 
 export const PRIMARY_RENDERER_PARTITION = "open-chords-primary";
@@ -19,14 +19,7 @@ function isPrimaryRendererUrl(value: string): boolean {
     if (decodedPath.split("/").some((segment) => segment === "." || segment === "..")) {
       return false;
     }
-    const url = new URL(value);
-    return (
-      url.protocol === "open-chords:" &&
-      url.host === "app" &&
-      url.username === "" &&
-      url.password === "" &&
-      url.port === ""
-    );
+    return parseApplicationUrl(value) !== null;
   } catch {
     return false;
   }
