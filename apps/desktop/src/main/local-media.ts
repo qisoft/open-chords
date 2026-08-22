@@ -85,11 +85,20 @@ type PlaybackCapabilityEntry = {
 };
 
 class MediaCapabilityRegistry {
+  readonly #activeGenerations = new Set<string>();
   readonly #playback = new Map<string, PlaybackCapabilityEntry>();
-  readonly #revokedGenerations = new Set<string>();
+  readonly #publicationQueues = new Map<string, Promise<void>>();
   readonly #selection = new Map<string, SelectionCapabilityEntry>();
 
+  activateGeneration(generationId: string): void {
+    if (this.#activeGenerations.has(generationId)) {
+      throw new Error("Local media generation is already active");
+    }
+    this.#activeGenerations.add(generationId);
+  }
+
   consumeSelection(capabilityId: string, generationId: string): VerifiedMediaLease | null {
+    this.#assertGenerationActive(generationId);
     const entry = this.#selection.get(capabilityId);
     if (entry === undefined || entry.generationId !== generationId) return null;
     this.#selection.delete(capabilityId);
@@ -98,6 +107,28 @@ class MediaCapabilityRegistry {
 
   playback(capabilityId: string): VerifiedMediaLease | null {
     return this.#playback.get(capabilityId)?.lease ?? null;
+  }
+
+  async publishIfActive<T>(generationId: string, publish: () => Promise<T>): Promise<T> {
+    const prior = this.#publicationQueues.get(generationId) ?? Promise.resolve();
+    const task = prior
+      .catch(() => undefined)
+      .then(async () => {
+        this.#assertGenerationActive(generationId);
+        return publish();
+      });
+    const tail = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#publicationQueues.set(generationId, tail);
+    try {
+      return await task;
+    } finally {
+      if (this.#publicationQueues.get(generationId) === tail) {
+        this.#publicationQueues.delete(generationId);
+      }
+    }
   }
 
   async replaceSelection(generationId: string, lease: VerifiedMediaLease): Promise<string> {
@@ -145,7 +176,7 @@ class MediaCapabilityRegistry {
   }
 
   async revokeGeneration(generationId: string): Promise<void> {
-    this.#revokedGenerations.add(generationId);
+    this.#activeGenerations.delete(generationId);
     const releases: Promise<void>[] = [];
     for (const [capabilityId, entry] of this.#selection) {
       if (entry.generationId !== generationId) continue;
@@ -157,11 +188,12 @@ class MediaCapabilityRegistry {
       this.#playback.delete(capabilityId);
       releases.push(entry.lease.release());
     }
-    await Promise.all(releases);
+    const publication = this.#publicationQueues.get(generationId) ?? Promise.resolve();
+    await Promise.all([...releases, publication]);
   }
 
   #assertGenerationActive(generationId: string): void {
-    if (this.#revokedGenerations.has(generationId)) throw new RevokedMediaGenerationError();
+    if (!this.#activeGenerations.has(generationId)) throw new RevokedMediaGenerationError();
   }
 }
 
@@ -260,6 +292,10 @@ export class LocalMediaService {
     this.#now = options.now ?? (() => new Date());
     this.#pickFile = options.pickFile;
     this.#rangeCache = options.rangeCache;
+  }
+
+  activateGeneration(generationId: string): void {
+    this.#capabilities.activateGeneration(generationId);
   }
 
   revokeGeneration(generationId: string): Promise<void> {
@@ -370,7 +406,9 @@ export class LocalMediaService {
         projectId,
         sampleRate: capability.sampleRate,
       });
-      const created = await this.#library.createProject({ envelope, records });
+      const created = await this.#capabilities.publishIfActive(input.generationId, async () =>
+        this.#library.createProject({ envelope, records }),
+      );
       return { projectId, projectRevisionId: created.projectRevisionId, sourceId };
     } finally {
       await selectedLease.release();
@@ -403,14 +441,16 @@ export class LocalMediaService {
           sampleRate: verified.sampleRate,
         };
       }
-      await this.#library.observeSourceLocator(input.sourceId, {
-        fingerprint: verified.byteFingerprint,
-        id: opaqueId("locator"),
-        kind: "local_file",
-        path: verified.path,
-        status: "available",
-        verifiedAt: this.#now().toISOString(),
-      });
+      await this.#capabilities.publishIfActive(input.generationId, async () =>
+        this.#library.observeSourceLocator(input.sourceId, {
+          fingerprint: verified.byteFingerprint,
+          id: opaqueId("locator"),
+          kind: "local_file",
+          path: verified.path,
+          status: "available",
+          verifiedAt: this.#now().toISOString(),
+        }),
+      );
       return { kind: "relinked", sourceId: input.sourceId };
     } finally {
       await lease.release();

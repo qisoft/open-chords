@@ -99,6 +99,7 @@ function getOrCreateWindow() {
   if (mainWindow === null || mainWindow.isDestroyed()) {
     const generationId = `generation_${randomUUID().replaceAll("-", "")}`;
     const window = createDesktopWindow(generationId);
+    localMediaAuthority?.activateGeneration(generationId);
     mainWindow = window;
     const webContentsId = window.webContents.id;
     rendererContexts.set(webContentsId, {
