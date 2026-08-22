@@ -60,8 +60,17 @@ describe("canonical domain kernel", () => {
     expect(() => materializeEffectiveTimeline(project)).toThrow(/no Analysis Revision/i);
 
     const invalid = structuredClone(project);
-    invalid.analysisRevisions.push(readGoldenEnvelope().payload.analysisRevisions[0]!);
+    const revision = structuredClone(readGoldenEnvelope().payload.analysisRevisions[0]!);
+    revision.projectId = project.id;
+    revision.supportClaimIds = [];
+    invalid.analysisRevisions.push(revision);
     expect(() => parseProjectContract(invalid)).toThrow(/without an Active View/i);
+
+    const invalidClaims = structuredClone(project);
+    invalidClaims.supportClaims.push(readGoldenEnvelope().payload.supportClaims[0]!);
+    expect(() => parseProjectContract(invalidClaims)).toThrow(
+      /without an Active View.*Support Claims/i,
+    );
   });
 
   it("parses the golden Project contract and materializes its explicitly selected stale revision", () => {
@@ -76,7 +85,10 @@ describe("canonical domain kernel", () => {
       "no_chord",
       "chord",
     ]);
-    expect(effective.chordEvents[0]?.value).toMatchObject({ quality: "minor7", root: "A" });
+    expect(effective.chordEvents[0]?.value).toMatchObject({
+      quality: "minor7",
+      root: "A",
+    });
   });
 
   it("serializes independent of object insertion order", () => {
@@ -225,7 +237,11 @@ describe("canonical domain kernel", () => {
 
   it("projects committed Beat, Bar/meter, and lyric timing operations", () => {
     const beat = materializeEffectiveTimeline(
-      projectWithOperation({ atSample: 17000, beatId: "beat_three_2", type: "move_beat" }),
+      projectWithOperation({
+        atSample: 17000,
+        beatId: "beat_three_2",
+        type: "move_beat",
+      }),
     );
     expect(beat.bars[1]?.beats[1]?.atSample).toBe(17000);
 
@@ -274,7 +290,11 @@ describe("canonical domain kernel", () => {
       projectWithOperation({
         alignmentId: "alignment_repeated",
         timing: {
-          assertion: { evidence: [], reasonCodes: ["user_authored"], state: "asserted" },
+          assertion: {
+            evidence: [],
+            reasonCodes: ["user_authored"],
+            state: "asserted",
+          },
           endSample: 5000,
           startSample: 3000,
           state: "matched",
@@ -294,7 +314,11 @@ describe("canonical domain kernel", () => {
         alignmentId: "alignment_repeated",
         lineId: "line_second",
         timing: {
-          assertion: { evidence: [], reasonCodes: ["user_authored"], state: "asserted" },
+          assertion: {
+            evidence: [],
+            reasonCodes: ["user_authored"],
+            state: "asserted",
+          },
           endSample: 29000,
           startSample: 21000,
           state: "matched",
@@ -351,7 +375,10 @@ describe("canonical domain kernel", () => {
         type: "merge_bars",
       }),
     );
-    expect(merged.bars[0]).toMatchObject({ endSample: 32000, id: "bar_pickup" });
+    expect(merged.bars[0]).toMatchObject({
+      endSample: 32000,
+      id: "bar_pickup",
+    });
   });
 
   it.each(parseMutationCases(readFixture("invalid/cases.json")))(
@@ -403,7 +430,9 @@ describe("canonical domain kernel", () => {
     expect(parseContractEnvelope(newerMinor)).toMatchObject({
       compatibility: "read_only",
       envelope: {
-        extensions: { "org.openchords.fixture": { purpose: "golden cross-language corpus" } },
+        extensions: {
+          "org.openchords.fixture": { purpose: "golden cross-language corpus" },
+        },
       },
     });
     newerMinor.schemaVersion = "2.0";

@@ -17,6 +17,11 @@ const MAX_PLAYBACK_CAPABILITIES_PER_GENERATION = 8;
 const CANONICAL_SAMPLE_RATE = 48_000;
 const LOCAL_MEDIA_COMPONENT_HASH = sha256("open-chords/local-media/wav-pcm-s16le/v1");
 
+export class LocalMediaCapabilityUnavailableError extends Error {}
+export class LocalMediaChangedError extends Error {}
+export class LocalMediaRangeError extends Error {}
+export class LocalMediaReadLimitError extends Error {}
+
 type VerifiedLocalMedia = {
   audioCodec: "pcm_s16le";
   byteFingerprint: string;
@@ -117,7 +122,7 @@ class MediaHandleCleanup {
   }
 }
 
-class RevokedMediaGenerationError extends Error {
+class RevokedMediaGenerationError extends LocalMediaCapabilityUnavailableError {
   constructor() {
     super("Local media capability is unavailable because its generation was revoked");
   }
@@ -259,7 +264,11 @@ class MediaCapabilityRegistry {
       }
       await releaseLeases(releases);
       const capabilityId = opaqueId("playbackcapability");
-      this.#playback.set(capabilityId, { generationId, lease: lease.move(), projectId });
+      this.#playback.set(capabilityId, {
+        generationId,
+        lease: lease.move(),
+        projectId,
+      });
       return capabilityId;
     });
   }
@@ -495,7 +504,11 @@ export class LocalMediaService {
     endSourceSample: number;
     generationId: string;
     startSourceSample: number;
-  }): Promise<{ projectId: string; projectRevisionId: string; sourceId: string }> {
+  }): Promise<{
+    projectId: string;
+    projectRevisionId: string;
+    sourceId: string;
+  }> {
     return this.#runGenerationOperation(input.generationId, () => this.#createProject(input));
   }
 
@@ -504,7 +517,11 @@ export class LocalMediaService {
     endSourceSample: number;
     generationId: string;
     startSourceSample: number;
-  }): Promise<{ projectId: string; projectRevisionId: string; sourceId: string }> {
+  }): Promise<{
+    projectId: string;
+    projectRevisionId: string;
+    sourceId: string;
+  }> {
     const selectedLease = await this.#capabilities.consumeSelection(
       input.capabilityId,
       input.generationId,
@@ -539,7 +556,10 @@ export class LocalMediaService {
       };
       const source = existingSource ?? {
         id: sourceId,
-        identity: { fingerprint: capability.byteFingerprint, kind: "local_file" as const },
+        identity: {
+          fingerprint: capability.byteFingerprint,
+          kind: "local_file" as const,
+        },
         locators: [],
         metadataObservations: [],
         snapshots: [
@@ -591,7 +611,11 @@ export class LocalMediaService {
         async () => this.#library.createProject({ envelope, records }),
         [selectedLease, reverifiedLease],
       );
-      return { projectId, projectRevisionId: created.projectRevisionId, sourceId };
+      return {
+        projectId,
+        projectRevisionId: created.projectRevisionId,
+        sourceId,
+      };
     } finally {
       if (!cleanupQueued) {
         await releaseLeasesSuppressingCleanupErrors([
@@ -664,7 +688,11 @@ export class LocalMediaService {
     const range = project.records.projectRange;
     const source = project.records.sources.find(({ id }) => id === range.sourceId);
     if (source === undefined || source.identity.kind !== "local_file") {
-      return { kind: "unavailable", projectId: input.projectId, sourceId: range.sourceId };
+      return {
+        kind: "unavailable",
+        projectId: input.projectId,
+        sourceId: range.sourceId,
+      };
     }
     const locators = source.locators
       .filter(
@@ -706,7 +734,11 @@ export class LocalMediaService {
         await releaseLeasesSuppressingCleanupErrors([lease]);
       }
     }
-    return { kind: "unavailable", projectId: input.projectId, sourceId: source.id };
+    return {
+      kind: "unavailable",
+      projectId: input.projectId,
+      sourceId: source.id,
+    };
   }
 
   readPlaybackRange(input: {
@@ -735,7 +767,8 @@ export class LocalMediaService {
     startByte: number;
   }> {
     const lease = this.#capabilities.playback(input.capabilityId);
-    if (lease === null) throw new Error("Playback capability is unavailable");
+    if (lease === null)
+      throw new LocalMediaCapabilityUnavailableError("Playback capability is unavailable");
     const capability = lease.media;
     const endByteExclusive =
       input.endByteExclusive ??
@@ -748,7 +781,7 @@ export class LocalMediaService {
       endByteExclusive > capability.byteSize ||
       endByteExclusive - input.startByte > MAX_PLAYBACK_RANGE_BYTES
     ) {
-      throw new Error("Playback byte range is invalid or exceeds its limit");
+      throw new LocalMediaRangeError("Playback byte range is invalid or exceeds its limit");
     }
     const bytes = await this.#readVerifiedBytes(capability, input.startByte, endByteExclusive);
     return {
@@ -855,7 +888,7 @@ export class LocalMediaService {
     endByteExclusive: number,
   ): Promise<Buffer> {
     if (this.#activeVerifiedReads >= MAX_CONCURRENT_VERIFIED_READS) {
-      throw new Error("Too many local media reads are active");
+      throw new LocalMediaReadLimitError("Too many local media reads are active");
     }
     this.#activeVerifiedReads += 1;
     try {
@@ -875,7 +908,8 @@ async function readVerifiedBytes(
   assertSameFileIdentity(media.identity, identity);
   const bytes = Buffer.alloc(endByteExclusive - startByte);
   const read = await media.handle.read(bytes, 0, bytes.length, startByte);
-  if (read.bytesRead !== bytes.length) throw new Error("Local media changed while reading");
+  if (read.bytesRead !== bytes.length)
+    throw new LocalMediaChangedError("Local media changed while reading");
   const identityAfter = await media.handle.stat({ bigint: true });
   assertSameFileIdentity(identity, identityAfter);
   return bytes;
@@ -969,7 +1003,12 @@ async function inspectPathAncestors(
     if (identity.isSymbolicLink()) {
       throw new Error("Selected media path must not traverse a symbolic link or junction");
     }
-    identities.push({ dev: identity.dev, ino: identity.ino, mode: identity.mode, path: ancestor });
+    identities.push({
+      dev: identity.dev,
+      ino: identity.ino,
+      mode: identity.mode,
+      path: ancestor,
+    });
   }
   return identities;
 }
@@ -1088,7 +1127,7 @@ function assertSameFileIdentity(left: FileIdentity, right: FileIdentity): void {
     left.mtimeNs !== right.mtimeNs ||
     left.ctimeNs !== right.ctimeNs
   ) {
-    throw new Error("Selected media changed while reading");
+    throw new LocalMediaChangedError("Selected media changed while reading");
   }
 }
 

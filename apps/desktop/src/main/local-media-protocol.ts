@@ -1,5 +1,11 @@
 import { parseApplicationUrl } from "./desktop-origin.ts";
-import type { LocalMediaService } from "./local-media.ts";
+import {
+  LocalMediaCapabilityUnavailableError,
+  LocalMediaChangedError,
+  LocalMediaRangeError,
+  LocalMediaReadLimitError,
+  type LocalMediaService,
+} from "./local-media.ts";
 
 const baseHeaders = {
   "Accept-Ranges": "bytes",
@@ -14,12 +20,9 @@ export async function handleLocalMediaRequest(
 ): Promise<Response> {
   if (request.method === "OPTIONS")
     return new Response(null, { headers: baseHeaders, status: 204 });
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return mediaError(405, "Method Not Allowed");
-  }
+  if (request.method !== "GET") return methodNotAllowed();
   const capabilityId = capabilityFromUrl(request.url);
   if (capabilityId === null) return mediaError(404, "Not Found");
-  if (request.method === "HEAD") return mediaError(405, "Range Required");
   const range = parseByteRange(request.headers.get("range"));
   if (range === null) return mediaError(416, "Range Not Satisfiable");
   try {
@@ -32,8 +35,13 @@ export async function handleLocalMediaRequest(
     );
     headers.set("Content-Type", result.mimeType);
     return new Response(new Uint8Array(result.bytes), { headers, status: 206 });
-  } catch {
-    return mediaError(416, "Range Not Satisfiable");
+  } catch (error) {
+    if (error instanceof LocalMediaReadLimitError)
+      return mediaError(503, "Service Unavailable", { "Retry-After": "1" });
+    if (error instanceof LocalMediaCapabilityUnavailableError) return mediaError(404, "Not Found");
+    if (error instanceof LocalMediaChangedError) return mediaError(410, "Gone");
+    if (error instanceof LocalMediaRangeError) return mediaError(416, "Range Not Satisfiable");
+    return mediaError(500, "Internal Server Error");
   }
 }
 
@@ -79,6 +87,17 @@ function parseByteRange(
   return { endByteExclusive: inclusiveEnd + 1, startByte };
 }
 
-function mediaError(status: number, message: string): Response {
-  return new Response(message, { headers: baseHeaders, status });
+function methodNotAllowed(): Response {
+  return mediaError(405, null, { Allow: "GET, OPTIONS" });
+}
+
+function mediaError(
+  status: number,
+  message: string | null,
+  additionalHeaders: Record<string, string> = {},
+): Response {
+  return new Response(message, {
+    headers: { ...baseHeaders, ...additionalHeaders },
+    status,
+  });
 }

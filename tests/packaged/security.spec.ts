@@ -20,9 +20,9 @@ const EXPECTED_RENDERER_CSP = [
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data:",
-  "connect-src open-chords:",
+  "connect-src 'self'",
   "font-src 'self'",
-  "media-src open-chords:",
+  "media-src 'self'",
   "object-src 'none'",
   "frame-src 'none'",
   "base-uri 'none'",
@@ -725,7 +725,12 @@ async function evaluatePackagedMedia(
         JSON.stringify({
           id: requestId,
           method: "Runtime.evaluate",
-          params: { awaitPromise: true, expression, returnByValue: true, userGesture: true },
+          params: {
+            awaitPromise: true,
+            expression,
+            returnByValue: true,
+            userGesture: true,
+          },
         }),
       );
     };

@@ -131,7 +131,9 @@ export function validateTimelineInvariants(timeline: MusicalTimeline, duration: 
 }
 
 function validateLyricsTimingSequence(
-  occurrences: readonly { timing: LyricsAlignment["occurrences"][number]["timing"] }[],
+  occurrences: readonly {
+    timing: LyricsAlignment["occurrences"][number]["timing"];
+  }[],
   durationSamples: number,
   label: string,
   issues: string[],
@@ -258,6 +260,9 @@ export function validateProjectInvariants(project: ProjectContract): void {
   if (project.activeView === null) {
     if (project.analysisRevisions.length !== 0 || project.editLayers.length !== 0) {
       issues.push("A Project without an Active View must not contain analysis or edit revisions");
+    }
+    if (project.supportClaims.length !== 0) {
+      issues.push("A Project without an Active View must not contain Support Claims");
     }
     if (project.lyricsDocuments.length !== 0 || project.lyricsAlignments.length !== 0) {
       issues.push("A Project without an Active View must not contain lyrics records");

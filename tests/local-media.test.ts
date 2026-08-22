@@ -259,7 +259,10 @@ describe("LocalMediaService", () => {
     await writeFile(originalPath, original);
     await writeFile(movedPath, original);
     const library = await openProjectLibrary({ stateRoot });
-    const ingestion = createMediaService({ library, pickFile: async () => originalPath });
+    const ingestion = createMediaService({
+      library,
+      pickFile: async () => originalPath,
+    });
     const selected = await ingestion.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await ingestion.createProject({
@@ -362,9 +365,10 @@ describe("LocalMediaService", () => {
     const library = await openProjectLibrary({ stateRoot });
 
     await expect(
-      createMediaService({ library, pickFile: async () => spoofedPath }).pickLocalFile(
-        "generation_fixture",
-      ),
+      createMediaService({
+        library,
+        pickFile: async () => spoofedPath,
+      }).pickLocalFile("generation_fixture"),
     ).rejects.toThrow(/supported media/i);
     expect(library.listProjects()).toEqual([]);
   });
@@ -399,9 +403,10 @@ describe("LocalMediaService", () => {
     const library = await openProjectLibrary({ stateRoot });
 
     await expect(
-      createMediaService({ library, pickFile: async () => symlinkPath }).pickLocalFile(
-        "generation_fixture",
-      ),
+      createMediaService({
+        library,
+        pickFile: async () => symlinkPath,
+      }).pickLocalFile("generation_fixture"),
     ).rejects.toThrow(/symbolic link|junction/i);
     expect(library.listProjects()).toEqual([]);
   });
@@ -497,7 +502,10 @@ describe("LocalMediaService", () => {
     const displacedPath = join(mediaRoot, "selected-recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     const library = await openProjectLibrary({ stateRoot });
-    const media = createMediaService({ library, pickFile: async () => mediaPath });
+    const media = createMediaService({
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await media.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     await rename(mediaPath, displacedPath);
@@ -520,7 +528,10 @@ describe("LocalMediaService", () => {
     const mediaPath = join(mediaRoot, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     const library = await openProjectLibrary({ stateRoot });
-    const media = createMediaService({ library, pickFile: async () => mediaPath });
+    const media = createMediaService({
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await media.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
 
@@ -554,7 +565,10 @@ describe("LocalMediaService", () => {
     await writeFile(movedPath, original);
     await writeFile(differentPath, monoPcmWav([0, 200, -200, 0]));
     const library = await openProjectLibrary({ stateRoot });
-    const createMedia = createMediaService({ library, pickFile: async () => originalPath });
+    const createMedia = createMediaService({
+      library,
+      pickFile: async () => originalPath,
+    });
     const selected = await createMedia.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await createMedia.createProject({
@@ -567,7 +581,10 @@ describe("LocalMediaService", () => {
     const matching = await createMediaService({
       library,
       pickFile: async () => movedPath,
-    }).relinkSource({ generationId: "generation_fixture", sourceId: created.sourceId });
+    }).relinkSource({
+      generationId: "generation_fixture",
+      sourceId: created.sourceId,
+    });
     expect(matching).toEqual({ kind: "relinked", sourceId: created.sourceId });
     expect(JSON.stringify(matching)).not.toContain(movedPath);
     expect((await library.readProject(created.projectId)).records.sources[0]?.locators).toEqual(
@@ -629,7 +646,10 @@ describe("LocalMediaService", () => {
       startSourceSample: 0,
     });
     expect(library.listProjects()).toEqual([
-      expect.objectContaining({ projectId: created.projectId, status: "active" }),
+      expect.objectContaining({
+        projectId: created.projectId,
+        status: "active",
+      }),
     ]);
     expect(createCleanup.closeAttempts).toBe(2);
     expect(createCleanup.closedHandles).toBe(0);
@@ -662,7 +682,10 @@ describe("LocalMediaService", () => {
     const mediaPath = join(mediaRoot, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 100, -100, 200, -200, 0]));
     const library = await openProjectLibrary({ stateRoot });
-    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const ingestion = createMediaService({
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await ingestion.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await ingestion.createProject({
@@ -697,13 +720,24 @@ describe("LocalMediaService", () => {
       pathname: expect.stringMatching(/^\/media\/playbackcapability_/),
       protocol: "open-chords:",
     });
+    const head = await handleLocalMediaRequest(
+      playback,
+      new Request(opened.playbackUrl, { method: "HEAD" }),
+    );
+    expect(head.status).toBe(405);
+    expect(head.headers.get("Allow")).toBe("GET, OPTIONS");
+    expect((await head.arrayBuffer()).byteLength).toBe(0);
     const range = await playback.readPlaybackRange({
       capabilityId: opened.capabilityId,
       endByteExclusive: 12,
       startByte: 0,
     });
     expect(range.bytes.toString("ascii")).toBe("RIFF0\u0000\u0000\u0000WAVE");
-    expect(range).toMatchObject({ byteSize: 56, endByteExclusive: 12, startByte: 0 });
+    expect(range).toMatchObject({
+      byteSize: 56,
+      endByteExclusive: 12,
+      startByte: 0,
+    });
     await expect(
       playback.readPlaybackRange({
         capabilityId: opened.capabilityId,
@@ -733,7 +767,17 @@ describe("LocalMediaService", () => {
       (
         await handleLocalMediaRequest(
           playback,
-          new Request(opened.playbackUrl, { headers: { Range: "bytes=0-1,4-5" } }),
+          new Request(opened.playbackUrl, {
+            headers: { Range: "bytes=0-1,4-5" },
+          }),
+        )
+      ).status,
+    ).toBe(416);
+    expect(
+      (
+        await handleLocalMediaRequest(
+          playback,
+          new Request(opened.playbackUrl, { headers: { Range: "bytes=0-56" } }),
         )
       ).status,
     ).toBe(416);
@@ -752,6 +796,14 @@ describe("LocalMediaService", () => {
         startByte: 0,
       }),
     ).rejects.toThrow(/unavailable/i);
+    expect(
+      (
+        await handleLocalMediaRequest(
+          playback,
+          new Request(opened.playbackUrl, { headers: { Range: "bytes=0-11" } }),
+        )
+      ).status,
+    ).toBe(404);
     await expect(
       playback.readPlaybackRange({
         capabilityId: replacement.capabilityId,
@@ -785,6 +837,16 @@ describe("LocalMediaService", () => {
         startByte: 0,
       }),
     ).rejects.toThrow(/changed/i);
+    expect(
+      (
+        await handleLocalMediaRequest(
+          playback,
+          new Request(reopenedCapability.playbackUrl, {
+            headers: { Range: "bytes=0-11" },
+          }),
+        )
+      ).status,
+    ).toBe(410);
     await playback.revokeGeneration("generation_replacement_probe");
   });
 
@@ -822,7 +884,11 @@ describe("LocalMediaService", () => {
         };
       },
     };
-    const media = createMediaService({ library, fileSystem, pickFile: async () => mediaPath });
+    const media = createMediaService({
+      library,
+      fileSystem,
+      pickFile: async () => mediaPath,
+    });
     const selected = await media.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await media.createProject({
@@ -846,13 +912,12 @@ describe("LocalMediaService", () => {
       }),
     );
     await limitReached;
-    await expect(
-      media.readPlaybackRange({
-        capabilityId: playback.capabilityId,
-        endByteExclusive: 12,
-        startByte: 0,
-      }),
-    ).rejects.toThrow(/too many local media reads/i);
+    const limited = await handleLocalMediaRequest(
+      media,
+      new Request(playback.playbackUrl, { headers: { Range: "bytes=0-11" } }),
+    );
+    expect(limited.status).toBe(503);
+    expect(limited.headers.get("Retry-After")).toBe("1");
     releaseReads();
     await expect(Promise.all(activeReads)).resolves.toHaveLength(8);
     await media.revokeGeneration("generation_fixture");
@@ -864,7 +929,10 @@ describe("LocalMediaService", () => {
     const mediaPath = join(mediaRoot, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     const library = await openProjectLibrary({ stateRoot });
-    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const ingestion = createMediaService({
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await ingestion.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await ingestion.createProject({
@@ -1027,7 +1095,10 @@ describe("LocalMediaService", () => {
     const mediaPath = join(mediaRoot, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 100, 200, 300, 400]));
     const library = await openProjectLibrary({ stateRoot });
-    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const ingestion = createMediaService({
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await ingestion.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await ingestion.createProject({
@@ -1061,11 +1132,17 @@ describe("LocalMediaService", () => {
             startSourceSample: 1,
           });
           const bytes = Buffer.from(
-            await input.readCanonicalPcm({ endProjectSample: 3, startProjectSample: 0 }),
+            await input.readCanonicalPcm({
+              endProjectSample: 3,
+              startProjectSample: 0,
+            }),
           );
           cachedSamples = [bytes.readInt16LE(0), bytes.readInt16LE(2), bytes.readInt16LE(4)];
           await expect(
-            input.readCanonicalPcm({ endProjectSample: 4, startProjectSample: 0 }),
+            input.readCanonicalPcm({
+              endProjectSample: 4,
+              startProjectSample: 0,
+            }),
           ).rejects.toThrow(/Project Range/i);
         },
       },
@@ -1081,7 +1158,10 @@ describe("LocalMediaService", () => {
     const mediaPath = join(mediaRoot, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     const library = await openProjectLibrary({ stateRoot });
-    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const ingestion = createMediaService({
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await ingestion.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await ingestion.createProject({
@@ -1113,7 +1193,10 @@ describe("LocalMediaService", () => {
     const mediaPath = join(mediaRoot, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     const library = await openProjectLibrary({ stateRoot });
-    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const ingestion = createMediaService({
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await ingestion.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await ingestion.createProject({
@@ -1165,7 +1248,10 @@ describe("LocalMediaService", () => {
     const mediaPath = join(mediaRoot, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     const library = await openProjectLibrary({ stateRoot });
-    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const ingestion = createMediaService({
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await ingestion.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await ingestion.createProject({
@@ -1180,7 +1266,10 @@ describe("LocalMediaService", () => {
       library,
       now: () => new Date("2026-08-21T12:00:01.000Z"),
       pickFile: async () => null,
-    }).openPlayback({ generationId: "generation_fixture", projectId: created.projectId });
+    }).openPlayback({
+      generationId: "generation_fixture",
+      projectId: created.projectId,
+    });
     expect(result).toEqual({
       kind: "unavailable",
       projectId: created.projectId,
