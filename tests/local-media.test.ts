@@ -490,6 +490,7 @@ describe("LocalMediaService", () => {
         startByte: 0,
       }),
     ).rejects.toThrow(/changed/i);
+    playback.revokeGeneration("generation_replacement_probe");
   });
 
   it("bounds concurrent playback range reads", async () => {
@@ -559,9 +560,10 @@ describe("LocalMediaService", () => {
     ).rejects.toThrow(/too many local media reads/i);
     releaseReads();
     await expect(Promise.all(activeReads)).resolves.toHaveLength(8);
+    media.revokeGeneration("generation_fixture");
   });
 
-  it("rejects playback after a verified ancestor becomes a symlink or junction", async () => {
+  it("reads only through its retained handle during a transient ancestor link swap", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-playback-link-state-");
     const mediaRoot = await temporaryDirectory("open-chords-local-media-playback-link-source-");
     const selectedRoot = join(mediaRoot, "selected");
@@ -570,7 +572,39 @@ describe("LocalMediaService", () => {
     await mkdir(selectedRoot);
     await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
     const library = await openProjectLibrary({ stateRoot });
-    const media = new LocalMediaService({ library, pickFile: async () => mediaPath });
+    let openCalls = 0;
+    let swapOnRead = false;
+    const media = new LocalMediaService({
+      fileSystem: {
+        ...nodeLocalMediaFileSystem,
+        open: async (path, flags) => {
+          openCalls += 1;
+          const handle = await nodeLocalMediaFileSystem.open(path, flags);
+          return {
+            close: () => handle.close(),
+            read: async (buffer, offset, length, position) => {
+              if (!swapOnRead) return handle.read(buffer, offset, length, position);
+              swapOnRead = false;
+              await rename(selectedRoot, displacedRoot);
+              await symlink(
+                displacedRoot,
+                selectedRoot,
+                process.platform === "win32" ? "junction" : "dir",
+              );
+              try {
+                return await handle.read(buffer, offset, length, position);
+              } finally {
+                await rm(selectedRoot, { force: true, recursive: true });
+                await rename(displacedRoot, selectedRoot);
+              }
+            },
+            stat: (options) => handle.stat(options),
+          };
+        },
+      },
+      library,
+      pickFile: async () => mediaPath,
+    });
     const selected = await media.pickLocalFile("generation_fixture");
     if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
     const created = await media.createProject({
@@ -585,15 +619,17 @@ describe("LocalMediaService", () => {
     });
     if (playback.kind !== "ready") throw new Error("Fixture Source was unavailable");
 
-    await rename(selectedRoot, displacedRoot);
-    await symlink(displacedRoot, selectedRoot, process.platform === "win32" ? "junction" : "dir");
-    await expect(
-      media.readPlaybackRange({
-        capabilityId: playback.capabilityId,
-        endByteExclusive: 12,
-        startByte: 0,
-      }),
-    ).rejects.toThrow(/ancestor|symbolic link|junction/i);
+    const opensBeforePlaybackRead = openCalls;
+    swapOnRead = true;
+    const range = await media.readPlaybackRange({
+      capabilityId: playback.capabilityId,
+      endByteExclusive: 12,
+      startByte: 0,
+    });
+    expect(range.bytes.toString("ascii")).toBe("RIFF,\u0000\u0000\u0000WAVE");
+    expect(openCalls).toBe(opensBeforePlaybackRead);
+    expect(await realpath(mediaPath)).toBe(mediaPath);
+    media.revokeGeneration("generation_fixture");
   });
 
   it("gives a cache adapter only an immutable Project Range and range-bounded PCM reader", async () => {

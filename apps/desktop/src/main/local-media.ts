@@ -18,7 +18,6 @@ const CANONICAL_SAMPLE_RATE = 48_000;
 const LOCAL_MEDIA_COMPONENT_HASH = sha256("open-chords/local-media/wav-pcm-s16le/v1");
 
 type VerifiedLocalMedia = {
-  ancestors: readonly PathAncestorIdentity[];
   audioCodec: "pcm_s16le";
   byteFingerprint: string;
   byteSize: number;
@@ -26,6 +25,7 @@ type VerifiedLocalMedia = {
   container: "wav";
   dataOffset: number;
   durationSamples: number;
+  handle: LocalMediaFileHandle;
   identity: FileIdentity;
   mimeType: "audio/wav";
   path: string;
@@ -155,10 +155,16 @@ export class LocalMediaService {
 
   revokeGeneration(generationId: string): void {
     for (const [capabilityId, capability] of this.#capabilities) {
-      if (capability.generationId === generationId) this.#capabilities.delete(capabilityId);
+      if (capability.generationId === generationId) {
+        this.#capabilities.delete(capabilityId);
+        releaseVerifiedMedia(capability);
+      }
     }
     for (const [capabilityId, capability] of this.#playbackCapabilities) {
-      if (capability.generationId === generationId) this.#playbackCapabilities.delete(capabilityId);
+      if (capability.generationId === generationId) {
+        this.#playbackCapabilities.delete(capabilityId);
+        releaseVerifiedMedia(capability);
+      }
     }
   }
 
@@ -187,78 +193,85 @@ export class LocalMediaService {
     if (capability === undefined || capability.generationId !== input.generationId) {
       throw new Error("Local media capability is unavailable");
     }
-    assertProjectRange(input, capability.durationSamples);
-    const reverified = await this.#verifyLocalWav(capability.path);
-    if (reverified.byteFingerprint !== capability.byteFingerprint) {
-      throw new Error("Selected media changed before Project creation");
-    }
-    assertSameFileIdentity(capability.identity, reverified.identity);
-    capability = { ...reverified, generationId: capability.generationId };
-
-    const observedAt = this.#now().toISOString();
-    const existingSource = this.#library.findLocalFileSourceByFingerprint(
-      capability.byteFingerprint,
-    );
-    const sourceId = existingSource?.id ?? sourceIdFor(capability.byteFingerprint);
-    const locator = {
-      fingerprint: capability.byteFingerprint,
-      id: opaqueId("locator"),
-      kind: "local_file" as const,
-      path: capability.path,
-      status: "available" as const,
-      verifiedAt: observedAt,
-    };
-    const source = existingSource ?? {
-      id: sourceId,
-      identity: { fingerprint: capability.byteFingerprint, kind: "local_file" as const },
-      locators: [],
-      metadataObservations: [],
-      snapshots: [
-        {
-          byteFingerprint: capability.byteFingerprint,
-          byteSize: capability.byteSize,
-          canonicalAudioFingerprint: capability.canonicalAudioFingerprint,
-          durationSamples: capability.durationSamples,
-          id: snapshotIdFor(capability.byteFingerprint),
-          metadataObservationIds: [],
-          observedAt,
-          provenance: {
-            components: [
-              {
-                hash: LOCAL_MEDIA_COMPONENT_HASH,
-                id: "open-chords-local-wav-probe",
-                version: "1.0",
-              },
-            ],
-            kind: "local_file" as const,
-          },
-          selectedFormat: {
-            audioCodec: capability.audioCodec,
-            container: capability.container,
-            mimeType: capability.mimeType,
-          },
-        },
-      ],
-    };
-    const records = ProjectOwnedRecordsSchema.parse({
-      exportReceipts: [],
-      extensions: {},
-      projectRange: {
-        endSourceSample: input.endSourceSample,
-        sourceId,
-        startSourceSample: input.startSourceSample,
-      },
-      sources: [{ ...source, locators: [...source.locators, locator] }],
-    });
-    const projectId = opaqueId("project");
-    const envelope = buildUnanalyzedProjectEnvelope({
-      durationSamples: input.endSourceSample - input.startSourceSample,
-      projectId,
-      sampleRate: capability.sampleRate,
-    });
-    const created = await this.#library.createProject({ envelope, records });
     this.#capabilities.delete(input.capabilityId);
-    return { projectId, projectRevisionId: created.projectRevisionId, sourceId };
+    const selectedCapability = capability;
+    let reverified: VerifiedLocalMedia | undefined;
+    try {
+      assertProjectRange(input, capability.durationSamples);
+      reverified = await this.#verifyLocalWav(capability.path);
+      if (reverified.byteFingerprint !== capability.byteFingerprint) {
+        throw new Error("Selected media changed before Project creation");
+      }
+      assertSameFileIdentity(capability.identity, reverified.identity);
+      capability = { ...reverified, generationId: capability.generationId };
+
+      const observedAt = this.#now().toISOString();
+      const existingSource = this.#library.findLocalFileSourceByFingerprint(
+        capability.byteFingerprint,
+      );
+      const sourceId = existingSource?.id ?? sourceIdFor(capability.byteFingerprint);
+      const locator = {
+        fingerprint: capability.byteFingerprint,
+        id: opaqueId("locator"),
+        kind: "local_file" as const,
+        path: capability.path,
+        status: "available" as const,
+        verifiedAt: observedAt,
+      };
+      const source = existingSource ?? {
+        id: sourceId,
+        identity: { fingerprint: capability.byteFingerprint, kind: "local_file" as const },
+        locators: [],
+        metadataObservations: [],
+        snapshots: [
+          {
+            byteFingerprint: capability.byteFingerprint,
+            byteSize: capability.byteSize,
+            canonicalAudioFingerprint: capability.canonicalAudioFingerprint,
+            durationSamples: capability.durationSamples,
+            id: snapshotIdFor(capability.byteFingerprint),
+            metadataObservationIds: [],
+            observedAt,
+            provenance: {
+              components: [
+                {
+                  hash: LOCAL_MEDIA_COMPONENT_HASH,
+                  id: "open-chords-local-wav-probe",
+                  version: "1.0",
+                },
+              ],
+              kind: "local_file" as const,
+            },
+            selectedFormat: {
+              audioCodec: capability.audioCodec,
+              container: capability.container,
+              mimeType: capability.mimeType,
+            },
+          },
+        ],
+      };
+      const records = ProjectOwnedRecordsSchema.parse({
+        exportReceipts: [],
+        extensions: {},
+        projectRange: {
+          endSourceSample: input.endSourceSample,
+          sourceId,
+          startSourceSample: input.startSourceSample,
+        },
+        sources: [{ ...source, locators: [...source.locators, locator] }],
+      });
+      const projectId = opaqueId("project");
+      const envelope = buildUnanalyzedProjectEnvelope({
+        durationSamples: input.endSourceSample - input.startSourceSample,
+        projectId,
+        sampleRate: capability.sampleRate,
+      });
+      const created = await this.#library.createProject({ envelope, records });
+      return { projectId, projectRevisionId: created.projectRevisionId, sourceId };
+    } finally {
+      releaseVerifiedMedia(selectedCapability);
+      if (reverified !== undefined) releaseVerifiedMedia(reverified);
+    }
   }
 
   async relinkSource(input: {
@@ -268,31 +281,37 @@ export class LocalMediaService {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
     const verified = await this.#verifyLocalWav(selectedPath);
-    const source = this.#library.getSourceById(input.sourceId);
-    if (source === undefined) throw new Error("Source is unavailable");
-    if (
-      source.identity.kind !== "local_file" ||
-      source.identity.fingerprint !== verified.byteFingerprint
-    ) {
-      const capabilityId = this.#rememberSelectionCapability(input.generationId, verified);
-      return {
-        byteSize: verified.byteSize,
-        capabilityId,
-        durationSamples: verified.durationSamples,
-        kind: "different_source",
-        mimeType: verified.mimeType,
-        sampleRate: verified.sampleRate,
-      };
+    let retained = false;
+    try {
+      const source = this.#library.getSourceById(input.sourceId);
+      if (source === undefined) throw new Error("Source is unavailable");
+      if (
+        source.identity.kind !== "local_file" ||
+        source.identity.fingerprint !== verified.byteFingerprint
+      ) {
+        const capabilityId = this.#rememberSelectionCapability(input.generationId, verified);
+        retained = true;
+        return {
+          byteSize: verified.byteSize,
+          capabilityId,
+          durationSamples: verified.durationSamples,
+          kind: "different_source",
+          mimeType: verified.mimeType,
+          sampleRate: verified.sampleRate,
+        };
+      }
+      await this.#library.observeSourceLocator(input.sourceId, {
+        fingerprint: verified.byteFingerprint,
+        id: opaqueId("locator"),
+        kind: "local_file",
+        path: verified.path,
+        status: "available",
+        verifiedAt: this.#now().toISOString(),
+      });
+      return { kind: "relinked", sourceId: input.sourceId };
+    } finally {
+      if (!retained) releaseVerifiedMedia(verified);
     }
-    await this.#library.observeSourceLocator(input.sourceId, {
-      fingerprint: verified.byteFingerprint,
-      id: opaqueId("locator"),
-      kind: "local_file",
-      path: verified.path,
-      status: "available",
-      verifiedAt: this.#now().toISOString(),
-    });
-    return { kind: "relinked", sourceId: input.sourceId };
   }
 
   async openPlayback(input: {
@@ -314,26 +333,32 @@ export class LocalMediaService {
     for (const locator of locators) {
       try {
         const verified = await this.#verifyLocalWav(locator.path);
-        if (verified.byteFingerprint !== source.identity.fingerprint) {
-          await this.#markLocatorUnavailable(source.id, locator);
-          continue;
+        let retained = false;
+        try {
+          if (verified.byteFingerprint !== source.identity.fingerprint) {
+            await this.#markLocatorUnavailable(source.id, locator);
+            continue;
+          }
+          const capabilityId = this.#rememberPlaybackCapability(
+            input.generationId,
+            input.projectId,
+            verified,
+          );
+          retained = true;
+          return {
+            byteSize: verified.byteSize,
+            capabilityId,
+            endSourceSample: range.endSourceSample,
+            kind: "ready",
+            mimeType: verified.mimeType,
+            playbackUrl: `open-chords://app/media/${capabilityId}`,
+            projectId: input.projectId,
+            sampleRate: verified.sampleRate,
+            startSourceSample: range.startSourceSample,
+          };
+        } finally {
+          if (!retained) releaseVerifiedMedia(verified);
         }
-        const capabilityId = this.#rememberPlaybackCapability(
-          input.generationId,
-          input.projectId,
-          verified,
-        );
-        return {
-          byteSize: verified.byteSize,
-          capabilityId,
-          endSourceSample: range.endSourceSample,
-          kind: "ready",
-          mimeType: verified.mimeType,
-          playbackUrl: `open-chords://app/media/${capabilityId}`,
-          projectId: input.projectId,
-          sampleRate: verified.sampleRate,
-          startSourceSample: range.startSourceSample,
-        };
       } catch {
         await this.#markLocatorUnavailable(source.id, locator);
       }
@@ -379,7 +404,10 @@ export class LocalMediaService {
 
   #rememberSelectionCapability(generationId: string, verified: VerifiedLocalMedia): string {
     for (const [capabilityId, capability] of this.#capabilities) {
-      if (capability.generationId === generationId) this.#capabilities.delete(capabilityId);
+      if (capability.generationId === generationId) {
+        this.#capabilities.delete(capabilityId);
+        releaseVerifiedMedia(capability);
+      }
     }
     const capabilityId = opaqueId("mediacapability");
     this.#capabilities.set(capabilityId, { ...verified, generationId });
@@ -394,13 +422,17 @@ export class LocalMediaService {
     const generationCapabilities: string[] = [];
     for (const [capabilityId, capability] of this.#playbackCapabilities) {
       if (capability.generationId !== generationId) continue;
-      if (capability.projectId === projectId) this.#playbackCapabilities.delete(capabilityId);
-      else generationCapabilities.push(capabilityId);
+      if (capability.projectId === projectId) {
+        this.#playbackCapabilities.delete(capabilityId);
+        releaseVerifiedMedia(capability);
+      } else generationCapabilities.push(capabilityId);
     }
     while (generationCapabilities.length >= MAX_PLAYBACK_CAPABILITIES_PER_GENERATION) {
       const oldestCapabilityId = generationCapabilities.shift();
       if (oldestCapabilityId !== undefined) {
+        const oldestCapability = this.#playbackCapabilities.get(oldestCapabilityId);
         this.#playbackCapabilities.delete(oldestCapabilityId);
+        if (oldestCapability !== undefined) releaseVerifiedMedia(oldestCapability);
       }
     }
     const capabilityId = opaqueId("playbackcapability");
@@ -425,36 +457,40 @@ export class LocalMediaService {
     );
     if (locator === undefined) throw new Error("Project Source Locator is unavailable");
     const verified = await this.#verifyLocalWav(locator.path);
-    if (verified.byteFingerprint !== source.identity.fingerprint) {
-      await this.#markLocatorUnavailable(source.id, locator);
-      throw new Error("Project Source Locator no longer matches its identity");
+    try {
+      if (verified.byteFingerprint !== source.identity.fingerprint) {
+        await this.#markLocatorUnavailable(source.id, locator);
+        throw new Error("Project Source Locator no longer matches its identity");
+      }
+      const durationSamples = range.endSourceSample - range.startSourceSample;
+      await this.#rangeCache.cacheProjectRange({
+        canonicalAudioFingerprint: snapshot.canonicalAudioFingerprint,
+        endSourceSample: range.endSourceSample,
+        projectId,
+        readCanonicalPcm: async ({ endProjectSample, startProjectSample }) => {
+          if (
+            !Number.isSafeInteger(startProjectSample) ||
+            !Number.isSafeInteger(endProjectSample) ||
+            startProjectSample < 0 ||
+            endProjectSample <= startProjectSample ||
+            endProjectSample > durationSamples
+          ) {
+            throw new Error("Cache read must stay inside the immutable Project Range");
+          }
+          return this.#readVerifiedBytes(
+            verified,
+            verified.dataOffset + (range.startSourceSample + startProjectSample) * 2,
+            verified.dataOffset + (range.startSourceSample + endProjectSample) * 2,
+          );
+        },
+        sampleRate: verified.sampleRate,
+        sourceId: source.id,
+        sourceSnapshotId: snapshot.id,
+        startSourceSample: range.startSourceSample,
+      });
+    } finally {
+      releaseVerifiedMedia(verified);
     }
-    const durationSamples = range.endSourceSample - range.startSourceSample;
-    await this.#rangeCache.cacheProjectRange({
-      canonicalAudioFingerprint: snapshot.canonicalAudioFingerprint,
-      endSourceSample: range.endSourceSample,
-      projectId,
-      readCanonicalPcm: async ({ endProjectSample, startProjectSample }) => {
-        if (
-          !Number.isSafeInteger(startProjectSample) ||
-          !Number.isSafeInteger(endProjectSample) ||
-          startProjectSample < 0 ||
-          endProjectSample <= startProjectSample ||
-          endProjectSample > durationSamples
-        ) {
-          throw new Error("Cache read must stay inside the immutable Project Range");
-        }
-        return this.#readVerifiedBytes(
-          verified,
-          verified.dataOffset + (range.startSourceSample + startProjectSample) * 2,
-          verified.dataOffset + (range.startSourceSample + endProjectSample) * 2,
-        );
-      },
-      sampleRate: verified.sampleRate,
-      sourceId: source.id,
-      sourceSnapshotId: snapshot.id,
-      startSourceSample: range.startSourceSample,
-    });
   }
 
   async #markLocatorUnavailable(sourceId: string, locator: LocalFileLocator): Promise<void> {
@@ -479,7 +515,7 @@ export class LocalMediaService {
     }
     this.#activeVerifiedReads += 1;
     try {
-      return await readVerifiedBytes(media, startByte, endByteExclusive, this.#fileSystem);
+      return await readVerifiedBytes(media, startByte, endByteExclusive);
     } finally {
       this.#activeVerifiedReads -= 1;
     }
@@ -490,24 +526,15 @@ async function readVerifiedBytes(
   media: VerifiedLocalMedia,
   startByte: number,
   endByteExclusive: number,
-  fileSystem: LocalMediaFileSystem,
 ): Promise<Buffer> {
-  await assertSamePathAncestors(media.ancestors, fileSystem);
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-  const handle = await fileSystem.open(media.path, constants.O_RDONLY | noFollow);
-  try {
-    const identity = await handle.stat({ bigint: true });
-    assertSameFileIdentity(media.identity, identity);
-    const bytes = Buffer.alloc(endByteExclusive - startByte);
-    const read = await handle.read(bytes, 0, bytes.length, startByte);
-    if (read.bytesRead !== bytes.length) throw new Error("Local media changed while reading");
-    const identityAfter = await handle.stat({ bigint: true });
-    assertSameFileIdentity(identity, identityAfter);
-    await assertSamePathAncestors(media.ancestors, fileSystem);
-    return bytes;
-  } finally {
-    await handle.close();
-  }
+  const identity = await media.handle.stat({ bigint: true });
+  assertSameFileIdentity(media.identity, identity);
+  const bytes = Buffer.alloc(endByteExclusive - startByte);
+  const read = await media.handle.read(bytes, 0, bytes.length, startByte);
+  if (read.bytesRead !== bytes.length) throw new Error("Local media changed while reading");
+  const identityAfter = await media.handle.stat({ bigint: true });
+  assertSameFileIdentity(identity, identityAfter);
+  return bytes;
 }
 
 async function verifyLocalWav(
@@ -523,6 +550,7 @@ async function verifyLocalWav(
   }
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
   const handle = await fileSystem.open(path, constants.O_RDONLY | noFollow);
+  let retained = false;
   try {
     const before = await handle.stat({ bigint: true });
     assertSameFileIdentity(pathBefore, before);
@@ -554,8 +582,7 @@ async function verifyLocalWav(
     await assertSamePathAncestors(ancestorsBefore, fileSystem);
     assertSameFileIdentity(before, after);
     assertSameFileIdentity(after, pathAfter);
-    return {
-      ancestors: ancestorsBefore,
+    const verified: VerifiedLocalMedia = {
       audioCodec: "pcm_s16le",
       byteFingerprint: `sha256:${byteHash.digest("hex")}`,
       byteSize,
@@ -563,14 +590,21 @@ async function verifyLocalWav(
       container: "wav",
       dataOffset: format.dataOffset,
       durationSamples: format.durationSamples,
+      handle,
       identity: fileIdentity(after),
       mimeType: "audio/wav",
       path,
       sampleRate: CANONICAL_SAMPLE_RATE,
     };
+    retained = true;
+    return verified;
   } finally {
-    await handle.close();
+    if (!retained) await handle.close();
   }
+}
+
+function releaseVerifiedMedia(media: VerifiedLocalMedia): void {
+  void media.handle.close().catch(() => undefined);
 }
 
 type PathAncestorIdentity = {
