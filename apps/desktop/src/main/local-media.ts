@@ -48,22 +48,62 @@ type LocalFileLocator = Extract<
 
 class VerifiedMediaLease {
   readonly media: VerifiedLocalMedia;
+  readonly #cleanup: MediaHandleCleanup;
   #ownsHandle = true;
 
-  constructor(media: VerifiedLocalMedia) {
+  constructor(media: VerifiedLocalMedia, cleanup: MediaHandleCleanup) {
     this.media = media;
+    this.#cleanup = cleanup;
   }
 
   move(): VerifiedMediaLease {
     if (!this.#ownsHandle) throw new Error("Verified media lease is no longer owned");
     this.#ownsHandle = false;
-    return new VerifiedMediaLease(this.media);
+    return new VerifiedMediaLease(this.media, this.#cleanup);
   }
 
   async release(): Promise<void> {
     if (!this.#ownsHandle) return;
-    await this.media.handle.close();
+    await this.#cleanup.release(this.media.handle);
     this.#ownsHandle = false;
+  }
+}
+
+class MediaHandleCleanup {
+  readonly #closing = new Map<LocalMediaFileHandle, Promise<void>>();
+  readonly #failed = new Set<LocalMediaFileHandle>();
+  readonly #retained = new Set<LocalMediaFileHandle>();
+
+  retain(handle: LocalMediaFileHandle): void {
+    this.#retained.add(handle);
+  }
+
+  async release(handle: LocalMediaFileHandle): Promise<void> {
+    if (!this.#retained.has(handle)) return;
+    const activeClose = this.#closing.get(handle);
+    if (activeClose !== undefined) return activeClose;
+    const close = Promise.resolve().then(() => handle.close());
+    this.#closing.set(handle, close);
+    try {
+      await close;
+      this.#failed.delete(handle);
+      this.#retained.delete(handle);
+    } catch (error) {
+      this.#failed.add(handle);
+      throw error;
+    } finally {
+      if (this.#closing.get(handle) === close) this.#closing.delete(handle);
+    }
+  }
+
+  async retryFailed(): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.#failed].map((handle) => this.release(handle)),
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure !== undefined) throw failure.reason;
   }
 }
 
@@ -86,10 +126,14 @@ type PlaybackCapabilityEntry = {
 
 class MediaCapabilityRegistry {
   readonly #activeGenerations = new Set<string>();
-  readonly #cleanupQuarantine = new Map<string, Set<VerifiedMediaLease>>();
+  readonly #cleanup: MediaHandleCleanup;
+  readonly #generationQueues = new Map<string, Promise<void>>();
   readonly #playback = new Map<string, PlaybackCapabilityEntry>();
-  readonly #publicationQueues = new Map<string, Promise<void>>();
   readonly #selection = new Map<string, SelectionCapabilityEntry>();
+
+  constructor(cleanup: MediaHandleCleanup) {
+    this.#cleanup = cleanup;
+  }
 
   activateGeneration(generationId: string): void {
     if (this.#activeGenerations.has(generationId)) {
@@ -98,54 +142,43 @@ class MediaCapabilityRegistry {
     this.#activeGenerations.add(generationId);
   }
 
-  consumeSelection(capabilityId: string, generationId: string): VerifiedMediaLease | null {
-    this.#assertGenerationActive(generationId);
-    const entry = this.#selection.get(capabilityId);
-    if (entry === undefined || entry.generationId !== generationId) return null;
-    this.#selection.delete(capabilityId);
-    return entry.lease;
+  consumeSelection(capabilityId: string, generationId: string): Promise<VerifiedMediaLease | null> {
+    return this.#runGenerationTask(generationId, true, async () => {
+      const entry = this.#selection.get(capabilityId);
+      if (entry === undefined || entry.generationId !== generationId) return null;
+      this.#selection.delete(capabilityId);
+      return entry.lease;
+    });
   }
 
   playback(capabilityId: string): VerifiedMediaLease | null {
     return this.#playback.get(capabilityId)?.lease ?? null;
   }
 
-  async publishIfActive<T>(generationId: string, publish: () => Promise<T>): Promise<T> {
-    const prior = this.#publicationQueues.get(generationId) ?? Promise.resolve();
-    const task = prior
-      .catch(() => undefined)
-      .then(async () => {
-        this.#assertGenerationActive(generationId);
-        return publish();
-      });
-    const tail = task.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.#publicationQueues.set(generationId, tail);
-    try {
-      return await task;
-    } finally {
-      if (this.#publicationQueues.get(generationId) === tail) {
-        this.#publicationQueues.delete(generationId);
-      }
-    }
+  async publishIfActive<T>(
+    generationId: string,
+    publish: () => Promise<T>,
+    cleanupLeases: readonly VerifiedMediaLease[] = [],
+  ): Promise<T> {
+    return this.#runGenerationTask(generationId, true, publish, async () => {
+      await releaseLeasesSuppressingCleanupErrors(cleanupLeases);
+    });
   }
 
   async replaceSelection(generationId: string, lease: VerifiedMediaLease): Promise<string> {
-    this.#assertGenerationActive(generationId);
-    await this.#retryQuarantinedCleanup(generationId);
-    const releases: VerifiedMediaLease[] = [];
-    for (const [capabilityId, entry] of this.#selection) {
-      if (entry.generationId !== generationId) continue;
-      this.#selection.delete(capabilityId);
-      releases.push(entry.lease);
-    }
-    await this.#releaseAll(generationId, releases);
-    this.#assertGenerationActive(generationId);
-    const capabilityId = opaqueId("mediacapability");
-    this.#selection.set(capabilityId, { generationId, lease: lease.move() });
-    return capabilityId;
+    return this.#runGenerationTask(generationId, true, async () => {
+      await this.#cleanup.retryFailed();
+      const releases: VerifiedMediaLease[] = [];
+      for (const [capabilityId, entry] of this.#selection) {
+        if (entry.generationId !== generationId) continue;
+        this.#selection.delete(capabilityId);
+        releases.push(entry.lease);
+      }
+      await releaseLeases(releases);
+      const capabilityId = opaqueId("mediacapability");
+      this.#selection.set(capabilityId, { generationId, lease: lease.move() });
+      return capabilityId;
+    });
   }
 
   async replacePlayback(
@@ -153,84 +186,98 @@ class MediaCapabilityRegistry {
     projectId: string,
     lease: VerifiedMediaLease,
   ): Promise<string> {
-    this.#assertGenerationActive(generationId);
-    await this.#retryQuarantinedCleanup(generationId);
-    const generationCapabilities: string[] = [];
-    const releases: VerifiedMediaLease[] = [];
-    for (const [capabilityId, entry] of this.#playback) {
-      if (entry.generationId !== generationId) continue;
-      if (entry.projectId === projectId) {
-        this.#playback.delete(capabilityId);
-        releases.push(entry.lease);
-      } else generationCapabilities.push(capabilityId);
-    }
-    while (generationCapabilities.length >= MAX_PLAYBACK_CAPABILITIES_PER_GENERATION) {
-      const oldestCapabilityId = generationCapabilities.shift();
-      if (oldestCapabilityId === undefined) break;
-      const oldest = this.#playback.get(oldestCapabilityId);
-      this.#playback.delete(oldestCapabilityId);
-      if (oldest !== undefined) releases.push(oldest.lease);
-    }
-    await this.#releaseAll(generationId, releases);
-    this.#assertGenerationActive(generationId);
-    const capabilityId = opaqueId("playbackcapability");
-    this.#playback.set(capabilityId, { generationId, lease: lease.move(), projectId });
-    return capabilityId;
+    return this.#runGenerationTask(generationId, true, async () => {
+      await this.#cleanup.retryFailed();
+      const generationCapabilities: string[] = [];
+      const releases: VerifiedMediaLease[] = [];
+      for (const [capabilityId, entry] of this.#playback) {
+        if (entry.generationId !== generationId) continue;
+        if (entry.projectId === projectId) {
+          this.#playback.delete(capabilityId);
+          releases.push(entry.lease);
+        } else generationCapabilities.push(capabilityId);
+      }
+      while (generationCapabilities.length >= MAX_PLAYBACK_CAPABILITIES_PER_GENERATION) {
+        const oldestCapabilityId = generationCapabilities.shift();
+        if (oldestCapabilityId === undefined) break;
+        const oldest = this.#playback.get(oldestCapabilityId);
+        this.#playback.delete(oldestCapabilityId);
+        if (oldest !== undefined) releases.push(oldest.lease);
+      }
+      await releaseLeases(releases);
+      const capabilityId = opaqueId("playbackcapability");
+      this.#playback.set(capabilityId, { generationId, lease: lease.move(), projectId });
+      return capabilityId;
+    });
   }
 
   async revokeGeneration(generationId: string): Promise<void> {
     this.#activeGenerations.delete(generationId);
-    const releases = [...(this.#cleanupQuarantine.get(generationId) ?? [])];
-    this.#cleanupQuarantine.delete(generationId);
-    for (const [capabilityId, entry] of this.#selection) {
-      if (entry.generationId !== generationId) continue;
-      this.#selection.delete(capabilityId);
-      releases.push(entry.lease);
-    }
-    for (const [capabilityId, entry] of this.#playback) {
-      if (entry.generationId !== generationId) continue;
-      this.#playback.delete(capabilityId);
-      releases.push(entry.lease);
-    }
-    const publication = this.#publicationQueues.get(generationId) ?? Promise.resolve();
-    const [cleanup] = await Promise.allSettled([
-      this.#releaseAll(generationId, releases),
-      publication,
-    ]);
-    if (cleanup.status === "rejected") throw cleanup.reason;
+    await this.#runGenerationTask(generationId, false, async () => {
+      const releases: VerifiedMediaLease[] = [];
+      for (const [capabilityId, entry] of this.#selection) {
+        if (entry.generationId !== generationId) continue;
+        this.#selection.delete(capabilityId);
+        releases.push(entry.lease);
+      }
+      for (const [capabilityId, entry] of this.#playback) {
+        if (entry.generationId !== generationId) continue;
+        this.#playback.delete(capabilityId);
+        releases.push(entry.lease);
+      }
+      await releaseLeases(releases);
+      await this.#cleanup.retryFailed();
+    });
   }
 
   #assertGenerationActive(generationId: string): void {
     if (!this.#activeGenerations.has(generationId)) throw new RevokedMediaGenerationError();
   }
 
-  async #retryQuarantinedCleanup(generationId: string): Promise<void> {
-    const quarantine = this.#cleanupQuarantine.get(generationId);
-    if (quarantine !== undefined) await this.#releaseAll(generationId, [...quarantine]);
-  }
-
-  async #releaseAll(generationId: string, leases: readonly VerifiedMediaLease[]): Promise<void> {
-    const results = await Promise.allSettled(
-      leases.map(async (lease) => {
+  async #runGenerationTask<T>(
+    generationId: string,
+    requireActive: boolean,
+    task: () => Promise<T>,
+    cleanup: () => Promise<void> = async () => undefined,
+  ): Promise<T> {
+    const prior = this.#generationQueues.get(generationId) ?? Promise.resolve();
+    const result = prior
+      .catch(() => undefined)
+      .then(async () => {
         try {
-          await lease.release();
-          this.#cleanupQuarantine.get(generationId)?.delete(lease);
-        } catch (error) {
-          const quarantine = this.#cleanupQuarantine.get(generationId) ?? new Set();
-          quarantine.add(lease);
-          this.#cleanupQuarantine.set(generationId, quarantine);
-          throw error;
+          if (requireActive) this.#assertGenerationActive(generationId);
+          return await task();
+        } finally {
+          await cleanup();
         }
-      }),
+      });
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
     );
-    const failure = results.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    if (failure !== undefined) throw failure.reason;
-    if (this.#cleanupQuarantine.get(generationId)?.size === 0) {
-      this.#cleanupQuarantine.delete(generationId);
+    this.#generationQueues.set(generationId, tail);
+    try {
+      return await result;
+    } finally {
+      if (this.#generationQueues.get(generationId) === tail) {
+        this.#generationQueues.delete(generationId);
+      }
     }
   }
+}
+
+async function releaseLeases(leases: readonly VerifiedMediaLease[]): Promise<void> {
+  const results = await Promise.allSettled(leases.map((lease) => lease.release()));
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failure !== undefined) throw failure.reason;
+}
+
+async function releaseLeasesSuppressingCleanupErrors(
+  leases: readonly VerifiedMediaLease[],
+): Promise<void> {
+  await Promise.allSettled(leases.map((lease) => lease.release()));
 }
 
 type MediaSelectionCapability = {
@@ -314,7 +361,8 @@ export type LocalMediaRangeCache = {
 };
 
 export class LocalMediaService {
-  readonly #capabilities = new MediaCapabilityRegistry();
+  readonly #capabilities: MediaCapabilityRegistry;
+  readonly #cleanup = new MediaHandleCleanup();
   readonly #fileSystem: LocalMediaFileSystem;
   readonly #library: ProjectLibrary;
   readonly #now: () => Date;
@@ -323,6 +371,7 @@ export class LocalMediaService {
   #activeVerifiedReads = 0;
 
   constructor(options: LocalMediaServiceOptions) {
+    this.#capabilities = new MediaCapabilityRegistry(this.#cleanup);
     this.#fileSystem = options.fileSystem ?? nodeLocalMediaFileSystem;
     this.#library = options.library;
     this.#now = options.now ?? (() => new Date());
@@ -353,7 +402,7 @@ export class LocalMediaService {
         sampleRate: lease.media.sampleRate,
       };
     } finally {
-      await lease.release();
+      await releaseLeasesSuppressingCleanupErrors([lease]);
     }
   }
 
@@ -363,13 +412,14 @@ export class LocalMediaService {
     generationId: string;
     startSourceSample: number;
   }): Promise<{ projectId: string; projectRevisionId: string; sourceId: string }> {
-    const selectedLease = this.#capabilities.consumeSelection(
+    const selectedLease = await this.#capabilities.consumeSelection(
       input.capabilityId,
       input.generationId,
     );
     if (selectedLease === null) {
       throw new Error("Local media capability is unavailable");
     }
+    let cleanupQueued = false;
     let reverifiedLease: VerifiedMediaLease | undefined;
     try {
       const selected = selectedLease.media;
@@ -442,13 +492,20 @@ export class LocalMediaService {
         projectId,
         sampleRate: capability.sampleRate,
       });
-      const created = await this.#capabilities.publishIfActive(input.generationId, async () =>
-        this.#library.createProject({ envelope, records }),
+      cleanupQueued = true;
+      const created = await this.#capabilities.publishIfActive(
+        input.generationId,
+        async () => this.#library.createProject({ envelope, records }),
+        [selectedLease, reverifiedLease],
       );
       return { projectId, projectRevisionId: created.projectRevisionId, sourceId };
     } finally {
-      await selectedLease.release();
-      if (reverifiedLease !== undefined) await reverifiedLease.release();
+      if (!cleanupQueued) {
+        await releaseLeasesSuppressingCleanupErrors([
+          selectedLease,
+          ...(reverifiedLease === undefined ? [] : [reverifiedLease]),
+        ]);
+      }
     }
   }
 
@@ -459,6 +516,7 @@ export class LocalMediaService {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
     const lease = await this.#verifyLocalWav(selectedPath);
+    let cleanupQueued = false;
     try {
       const verified = lease.media;
       const source = this.#library.getSourceById(input.sourceId);
@@ -477,19 +535,23 @@ export class LocalMediaService {
           sampleRate: verified.sampleRate,
         };
       }
-      await this.#capabilities.publishIfActive(input.generationId, async () =>
-        this.#library.observeSourceLocator(input.sourceId, {
-          fingerprint: verified.byteFingerprint,
-          id: opaqueId("locator"),
-          kind: "local_file",
-          path: verified.path,
-          status: "available",
-          verifiedAt: this.#now().toISOString(),
-        }),
+      cleanupQueued = true;
+      await this.#capabilities.publishIfActive(
+        input.generationId,
+        async () =>
+          this.#library.observeSourceLocator(input.sourceId, {
+            fingerprint: verified.byteFingerprint,
+            id: opaqueId("locator"),
+            kind: "local_file",
+            path: verified.path,
+            status: "available",
+            verifiedAt: this.#now().toISOString(),
+          }),
+        [lease],
       );
       return { kind: "relinked", sourceId: input.sourceId };
     } finally {
-      await lease.release();
+      if (!cleanupQueued) await releaseLeasesSuppressingCleanupErrors([lease]);
     }
   }
 
@@ -540,7 +602,7 @@ export class LocalMediaService {
           startSourceSample: range.startSourceSample,
         };
       } finally {
-        await lease.release();
+        await releaseLeasesSuppressingCleanupErrors([lease]);
       }
     }
     return { kind: "unavailable", projectId: input.projectId, sourceId: source.id };
@@ -633,7 +695,7 @@ export class LocalMediaService {
         startSourceSample: range.startSourceSample,
       });
     } finally {
-      await lease.release();
+      await releaseLeasesSuppressingCleanupErrors([lease]);
     }
   }
 
@@ -646,7 +708,7 @@ export class LocalMediaService {
   }
 
   #verifyLocalWav(path: string): Promise<VerifiedMediaLease> {
-    return verifyLocalWav(path, this.#fileSystem);
+    return verifyLocalWav(path, this.#fileSystem, this.#cleanup);
   }
 
   async #readVerifiedBytes(
@@ -684,6 +746,7 @@ async function readVerifiedBytes(
 async function verifyLocalWav(
   candidatePath: string,
   fileSystem: LocalMediaFileSystem,
+  cleanup: MediaHandleCleanup,
 ): Promise<VerifiedMediaLease> {
   const path = resolve(candidatePath);
   const ancestorsBefore = await inspectPathAncestors(path, fileSystem);
@@ -694,6 +757,7 @@ async function verifyLocalWav(
   }
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
   const handle = await fileSystem.open(path, constants.O_RDONLY | noFollow);
+  cleanup.retain(handle);
   try {
     const before = await handle.stat({ bigint: true });
     assertSameFileIdentity(pathBefore, before);
@@ -739,9 +803,9 @@ async function verifyLocalWav(
       path,
       sampleRate: CANONICAL_SAMPLE_RATE,
     };
-    return new VerifiedMediaLease(verified);
+    return new VerifiedMediaLease(verified, cleanup);
   } catch (error) {
-    await handle.close();
+    await cleanup.release(handle).catch(() => undefined);
     throw error;
   }
 }

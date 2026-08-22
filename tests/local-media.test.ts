@@ -85,6 +85,40 @@ function controlledReadFileSystem() {
   };
 }
 
+function failFirstHandleCloseFileSystem() {
+  let closeAttempts = 0;
+  let closedHandles = 0;
+  return {
+    get closeAttempts() {
+      return closeAttempts;
+    },
+    get closedHandles() {
+      return closedHandles;
+    },
+    fileSystem: {
+      ...nodeLocalMediaFileSystem,
+      open: async (path: string, flags: number) => {
+        const handle = await nodeLocalMediaFileSystem.open(path, flags);
+        let failedOnce = false;
+        return {
+          close: async () => {
+            closeAttempts += 1;
+            if (!failedOnce) {
+              failedOnce = true;
+              throw new Error("Fixture transient cleanup failed");
+            }
+            await handle.close();
+            closedHandles += 1;
+          },
+          read: (buffer: Buffer, offset: number, length: number, position: number) =>
+            handle.read(buffer, offset, length, position),
+          stat: (options: { bigint: true }) => handle.stat(options),
+        };
+      },
+    },
+  };
+}
+
 describe("LocalMediaService", () => {
   it("routes media only through the exact hardened application origin", () => {
     const capabilityId = "playbackcapability_11111111111141118111111111111111";
@@ -296,6 +330,26 @@ describe("LocalMediaService", () => {
       ),
     ).rejects.toThrow(/supported media/i);
     expect(library.listProjects()).toEqual([]);
+  });
+
+  it("retains a failed verification close for lifecycle cleanup", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-probe-cleanup-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-probe-cleanup-source-");
+    const spoofedPath = join(mediaRoot, "spoofed.wav");
+    await writeFile(spoofedPath, Buffer.from("not audio despite its extension"));
+    const cleanup = failFirstHandleCloseFileSystem();
+    const media = createMediaService({
+      fileSystem: cleanup.fileSystem,
+      library: await openProjectLibrary({ stateRoot }),
+      pickFile: async () => spoofedPath,
+    });
+
+    await expect(media.pickLocalFile("generation_fixture")).rejects.toThrow(/supported media/i);
+    expect(cleanup.closeAttempts).toBe(1);
+    expect(cleanup.closedHandles).toBe(0);
+    await media.revokeGeneration("generation_fixture");
+    expect(cleanup.closeAttempts).toBe(2);
+    expect(cleanup.closedHandles).toBe(1);
   });
 
   it.runIf(process.platform !== "win32")("rejects a directly selected symbolic link", async () => {
@@ -512,6 +566,57 @@ describe("LocalMediaService", () => {
       fingerprint: expect.any(String),
       kind: "local_file",
     });
+  });
+
+  it("reports committed create and relink results while retrying transient handle cleanup", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-transient-cleanup-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-transient-cleanup-source-");
+    const mediaPath = join(mediaRoot, "recording.wav");
+    const movedPath = join(mediaRoot, "moved.wav");
+    const wav = monoPcmWav([0, 1, 2, 3]);
+    await writeFile(mediaPath, wav);
+    await writeFile(movedPath, wav);
+    const library = await openProjectLibrary({ stateRoot });
+    const createCleanup = failFirstHandleCloseFileSystem();
+    const media = createMediaService({
+      fileSystem: createCleanup.fileSystem,
+      library,
+      pickFile: async () => mediaPath,
+    });
+    const selected = await media.pickLocalFile("generation_fixture");
+    if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
+    const created = await media.createProject({
+      capabilityId: selected.capabilityId,
+      endSourceSample: 4,
+      generationId: "generation_fixture",
+      startSourceSample: 0,
+    });
+    expect(library.listProjects()).toEqual([
+      expect.objectContaining({ projectId: created.projectId, status: "active" }),
+    ]);
+    expect(createCleanup.closeAttempts).toBe(2);
+    expect(createCleanup.closedHandles).toBe(0);
+    await media.revokeGeneration("generation_fixture");
+    expect(createCleanup.closeAttempts).toBe(4);
+    expect(createCleanup.closedHandles).toBe(2);
+
+    const relinkCleanup = failFirstHandleCloseFileSystem();
+    const relink = createMediaService({
+      fileSystem: relinkCleanup.fileSystem,
+      library,
+      pickFile: async () => movedPath,
+    });
+    await expect(
+      relink.relinkSource({
+        generationId: "generation_fixture",
+        sourceId: created.sourceId,
+      }),
+    ).resolves.toEqual({ kind: "relinked", sourceId: created.sourceId });
+    expect(relinkCleanup.closeAttempts).toBe(1);
+    expect(relinkCleanup.closedHandles).toBe(0);
+    await relink.revokeGeneration("generation_fixture");
+    expect(relinkCleanup.closeAttempts).toBe(2);
+    expect(relinkCleanup.closedHandles).toBe(1);
   });
 
   it("reopens offline playback through bounded read-only byte ranges without exposing a path", async () => {
@@ -734,7 +839,15 @@ describe("LocalMediaService", () => {
 
     let firstHandleClosed = false;
     let firstHandleCloseAttempts = 0;
+    let confirmFirstCloseStarted!: () => void;
+    let releaseFirstClose!: () => void;
     let openedHandles = 0;
+    const firstCloseStarted = new Promise<void>((resolve) => {
+      confirmFirstCloseStarted = resolve;
+    });
+    const firstCloseReleased = new Promise<void>((resolve) => {
+      releaseFirstClose = resolve;
+    });
     const playback = createMediaService({
       fileSystem: {
         ...nodeLocalMediaFileSystem,
@@ -747,6 +860,8 @@ describe("LocalMediaService", () => {
               if (handleNumber === 1) {
                 firstHandleCloseAttempts += 1;
                 if (firstHandleCloseAttempts === 1) {
+                  confirmFirstCloseStarted();
+                  await firstCloseReleased;
                   throw new Error("Fixture capability cleanup failed");
                 }
               }
@@ -768,18 +883,20 @@ describe("LocalMediaService", () => {
         projectId: created.projectId,
       }),
     ).resolves.toMatchObject({ kind: "ready" });
-    await expect(
-      playback.openPlayback({
-        generationId: "generation_fixture",
-        projectId: created.projectId,
-      }),
-    ).rejects.toThrow("Fixture capability cleanup failed");
-
+    const replacement = playback.openPlayback({
+      generationId: "generation_fixture",
+      projectId: created.projectId,
+    });
+    await firstCloseStarted;
     expect(firstHandleClosed).toBe(false);
+    const revocation = playback.revokeGeneration("generation_fixture");
+    releaseFirstClose();
+    await expect(replacement).rejects.toThrow("Fixture capability cleanup failed");
+
     expect((await library.readProject(created.projectId)).records.sources[0]?.locators).toEqual([
       expect.objectContaining({ path: mediaPath, status: "available" }),
     ]);
-    await playback.revokeGeneration("generation_fixture");
+    await revocation;
     expect(firstHandleCloseAttempts).toBe(2);
     expect(firstHandleClosed).toBe(true);
   });
