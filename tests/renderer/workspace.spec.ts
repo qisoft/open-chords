@@ -60,6 +60,8 @@ test("a durable local-media Project reopens into the centered workspace and play
     await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
     await expect.poll(() => page.locator(".timeline-track").getAttribute("style")).not.toBe(before);
     await page.getByRole("button", { name: "Pause" }).click();
+    await page.mouse.move(0, 0);
+    await expect(page.getByRole("tooltip")).toBeHidden();
 
     await page.setViewportSize({ height: 720, width: 360 });
     const overflowOutsideTimeline = await page.evaluate(() =>
