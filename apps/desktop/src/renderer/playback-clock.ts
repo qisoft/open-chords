@@ -101,6 +101,22 @@ export function createPlaybackClock(options: PlaybackClockOptions) {
         listeners.delete(listener);
       };
     },
+    subscribeSelection<Value>(
+      select: (snapshot: PlaybackClockSnapshot) => Value,
+      listener: () => void,
+    ) {
+      let selected = select(snapshot);
+      const publishSelection = () => {
+        const next = select(snapshot);
+        if (Object.is(selected, next)) return;
+        selected = next;
+        listener();
+      };
+      listeners.add(publishSelection);
+      return () => {
+        listeners.delete(publishSelection);
+      };
+    },
   };
 }
 

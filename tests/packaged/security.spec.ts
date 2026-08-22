@@ -177,10 +177,13 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
         error: null,
         pathKeyExposed: false,
         played: true,
+        playAligned: true,
         seeked: true,
         status: 206,
         type: "media.playback_ready",
         urlProtocol: "open-chords:",
+        workspacePlayed: true,
+        timelineMoved: true,
       },
       permissionDenied: true,
       popupDenied: true,
@@ -295,10 +298,13 @@ const OfflinePlaybackSchema = z.object({
   error: z.string().nullable(),
   pathKeyExposed: z.boolean(),
   played: z.boolean(),
+  playAligned: z.boolean(),
   seeked: z.boolean(),
   status: z.number().int(),
   type: z.string(),
   urlProtocol: z.string(),
+  workspacePlayed: z.boolean(),
+  timelineMoved: z.boolean(),
 });
 
 const RendererSnapshotSchema = z.object({
@@ -661,8 +667,48 @@ async function evaluatePackagedMedia(
     let body = "";
     let error = null;
     let played = false;
+    let playAligned = false;
     let seeked = false;
+    let workspacePlayed = false;
+    let timelineMoved = false;
     try {
+      const waitFor = async (read, message) => {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const value = read();
+          if (value) return value;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        throw new Error(message);
+      };
+      const playButton = await waitFor(
+        () => document.querySelector('button[aria-label="Play"]'),
+        "workspace Play control timed out",
+      );
+      const track = document.querySelector(".timeline-track");
+      const playhead = document.querySelector(".fixed-playhead");
+      if (!(playButton instanceof HTMLElement) || !(track instanceof HTMLElement) || !(playhead instanceof HTMLElement)) {
+        throw new Error("workspace playback geometry is unavailable");
+      }
+      const playBounds = playButton.getBoundingClientRect();
+      const playheadBounds = playhead.getBoundingClientRect();
+      playAligned = Math.abs(
+        playBounds.left + playBounds.width / 2 - (playheadBounds.left + playheadBounds.width / 2),
+      ) < 1;
+      const transformBeforePlay = track.style.transform;
+      playButton.click();
+      await waitFor(
+        () => document.querySelector('button[aria-label="Pause"]'),
+        "workspace playback did not start",
+      );
+      workspacePlayed = true;
+      await waitFor(
+        () => track.style.transform !== transformBeforePlay,
+        "workspace timeline did not move",
+      );
+      timelineMoved = true;
+      document.querySelector('button[aria-label="Pause"]')?.click();
+
       playback = await Promise.race([
         window.openChords.media.openPlayback(${projectIdLiteral}),
         new Promise((_, reject) => setTimeout(() => reject(new Error("openPlayback timed out")), 3000)),
@@ -710,12 +756,15 @@ async function evaluatePackagedMedia(
       error,
       pathKeyExposed: Object.keys(playback).some((key) => /path|directory/i.test(key)),
       played,
+      playAligned,
       seeked,
       status: response?.status ?? 0,
       type: playback.type,
       urlProtocol: playback.type === "media.playback_ready"
         ? new URL(playback.playbackUrl).protocol
         : "",
+      workspacePlayed,
+      timelineMoved,
     };
   })()`;
 

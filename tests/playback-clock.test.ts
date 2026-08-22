@@ -28,9 +28,16 @@ describe("playback clock", () => {
       source,
     });
     let notifications = 0;
+    let playingNotifications = 0;
     clock.subscribe(() => {
       notifications += 1;
     });
+    clock.subscribeSelection(
+      ({ playing }) => playing,
+      () => {
+        playingNotifications += 1;
+      },
+    );
 
     expect(clock.getSnapshot()).toEqual({ playing: false, positionSamples: 0 });
     expect(clock.getSnapshot()).toBe(clock.getSnapshot());
@@ -41,5 +48,6 @@ describe("playback clock", () => {
 
     expect(clock.getSnapshot()).toEqual({ playing: true, positionSamples: 12_000 });
     expect(notifications).toBe(2);
+    expect(playingNotifications).toBe(1);
   });
 });

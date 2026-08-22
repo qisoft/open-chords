@@ -1,4 +1,5 @@
 import { Button } from "@base-ui/react/button";
+import { Tooltip } from "@base-ui/react/tooltip";
 import type {
   MediaPlaybackResponse,
   OpenChordsDesktopApi,
@@ -37,6 +38,13 @@ export function ProjectWorkspace({
   const [selectedRegionId, setSelectedRegionId] = useState(timeline.regions[0]?.id ?? null);
   const [loopRegionId, setLoopRegionId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    document.title = `${snapshot.project.id} · Local Project · Open Chords`;
+    return () => {
+      document.title = "Open Chords";
+    };
+  }, [snapshot.project.id]);
 
   useEffect(() => {
     const audio = new Audio();
@@ -199,8 +207,10 @@ export function ProjectWorkspace({
           </span>
           <Button
             className="secondary-button"
-            disabled={selectedRegionId === null}
-            onClick={() => setLoopRegionId(selectedRegionId)}
+            disabled={selectedRegion?.kind !== "bar"}
+            onClick={() => {
+              if (selectedRegion?.kind === "bar") setLoopRegionId(selectedRegion.id);
+            }}
           >
             <Repeat2 aria-hidden="true" size={16} />
             Set loop from selection
@@ -254,14 +264,21 @@ function TimelineMotion({
   clock: PlaybackClock | null;
   timeline: WorkspaceTimeline;
 }) {
-  const position = useClockSnapshot(clock).positionSamples;
-  const percentage = (position / timeline.durationSamples) * 100;
+  const trackRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const renderPosition = () => {
+      const position = clock?.getSnapshot().positionSamples ?? 0;
+      const percentage = (position / timeline.durationSamples) * 100;
+      const track = trackRef.current;
+      if (track === null) return;
+      track.dataset.positionSamples = String(position);
+      track.style.transform = `translateX(calc(50% - ${String(percentage)}%))`;
+    };
+    renderPosition();
+    return clock?.subscribe(renderPosition);
+  }, [clock, timeline.durationSamples]);
   return (
-    <div
-      className="timeline-track"
-      data-position-samples={position}
-      style={{ transform: `translateX(calc(50% - ${String(percentage)}%))` }}
-    >
+    <div className="timeline-track" ref={trackRef}>
       {children}
     </div>
   );
@@ -276,16 +293,27 @@ function PlaybackButton({
   disabled: boolean;
   onToggle: () => void;
 }) {
-  const { playing } = useClockSnapshot(clock);
+  const playing = useClockPlaying(clock);
   return (
-    <Button
-      aria-label={playing ? "Pause" : "Play"}
-      className="play-button"
-      disabled={disabled}
-      onClick={onToggle}
-    >
-      {playing ? <Pause aria-hidden="true" size={19} /> : <Play aria-hidden="true" size={19} />}
-    </Button>
+    <Tooltip.Provider>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          aria-label={playing ? "Pause" : "Play"}
+          className="play-button"
+          onClick={onToggle}
+          render={<Button disabled={disabled} />}
+        >
+          {playing ? <Pause aria-hidden="true" size={19} /> : <Play aria-hidden="true" size={19} />}
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Positioner sideOffset={8}>
+            <Tooltip.Popup className="control-tooltip" role="tooltip">
+              {playing ? "Pause" : "Play"}
+            </Tooltip.Popup>
+          </Tooltip.Positioner>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -296,20 +324,37 @@ function PositionReadout({
   clock: PlaybackClock | null;
   sampleRate: number;
 }) {
-  const { positionSamples } = useClockSnapshot(clock);
+  const elapsedSeconds = useClockElapsedSeconds(clock, sampleRate);
   return (
     <output aria-live="off" className="position-readout">
-      {formatDuration(positionSamples, sampleRate)}
+      {formatElapsedSeconds(elapsedSeconds)}
     </output>
   );
 }
 
-function useClockSnapshot(clock: PlaybackClock | null) {
+function useClockPlaying(clock: PlaybackClock | null) {
   const subscribe = useCallback(
-    (listener: () => void) => clock?.subscribe(listener) ?? emptySubscribe(),
+    (listener: () => void) =>
+      clock?.subscribeSelection(({ playing }) => playing, listener) ?? emptySubscribe(),
     [clock],
   );
-  const getSnapshot = useCallback(() => clock?.getSnapshot() ?? stopped, [clock]);
+  const getSnapshot = useCallback(() => clock?.getSnapshot().playing ?? false, [clock]);
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+function useClockElapsedSeconds(clock: PlaybackClock | null, sampleRate: number) {
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      clock?.subscribeSelection(
+        ({ positionSamples }) => Math.floor(positionSamples / sampleRate),
+        listener,
+      ) ?? emptySubscribe(),
+    [clock, sampleRate],
+  );
+  const getSnapshot = useCallback(
+    () => Math.floor((clock?.getSnapshot().positionSamples ?? 0) / sampleRate),
+    [clock, sampleRate],
+  );
   return useSyncExternalStore(subscribe, getSnapshot);
 }
 
@@ -345,7 +390,10 @@ function handleRegionKey(
 }
 
 function formatDuration(samples: number, sampleRate: number): string {
-  const seconds = samples / sampleRate;
+  return formatElapsedSeconds(samples / sampleRate);
+}
+
+function formatElapsedSeconds(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   return `${String(minutes)}:${Math.floor(seconds % 60)
     .toString()
@@ -353,7 +401,6 @@ function formatDuration(samples: number, sampleRate: number): string {
 }
 
 const emptySubscribe = () => () => undefined;
-const stopped = { playing: false, positionSamples: 0 } as const;
 
 export function EmptyWorkspace({
   busy,

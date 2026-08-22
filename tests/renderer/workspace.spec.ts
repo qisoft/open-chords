@@ -36,17 +36,41 @@ test("a durable local-media Project reopens into the centered workspace and play
   try {
     const page = await application.firstWindow();
     await expect(page.getByRole("heading", { name: "Local Project" })).toBeVisible();
+    await expect(page).toHaveTitle(/project_.+ · Local Project · Open Chords/);
     await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Unanalyzed Project range/ })).toBeVisible();
     await expect(page.getByText("Verified local playback")).toBeVisible();
 
     const play = page.getByRole("button", { name: "Play" });
     await expect(play).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Set loop from selection" })).toBeDisabled();
+    await play.hover();
+    await expect(page.getByRole("tooltip", { name: "Play" })).toBeVisible();
+    const playBounds = await play.boundingBox();
+    const playheadBounds = await page.locator(".fixed-playhead").boundingBox();
+    if (playBounds === null || playheadBounds === null) {
+      throw new Error("Playback geometry is unavailable");
+    }
+    expect(
+      Math.abs(playBounds.x + playBounds.width / 2 - (playheadBounds.x + playheadBounds.width / 2)),
+    ).toBeLessThan(1);
     const before = await page.locator(".timeline-track").getAttribute("style");
     await play.click();
     await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
     await expect.poll(() => page.locator(".timeline-track").getAttribute("style")).not.toBe(before);
     await page.getByRole("button", { name: "Pause" }).click();
+
+    await page.setViewportSize({ height: 720, width: 360 });
+    const overflowOutsideTimeline = await page.evaluate(() =>
+      [...document.querySelectorAll("*")]
+        .filter(
+          (element) =>
+            element.closest(".timeline-viewport") === null &&
+            element.getBoundingClientRect().right > window.innerWidth + 1,
+        )
+        .map((element) => element.getAttribute("class") ?? element.tagName),
+    );
+    expect(overflowOutsideTimeline).toEqual([]);
   } finally {
     await application.close();
     await rm(userDataDirectory, { force: true, recursive: true });
