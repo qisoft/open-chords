@@ -682,7 +682,10 @@ async function evaluatePackagedMedia(
         throw new Error(message);
       };
       const playButton = await waitFor(
-        () => document.querySelector('button[aria-label="Play"]'),
+        () => {
+          const candidate = document.querySelector('button[aria-label="Play"]');
+          return candidate instanceof HTMLButtonElement && !candidate.disabled ? candidate : null;
+        },
         "workspace Play control timed out",
       );
       const track = document.querySelector(".timeline-track");

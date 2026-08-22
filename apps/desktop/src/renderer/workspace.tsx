@@ -326,7 +326,7 @@ function PositionReadout({
 }) {
   const elapsedSeconds = useClockElapsedSeconds(clock, sampleRate);
   return (
-    <output aria-live="off" className="position-readout">
+    <output aria-label="Current Project Time" aria-live="off" className="position-readout">
       {formatElapsedSeconds(elapsedSeconds)}
     </output>
   );

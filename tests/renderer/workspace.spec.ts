@@ -40,6 +40,7 @@ test("a durable local-media Project reopens into the centered workspace and play
     await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Unanalyzed Project range/ })).toBeVisible();
     await expect(page.getByText("Verified local playback")).toBeVisible();
+    await expect(page.getByRole("status", { name: "Current Project Time" })).toHaveText("0:00");
 
     const play = page.getByRole("button", { name: "Play" });
     await expect(play).toBeEnabled();
