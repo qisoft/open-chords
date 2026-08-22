@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { monoPcmWav } from "@open-chords/testkit/media";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { handleLocalMediaRequest } from "../apps/desktop/src/main/local-media-protocol.ts";
+import {
+  handleLocalMediaRequest,
+  isLocalMediaRequestUrl,
+} from "../apps/desktop/src/main/local-media-protocol.ts";
 import { LocalMediaService } from "../apps/desktop/src/main/local-media.ts";
 import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
 
@@ -24,6 +27,46 @@ async function temporaryDirectory(prefix: string): Promise<string> {
 }
 
 describe("LocalMediaService", () => {
+  it("routes media only through the exact hardened application origin", () => {
+    const capabilityId = "playbackcapability_11111111111141118111111111111111";
+    expect(isLocalMediaRequestUrl(`open-chords://app/media/${capabilityId}`)).toBe(true);
+    expect(isLocalMediaRequestUrl(`open-chords://other/media/${capabilityId}`)).toBe(false);
+    expect(isLocalMediaRequestUrl(`open-chords://app/media/%2e%2e/${capabilityId}`)).toBe(false);
+  });
+
+  it("replaces a generation's prior selection capability", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-capability-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-capability-source-");
+    const mediaPath = join(mediaRoot, "recording.wav");
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    const media = new LocalMediaService({
+      library: await openProjectLibrary({ stateRoot }),
+      pickFile: async () => mediaPath,
+    });
+
+    const first = await media.pickLocalFile("generation_fixture");
+    const second = await media.pickLocalFile("generation_fixture");
+    if (first.kind !== "selected" || second.kind !== "selected") {
+      throw new Error("Fixture selection was cancelled");
+    }
+    await expect(
+      media.createProject({
+        capabilityId: first.capabilityId,
+        endSourceSample: 4,
+        generationId: "generation_fixture",
+        startSourceSample: 0,
+      }),
+    ).rejects.toThrow(/capability.*unavailable/i);
+    await expect(
+      media.createProject({
+        capabilityId: second.capabilityId,
+        endSourceSample: 4,
+        generationId: "generation_fixture",
+        startSourceSample: 0,
+      }),
+    ).resolves.toMatchObject({ projectId: expect.stringMatching(/^project_/) });
+  });
+
   it("creates a durable immutable Project Range through an opaque native-picker capability", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-state-");
     const mediaRoot = await temporaryDirectory("open-chords-local-media-source-");
@@ -383,10 +426,32 @@ describe("LocalMediaService", () => {
       ).status,
     ).toBe(416);
 
-    playback.revokeGeneration("generation_reopened");
+    const replacement = await playback.openPlayback({
+      generationId: "generation_reopened",
+      projectId: created.projectId,
+    });
+    if (replacement.kind !== "ready") {
+      throw new Error("Fixture Source was unavailable before capability replacement");
+    }
     await expect(
       playback.readPlaybackRange({
         capabilityId: opened.capabilityId,
+        endByteExclusive: 12,
+        startByte: 0,
+      }),
+    ).rejects.toThrow(/unavailable/i);
+    await expect(
+      playback.readPlaybackRange({
+        capabilityId: replacement.capabilityId,
+        endByteExclusive: 12,
+        startByte: 0,
+      }),
+    ).resolves.toMatchObject({ endByteExclusive: 12, startByte: 0 });
+
+    playback.revokeGeneration("generation_reopened");
+    await expect(
+      playback.readPlaybackRange({
+        capabilityId: replacement.capabilityId,
         endByteExclusive: 12,
         startByte: 0,
       }),

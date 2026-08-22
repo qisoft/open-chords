@@ -12,6 +12,7 @@ import type { ProjectLibrary } from "./project-library.ts";
 const MAX_PROBE_BYTES = 64 * 1024;
 const HASH_CHUNK_BYTES = 1024 * 1024;
 const MAX_PLAYBACK_RANGE_BYTES = 8 * 1024 * 1024;
+const MAX_PLAYBACK_CAPABILITIES_PER_GENERATION = 8;
 const CANONICAL_SAMPLE_RATE = 48_000;
 const LOCAL_MEDIA_COMPONENT_HASH = sha256("open-chords/local-media/wav-pcm-s16le/v1");
 
@@ -144,8 +145,7 @@ export class LocalMediaService {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
     const verified = await this.#verifyLocalWav(selectedPath);
-    const capabilityId = opaqueId("mediacapability");
-    this.#capabilities.set(capabilityId, { ...verified, generationId });
+    const capabilityId = this.#rememberSelectionCapability(generationId, verified);
     return {
       byteSize: verified.byteSize,
       capabilityId,
@@ -253,8 +253,7 @@ export class LocalMediaService {
       source.identity.kind !== "local_file" ||
       source.identity.fingerprint !== verified.byteFingerprint
     ) {
-      const capabilityId = opaqueId("mediacapability");
-      this.#capabilities.set(capabilityId, { ...verified, generationId: input.generationId });
+      const capabilityId = this.#rememberSelectionCapability(input.generationId, verified);
       return {
         byteSize: verified.byteSize,
         capabilityId,
@@ -298,12 +297,11 @@ export class LocalMediaService {
           await this.#markLocatorUnavailable(source.id, locator);
           continue;
         }
-        const capabilityId = opaqueId("playbackcapability");
-        this.#playbackCapabilities.set(capabilityId, {
-          ...verified,
-          generationId: input.generationId,
-          projectId: input.projectId,
-        });
+        const capabilityId = this.#rememberPlaybackCapability(
+          input.generationId,
+          input.projectId,
+          verified,
+        );
         return {
           byteSize: verified.byteSize,
           capabilityId,
@@ -356,6 +354,37 @@ export class LocalMediaService {
       mimeType: capability.mimeType,
       startByte: input.startByte,
     };
+  }
+
+  #rememberSelectionCapability(generationId: string, verified: VerifiedLocalMedia): string {
+    for (const [capabilityId, capability] of this.#capabilities) {
+      if (capability.generationId === generationId) this.#capabilities.delete(capabilityId);
+    }
+    const capabilityId = opaqueId("mediacapability");
+    this.#capabilities.set(capabilityId, { ...verified, generationId });
+    return capabilityId;
+  }
+
+  #rememberPlaybackCapability(
+    generationId: string,
+    projectId: string,
+    verified: VerifiedLocalMedia,
+  ): string {
+    const generationCapabilities: string[] = [];
+    for (const [capabilityId, capability] of this.#playbackCapabilities) {
+      if (capability.generationId !== generationId) continue;
+      if (capability.projectId === projectId) this.#playbackCapabilities.delete(capabilityId);
+      else generationCapabilities.push(capabilityId);
+    }
+    while (generationCapabilities.length >= MAX_PLAYBACK_CAPABILITIES_PER_GENERATION) {
+      const oldestCapabilityId = generationCapabilities.shift();
+      if (oldestCapabilityId !== undefined) {
+        this.#playbackCapabilities.delete(oldestCapabilityId);
+      }
+    }
+    const capabilityId = opaqueId("playbackcapability");
+    this.#playbackCapabilities.set(capabilityId, { ...verified, generationId, projectId });
+    return capabilityId;
   }
 
   async cacheProjectRange(projectId: string): Promise<void> {

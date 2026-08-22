@@ -31,12 +31,12 @@ describe("desktop shell denial policy", () => {
         "open-chords://app/media/playbackcapability_11111111111141118111111111111111",
       ),
     ).toEqual({ cancel: false });
-    expect(rendererRequestPolicy("open-chords-media://stream/../private.wav")).toEqual({
+    expect(rendererRequestPolicy("open-chords://other/media/playbackcapability_bad")).toEqual({
       cancel: true,
     });
     expect(
       rendererRequestPolicy(
-        "open-chords-media://other/playbackcapability_11111111111141118111111111111111",
+        "open-chords://app/media/%2e%2e/playbackcapability_11111111111141118111111111111111",
       ),
     ).toEqual({ cancel: true });
   });

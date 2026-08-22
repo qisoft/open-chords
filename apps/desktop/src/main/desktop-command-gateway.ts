@@ -24,6 +24,7 @@ import type {
 import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
 
 const MAX_COMMAND_BYTES = 256 * 1024;
+const MAX_CONCURRENT_MEDIA_COMMANDS = 1;
 const MAX_CONCURRENT_READS = 32;
 const MAX_INVALID_COMMANDS = 3;
 const MAX_PENDING_MUTATIONS = 32;
@@ -79,6 +80,7 @@ export class DesktopCommandGateway {
   readonly #mediaAuthority: LocalMediaAuthority | undefined;
   readonly #mutationDepths = new Map<string, number>();
   readonly #mutationQueues = new Map<string, Promise<void>>();
+  #activeMediaCommands = 0;
   #activeReads = 0;
   #pendingMutations = 0;
 
@@ -153,6 +155,13 @@ export class DesktopCommandGateway {
         response: errorResponse("source_unavailable", "Local media is unavailable", false, command),
       };
     }
+    if (this.#activeMediaCommands >= MAX_CONCURRENT_MEDIA_COMMANDS) {
+      return {
+        action: "none",
+        response: errorResponse("busy", "A local media operation is already active", true, command),
+      };
+    }
+    this.#activeMediaCommands += 1;
     try {
       if (command.type === "media.pick_local_file") {
         const result = await this.#mediaAuthority.pickLocalFile(command.generationId);
@@ -215,6 +224,8 @@ export class DesktopCommandGateway {
           command,
         ),
       };
+    } finally {
+      this.#activeMediaCommands -= 1;
     }
   }
 

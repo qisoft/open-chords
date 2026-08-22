@@ -163,6 +163,48 @@ describe("DesktopCommandGateway", () => {
     expect(pickerCalls).toBe(1);
   });
 
+  it("allows only one active local media operation and releases the slot", async () => {
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let pickerCalls = 0;
+    const gateway = new DesktopCommandGateway(
+      createAuthority(),
+      createMediaAuthority({
+        pickLocalFile: async () => {
+          pickerCalls += 1;
+          if (pickerCalls === 1) await firstBlocked;
+          return {
+            byteSize: 1_024,
+            capabilityId: "mediacapability_11111111111141118111111111111111",
+            durationSamples: 48_000,
+            kind: "selected",
+            mimeType: "audio/wav",
+            sampleRate: 48_000,
+          };
+        },
+      }),
+    );
+    const mediaCommand = (requestId: string) => ({
+      ...commandEnvelope(requestId),
+      type: "media.pick_local_file" as const,
+    });
+
+    const first = gateway.execute(mediaCommand("request_media_first"), sender);
+    await Promise.resolve();
+    const overflow = await gateway.execute(mediaCommand("request_media_overflow"), sender);
+    expect(overflow.response).toMatchObject({ code: "busy", retryable: true });
+    expect(pickerCalls).toBe(1);
+
+    releaseFirst();
+    expect((await first).response).toMatchObject({ type: "media.selected" });
+    expect(
+      (await gateway.execute(mediaCommand("request_media_after_release"), sender)).response,
+    ).toMatchObject({ type: "media.selected" });
+    expect(pickerCalls).toBe(2);
+  });
+
   it("destroys hostile frames before parsing their command", async () => {
     const gateway = new DesktopCommandGateway(createAuthority());
     const result = await gateway.execute(shellCommand(), {

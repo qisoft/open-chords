@@ -36,12 +36,19 @@ export async function handleLocalMediaRequest(
   }
 }
 
+export function isLocalMediaRequestUrl(value: string): boolean {
+  return capabilityFromUrl(value) !== null;
+}
+
 function capabilityFromUrl(value: string): string | null {
   try {
     const url = new URL(value);
     if (
       url.protocol !== "open-chords:" ||
       url.host !== "app" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.port !== "" ||
       url.search !== "" ||
       url.hash !== "" ||
       !/^\/media\/playbackcapability_[a-f0-9]{32}$/.test(url.pathname)

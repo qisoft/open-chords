@@ -12,8 +12,21 @@ const hardenedContents = new WeakSet<WebContents>();
 
 function isPrimaryRendererUrl(value: string): boolean {
   try {
+    const schemeEnd = value.indexOf("://");
+    const pathStart = schemeEnd === -1 ? -1 : value.indexOf("/", schemeEnd + 3);
+    const rawPath = pathStart === -1 ? "" : (value.slice(pathStart).split(/[?#]/, 1)[0] ?? "");
+    const decodedPath = decodeURIComponent(rawPath);
+    if (decodedPath.split("/").some((segment) => segment === "." || segment === "..")) {
+      return false;
+    }
     const url = new URL(value);
-    return url.protocol === "open-chords:" && url.host === "app";
+    return (
+      url.protocol === "open-chords:" &&
+      url.host === "app" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.port === ""
+    );
   } catch {
     return false;
   }

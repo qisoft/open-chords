@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import { net, protocol, session } from "electron";
 
-import { handleLocalMediaRequest } from "./local-media-protocol.ts";
+import { handleLocalMediaRequest, isLocalMediaRequestUrl } from "./local-media-protocol.ts";
 import type { LocalMediaService } from "./local-media.ts";
 import { loadRendererAssetManifest } from "./renderer-assets.ts";
 import { PRIMARY_RENDERER_PARTITION } from "./shell.ts";
@@ -54,7 +54,7 @@ export function installRendererProtocol(rendererRoot: string, media: LocalMediaS
   session
     .fromPartition(PRIMARY_RENDERER_PARTITION)
     .protocol.handle("open-chords", async (request) => {
-      if (new URL(request.url).pathname.startsWith("/media/")) {
+      if (isLocalMediaRequestUrl(request.url)) {
         return handleLocalMediaRequest(media, request);
       }
       if (request.method !== "GET" && request.method !== "HEAD") {
