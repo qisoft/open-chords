@@ -143,11 +143,7 @@ export class LocalMediaService {
   async pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
-    const verified = await verifyLocalWav(
-      selectedPath,
-      this.#afterAncestorVerification,
-      this.#afterVerificationRead,
-    );
+    const verified = await this.#verifyLocalWav(selectedPath);
     const capabilityId = opaqueId("mediacapability");
     this.#capabilities.set(capabilityId, { ...verified, generationId });
     return {
@@ -171,11 +167,7 @@ export class LocalMediaService {
       throw new Error("Local media capability is unavailable");
     }
     assertProjectRange(input, capability.durationSamples);
-    const reverified = await verifyLocalWav(
-      capability.path,
-      this.#afterAncestorVerification,
-      this.#afterVerificationRead,
-    );
+    const reverified = await this.#verifyLocalWav(capability.path);
     if (reverified.byteFingerprint !== capability.byteFingerprint) {
       throw new Error("Selected media changed before Project creation");
     }
@@ -254,11 +246,7 @@ export class LocalMediaService {
   }): Promise<LocalMediaRelinkResult> {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
-    const verified = await verifyLocalWav(
-      selectedPath,
-      this.#afterAncestorVerification,
-      this.#afterVerificationRead,
-    );
+    const verified = await this.#verifyLocalWav(selectedPath);
     const source = this.#library.getSourceById(input.sourceId);
     if (source === undefined) throw new Error("Source is unavailable");
     if (
@@ -305,11 +293,7 @@ export class LocalMediaService {
       .toSorted((left, right) => Date.parse(right.verifiedAt) - Date.parse(left.verifiedAt));
     for (const locator of locators) {
       try {
-        const verified = await verifyLocalWav(
-          locator.path,
-          this.#afterAncestorVerification,
-          this.#afterVerificationRead,
-        );
+        const verified = await this.#verifyLocalWav(locator.path);
         if (verified.byteFingerprint !== source.identity.fingerprint) {
           await this.#markLocatorUnavailable(source.id, locator);
           continue;
@@ -390,11 +374,7 @@ export class LocalMediaService {
         candidate.kind === "local_file" && candidate.status === "available",
     );
     if (locator === undefined) throw new Error("Project Source Locator is unavailable");
-    const verified = await verifyLocalWav(
-      locator.path,
-      this.#afterAncestorVerification,
-      this.#afterVerificationRead,
-    );
+    const verified = await this.#verifyLocalWav(locator.path);
     if (verified.byteFingerprint !== source.identity.fingerprint) {
       await this.#markLocatorUnavailable(source.id, locator);
       throw new Error("Project Source Locator no longer matches its identity");
@@ -433,6 +413,10 @@ export class LocalMediaService {
       status: "unavailable",
       verifiedAt: laterTimestamp(locator.verifiedAt, this.#now()),
     });
+  }
+
+  #verifyLocalWav(path: string): Promise<VerifiedLocalMedia> {
+    return verifyLocalWav(path, this.#afterAncestorVerification, this.#afterVerificationRead);
   }
 }
 
