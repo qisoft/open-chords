@@ -732,6 +732,8 @@ describe("LocalMediaService", () => {
       startSourceSample: 0,
     });
 
+    let firstHandleClosed = false;
+    let firstHandleCloseAttempts = 0;
     let openedHandles = 0;
     const playback = createMediaService({
       fileSystem: {
@@ -742,8 +744,14 @@ describe("LocalMediaService", () => {
           const handleNumber = openedHandles;
           return {
             close: async () => {
+              if (handleNumber === 1) {
+                firstHandleCloseAttempts += 1;
+                if (firstHandleCloseAttempts === 1) {
+                  throw new Error("Fixture capability cleanup failed");
+                }
+              }
               await handle.close();
-              if (handleNumber === 1) throw new Error("Fixture capability cleanup failed");
+              if (handleNumber === 1) firstHandleClosed = true;
             },
             read: (buffer, offset, length, position) =>
               handle.read(buffer, offset, length, position),
@@ -767,10 +775,13 @@ describe("LocalMediaService", () => {
       }),
     ).rejects.toThrow("Fixture capability cleanup failed");
 
+    expect(firstHandleClosed).toBe(false);
     expect((await library.readProject(created.projectId)).records.sources[0]?.locators).toEqual([
       expect.objectContaining({ path: mediaPath, status: "available" }),
     ]);
     await playback.revokeGeneration("generation_fixture");
+    expect(firstHandleCloseAttempts).toBe(2);
+    expect(firstHandleClosed).toBe(true);
   });
 
   it("reads only through its retained handle during a transient ancestor link swap", async () => {
