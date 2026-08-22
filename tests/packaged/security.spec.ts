@@ -61,6 +61,7 @@ test.beforeAll(async () => {
     library,
     pickFile: async () => mediaPath,
   });
+  media.activateGeneration("generation_packaged_seed");
   const selected = await media.pickLocalFile("generation_packaged_seed");
   if (selected.kind !== "selected") throw new Error("Packaged media fixture was not selected");
   const created = await media.createProject({
@@ -70,6 +71,7 @@ test.beforeAll(async () => {
     startSourceSample: 0,
   });
   packagedProjectId = created.projectId;
+  await media.revokeGeneration("generation_packaged_seed");
 });
 
 test.afterAll(() => {
