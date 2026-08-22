@@ -727,6 +727,8 @@ describe("LocalMediaService", () => {
     const library = await openProjectLibrary({ stateRoot });
     let openCalls = 0;
     let swapOnRead = false;
+    let transientSwapCompleted = false;
+    let windowsRenameBlocked = false;
     const media = createMediaService({
       fileSystem: {
         ...nodeLocalMediaFileSystem,
@@ -738,7 +740,17 @@ describe("LocalMediaService", () => {
             read: async (buffer, offset, length, position) => {
               if (!swapOnRead) return handle.read(buffer, offset, length, position);
               swapOnRead = false;
-              await rename(selectedRoot, displacedRoot);
+              try {
+                await rename(selectedRoot, displacedRoot);
+              } catch (error) {
+                const code =
+                  typeof error === "object" && error !== null && "code" in error
+                    ? error.code
+                    : null;
+                if (process.platform !== "win32" || code !== "EPERM") throw error;
+                windowsRenameBlocked = true;
+                return handle.read(buffer, offset, length, position);
+              }
               await symlink(
                 displacedRoot,
                 selectedRoot,
@@ -749,6 +761,7 @@ describe("LocalMediaService", () => {
               } finally {
                 await rm(selectedRoot, { force: true, recursive: true });
                 await rename(displacedRoot, selectedRoot);
+                transientSwapCompleted = true;
               }
             },
             stat: (options) => handle.stat(options),
@@ -781,6 +794,7 @@ describe("LocalMediaService", () => {
     });
     expect(range.bytes.toString("ascii")).toBe("RIFF,\u0000\u0000\u0000WAVE");
     expect(openCalls).toBe(opensBeforePlaybackRead);
+    expect(windowsRenameBlocked || transientSwapCompleted).toBe(true);
     expect(await realpath(mediaPath)).toBe(mediaPath);
     await media.revokeGeneration("generation_fixture");
   });
