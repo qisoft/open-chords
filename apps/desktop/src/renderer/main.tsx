@@ -73,7 +73,13 @@ function App() {
     );
   }
   if (committed.kind === "ready")
-    return <ProjectWorkspace api={api} snapshot={committed.snapshot} />;
+    return (
+      <ProjectWorkspace
+        api={api}
+        key={committed.snapshot.project.id}
+        snapshot={committed.snapshot}
+      />
+    );
   return (
     <EmptyWorkspace
       busy={busy || committed.kind === "loading"}

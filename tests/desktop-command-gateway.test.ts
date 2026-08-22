@@ -163,6 +163,35 @@ describe("DesktopCommandGateway", () => {
     });
   });
 
+  it("deterministically bounds a Project listing at the response contract limit", async () => {
+    const gateway = new DesktopCommandGateway(
+      createAuthority({
+        listProjects: () =>
+          Array.from({ length: 10_001 }, (_, index) => {
+            const suffix = String(10_000 - index).padStart(5, "0");
+            return {
+              compatibility: "writable" as const,
+              projectId: `project_${suffix}`,
+              projectRevisionId: `projectrevision_${suffix}`,
+              status: "active" as const,
+            };
+          }),
+      }),
+    );
+
+    const result = await gateway.execute(
+      { ...commandEnvelope("request_bounded_project_list"), type: "project.list" },
+      sender,
+      "project.list",
+    );
+
+    expect(result.response).toMatchObject({ type: "project.list" });
+    if (result.response.type !== "project.list") throw new Error("Project listing failed");
+    expect(result.response.projects).toHaveLength(10_000);
+    expect(result.response.projects[0]?.projectId).toBe("project_00000");
+    expect(result.response.projects.at(-1)?.projectId).toBe("project_09999");
+  });
+
   it("returns only an opaque media capability and rejects renderer-supplied paths", async () => {
     let pickerCalls = 0;
     const gateway = new DesktopCommandGateway(

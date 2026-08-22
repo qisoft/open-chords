@@ -28,6 +28,7 @@ const MAX_CONCURRENT_MEDIA_COMMANDS = 1;
 const MAX_CONCURRENT_READS = 32;
 const MAX_INVALID_COMMANDS = 3;
 const MAX_PENDING_MUTATIONS = 32;
+const MAX_PROJECT_LIST_ENTRIES = 10_000;
 const MAX_TRACKED_INVALID_SENDERS = 1_024;
 const MAX_MUTATIONS_PER_PROJECT = 32;
 const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -310,7 +311,9 @@ export class DesktopCommandGateway {
         compatibility,
         projectId,
         projectRevisionId,
-      }));
+      }))
+      .toSorted((left, right) => left.projectId.localeCompare(right.projectId))
+      .slice(0, MAX_PROJECT_LIST_ENTRIES);
     return {
       action: "none",
       response: DesktopResponseSchema.parse({

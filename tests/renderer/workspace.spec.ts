@@ -60,6 +60,16 @@ test("a durable local-media Project reopens into the centered workspace and play
     await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
     await expect.poll(() => page.locator(".timeline-track").getAttribute("style")).not.toBe(before);
     await page.getByRole("button", { name: "Pause" }).click();
+    await page.evaluate(() => {
+      Object.defineProperty(HTMLMediaElement.prototype, "play", {
+        configurable: true,
+        value: () => Promise.reject(new DOMException("Playback blocked", "NotAllowedError")),
+      });
+    });
+    await page.getByRole("button", { name: "Play" }).click();
+    await expect(page.getByRole("alert")).toContainText(
+      "Playback could not start. Check the verified Source.",
+    );
     await page.mouse.move(0, 0);
     await expect(page.getByRole("tooltip")).toBeHidden();
 
@@ -103,6 +113,13 @@ test("selection and persistent loop remain independent in the deterministic fixt
     await expect(pickup).toBeVisible();
     await expect(page.getByText("go go", { exact: true })).toBeVisible();
     await expect(page.getByText("home go", { exact: true })).toBeVisible();
+    await page.setViewportSize({ height: 720, width: 320 });
+    const pickupBounds = await pickup.boundingBox();
+    const completeBounds = await complete.boundingBox();
+    if (pickupBounds === null || completeBounds === null) {
+      throw new Error("Timeline region geometry is unavailable");
+    }
+    expect(pickupBounds.width / completeBounds.width).toBeCloseTo(1 / 3, 2);
     await pickup.focus();
     await pickup.press("ArrowRight");
     await expect(complete).toHaveAttribute("aria-pressed", "true");

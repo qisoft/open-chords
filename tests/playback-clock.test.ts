@@ -3,6 +3,30 @@ import { describe, expect, it } from "vitest";
 import { createPlaybackClock } from "../apps/desktop/src/renderer/playback-clock.ts";
 
 describe("playback clock", () => {
+  it("starts frame updates when the playback source is already playing", () => {
+    let requestedFrames = 0;
+    const source = {
+      addEventListener: () => undefined,
+      currentTime: 0.5,
+      paused: false,
+      removeEventListener: () => undefined,
+    };
+
+    const clock = createPlaybackClock({
+      cancelFrame: () => undefined,
+      requestFrame: () => {
+        requestedFrames += 1;
+        return 1;
+      },
+      sampleRate: 48_000,
+      source,
+    });
+
+    expect(clock.getSnapshot()).toEqual({ playing: true, positionSamples: 24_000 });
+    expect(requestedFrames).toBe(1);
+    clock.dispose();
+  });
+
   it("publishes frame positions without changing its subscription contract", () => {
     let frame: FrameRequestCallback | undefined;
     const listeners = new Map<string, Set<() => void>>();

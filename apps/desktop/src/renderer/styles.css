@@ -229,7 +229,8 @@ button:disabled {
   will-change: transform;
 }
 .timeline-region {
-  min-width: 110px;
+  min-width: 0;
+  box-sizing: border-box;
   flex-grow: 0;
   flex-shrink: 0;
   border: 0;
@@ -264,9 +265,12 @@ button:disabled {
   display: block;
 }
 .region-name {
+  overflow: hidden;
   color: #858590;
   font-size: 10px;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .region-chords {
   margin-top: 11px;

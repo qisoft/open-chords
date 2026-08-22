@@ -75,6 +75,7 @@ export function createPlaybackClock(options: PlaybackClockOptions) {
   options.source.addEventListener("ended", onStopped);
   options.source.addEventListener("seeked", onPosition);
   options.source.addEventListener("timeupdate", onPosition);
+  scheduleFrame();
 
   return {
     dispose() {

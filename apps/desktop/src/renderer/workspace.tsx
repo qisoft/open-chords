@@ -141,7 +141,12 @@ export function ProjectWorkspace({
       const position = clock.getSnapshot().positionSamples;
       if (position < loop.startSample || position >= loop.endSample) clock.seek(loop.startSample);
     }
-    await audio.play();
+    try {
+      await audio.play();
+      setPlaybackError(null);
+    } catch {
+      setPlaybackError("Playback could not start. Check the verified Source.");
+    }
   };
 
   return (
