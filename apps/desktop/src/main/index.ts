@@ -24,6 +24,7 @@ registerRendererScheme();
 const ownsSingleInstance = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let localMediaAuthority: LocalMediaService | null = null;
+let mediaCleanupStarted = false;
 const rendererContexts = new Map<
   number,
   {
@@ -35,6 +36,16 @@ const rendererContexts = new Map<
 if (!ownsSingleInstance) {
   app.quit();
 } else {
+  app.on("before-quit", (event) => {
+    if (mediaCleanupStarted) return;
+    event.preventDefault();
+    mediaCleanupStarted = true;
+    const cleanup = localMediaAuthority?.dispose() ?? Promise.resolve();
+    void cleanup.then(
+      () => app.quit(),
+      () => app.exit(1),
+    );
+  });
   app.on("web-contents-created", (_event, contents) => hardenWebContents(contents));
   app.on("second-instance", () => {
     void desktopReady.then(() => presentDesktopWindow(getOrCreateWindow()));

@@ -105,6 +105,16 @@ class MediaHandleCleanup {
     );
     if (failure !== undefined) throw failure.reason;
   }
+
+  async releaseAllRetained(): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.#retained].map((handle) => this.release(handle)),
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure !== undefined) throw failure.reason;
+  }
 }
 
 class RevokedMediaGenerationError extends Error {
@@ -406,6 +416,10 @@ export class LocalMediaService {
 
   revokeGeneration(generationId: string): Promise<void> {
     return this.#capabilities.revokeGeneration(generationId);
+  }
+
+  dispose(): Promise<void> {
+    return this.#cleanup.releaseAllRetained();
   }
 
   pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
@@ -738,7 +752,7 @@ export class LocalMediaService {
       });
     } finally {
       await releaseLeasesSuppressingCleanupErrors([lease]);
-      await this.#cleanup.retryFailed().catch(() => undefined);
+      await this.#cleanup.retryFailed();
     }
   }
 

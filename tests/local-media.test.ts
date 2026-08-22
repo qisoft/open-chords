@@ -1072,6 +1072,62 @@ describe("LocalMediaService", () => {
     expect(cleanup.closedHandles).toBe(1);
   });
 
+  it("rejects cache completion after terminal cleanup failure and retains shutdown cleanup", async () => {
+    const stateRoot = await temporaryDirectory(
+      "open-chords-local-media-cache-terminal-cleanup-state-",
+    );
+    const mediaRoot = await temporaryDirectory(
+      "open-chords-local-media-cache-terminal-cleanup-source-",
+    );
+    const mediaPath = join(mediaRoot, "recording.wav");
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    const library = await openProjectLibrary({ stateRoot });
+    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const selected = await ingestion.pickLocalFile("generation_fixture");
+    if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
+    const created = await ingestion.createProject({
+      capabilityId: selected.capabilityId,
+      endSourceSample: 4,
+      generationId: "generation_fixture",
+      startSourceSample: 0,
+    });
+    let allowClose = false;
+    let closeAttempts = 0;
+    let handleClosed = false;
+    const cacheMedia = createMediaService({
+      fileSystem: {
+        ...nodeLocalMediaFileSystem,
+        open: async (path, flags) => {
+          const handle = await nodeLocalMediaFileSystem.open(path, flags);
+          return {
+            close: async () => {
+              closeAttempts += 1;
+              if (!allowClose) throw new Error("Fixture persistent cache cleanup failed");
+              await handle.close();
+              handleClosed = true;
+            },
+            read: (buffer, offset, length, position) =>
+              handle.read(buffer, offset, length, position),
+            stat: (options) => handle.stat(options),
+          };
+        },
+      },
+      library,
+      pickFile: async () => null,
+      rangeCache: { cacheProjectRange: async () => undefined },
+    });
+
+    await expect(cacheMedia.cacheProjectRange(created.projectId)).rejects.toThrow(
+      "Fixture persistent cache cleanup failed",
+    );
+    expect(closeAttempts).toBe(2);
+    expect(handleClosed).toBe(false);
+    allowClose = true;
+    await cacheMedia.dispose();
+    expect(closeAttempts).toBe(3);
+    expect(handleClosed).toBe(true);
+  });
+
   it("keeps a Project when its Source is unavailable and durably marks the failed Locator", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-unavailable-state-");
     const mediaRoot = await temporaryDirectory("open-chords-local-media-unavailable-source-");
