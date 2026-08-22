@@ -87,6 +87,7 @@ function createAuthority(overrides: Partial<ProjectAuthority> = {}): ProjectAuth
   return {
     commitEditTransaction: async () => ({ projectRevisionId: "projectrevision_next" }),
     getSnapshot: async () => null,
+    listProjects: () => [],
     ...overrides,
   };
 }
@@ -123,6 +124,45 @@ function createMediaAuthority(overrides: Partial<LocalMediaAuthority> = {}): Loc
 }
 
 describe("DesktopCommandGateway", () => {
+  it("lists only active readable Projects through a bounded renderer capability", async () => {
+    const gateway = new DesktopCommandGateway(
+      createAuthority({
+        listProjects: () => [
+          {
+            compatibility: "writable",
+            projectId: "project_alpha",
+            projectRevisionId: "projectrevision_alpha",
+            status: "active",
+          },
+          { projectId: "project_damaged", status: "damaged" },
+          {
+            compatibility: "writable",
+            projectId: "project_trashed",
+            projectRevisionId: "projectrevision_trashed",
+            status: "trashed",
+          },
+        ],
+      }),
+    );
+
+    const result = await gateway.execute(
+      { ...commandEnvelope("request_project_list"), type: "project.list" },
+      sender,
+      "project.list",
+    );
+
+    expect(result.response).toMatchObject({
+      projects: [
+        {
+          compatibility: "writable",
+          projectId: "project_alpha",
+          projectRevisionId: "projectrevision_alpha",
+        },
+      ],
+      type: "project.list",
+    });
+  });
+
   it("returns only an opaque media capability and rejects renderer-supplied paths", async () => {
     let pickerCalls = 0;
     const gateway = new DesktopCommandGateway(

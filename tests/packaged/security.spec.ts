@@ -162,7 +162,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },
       externalFetch: "rejected",
-      heading: "Open Chords foundation",
+      heading: "Local Project",
       mediaKeys: ["createProject", "openPlayback", "pickLocalFile", "relinkSource"],
       missingProject: { code: "project_not_found", type: "desktop.error" },
       nodeGlobals: {
@@ -184,7 +184,11 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       },
       permissionDenied: true,
       popupDenied: true,
-      projectKeys: ["commitEditTransaction", "getSnapshot", "subscribe"],
+      projectKeys: ["commitEditTransaction", "getSnapshot", "list", "subscribe"],
+      projectList: {
+        projects: [expect.objectContaining({ projectId: packagedProjectId })],
+        type: "project.list",
+      },
       security: {
         security: {
           contextIsolation: true,
@@ -319,6 +323,10 @@ const RendererSnapshotSchema = z.object({
   permissionDenied: z.literal(true),
   popupDenied: z.literal(true),
   projectKeys: z.array(z.string()),
+  projectList: z.object({
+    projects: z.array(z.object({ projectId: z.string() })),
+    type: z.literal("project.list"),
+  }),
   resourceUrls: z.array(z.string()),
   security: z.object({
     security: z.object({
@@ -440,6 +448,10 @@ async function evaluateRendererTarget(webSocketUrl: string) {
         window.openChords.project.getSnapshot("project_missing"),
         new Promise((_, reject) => setTimeout(() => reject(new Error("Project IPC timed out")), 1000)),
       ]);
+      const projectList = await Promise.race([
+        window.openChords.project.list(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Project list IPC timed out")), 1000)),
+      ]);
       const security = await Promise.race([
         window.openChords.shell.getSecuritySnapshot(),
         new Promise((_, reject) => setTimeout(() => reject(new Error("Shell IPC timed out")), 1000)),
@@ -460,6 +472,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       permissionDenied,
       popupDenied,
       projectKeys: Object.keys(window.openChords.project).sort(),
+      projectList,
       resourceUrls: Array.from(document.querySelectorAll("script[src], link[rel=stylesheet][href]"))
         .map((element) => element instanceof HTMLScriptElement ? element.src : element.href)
         .filter((url) => url.startsWith("open-chords://")),

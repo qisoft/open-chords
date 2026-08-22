@@ -8,7 +8,10 @@
   "include": [
     "apps/desktop/src/main/**/*.ts",
     "apps/desktop/src/preload/**/*.ts",
+    "apps/desktop/src/renderer/committed-project-store.ts",
     "apps/desktop/src/renderer/**/*.d.ts",
+    "apps/desktop/src/renderer/playback-clock.ts",
+    "apps/desktop/src/renderer/workspace-timeline.ts",
     "packages/contracts/src/**/*.ts",
     "packages/domain/src/**/*.ts",
     "packages/testkit/src/**/*.ts",

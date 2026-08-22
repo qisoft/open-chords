@@ -22,6 +22,7 @@ const commandChannels = [
   [DESKTOP_IPC_CHANNELS.mediaPickLocalFile, "media.pick_local_file"],
   [DESKTOP_IPC_CHANNELS.mediaRelinkSource, "media.relink_source"],
   [DESKTOP_IPC_CHANNELS.shellGetSecuritySnapshot, "shell.get_security_snapshot"],
+  [DESKTOP_IPC_CHANNELS.projectList, "project.list"],
   [DESKTOP_IPC_CHANNELS.projectGetSnapshot, "project.get_snapshot"],
   [DESKTOP_IPC_CHANNELS.projectCommitEditTransaction, "project.commit_edit_transaction"],
 ] as const satisfies ReadonlyArray<readonly [string, CommandType]>;

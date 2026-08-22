@@ -36,7 +36,7 @@ test("the primary renderer runs only through the hardened application origin", a
 
   try {
     const page = await application.firstWindow();
-    await expect(page.getByRole("heading", { name: "Open Chords foundation" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Open a local recording" })).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.readyState)).toBe("complete");
 
     expect(

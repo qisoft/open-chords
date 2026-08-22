@@ -7,6 +7,7 @@ export const DESKTOP_IPC_CHANNELS = {
   projectChanged: "open-chords:project:changed",
   projectCommitEditTransaction: "open-chords:project:commit-edit-transaction",
   projectGetSnapshot: "open-chords:project:get-snapshot",
+  projectList: "open-chords:project:list",
   mediaCreateProject: "open-chords:media:create-project",
   mediaOpenPlayback: "open-chords:media:open-playback",
   mediaPickLocalFile: "open-chords:media:pick-local-file",
@@ -59,6 +60,11 @@ export const ProjectSnapshotCommandSchema = z.strictObject({
   type: z.literal("project.get_snapshot"),
 });
 
+export const ProjectListCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  type: z.literal("project.list"),
+});
+
 export const CommitEditTransactionCommandSchema = z.strictObject({
   ...correlatedEnvelope,
   expectedProjectRevisionId: DesktopProjectRevisionIdSchema,
@@ -97,6 +103,7 @@ export const DesktopCommandSchema = z.discriminatedUnion("type", [
   CreateMediaProjectCommandSchema,
   OpenMediaPlaybackCommandSchema,
   PickLocalFileCommandSchema,
+  ProjectListCommandSchema,
   ProjectSnapshotCommandSchema,
   RelinkMediaSourceCommandSchema,
   ShellSecuritySnapshotCommandSchema,
@@ -151,6 +158,19 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
     project: ProjectContractSchema,
     projectRevisionId: DesktopProjectRevisionIdSchema,
     type: z.literal("project.snapshot"),
+  }),
+  z.strictObject({
+    ...correlatedEnvelope,
+    projects: z
+      .array(
+        z.strictObject({
+          compatibility: z.enum(["read_only", "writable"]),
+          projectId: DesktopProjectIdSchema,
+          projectRevisionId: DesktopProjectRevisionIdSchema,
+        }),
+      )
+      .max(10_000),
+    type: z.literal("project.list"),
   }),
   z.strictObject({
     ...correlatedEnvelope,
@@ -218,6 +238,7 @@ export type DesktopResponse = z.infer<typeof DesktopResponseSchema>;
 export type ProjectEvent = z.infer<typeof ProjectEventSchema>;
 export type DesktopErrorResponse = Extract<DesktopResponse, { type: "desktop.error" }>;
 export type ProjectSnapshotResponse = Extract<DesktopResponse, { type: "project.snapshot" }>;
+export type ProjectListResponse = Extract<DesktopResponse, { type: "project.list" }>;
 export type ProjectCommittedResponse = Extract<DesktopResponse, { type: "project.committed" }>;
 export type ShellSecuritySnapshotResponse = Extract<
   DesktopResponse,
@@ -259,6 +280,7 @@ export type OpenChordsDesktopApi = {
       transaction: z.infer<typeof EditTransactionSchema>;
     }): Promise<DesktopErrorResponse | ProjectCommittedResponse>;
     getSnapshot(projectId: string): Promise<DesktopErrorResponse | ProjectSnapshotResponse>;
+    list(): Promise<DesktopErrorResponse | ProjectListResponse>;
     subscribe(
       listener: (
         update:

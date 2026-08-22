@@ -53,6 +53,12 @@ export type ProjectAuthority = {
     project: ProjectContract;
     projectRevisionId: string;
   } | null>;
+  listProjects(): readonly {
+    compatibility?: "read_only" | "writable";
+    projectId: string;
+    projectRevisionId?: string;
+    status: "active" | "damaged" | "trashed";
+  }[];
 };
 
 export type LocalMediaAuthority = {
@@ -141,6 +147,7 @@ export class DesktopCommandGateway {
       };
     }
 
+    if (command.type === "project.list") return this.#listProjects(command);
     if (command.type === "project.get_snapshot") return this.#readSnapshot(command);
     if (command.type === "project.commit_edit_transaction") return this.#enqueueMutation(command);
     return this.#executeMedia(command);
@@ -283,6 +290,35 @@ export class DesktopCommandGateway {
     } finally {
       this.#activeReads -= 1;
     }
+  }
+
+  #listProjects(command: Extract<DesktopCommand, { type: "project.list" }>): DesktopGatewayResult {
+    const projects = this.#authority
+      .listProjects()
+      .filter(
+        (
+          project,
+        ): project is typeof project & {
+          compatibility: "read_only" | "writable";
+          projectRevisionId: string;
+        } =>
+          project.status === "active" &&
+          project.compatibility !== undefined &&
+          project.projectRevisionId !== undefined,
+      )
+      .map(({ compatibility, projectId, projectRevisionId }) => ({
+        compatibility,
+        projectId,
+        projectRevisionId,
+      }));
+    return {
+      action: "none",
+      response: DesktopResponseSchema.parse({
+        ...responseEnvelope(command),
+        projects,
+        type: "project.list",
+      }),
+    };
   }
 
   async #enqueueMutation(
