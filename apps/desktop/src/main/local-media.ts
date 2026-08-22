@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { lstat, open } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 import { CONTRACT_VERSION, ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { parseProjectContract } from "@open-chords/domain";
@@ -439,16 +439,10 @@ async function verifyLocalWav(
   afterVerificationRead: () => Promise<void> | void,
 ): Promise<VerifiedLocalMedia> {
   const path = resolve(candidatePath);
-  const canonicalPath = await realpath(path);
-  const comparisonPath = process.platform === "win32" ? path.toLowerCase() : path;
-  const comparisonCanonical =
-    process.platform === "win32" ? canonicalPath.toLowerCase() : canonicalPath;
-  if (comparisonPath !== comparisonCanonical) {
-    throw new Error("Selected media path must not traverse a symbolic link or junction");
-  }
+  await assertNoLinkedAncestors(path);
   const pathBefore = await lstat(path, { bigint: true });
   if (!pathBefore.isFile() || pathBefore.isSymbolicLink()) {
-    throw new Error("Selected media must be a regular file");
+    throw new Error("Selected media must be a regular file, not a symbolic link or junction");
   }
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
   const handle = await open(path, constants.O_RDONLY | noFollow);
@@ -498,6 +492,18 @@ async function verifyLocalWav(
     };
   } finally {
     await handle.close();
+  }
+}
+
+async function assertNoLinkedAncestors(path: string): Promise<void> {
+  const ancestors: string[] = [];
+  for (let current = dirname(path); current !== dirname(current); current = dirname(current)) {
+    ancestors.push(current);
+  }
+  for (const ancestor of ancestors.reverse()) {
+    if ((await lstat(ancestor)).isSymbolicLink()) {
+      throw new Error("Selected media path must not traverse a symbolic link or junction");
+    }
   }
 }
 
