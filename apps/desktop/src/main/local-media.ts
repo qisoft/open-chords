@@ -738,6 +738,7 @@ export class LocalMediaService {
       });
     } finally {
       await releaseLeasesSuppressingCleanupErrors([lease]);
+      await this.#cleanup.retryFailed().catch(() => undefined);
     }
   }
 

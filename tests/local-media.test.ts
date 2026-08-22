@@ -1044,6 +1044,34 @@ describe("LocalMediaService", () => {
     expect(cachedSamples).toEqual([100, 200, 300]);
   });
 
+  it("retries failed cache handle cleanup before the cache operation completes", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-cache-cleanup-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-cache-cleanup-source-");
+    const mediaPath = join(mediaRoot, "recording.wav");
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    const library = await openProjectLibrary({ stateRoot });
+    const ingestion = createMediaService({ library, pickFile: async () => mediaPath });
+    const selected = await ingestion.pickLocalFile("generation_fixture");
+    if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
+    const created = await ingestion.createProject({
+      capabilityId: selected.capabilityId,
+      endSourceSample: 4,
+      generationId: "generation_fixture",
+      startSourceSample: 0,
+    });
+    const cleanup = failFirstHandleCloseFileSystem();
+    const cacheMedia = createMediaService({
+      fileSystem: cleanup.fileSystem,
+      library,
+      pickFile: async () => null,
+      rangeCache: { cacheProjectRange: async () => undefined },
+    });
+
+    await expect(cacheMedia.cacheProjectRange(created.projectId)).resolves.toBeUndefined();
+    expect(cleanup.closeAttempts).toBe(2);
+    expect(cleanup.closedHandles).toBe(1);
+  });
+
   it("keeps a Project when its Source is unavailable and durably marks the failed Locator", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-unavailable-state-");
     const mediaRoot = await temporaryDirectory("open-chords-local-media-unavailable-source-");
