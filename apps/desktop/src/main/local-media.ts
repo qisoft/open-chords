@@ -88,6 +88,7 @@ export type LocalMediaPlayback =
     };
 
 export type LocalMediaServiceOptions = {
+  afterAncestorVerification?: () => Promise<void> | void;
   afterVerificationRead?: () => Promise<void> | void;
   library: ProjectLibrary;
   now?: () => Date;
@@ -112,6 +113,7 @@ export type LocalMediaRangeCache = {
 };
 
 export class LocalMediaService {
+  readonly #afterAncestorVerification: () => Promise<void> | void;
   readonly #afterVerificationRead: () => Promise<void> | void;
   readonly #capabilities = new Map<string, SelectionCapability>();
   readonly #playbackCapabilities = new Map<string, PlaybackCapability>();
@@ -121,6 +123,7 @@ export class LocalMediaService {
   readonly #rangeCache: LocalMediaRangeCache | undefined;
 
   constructor(options: LocalMediaServiceOptions) {
+    this.#afterAncestorVerification = options.afterAncestorVerification ?? (() => undefined);
     this.#afterVerificationRead = options.afterVerificationRead ?? (() => undefined);
     this.#library = options.library;
     this.#now = options.now ?? (() => new Date());
@@ -140,7 +143,11 @@ export class LocalMediaService {
   async pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
-    const verified = await verifyLocalWav(selectedPath, this.#afterVerificationRead);
+    const verified = await verifyLocalWav(
+      selectedPath,
+      this.#afterAncestorVerification,
+      this.#afterVerificationRead,
+    );
     const capabilityId = opaqueId("mediacapability");
     this.#capabilities.set(capabilityId, { ...verified, generationId });
     return {
@@ -164,7 +171,11 @@ export class LocalMediaService {
       throw new Error("Local media capability is unavailable");
     }
     assertProjectRange(input, capability.durationSamples);
-    const reverified = await verifyLocalWav(capability.path, this.#afterVerificationRead);
+    const reverified = await verifyLocalWav(
+      capability.path,
+      this.#afterAncestorVerification,
+      this.#afterVerificationRead,
+    );
     if (reverified.byteFingerprint !== capability.byteFingerprint) {
       throw new Error("Selected media changed before Project creation");
     }
@@ -243,7 +254,11 @@ export class LocalMediaService {
   }): Promise<LocalMediaRelinkResult> {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
-    const verified = await verifyLocalWav(selectedPath, this.#afterVerificationRead);
+    const verified = await verifyLocalWav(
+      selectedPath,
+      this.#afterAncestorVerification,
+      this.#afterVerificationRead,
+    );
     const source = this.#library.getSourceById(input.sourceId);
     if (source === undefined) throw new Error("Source is unavailable");
     if (
@@ -290,7 +305,11 @@ export class LocalMediaService {
       .toSorted((left, right) => Date.parse(right.verifiedAt) - Date.parse(left.verifiedAt));
     for (const locator of locators) {
       try {
-        const verified = await verifyLocalWav(locator.path, this.#afterVerificationRead);
+        const verified = await verifyLocalWav(
+          locator.path,
+          this.#afterAncestorVerification,
+          this.#afterVerificationRead,
+        );
         if (verified.byteFingerprint !== source.identity.fingerprint) {
           await this.#markLocatorUnavailable(source.id, locator);
           continue;
@@ -371,7 +390,11 @@ export class LocalMediaService {
         candidate.kind === "local_file" && candidate.status === "available",
     );
     if (locator === undefined) throw new Error("Project Source Locator is unavailable");
-    const verified = await verifyLocalWav(locator.path, this.#afterVerificationRead);
+    const verified = await verifyLocalWav(
+      locator.path,
+      this.#afterAncestorVerification,
+      this.#afterVerificationRead,
+    );
     if (verified.byteFingerprint !== source.identity.fingerprint) {
       await this.#markLocatorUnavailable(source.id, locator);
       throw new Error("Project Source Locator no longer matches its identity");
@@ -436,10 +459,13 @@ async function readVerifiedBytes(
 
 async function verifyLocalWav(
   candidatePath: string,
+  afterAncestorVerification: () => Promise<void> | void,
   afterVerificationRead: () => Promise<void> | void,
 ): Promise<VerifiedLocalMedia> {
   const path = resolve(candidatePath);
-  await assertNoLinkedAncestors(path);
+  const ancestorsBefore = await inspectPathAncestors(path);
+  await afterAncestorVerification();
+  await assertSamePathAncestors(ancestorsBefore);
   const pathBefore = await lstat(path, { bigint: true });
   if (!pathBefore.isFile() || pathBefore.isSymbolicLink()) {
     throw new Error("Selected media must be a regular file, not a symbolic link or junction");
@@ -475,6 +501,7 @@ async function verifyLocalWav(
     await afterVerificationRead();
     const after = await handle.stat({ bigint: true });
     const pathAfter = await lstat(path, { bigint: true });
+    await assertSamePathAncestors(ancestorsBefore);
     assertSameFileIdentity(before, after);
     assertSameFileIdentity(after, pathAfter);
     return {
@@ -495,14 +522,39 @@ async function verifyLocalWav(
   }
 }
 
-async function assertNoLinkedAncestors(path: string): Promise<void> {
+type PathAncestorIdentity = {
+  dev: bigint;
+  ino: bigint;
+  mode: bigint;
+  path: string;
+};
+
+async function inspectPathAncestors(path: string): Promise<PathAncestorIdentity[]> {
   const ancestors: string[] = [];
   for (let current = dirname(path); current !== dirname(current); current = dirname(current)) {
     ancestors.push(current);
   }
+  const identities: PathAncestorIdentity[] = [];
   for (const ancestor of ancestors.reverse()) {
-    if ((await lstat(ancestor)).isSymbolicLink()) {
+    const identity = await lstat(ancestor, { bigint: true });
+    if (identity.isSymbolicLink()) {
       throw new Error("Selected media path must not traverse a symbolic link or junction");
+    }
+    identities.push({ dev: identity.dev, ino: identity.ino, mode: identity.mode, path: ancestor });
+  }
+  return identities;
+}
+
+async function assertSamePathAncestors(expected: readonly PathAncestorIdentity[]): Promise<void> {
+  for (const ancestor of expected) {
+    const current = await lstat(ancestor.path, { bigint: true });
+    if (
+      current.isSymbolicLink() ||
+      current.dev !== ancestor.dev ||
+      current.ino !== ancestor.ino ||
+      current.mode !== ancestor.mode
+    ) {
+      throw new Error("Selected media ancestor changed or became a symbolic link or junction");
     }
   }
 }

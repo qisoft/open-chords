@@ -138,6 +138,37 @@ describe("LocalMediaService", () => {
     expect(library.listProjects()).toEqual([]);
   });
 
+  it("aborts when a verified parent is replaced by a symlink or junction before open", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-parent-race-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-parent-race-source-");
+    const selectedRoot = join(mediaRoot, "selected");
+    const displacedRoot = join(mediaRoot, "selected-before-swap");
+    const replacementRoot = join(mediaRoot, "replacement");
+    const mediaPath = join(selectedRoot, "recording.wav");
+    await mkdir(selectedRoot);
+    await mkdir(replacementRoot);
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    await writeFile(join(replacementRoot, "recording.wav"), monoPcmWav([4, 5, 6, 7]));
+    const library = await openProjectLibrary({ stateRoot });
+    const media = new LocalMediaService({
+      afterAncestorVerification: async () => {
+        await rename(selectedRoot, displacedRoot);
+        await symlink(
+          replacementRoot,
+          selectedRoot,
+          process.platform === "win32" ? "junction" : "dir",
+        );
+      },
+      library,
+      pickFile: async () => mediaPath,
+    });
+
+    await expect(media.pickLocalFile("generation_fixture")).rejects.toThrow(
+      /ancestor|symbolic link|junction/i,
+    );
+    expect(library.listProjects()).toEqual([]);
+  });
+
   it("aborts a concurrent path replacement without publishing a Project", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-race-state-");
     const mediaRoot = await temporaryDirectory("open-chords-local-media-race-source-");
