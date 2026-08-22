@@ -32,6 +32,7 @@ import {
 import { z } from "zod";
 
 import {
+  locatorMatchesSourceIdentity,
   ProjectOwnedRecordsSchema,
   SourceLocatorSchema,
   type ProjectOwnedRecords,
@@ -371,14 +372,8 @@ export class ProjectLibrary {
         if (entry.revision === undefined) continue;
         const source = entry.revision.payload.records.sources.find(({ id }) => id === sourceId);
         if (source === undefined) continue;
-        const identityMatches =
-          (source.identity.kind === "local_file" &&
-            locator.kind === "local_file" &&
-            source.identity.fingerprint === locator.fingerprint) ||
-          (source.identity.kind === "youtube" &&
-            locator.kind === "youtube" &&
-            source.identity.videoId === locator.videoId);
-        if (!identityMatches) throw new Error("Source Locator does not match Source identity");
+        if (!locatorMatchesSourceIdentity(source, locator))
+          throw new Error("Source Locator does not match Source identity");
         const candidate = structuredClone(entry);
         const candidateSource = candidate.revision?.payload.records.sources.find(
           ({ id }) => id === sourceId,
