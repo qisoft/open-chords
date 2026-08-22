@@ -52,28 +52,26 @@ type PlaybackCapability = VerifiedLocalMedia & {
   projectId: string;
 };
 
+type MediaSelectionCapability = {
+  byteSize: number;
+  capabilityId: string;
+  durationSamples: number;
+  mimeType: string;
+  sampleRate: number;
+};
+
 export type LocalMediaSelection =
   | { kind: "cancelled" }
-  | {
-      byteSize: number;
-      capabilityId: string;
-      durationSamples: number;
+  | (MediaSelectionCapability & {
       kind: "selected";
-      mimeType: string;
-      sampleRate: number;
-    };
+    });
 
 export type LocalMediaRelinkResult =
   | { kind: "cancelled" }
   | { kind: "relinked"; sourceId: string }
-  | {
-      byteSize: number;
-      capabilityId: string;
-      durationSamples: number;
+  | (MediaSelectionCapability & {
       kind: "different_source";
-      mimeType: string;
-      sampleRate: number;
-    };
+    });
 
 export type LocalMediaPlayback =
   | { kind: "unavailable"; projectId: string; sourceId: string }
