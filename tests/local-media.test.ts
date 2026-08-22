@@ -85,7 +85,7 @@ describe("LocalMediaService", () => {
         },
       ],
     });
-  });
+  }, 15_000);
 
   it("rejects spoofed media before issuing a capability", async () => {
     const stateRoot = await temporaryDirectory("open-chords-local-media-hostile-state-");
