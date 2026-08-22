@@ -124,6 +124,15 @@ export const DesktopErrorResponseSchema = z.strictObject({
   type: z.literal("desktop.error"),
 });
 
+const mediaSelectionEnvelope = {
+  ...correlatedEnvelope,
+  byteSize: z.number().int().positive(),
+  capabilityId: DesktopMediaCapabilityIdSchema,
+  durationSamples: z.number().int().positive(),
+  mimeType: z.string().min(1).max(128),
+  sampleRate: z.number().int().positive().max(384_000),
+};
+
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
   z.strictObject({
     ...correlatedEnvelope,
@@ -156,12 +165,7 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
     type: z.literal("media.selection_cancelled"),
   }),
   z.strictObject({
-    ...correlatedEnvelope,
-    byteSize: z.number().int().positive(),
-    capabilityId: DesktopMediaCapabilityIdSchema,
-    durationSamples: z.number().int().positive(),
-    mimeType: z.string().min(1).max(128),
-    sampleRate: z.number().int().positive().max(384_000),
+    ...mediaSelectionEnvelope,
     type: z.literal("media.selected"),
   }),
   z.strictObject({
@@ -177,12 +181,7 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
     type: z.literal("media.relinked"),
   }),
   z.strictObject({
-    ...correlatedEnvelope,
-    byteSize: z.number().int().positive(),
-    capabilityId: DesktopMediaCapabilityIdSchema,
-    durationSamples: z.number().int().positive(),
-    mimeType: z.string().min(1).max(128),
-    sampleRate: z.number().int().positive().max(384_000),
+    ...mediaSelectionEnvelope,
     type: z.literal("media.different_source"),
   }),
   z.strictObject({

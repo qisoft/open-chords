@@ -42,6 +42,12 @@
     "value": 2
   },
   {
+    "expectedErrorType": "DomainInvariantError",
+    "name": "analysis records without an Active View",
+    "path": ["payload", "activeView"],
+    "value": null
+  },
+  {
     "expectedErrorType": "ZodError",
     "name": "unknown nested chord field",
     "path": [

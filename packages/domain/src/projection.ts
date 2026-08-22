@@ -118,21 +118,21 @@ function applyOperation(
 }
 
 export function materializeEffectiveTimeline(project: ProjectContract): EffectiveTimeline {
-  const revision = project.analysisRevisions.find(
-    ({ id }) => id === project.activeView.analysisRevisionId,
-  );
-  const layer = project.editLayers.find(({ id }) => id === project.activeView.editLayerId);
+  const activeView = project.activeView;
+  if (activeView === null) throw new Error("Project has no Analysis Revision to materialize");
+  const revision = project.analysisRevisions.find(({ id }) => id === activeView.analysisRevisionId);
+  const layer = project.editLayers.find(({ id }) => id === activeView.editLayerId);
   if (revision === undefined || layer === undefined)
     throw new Error("Active View references were not validated");
 
   const timeline = structuredClone(revision.timeline);
   const selectedAlignment = project.lyricsAlignments.find(
-    ({ id }) => id === project.activeView.lyricsAlignmentId,
+    ({ id }) => id === activeView.lyricsAlignmentId,
   );
   const lyricsAlignment =
     selectedAlignment === undefined ? undefined : structuredClone(selectedAlignment);
   const transactions: (typeof layer.transactions)[number][] = [];
-  let selected = layer.transactions[project.activeView.editHistoryPosition - 1];
+  let selected = layer.transactions[activeView.editHistoryPosition - 1];
   const byId = new Map(layer.transactions.map((transaction) => [transaction.id, transaction]));
   while (selected !== undefined) {
     transactions.unshift(selected);

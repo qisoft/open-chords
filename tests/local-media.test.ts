@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { monoPcmWav } from "@open-chords/testkit/media";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { handleLocalMediaRequest } from "../apps/desktop/src/main/local-media-protocol.ts";
@@ -20,27 +21,6 @@ async function temporaryDirectory(prefix: string): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), prefix));
   temporaryRoots.push(path);
   return realpath(path);
-}
-
-function monoPcmWav(samples: readonly number[], sampleRate = 48_000): Buffer {
-  const bytesPerSample = 2;
-  const dataSize = samples.length * bytesPerSample;
-  const wav = Buffer.alloc(44 + dataSize);
-  wav.write("RIFF", 0, "ascii");
-  wav.writeUInt32LE(36 + dataSize, 4);
-  wav.write("WAVE", 8, "ascii");
-  wav.write("fmt ", 12, "ascii");
-  wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20);
-  wav.writeUInt16LE(1, 22);
-  wav.writeUInt32LE(sampleRate, 24);
-  wav.writeUInt32LE(sampleRate * bytesPerSample, 28);
-  wav.writeUInt16LE(bytesPerSample, 32);
-  wav.writeUInt16LE(16, 34);
-  wav.write("data", 36, "ascii");
-  wav.writeUInt32LE(dataSize, 40);
-  samples.forEach((sample, index) => wav.writeInt16LE(sample, 44 + index * bytesPerSample));
-  return wav;
 }
 
 describe("LocalMediaService", () => {
@@ -82,7 +62,10 @@ describe("LocalMediaService", () => {
       startSourceSample: 2,
     });
     expect(stored.envelope.payload).toMatchObject({
+      activeView: null,
+      analysisRevisions: [],
       durationSamples: 5,
+      editLayers: [],
       id: created.projectId,
       sampleRate: 48_000,
     });
@@ -172,6 +155,30 @@ describe("LocalMediaService", () => {
     });
 
     await expect(media.pickLocalFile("generation_fixture")).rejects.toThrow(/changed/i);
+    expect(library.listProjects()).toEqual([]);
+  });
+
+  it("revalidates a selection capability before publishing its Project", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-local-media-stale-state-");
+    const mediaRoot = await temporaryDirectory("open-chords-local-media-stale-source-");
+    const mediaPath = join(mediaRoot, "recording.wav");
+    const displacedPath = join(mediaRoot, "selected-recording.wav");
+    await writeFile(mediaPath, monoPcmWav([0, 1, 2, 3]));
+    const library = await openProjectLibrary({ stateRoot });
+    const media = new LocalMediaService({ library, pickFile: async () => mediaPath });
+    const selected = await media.pickLocalFile("generation_fixture");
+    if (selected.kind !== "selected") throw new Error("Fixture selection was cancelled");
+    await rename(mediaPath, displacedPath);
+    await writeFile(mediaPath, monoPcmWav([4, 5, 6, 7]));
+
+    await expect(
+      media.createProject({
+        capabilityId: selected.capabilityId,
+        endSourceSample: 4,
+        generationId: "generation_fixture",
+        startSourceSample: 0,
+      }),
+    ).rejects.toThrow(/changed/i);
     expect(library.listProjects()).toEqual([]);
   });
 
@@ -329,6 +336,13 @@ describe("LocalMediaService", () => {
     expect(Buffer.from(await response.arrayBuffer()).toString("ascii")).toBe(
       "RIFF0\u0000\u0000\u0000WAVE",
     );
+    const openEnded = await handleLocalMediaRequest(
+      playback,
+      new Request(opened.playbackUrl, { headers: { Range: "bytes=44-" } }),
+    );
+    expect(openEnded.status).toBe(206);
+    expect(openEnded.headers.get("Content-Range")).toBe("bytes 44-55/56");
+    expect((await openEnded.arrayBuffer()).byteLength).toBe(12);
     expect(
       (
         await handleLocalMediaRequest(
@@ -338,11 +352,27 @@ describe("LocalMediaService", () => {
       ).status,
     ).toBe(416);
 
+    playback.revokeGeneration("generation_reopened");
+    await expect(
+      playback.readPlaybackRange({
+        capabilityId: opened.capabilityId,
+        endByteExclusive: 12,
+        startByte: 0,
+      }),
+    ).rejects.toThrow(/unavailable/i);
+    const reopenedCapability = await playback.openPlayback({
+      generationId: "generation_replacement_probe",
+      projectId: created.projectId,
+    });
+    if (reopenedCapability.kind !== "ready") {
+      throw new Error("Fixture Source was unavailable before replacement probe");
+    }
+
     await rename(mediaPath, `${mediaPath}.displaced`);
     await writeFile(mediaPath, monoPcmWav([9, 9, 9, 9, 9, 9]));
     await expect(
       playback.readPlaybackRange({
-        capabilityId: opened.capabilityId,
+        capabilityId: reopenedCapability.capabilityId,
         endByteExclusive: 12,
         startByte: 0,
       }),

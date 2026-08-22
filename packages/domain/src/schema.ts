@@ -388,10 +388,10 @@ export const ActiveViewSchema = z
 
 export const ProjectContractSchema = z
   .strictObject({
-    activeView: ActiveViewSchema,
-    analysisRevisions: z.array(AnalysisRevisionSchema).min(1),
+    activeView: ActiveViewSchema.nullable(),
+    analysisRevisions: z.array(AnalysisRevisionSchema),
     durationSamples: PositiveSampleFrameSchema,
-    editLayers: z.array(EditLayerSchema).min(1),
+    editLayers: z.array(EditLayerSchema),
     extensions: z.record(z.string().regex(/^[a-z0-9]+(?:\.[a-z0-9-]+)+$/), z.unknown()),
     format: z.literal("open-chords/project"),
     id: StableIdSchema,

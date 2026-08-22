@@ -36,6 +36,7 @@ function projectWithOperation(operation: EditOperation): ParsedProject {
   const project = structuredClone(parseProjectContract(readGoldenProject()));
   const layer = project.editLayers[0];
   if (layer === undefined) throw new Error("Golden fixture Edit Layer is missing");
+  if (project.activeView === null) throw new Error("Golden fixture Active View is missing");
   layer.transactions.push({
     id: "transaction_projection",
     operations: [operation],
@@ -46,9 +47,27 @@ function projectWithOperation(operation: EditOperation): ParsedProject {
 }
 
 describe("canonical domain kernel", () => {
+  it("accepts a Project before analysis without fabricating a Revision or musical assertion", () => {
+    const envelope = ProjectEnvelopeSchema.parse(
+      readFixture("valid/unanalyzed-project-envelope.json"),
+    );
+    const project = parseProjectContract(envelope.payload);
+    expect(project).toMatchObject({
+      activeView: null,
+      analysisRevisions: [],
+      editLayers: [],
+    });
+    expect(() => materializeEffectiveTimeline(project)).toThrow(/no Analysis Revision/i);
+
+    const invalid = structuredClone(project);
+    invalid.analysisRevisions.push(readGoldenEnvelope().payload.analysisRevisions[0]!);
+    expect(() => parseProjectContract(invalid)).toThrow(/without an Active View/i);
+  });
+
   it("parses the golden Project contract and materializes its explicitly selected stale revision", () => {
     const project = parseProjectContract(readGoldenProject());
     const effective = materializeEffectiveTimeline(project);
+    if (project.activeView === null) throw new Error("Golden fixture Active View is missing");
     expect(project.activeView.analysisRevisionId).toBe("revision_original");
     expect(project.analysisRevisions.at(-1)?.id).toBe("revision_reviewable");
     expect(effective.chordEvents.map((event) => event.value.kind)).toEqual([
@@ -143,6 +162,7 @@ describe("canonical domain kernel", () => {
 
   it("projects only the selected committed Edit Layer history position without mutating machine output", () => {
     const input = structuredClone(parseProjectContract(readGoldenProject()));
+    if (input.activeView === null) throw new Error("Golden fixture Active View is missing");
     input.activeView.editHistoryPosition = 1;
     const project = parseProjectContract(input);
     const effective = materializeEffectiveTimeline(project);
@@ -196,6 +216,7 @@ describe("canonical domain kernel", () => {
         parentTransactionId: null,
       },
     );
+    if (input.activeView === null) throw new Error("Golden fixture Active View is missing");
     input.activeView.editHistoryPosition = 3;
     expect(
       materializeEffectiveTimeline(parseProjectContract(input)).chordEvents[0]?.value,

@@ -1,0 +1,20 @@
+{
+  "protocol": "open-chords/contracts",
+  "schemaVersion": "1.0",
+  "type": "project_snapshot",
+  "extensions": {},
+  "payload": {
+    "format": "open-chords/project",
+    "schemaVersion": "1.0",
+    "id": "project_unanalyzed",
+    "sampleRate": 48000,
+    "durationSamples": 48000,
+    "extensions": {},
+    "supportClaims": [],
+    "analysisRevisions": [],
+    "editLayers": [],
+    "lyricsDocuments": [],
+    "lyricsAlignments": [],
+    "activeView": null
+  }
+}

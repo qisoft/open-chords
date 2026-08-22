@@ -317,6 +317,10 @@ def validate_domain(envelope: dict[str, Any]) -> None:
             except (KeyError, StopIteration) as error:
                 raise ContractError("Edit operation has an unstable reference") from error
     active = project["activeView"]
+    if active is None:
+        if project["analysisRevisions"] or project["editLayers"] or project["lyricsDocuments"] or project["lyricsAlignments"]:
+            raise ContractError("unanalyzed Project contains analysis-owned records")
+        return
     layer = layers.get(active["editLayerId"])
     if layer is None or active["analysisRevisionId"] not in revisions or layer["analysisRevisionId"] != active["analysisRevisionId"]:
         raise ContractError("invalid Active View reference")

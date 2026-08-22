@@ -23,6 +23,7 @@ registerRendererScheme();
 
 const ownsSingleInstance = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
+let localMediaAuthority: LocalMediaService | null = null;
 const rendererContexts = new Map<
   number,
   {
@@ -61,6 +62,7 @@ if (!ownsSingleInstance) {
           return result.canceled || result.filePaths.length !== 1 ? null : result.filePaths[0]!;
         },
       });
+      localMediaAuthority = localMedia;
       installRendererProtocol(join(__dirname, "../renderer"), localMedia);
       projectLibrary.subscribe(({ projectId, projectRevisionId, sequence }) => {
         const window = mainWindow;
@@ -107,6 +109,8 @@ function getOrCreateWindow() {
       },
     });
     window.webContents.once("destroyed", () => {
+      const context = rendererContexts.get(webContentsId);
+      if (context !== undefined) localMediaAuthority?.revokeGeneration(context.generationId);
       rendererContexts.delete(webContentsId);
     });
     window.once("closed", () => {
@@ -118,6 +122,8 @@ function getOrCreateWindow() {
 
 function replaceCompromisedRenderer(sender: WebContents): void {
   const isMainRenderer = mainWindow?.webContents === sender;
+  const context = rendererContexts.get(sender.id);
+  if (context !== undefined) localMediaAuthority?.revokeGeneration(context.generationId);
   rendererContexts.delete(sender.id);
   if (!sender.isDestroyed()) sender.close({ waitForBeforeUnload: false });
   if (isMainRenderer) {

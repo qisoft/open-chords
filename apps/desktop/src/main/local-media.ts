@@ -4,7 +4,7 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { CONTRACT_VERSION, ProjectEnvelopeSchema } from "@open-chords/contracts";
-import { canonicalSerialize, parseProjectContract } from "@open-chords/domain";
+import { parseProjectContract } from "@open-chords/domain";
 
 import { ProjectOwnedRecordsSchema, type ProjectOwnedRecords } from "./project-library-records.ts";
 import type { ProjectLibrary } from "./project-library.ts";
@@ -130,6 +130,15 @@ export class LocalMediaService {
     this.#rangeCache = options.rangeCache;
   }
 
+  revokeGeneration(generationId: string): void {
+    for (const [capabilityId, capability] of this.#capabilities) {
+      if (capability.generationId === generationId) this.#capabilities.delete(capabilityId);
+    }
+    for (const [capabilityId, capability] of this.#playbackCapabilities) {
+      if (capability.generationId === generationId) this.#playbackCapabilities.delete(capabilityId);
+    }
+  }
+
   async pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
@@ -152,14 +161,22 @@ export class LocalMediaService {
     generationId: string;
     startSourceSample: number;
   }): Promise<{ projectId: string; projectRevisionId: string; sourceId: string }> {
-    const capability = this.#capabilities.get(input.capabilityId);
+    let capability = this.#capabilities.get(input.capabilityId);
     if (capability === undefined || capability.generationId !== input.generationId) {
       throw new Error("Local media capability is unavailable");
     }
     assertProjectRange(input, capability.durationSamples);
+    const reverified = await verifyLocalWav(capability.path, this.#afterVerificationRead);
+    if (reverified.byteFingerprint !== capability.byteFingerprint) {
+      throw new Error("Selected media changed before Project creation");
+    }
+    assertSameFileIdentity(capability.identity, reverified.identity);
+    capability = { ...reverified, generationId: capability.generationId };
 
     const observedAt = this.#now().toISOString();
-    const existingSource = await this.#findSource(capability.byteFingerprint);
+    const existingSource = this.#library.findLocalFileSourceByFingerprint(
+      capability.byteFingerprint,
+    );
     const sourceId = existingSource?.id ?? sourceIdFor(capability.byteFingerprint);
     const locator = {
       fingerprint: capability.byteFingerprint,
@@ -212,13 +229,10 @@ export class LocalMediaService {
       sources: [{ ...source, locators: [...source.locators, locator] }],
     });
     const projectId = opaqueId("project");
-    const envelope = buildPendingProjectEnvelope({
-      createdAt: observedAt,
+    const envelope = buildUnanalyzedProjectEnvelope({
       durationSamples: input.endSourceSample - input.startSourceSample,
       projectId,
       sampleRate: capability.sampleRate,
-      sourceSnapshotId: source.snapshots[0]!.id,
-      startSourceSample: input.startSourceSample,
     });
     const created = await this.#library.createProject({ envelope, records });
     this.#capabilities.delete(input.capabilityId);
@@ -232,7 +246,8 @@ export class LocalMediaService {
     const selectedPath = await this.#pickFile();
     if (selectedPath === null) return { kind: "cancelled" };
     const verified = await verifyLocalWav(selectedPath, this.#afterVerificationRead);
-    const source = await this.#sourceById(input.sourceId);
+    const source = this.#library.getSourceById(input.sourceId);
+    if (source === undefined) throw new Error("Source is unavailable");
     if (
       source.identity.kind !== "local_file" ||
       source.identity.fingerprint !== verified.byteFingerprint
@@ -308,7 +323,7 @@ export class LocalMediaService {
 
   async readPlaybackRange(input: {
     capabilityId: string;
-    endByteExclusive: number;
+    endByteExclusive?: number;
     startByte: number;
   }): Promise<{
     byteSize: number;
@@ -319,21 +334,24 @@ export class LocalMediaService {
   }> {
     const capability = this.#playbackCapabilities.get(input.capabilityId);
     if (capability === undefined) throw new Error("Playback capability is unavailable");
+    const endByteExclusive =
+      input.endByteExclusive ??
+      Math.min(capability.byteSize, input.startByte + MAX_PLAYBACK_RANGE_BYTES);
     if (
       !Number.isSafeInteger(input.startByte) ||
-      !Number.isSafeInteger(input.endByteExclusive) ||
+      !Number.isSafeInteger(endByteExclusive) ||
       input.startByte < 0 ||
-      input.endByteExclusive <= input.startByte ||
-      input.endByteExclusive > capability.byteSize ||
-      input.endByteExclusive - input.startByte > MAX_PLAYBACK_RANGE_BYTES
+      endByteExclusive <= input.startByte ||
+      endByteExclusive > capability.byteSize ||
+      endByteExclusive - input.startByte > MAX_PLAYBACK_RANGE_BYTES
     ) {
       throw new Error("Playback byte range is invalid or exceeds its limit");
     }
-    const bytes = await readVerifiedBytes(capability, input.startByte, input.endByteExclusive);
+    const bytes = await readVerifiedBytes(capability, input.startByte, endByteExclusive);
     return {
       byteSize: capability.byteSize,
       bytes,
-      endByteExclusive: input.endByteExclusive,
+      endByteExclusive,
       mimeType: capability.mimeType,
       startByte: input.startByte,
     };
@@ -386,30 +404,6 @@ export class LocalMediaService {
       sourceSnapshotId: snapshot.id,
       startSourceSample: range.startSourceSample,
     });
-  }
-
-  async #findSource(
-    fingerprint: string,
-  ): Promise<ProjectOwnedRecords["sources"][number] | undefined> {
-    for (const entry of this.#library.listProjects()) {
-      if (entry.status !== "active") continue;
-      const project = await this.#library.readProject(entry.projectId);
-      const source = project.records.sources.find(
-        ({ identity }) => identity.kind === "local_file" && identity.fingerprint === fingerprint,
-      );
-      if (source !== undefined) return source;
-    }
-    return undefined;
-  }
-
-  async #sourceById(sourceId: string): Promise<ProjectOwnedRecords["sources"][number]> {
-    for (const entry of this.#library.listProjects()) {
-      if (entry.status !== "active") continue;
-      const project = await this.#library.readProject(entry.projectId);
-      const source = project.records.sources.find(({ id }) => id === sourceId);
-      if (source !== undefined) return source;
-    }
-    throw new Error("Source is unavailable");
   }
 
   async #markLocatorUnavailable(sourceId: string, locator: LocalFileLocator): Promise<void> {
@@ -554,87 +548,16 @@ function parseCanonicalWav(probe: Buffer, byteSize: number) {
   return { ...data, durationSamples: data.dataSize / format.blockAlign };
 }
 
-function buildPendingProjectEnvelope(input: {
-  createdAt: string;
+function buildUnanalyzedProjectEnvelope(input: {
   durationSamples: number;
   projectId: string;
   sampleRate: number;
-  sourceSnapshotId: string;
-  startSourceSample: number;
 }) {
-  const revisionId = opaqueId("revision");
-  const editLayerId = opaqueId("editlayer");
-  const abstained = {
-    evidence: [],
-    reasonCodes: ["analysis_pending"],
-    state: "abstained" as const,
-  };
   const payload = parseProjectContract({
-    activeView: {
-      analysisRevisionId: revisionId,
-      editHistoryPosition: 0,
-      editLayerId,
-      presentation: {
-        beginnerView: false,
-        enharmonicPreference: "contextual",
-        transposeSemitones: 0,
-      },
-    },
-    analysisRevisions: [
-      {
-        createdAt: input.createdAt,
-        id: revisionId,
-        manifestHash: sha256(
-          canonicalSerialize({
-            kind: "pending_local_media_analysis",
-            sourceSnapshotId: input.sourceSnapshotId,
-            startSourceSample: input.startSourceSample,
-          }),
-        ),
-        projectId: input.projectId,
-        supportClaimIds: [],
-        timeline: {
-          bars: [],
-          chordEvents: [
-            {
-              assertion: abstained,
-              endSample: input.durationSamples,
-              id: opaqueId("chord"),
-              startSample: 0,
-              value: { kind: "no_chord" },
-            },
-          ],
-          keyRegions: [
-            {
-              assertion: abstained,
-              endSample: input.durationSamples,
-              id: opaqueId("keyregion"),
-              startSample: 0,
-              value: { kind: "unknown" },
-            },
-          ],
-          sectionRegions: [
-            {
-              assertion: abstained,
-              endSample: input.durationSamples,
-              id: opaqueId("section"),
-              label: "unknown",
-              startSample: 0,
-            },
-          ],
-          unmeteredRegions: [
-            {
-              endSample: input.durationSamples,
-              id: opaqueId("unmetered"),
-              reasonCode: "analysis_pending",
-              startSample: 0,
-            },
-          ],
-        },
-      },
-    ],
+    activeView: null,
+    analysisRevisions: [],
     durationSamples: input.durationSamples,
-    editLayers: [{ analysisRevisionId: revisionId, id: editLayerId, transactions: [] }],
+    editLayers: [],
     extensions: {},
     format: "open-chords/project",
     id: input.projectId,

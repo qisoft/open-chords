@@ -255,36 +255,45 @@ export function validateProjectInvariants(project: ProjectContract): void {
     }
   }
 
-  const activeLayer = editLayers.get(project.activeView.editLayerId);
-  if (!revisionIds.has(project.activeView.analysisRevisionId))
-    issues.push("Active View references unknown Analysis Revision");
-  if (activeLayer === undefined) issues.push("Active View references unknown Edit Layer");
-  else {
-    if (activeLayer.analysisRevisionId !== project.activeView.analysisRevisionId) {
-      issues.push("Active View Analysis Revision and Edit Layer base do not match");
+  if (project.activeView === null) {
+    if (project.analysisRevisions.length !== 0 || project.editLayers.length !== 0) {
+      issues.push("A Project without an Active View must not contain analysis or edit revisions");
     }
-    if (project.activeView.editHistoryPosition > activeLayer.transactions.length) {
-      issues.push("Active View history position is outside committed Edit Layer history");
+    if (project.lyricsDocuments.length !== 0 || project.lyricsAlignments.length !== 0) {
+      issues.push("A Project without an Active View must not contain lyrics records");
     }
-  }
+  } else {
+    const activeLayer = editLayers.get(project.activeView.editLayerId);
+    if (!revisionIds.has(project.activeView.analysisRevisionId))
+      issues.push("Active View references unknown Analysis Revision");
+    if (activeLayer === undefined) issues.push("Active View references unknown Edit Layer");
+    else {
+      if (activeLayer.analysisRevisionId !== project.activeView.analysisRevisionId) {
+        issues.push("Active View Analysis Revision and Edit Layer base do not match");
+      }
+      if (project.activeView.editHistoryPosition > activeLayer.transactions.length) {
+        issues.push("Active View history position is outside committed Edit Layer history");
+      }
+    }
 
-  if (
-    (project.activeView.lyricsDocumentId === undefined) !==
-    (project.activeView.lyricsAlignmentId === undefined)
-  ) {
-    issues.push("Active View must select Lyrics Document and Lyrics Alignment together");
-  }
-  if (
-    project.activeView.lyricsDocumentId !== undefined &&
-    !documents.has(project.activeView.lyricsDocumentId)
-  ) {
-    issues.push("Active View references unknown Lyrics Document");
-  }
-  if (
-    project.activeView.lyricsAlignmentId !== undefined &&
-    !alignments.has(project.activeView.lyricsAlignmentId)
-  ) {
-    issues.push("Active View references unknown Lyrics Alignment");
+    if (
+      (project.activeView.lyricsDocumentId === undefined) !==
+      (project.activeView.lyricsAlignmentId === undefined)
+    ) {
+      issues.push("Active View must select Lyrics Document and Lyrics Alignment together");
+    }
+    if (
+      project.activeView.lyricsDocumentId !== undefined &&
+      !documents.has(project.activeView.lyricsDocumentId)
+    ) {
+      issues.push("Active View references unknown Lyrics Document");
+    }
+    if (
+      project.activeView.lyricsAlignmentId !== undefined &&
+      !alignments.has(project.activeView.lyricsAlignmentId)
+    ) {
+      issues.push("Active View references unknown Lyrics Alignment");
+    }
   }
 
   for (const alignment of project.lyricsAlignments) {
@@ -335,7 +344,7 @@ export function validateProjectInvariants(project: ProjectContract): void {
     }
   }
 
-  if (project.activeView.lyricsAlignmentId !== undefined) {
+  if (project.activeView?.lyricsAlignmentId !== undefined) {
     const alignment = alignments.get(project.activeView.lyricsAlignmentId);
     if (
       alignment !== undefined &&

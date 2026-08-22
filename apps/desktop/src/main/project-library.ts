@@ -350,6 +350,18 @@ export class ProjectLibrary {
     return () => this.#subscribers.delete(listener);
   }
 
+  findLocalFileSourceByFingerprint(
+    fingerprint: string,
+  ): ProjectOwnedRecords["sources"][number] | undefined {
+    return this.#findSource(
+      ({ identity }) => identity.kind === "local_file" && identity.fingerprint === fingerprint,
+    );
+  }
+
+  getSourceById(sourceId: string): ProjectOwnedRecords["sources"][number] | undefined {
+    return this.#findSource(({ id }) => id === sourceId);
+  }
+
   async observeSourceLocator(sourceId: string, rawLocator: unknown): Promise<void> {
     return this.#serializeMutation(async () => {
       const locator = SourceLocatorSchema.parse(rawLocator);
@@ -380,6 +392,20 @@ export class ProjectLibrary {
       if (!found) throw new Error(`Source ${sourceId} was not found`);
       this.#locatorCatalog = await this.#refreshLocatorCatalog(candidateEntries);
     });
+  }
+
+  #findSource(
+    matches: (source: ProjectOwnedRecords["sources"][number]) => boolean,
+  ): ProjectOwnedRecords["sources"][number] | undefined {
+    for (const entry of this.#entries.values()) {
+      if (entry.location !== "active" || entry.status !== "active" || entry.revision === undefined)
+        continue;
+      const source = this.#recordsWithCurrentLocators(entry.revision.payload.records).sources.find(
+        matches,
+      );
+      if (source !== undefined) return structuredClone(source);
+    }
+    return undefined;
   }
 
   async createProject(input: {
@@ -494,12 +520,12 @@ export class ProjectLibrary {
         return { stale: true };
 
       const project = structuredClone(entry.revision.payload.envelope.payload);
-      const activeLayer = project.editLayers.find(
-        ({ id }) => id === project.activeView.editLayerId,
-      );
+      const activeView = project.activeView;
+      if (activeView === null) throw new Error("Project has no Analysis Revision to edit");
+      const activeLayer = project.editLayers.find(({ id }) => id === activeView.editLayerId);
       if (activeLayer === undefined) throw new Error("Active Edit Layer is missing");
       activeLayer.transactions.push(EditTransactionSchema.parse(input.transaction));
-      project.activeView.editHistoryPosition = activeLayer.transactions.length;
+      activeView.editHistoryPosition = activeLayer.transactions.length;
       const payload = buildStoredPayload({
         envelope: { ...entry.revision.payload.envelope, payload: parseProjectContract(project) },
         records: entry.revision.payload.records,

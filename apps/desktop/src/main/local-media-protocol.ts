@@ -56,11 +56,14 @@ function capabilityFromUrl(value: string): string | null {
 
 function parseByteRange(
   value: string | null,
-): { endByteExclusive: number; startByte: number } | null {
+): { endByteExclusive?: number; startByte: number } | null {
   if (value === null) return null;
-  const match = /^bytes=(0|[1-9]\d*)-(0|[1-9]\d*)$/.exec(value);
+  const match = /^bytes=(0|[1-9]\d*)-(?:(0|[1-9]\d*))?$/.exec(value);
   if (match === null) return null;
   const startByte = Number(match[1]);
+  if (match[2] === undefined) {
+    return Number.isSafeInteger(startByte) ? { startByte } : null;
+  }
   const inclusiveEnd = Number(match[2]);
   if (
     !Number.isSafeInteger(startByte) ||

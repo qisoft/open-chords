@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { extractFile } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
+import { monoPcmWav } from "@open-chords/testkit/media";
 import { expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 import { z } from "zod";
@@ -51,7 +52,10 @@ let packagedProjectId = "";
 test.beforeAll(async () => {
   await extractZip(archivePath, { dir: packageRoot });
   const mediaPath = join(packageRoot, "offline-playback.wav");
-  writeFileSync(mediaPath, monoPcmWav([0, 100, -100, 200, -200, 0]));
+  const samples = Array.from({ length: 48_000 }, (_value, index) =>
+    Math.round(Math.sin(index / 12) * 1_000),
+  );
+  writeFileSync(mediaPath, monoPcmWav(samples));
   const library = await openProjectLibrary({ stateRoot: userDataDirectory });
   const media = new LocalMediaService({
     library,
@@ -61,9 +65,9 @@ test.beforeAll(async () => {
   if (selected.kind !== "selected") throw new Error("Packaged media fixture was not selected");
   const created = await media.createProject({
     capabilityId: selected.capabilityId,
-    endSourceSample: 5,
+    endSourceSample: samples.length,
     generationId: "generation_packaged_seed",
-    startSourceSample: 1,
+    startSourceSample: 0,
   });
   packagedProjectId = created.projectId;
 });
@@ -167,9 +171,11 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       },
       navigationDenied: true,
       offlinePlayback: {
-        body: "RIFF0\u0000\u0000\u0000WAVE",
+        body: expect.stringMatching(/^RIFF....WAVE$/s),
         error: null,
         pathKeyExposed: false,
+        played: true,
+        seeked: true,
         status: 206,
         type: "media.playback_ready",
         urlProtocol: "open-chords:",
@@ -282,6 +288,8 @@ const OfflinePlaybackSchema = z.object({
   body: z.string(),
   error: z.string().nullable(),
   pathKeyExposed: z.boolean(),
+  played: z.boolean(),
+  seeked: z.boolean(),
   status: z.number().int(),
   type: z.string(),
   urlProtocol: z.string(),
@@ -637,6 +645,8 @@ async function evaluatePackagedMedia(
     let response = null;
     let body = "";
     let error = null;
+    let played = false;
+    let seeked = false;
     try {
       playback = await Promise.race([
         window.openChords.media.openPlayback(${projectIdLiteral}),
@@ -652,6 +662,30 @@ async function evaluatePackagedMedia(
           new Promise((_, reject) => setTimeout(() => reject(new Error("media body timed out")), 2000)),
         ]);
         body = Array.from(new Uint8Array(bytes)).map((byte) => String.fromCharCode(byte)).join("");
+        const audio = document.createElement("audio");
+        audio.preload = "auto";
+        audio.src = playback.playbackUrl;
+        document.body.append(audio);
+        await Promise.race([
+          new Promise((resolve, reject) => {
+            audio.addEventListener("loadedmetadata", resolve, { once: true });
+            audio.addEventListener("error", () => reject(new Error("media element failed to load")), { once: true });
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("media metadata timed out")), 3000)),
+        ]);
+        audio.currentTime = 0.25;
+        await Promise.race([
+          new Promise((resolve) => audio.addEventListener("seeked", resolve, { once: true })),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("media seek timed out")), 3000)),
+        ]);
+        seeked = Math.abs(audio.currentTime - 0.25) < 0.1;
+        await Promise.race([
+          audio.play(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("media play timed out")), 3000)),
+        ]);
+        played = !audio.paused;
+        audio.pause();
+        audio.remove();
       }
     } catch (cause) {
       error = String(cause);
@@ -660,6 +694,8 @@ async function evaluatePackagedMedia(
       body,
       error,
       pathKeyExposed: Object.keys(playback).some((key) => /path|directory/i.test(key)),
+      played,
+      seeked,
       status: response?.status ?? 0,
       type: playback.type,
       urlProtocol: playback.type === "media.playback_ready"
@@ -687,7 +723,7 @@ async function evaluatePackagedMedia(
         JSON.stringify({
           id: requestId,
           method: "Runtime.evaluate",
-          params: { awaitPromise: true, expression, returnByValue: true },
+          params: { awaitPromise: true, expression, returnByValue: true, userGesture: true },
         }),
       );
     };
@@ -736,26 +772,6 @@ async function evaluatePackagedMedia(
       }
     }
   });
-}
-
-function monoPcmWav(samples: readonly number[], sampleRate = 48_000): Buffer {
-  const dataSize = samples.length * 2;
-  const wav = Buffer.alloc(44 + dataSize);
-  wav.write("RIFF", 0, "ascii");
-  wav.writeUInt32LE(36 + dataSize, 4);
-  wav.write("WAVE", 8, "ascii");
-  wav.write("fmt ", 12, "ascii");
-  wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20);
-  wav.writeUInt16LE(1, 22);
-  wav.writeUInt32LE(sampleRate, 24);
-  wav.writeUInt32LE(sampleRate * 2, 28);
-  wav.writeUInt16LE(2, 32);
-  wav.writeUInt16LE(16, 34);
-  wav.write("data", 36, "ascii");
-  wav.writeUInt32LE(dataSize, 40);
-  samples.forEach((sample, index) => wav.writeInt16LE(sample, 44 + index * 2));
-  return wav;
 }
 
 async function decodeWebSocketMessage(data: unknown): Promise<string | null> {

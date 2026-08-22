@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./media": "./src/media.ts",
     "./mutations": "./src/mutations.ts"
   },
   "dependencies": {

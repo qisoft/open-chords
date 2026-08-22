@@ -193,6 +193,7 @@ describe("ProjectLibrary", () => {
         projectRevisionId: committed.projectRevisionId,
       });
       const project = parseProjectContract(snapshot?.project);
+      if (project.activeView === null) throw new Error("Golden fixture Active View is missing");
       expect(project.editLayers[0]?.transactions.at(-1)?.id).toBe("transaction_library");
       expect(project.activeView.editHistoryPosition).toBe(
         project.editLayers[0]?.transactions.length,
