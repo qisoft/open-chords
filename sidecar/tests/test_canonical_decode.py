@@ -83,6 +83,28 @@ class CanonicalDecodeTests(unittest.TestCase):
             ):
                 self.assertFalse((workspace / relative).exists())
 
+    def test_removes_stale_artifacts_before_rejecting_missing_input(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-missing-") as temporary:
+            workspace = Path(temporary)
+            artifacts = workspace / "artifacts"
+            artifacts.mkdir()
+            for name in (
+                "canonical.wav.partial",
+                "canonical.wav",
+                "decode-manifest.json.partial",
+                "decode-manifest.json",
+            ):
+                (artifacts / name).write_bytes(b"stale")
+
+            with self.assertRaises(FileNotFoundError):
+                decode_canonical(
+                    workspace,
+                    NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
+                    CanonicalDecodeConfig(platform_profile="test"),
+                )
+
+            self.assertEqual(list(artifacts.iterdir()), [])
+
     @staticmethod
     def _write_stereo_fixture(path: Path) -> None:
         with wave.open(str(path), "wb") as fixture:

@@ -64,7 +64,6 @@ def decode_canonical(
     """Decode the fixed staged input and publish a deterministic manifest."""
 
     workspace = workspace.resolve(strict=True)
-    input_path = _workspace_file(workspace, INPUT_PATH, must_exist=True)
     output_path = _workspace_file(workspace, OUTPUT_PATH)
     manifest_path = _workspace_file(workspace, MANIFEST_PATH)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +72,7 @@ def decode_canonical(
     artifacts = (temporary_output, output_path, temporary_manifest, manifest_path)
     for artifact in artifacts:
         artifact.unlink(missing_ok=True)
+    input_path = _workspace_file(workspace, INPUT_PATH, must_exist=True)
     ffmpeg = _exact_executable(toolchain.ffmpeg)
     ffprobe = _exact_executable(toolchain.ffprobe)
     input_descriptor = _file_descriptor(workspace, input_path)
