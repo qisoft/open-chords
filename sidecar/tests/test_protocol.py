@@ -6,12 +6,15 @@ import math
 import shutil
 import struct
 import tempfile
+import threading
 import time
 import unittest
 import wave
 from pathlib import Path
+from typing import BinaryIO
 from unittest.mock import patch
 
+from sidecar.open_chords_analysis import protocol
 from sidecar.open_chords_analysis.canonical_decode import CanonicalDecodeCancelled, NativeToolchain
 from sidecar.open_chords_analysis.protocol import FrozenRuntime, ProtocolError, serve_one_session
 
@@ -25,17 +28,18 @@ class FragmentedReader(io.BytesIO):
         return super().read(min(size, self.fragment_size))
 
 
-class DelayedControlReader(io.BytesIO):
-    def __init__(self, start: bytes, control: bytes, delay_seconds: float):
+class GatedControlReader(io.BytesIO):
+    def __init__(self, start: bytes, control: bytes, gate: threading.Event):
         super().__init__(start + control)
         self.start_length = len(start)
-        self.delay_seconds = delay_seconds
-        self.delayed = False
+        self.gate = gate
+        self.waited = False
 
     def read(self, size: int = -1) -> bytes:
-        if not self.delayed and self.tell() >= self.start_length:
-            self.delayed = True
-            time.sleep(self.delay_seconds)
+        if not self.waited and self.tell() >= self.start_length:
+            self.waited = True
+            if not self.gate.wait(timeout=1):
+                raise TimeoutError("heartbeat was not written before cancel input was released")
         return super().read(size)
 
 
@@ -191,6 +195,13 @@ class ProtocolTests(unittest.TestCase):
             }
         )
         output = io.BytesIO()
+        heartbeat_written = threading.Event()
+        write_frame = protocol._write_frame
+
+        def write_and_signal(stream: BinaryIO, message: object) -> None:
+            write_frame(stream, message)
+            if isinstance(message, dict) and message.get("type") == "heartbeat":
+                heartbeat_written.set()
 
         def wait_for_cancel(*args: object) -> object:
             cancellation = args[-1]
@@ -207,9 +218,13 @@ class ProtocolTests(unittest.TestCase):
                 "sidecar.open_chords_analysis.protocol.decode_canonical",
                 side_effect=wait_for_cancel,
             ),
+            patch(
+                "sidecar.open_chords_analysis.protocol._write_frame",
+                side_effect=write_and_signal,
+            ),
         ):
             serve_one_session(
-                DelayedControlReader(start, cancel, 0.03),
+                GatedControlReader(start, cancel, heartbeat_written),
                 output,
                 Path.cwd(),
                 FrozenRuntime(
