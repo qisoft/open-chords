@@ -12,6 +12,7 @@ import extractZip from "extract-zip";
 import { z } from "zod";
 
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
+import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof-constants.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 
 const PRODUCT_NAME = "Open Chords";
@@ -98,6 +99,24 @@ test("packaged shell flips every security fuse explicitly", async () => {
     [FuseV1Options.WasmTrapHandlers]: FuseState.ENABLE,
     version: "1",
   });
+});
+
+test("installed artifact runs the main-owned sidecar lifecycle and reaps", async () => {
+  const proof = spawn(executablePath, [PACKAGED_SIDECAR_PROOF_ARGUMENT], {
+    cwd: packageRoot,
+    env: {},
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let output = "";
+  const capture = (chunk: Buffer) => {
+    output = `${output}${chunk.toString("utf8")}`.slice(-64 * 1024);
+  };
+  proof.stdout.on("data", capture);
+  proof.stderr.on("data", capture);
+
+  const exit = await waitForApplicationExit(proof, 10_000);
+  expect(exit, output).toEqual({ code: 0, signal: null });
 });
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {
@@ -250,6 +269,26 @@ async function stopApplication(application: ReturnType<typeof spawn>): Promise<v
       clearTimeout(timeout);
       resolve();
     }
+  });
+}
+
+async function waitForApplicationExit(
+  application: ReturnType<typeof spawn>,
+  timeoutMs: number,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      application.kill();
+      reject(new Error("Packaged lifecycle proof did not exit"));
+    }, timeoutMs);
+    application.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    application.once("exit", (code, signal) => {
+      clearTimeout(timeout);
+      resolve({ code, signal });
+    });
   });
 }
 
