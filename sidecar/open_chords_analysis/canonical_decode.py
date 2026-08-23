@@ -10,7 +10,7 @@ import threading
 import time
 import wave
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path
 from typing import BinaryIO, Final
 
@@ -24,7 +24,7 @@ MAX_TOOL_OUTPUT_BYTES: Final = 64 * 1024
 TOOL_TIMEOUT_SECONDS: Final = 30
 
 
-class CanonicalDecodeFailureCode(StrEnum):
+class CanonicalDecodeFailureCode(str, Enum):
     DECODE = "canonical_decode_failed"
     PREPARE = "canonical_prepare_failed"
     PROBE = "canonical_probe_failed"
