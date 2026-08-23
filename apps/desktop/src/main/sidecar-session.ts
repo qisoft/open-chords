@@ -95,7 +95,11 @@ export function createPromiseSidecarClient(
         process = await acquireSidecarProcess(
           launcher,
           request,
-          AbortSignal.any([timeout.signal, disposeSignal]),
+          AbortSignal.any(
+            request.signal === undefined
+              ? [timeout.signal, disposeSignal]
+              : [timeout.signal, disposeSignal, request.signal],
+          ),
         );
         return await runSidecarProtocol(
           process,
@@ -151,7 +155,11 @@ export function createEffectSidecarClient(
             acquireSidecarProcess(
               launcherService,
               request,
-              AbortSignal.any([signal, disposeSignal, timeout.signal]),
+              AbortSignal.any(
+                request.signal === undefined
+                  ? [signal, disposeSignal, timeout.signal]
+                  : [signal, disposeSignal, timeout.signal, request.signal],
+              ),
             ),
         }),
       );
@@ -229,13 +237,13 @@ async function acquireSidecarProcess(
   request: SidecarSessionRequest,
   signal: AbortSignal,
 ): Promise<SidecarProcess> {
-  if (signal.aborted) throw signal.reason;
+  if (signal.aborted) throw acquisitionAbortError(request, signal);
   return new Promise((resolve, reject) => {
     let settled = false;
     const abort = () => {
       if (settled) return;
       settled = true;
-      reject(signal.reason);
+      reject(acquisitionAbortError(request, signal));
     };
     signal.addEventListener("abort", abort, { once: true });
     void launcher.launch(request, signal).then(
@@ -266,4 +274,20 @@ async function acquireSidecarProcess(
       },
     );
   });
+}
+
+function acquisitionAbortError(
+  request: SidecarSessionRequest,
+  lifecycleSignal: AbortSignal,
+): SidecarSessionError {
+  if (request.signal?.aborted === true) {
+    return new SidecarSessionError("cancelled", "Sidecar acquisition was cancelled", {
+      cause: request.signal.reason,
+    });
+  }
+  return lifecycleSignal.reason instanceof SidecarSessionError
+    ? lifecycleSignal.reason
+    : new SidecarSessionError("cancelled", "Sidecar acquisition was interrupted", {
+        cause: lifecycleSignal.reason,
+      });
 }

@@ -294,6 +294,34 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
     await client.dispose();
   });
 
+  it("interrupts a hanging acquisition with typed user cancellation", async () => {
+    const controller = new AbortController();
+    let launchWasAborted = false;
+    const client = createClient({
+      launch: async (_request, signal) =>
+        new Promise<SidecarProcess>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              launchWasAborted = true;
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        }),
+    });
+    const result = client
+      .runSession({ ...request, signal: controller.signal })
+      .catch((error: unknown) => error);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    controller.abort();
+
+    expect(await result).toMatchObject({ code: "cancelled" });
+    expect(launchWasAborted).toBe(true);
+    await client.dispose();
+  });
+
   it("enforces the handshake deadline independently of the session deadline", async () => {
     const process = new FakeProcess([]);
     process.stdout = {
