@@ -266,6 +266,28 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(messages[-1]["code"], "canonical_cleanup_failed")
             self.assertEqual(outside_artifact.read_bytes(), b"outside")
 
+    def test_cancel_cleanup_maps_inspection_error_to_bounded_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-protocol-inspection-") as temporary:
+            workspace = Path(temporary)
+            artifact = workspace / "artifacts/canonical.wav"
+            artifact.parent.mkdir()
+            artifact.write_bytes(b"artifact")
+            original_lstat = Path.lstat
+
+            def deny_artifact_inspection(path: Path, *args: object, **kwargs: object) -> object:
+                if path.name == "canonical.wav" and path.parent.name == "artifacts":
+                    raise PermissionError("injected inspection denial")
+                return original_lstat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+            with patch.object(Path, "lstat", new=deny_artifact_inspection):
+                messages = self._cancelled_session_messages(workspace)
+
+            self.assertEqual(
+                [message["type"] for message in messages],
+                ["handshake", "cancel_ack", "error"],
+            )
+            self.assertEqual(messages[-1]["code"], "canonical_cleanup_failed")
+
     def test_cancel_acknowledges_and_cleans_before_exit(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")

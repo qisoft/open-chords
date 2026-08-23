@@ -338,7 +338,12 @@ def _cleanup_decode_artifacts(workspace: Path) -> bool:
         "artifacts/decode-manifest.json",
     ):
         candidate = workspace_root / relative
-        if not candidate.exists() and not candidate.is_symlink():
+        try:
+            candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            cleanup_succeeded = False
             continue
         try:
             resolved_parent = candidate.parent.resolve(strict=True)
