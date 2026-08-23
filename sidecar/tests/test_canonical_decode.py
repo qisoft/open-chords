@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import shutil
+import sys
 import tempfile
 import unittest
 import wave
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 from sidecar.open_chords_analysis.canonical_decode import (
     CanonicalDecodeConfig,
+    CanonicalDecodeError,
     NativeToolchain,
     decode_canonical,
 )
@@ -68,12 +70,13 @@ class CanonicalDecodeTests(unittest.TestCase):
                 "sidecar.open_chords_analysis.canonical_decode._inspect_canonical_wav",
                 side_effect=RuntimeError("fault after publication"),
             ):
-                with self.assertRaisesRegex(RuntimeError, "fault after publication"):
+                with self.assertRaises(CanonicalDecodeError) as raised:
                     decode_canonical(
                         workspace,
                         NativeToolchain(Path(ffmpeg), Path(ffprobe)),
                         CanonicalDecodeConfig(platform_profile="test"),
                     )
+                self.assertEqual(raised.exception.code, "canonical_artifact_validation_failed")
 
             for relative in (
                 "artifacts/canonical.wav.partial",
@@ -96,14 +99,109 @@ class CanonicalDecodeTests(unittest.TestCase):
             ):
                 (artifacts / name).write_bytes(b"stale")
 
-            with self.assertRaises(FileNotFoundError):
+            with self.assertRaises(CanonicalDecodeError) as raised:
                 decode_canonical(
                     workspace,
                     NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
                     CanonicalDecodeConfig(platform_profile="test"),
                 )
+            self.assertEqual(raised.exception.code, "canonical_prepare_failed")
 
             self.assertEqual(list(artifacts.iterdir()), [])
+
+    def test_reports_missing_tool_as_prepare_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-tool-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input/source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+
+            with self.assertRaises(CanonicalDecodeError) as raised:
+                decode_canonical(
+                    workspace,
+                    NativeToolchain(Path("/missing/ffmpeg"), Path("/missing/ffprobe")),
+                    CanonicalDecodeConfig(platform_profile="test"),
+                )
+
+            self.assertEqual(raised.exception.code, "canonical_prepare_failed")
+
+    def test_reports_publication_fault_and_removes_artifacts(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if ffmpeg is None or ffprobe is None:
+            self.skipTest("FFmpeg development tools are unavailable")
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-publication-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input/source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+
+            with patch(
+                "sidecar.open_chords_analysis.canonical_decode._write_atomic",
+                side_effect=OSError("injected publication fault"),
+            ):
+                with self.assertRaises(CanonicalDecodeError) as raised:
+                    decode_canonical(
+                        workspace,
+                        NativeToolchain(Path(ffmpeg), Path(ffprobe)),
+                        CanonicalDecodeConfig(platform_profile="test"),
+                    )
+
+            self.assertEqual(raised.exception.code, "canonical_publication_failed")
+            self.assertFalse((workspace / "artifacts/canonical.wav").exists())
+            self.assertFalse((workspace / "artifacts/decode-manifest.json").exists())
+
+    def test_reports_transcode_fault(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-transcode-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input/source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+
+            with (
+                patch(
+                    "sidecar.open_chords_analysis.canonical_decode._probe_audio",
+                    return_value={"streams": [{"codec_type": "audio"}]},
+                ),
+                patch(
+                    "sidecar.open_chords_analysis.canonical_decode._run_tool",
+                    side_effect=OSError("injected transcode fault"),
+                ),
+            ):
+                with self.assertRaises(CanonicalDecodeError) as raised:
+                    decode_canonical(
+                        workspace,
+                        NativeToolchain(Path(sys.executable), Path(sys.executable)),
+                        CanonicalDecodeConfig(platform_profile="test"),
+                    )
+
+            self.assertEqual(raised.exception.code, "canonical_transcode_failed")
+
+    def test_reports_tool_identity_fault(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if ffmpeg is None or ffprobe is None:
+            self.skipTest("FFmpeg development tools are unavailable")
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-identity-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input/source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+
+            with patch(
+                "sidecar.open_chords_analysis.canonical_decode._tool_identity",
+                side_effect=OSError("injected identity fault"),
+            ):
+                with self.assertRaises(CanonicalDecodeError) as raised:
+                    decode_canonical(
+                        workspace,
+                        NativeToolchain(Path(ffmpeg), Path(ffprobe)),
+                        CanonicalDecodeConfig(platform_profile="test"),
+                    )
+
+            self.assertEqual(raised.exception.code, "canonical_tool_identity_failed")
 
     @staticmethod
     def _write_stereo_fixture(path: Path) -> None:

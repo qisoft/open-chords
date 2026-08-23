@@ -12,6 +12,7 @@ from queue import Empty, Queue
 from typing import BinaryIO, Final
 
 from .canonical_decode import (
+    CANONICAL_DECODE_FAILURE_CODES,
     ArtifactDescriptor,
     CanonicalDecodeConfig,
     CanonicalDecodeCancelled,
@@ -175,6 +176,7 @@ def serve_one_session(
                     **_identity(start, sequence),
                     "code": payload.code
                     if isinstance(payload, CanonicalDecodeError)
+                    and payload.code in CANONICAL_DECODE_FAILURE_CODES
                     else "canonical_decode_failed",
                     "message": "Canonical media decode failed",
                     "type": "error",

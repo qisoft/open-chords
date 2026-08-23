@@ -15,7 +15,11 @@ from typing import BinaryIO
 from unittest.mock import patch
 
 from sidecar.open_chords_analysis import protocol
-from sidecar.open_chords_analysis.canonical_decode import CanonicalDecodeCancelled, NativeToolchain
+from sidecar.open_chords_analysis.canonical_decode import (
+    CanonicalDecodeCancelled,
+    CanonicalDecodeError,
+    NativeToolchain,
+)
 from sidecar.open_chords_analysis.protocol import FrozenRuntime, ProtocolError, serve_one_session
 
 
@@ -144,6 +148,31 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(messages[1]["code"], "canonical_probe_failed")
             self.assertEqual(messages[1]["message"], "Canonical media decode failed")
             self.assertNotIn("private", json.dumps(messages))
+
+    def test_unrecognized_decode_failure_code_fails_closed(self) -> None:
+        failure = CanonicalDecodeError("sensitive internal failure")
+        failure.code = "path-derived-private-code"  # type: ignore[assignment]
+        output = io.BytesIO()
+
+        with patch(
+            "sidecar.open_chords_analysis.protocol.decode_canonical",
+            side_effect=failure,
+        ):
+            serve_one_session(
+                io.BytesIO(self._start_frame()),
+                output,
+                Path.cwd(),
+                FrozenRuntime(
+                    manifest_hash="a" * 64,
+                    platform_profile="test",
+                    toolchain=NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
+                ),
+            )
+
+        messages = self._messages(output.getvalue())
+        self.assertEqual(messages[1]["code"], "canonical_decode_failed")
+        self.assertEqual(messages[1]["message"], "Canonical media decode failed")
+        self.assertNotIn("sensitive", json.dumps(messages))
 
     def test_cancel_acknowledges_and_cleans_before_exit(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
