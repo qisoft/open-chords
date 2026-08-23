@@ -6,7 +6,7 @@
       "licenseFile": "licenses/Open-Chords-AGPL-3.0.txt",
       "name": "Open Chords frozen executable",
       "role": "sidecar application and protocol",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "cpython",
@@ -14,7 +14,7 @@
       "licenseFile": "licenses/CPython-PSF-2.0.txt",
       "name": "CPython runtime",
       "role": "frozen Python runtime",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "pyinstaller",
@@ -39,7 +39,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "OpenSSL libssl and libcrypto",
       "role": "CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "xz",
@@ -47,7 +47,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "XZ Utils liblzma",
       "role": "CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "zstd",
@@ -55,7 +55,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "Zstandard",
       "role": "CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "mpdecimal",
@@ -63,7 +63,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "mpdecimal",
       "role": "CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "libffi",
@@ -71,7 +71,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "libffi",
       "role": "CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "bzip2",
@@ -79,7 +79,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "bzip2",
       "role": "CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "zlib",
@@ -87,7 +87,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "zlib",
       "role": "CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "expat",
@@ -95,7 +95,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "Expat",
       "role": "CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     },
     {
       "component": "msvc-runtime",
@@ -103,7 +103,7 @@
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "Microsoft Visual C++ runtime",
       "role": "Windows CPython runtime dependency",
-      "version": "build-observed"
+      "identity": "nativeFiles SHA-256; upstream source version is not asserted"
     }
   ],
   "schemaVersion": 1

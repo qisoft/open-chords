@@ -243,6 +243,58 @@ class ProtocolTests(unittest.TestCase):
             )
         self.assertEqual(output.getvalue(), b"")
 
+    def test_rejects_boolean_start_and_cancel_sequences(self) -> None:
+        boolean_start = self._frame(
+            {
+                "jobId": "job-protocol",
+                "manifestHash": "a" * 64,
+                "nonce": "nonce-protocol",
+                "requestId": "request-protocol",
+                "sequence": False,
+                "type": "start",
+            }
+        )
+        runtime = FrozenRuntime(
+            manifest_hash="a" * 64,
+            platform_profile="test",
+            toolchain=NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
+        )
+        with self.assertRaisesRegex(ProtocolError, "invalid sidecar start semantics"):
+            serve_one_session(io.BytesIO(boolean_start), io.BytesIO(), Path.cwd(), runtime)
+
+        boolean_cancel = self._frame(
+            {
+                "jobId": "job-protocol",
+                "nonce": "nonce-protocol",
+                "requestId": "request-protocol",
+                "sequence": True,
+                "type": "cancel",
+            }
+        )
+
+        def wait_for_rejection(*args: object) -> object:
+            cancellation = args[-1]
+            while not cancellation.is_set():  # type: ignore[union-attr]
+                time.sleep(0.001)
+            raise CanonicalDecodeCancelled("cancelled by test")
+
+        output = io.BytesIO()
+        with patch(
+            "sidecar.open_chords_analysis.protocol.decode_canonical",
+            side_effect=wait_for_rejection,
+        ):
+            with self.assertRaisesRegex(ProtocolError, "invalid sidecar cancel semantics"):
+                serve_one_session(
+                    io.BytesIO(self._start_frame() + boolean_cancel),
+                    output,
+                    Path.cwd(),
+                    runtime,
+                )
+        self.assertEqual(
+            [message["type"] for message in self._messages(output.getvalue())],
+            ["handshake"],
+        )
+
     def test_rejects_a_truncated_control_frame(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")

@@ -35,7 +35,7 @@ FFprobe is limited to the first audio stream and a small named JSON field set. B
 
 The resulting license is LGPL-2.1-or-later. `sidecar/native/ffmpeg-build.json` is the machine-readable source/configuration authority.
 
-`tools/build-analysis-sidecar.py` freezes the stdlib-only Python entry point with exact PyInstaller build dependencies, copies only the project-built `ffmpeg` and `ffprobe`, records observed versions, packages the project, primary native, and third-party license texts with version-pinned provenance, and writes the final full-folder runtime manifest. Magic-byte detection plus native suffix checks require every native executable, shared library, framework binary, and Python extension to map to a declared component; packaging fails closed on an unclassified native file. Forge copies this one-folder directory outside ASAR under `Resources/open-chords-analysis`.
+`tools/build-analysis-sidecar.py` freezes the stdlib-only Python entry point with exact PyInstaller build dependencies, copies only the project-built `ffmpeg` and `ffprobe`, records observed versions where the build proves them, packages the project, primary native, and third-party license texts, and writes the final full-folder runtime manifest. Transitive native source versions are not inferred from license references: their exact shipped identities are the per-file SHA-256 values. Magic-byte detection plus native suffix checks require every native executable, shared library, framework binary, and Python extension to map to a declared component; packaging fails closed on an unclassified native file. Forge copies this one-folder directory outside ASAR under `Resources/open-chords-analysis`.
 
 For a local macOS arm64 package, build the native runtime before Forge:
 

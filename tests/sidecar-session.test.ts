@@ -19,6 +19,26 @@ const request = parseSidecarSessionRequest({
   timeoutMs: 100,
 });
 
+describe("sidecar session identity bounds", () => {
+  it("uses the same 256 UTF-8 byte limit as the frozen protocol", () => {
+    expect(
+      parseSidecarSessionRequest({
+        ...request,
+        jobId: "é".repeat(128),
+      }).jobId,
+    ).toBe("é".repeat(128));
+    expect(() => parseSidecarSessionRequest({ ...request, jobId: "é".repeat(129) })).toThrowError(
+      SidecarSessionError,
+    );
+    expect(() => parseSidecarSessionRequest({ ...request, nonce: "é".repeat(129) })).toThrowError(
+      SidecarSessionError,
+    );
+    expect(() =>
+      parseSidecarSessionRequest({ ...request, requestId: "é".repeat(129) }),
+    ).toThrowError(SidecarSessionError);
+  });
+});
+
 class FakeProcess implements SidecarProcess {
   readonly commands: unknown[] = [];
   readonly events: string[] = [];

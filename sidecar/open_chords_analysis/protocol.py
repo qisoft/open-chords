@@ -217,7 +217,11 @@ def _parse_start(message: object) -> _Start:
         "type",
     }:
         raise ProtocolError("invalid sidecar start envelope")
-    if message["type"] != "start" or message["sequence"] != 0:
+    if (
+        message["type"] != "start"
+        or type(message["sequence"]) is not int
+        or message["sequence"] != 0
+    ):
         raise ProtocolError("invalid sidecar start semantics")
     identifiers = [message["jobId"], message["nonce"], message["requestId"]]
     if any(
@@ -245,7 +249,7 @@ def _parse_cancel(message: object) -> _Cancel:
         "type",
     }:
         raise ProtocolError("invalid sidecar cancel envelope")
-    if message["type"] != "cancel" or not isinstance(message["sequence"], int):
+    if message["type"] != "cancel" or type(message["sequence"]) is not int:
         raise ProtocolError("invalid sidecar cancel semantics")
     identifiers = [message["jobId"], message["nonce"], message["requestId"]]
     if any(
