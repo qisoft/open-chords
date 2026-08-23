@@ -110,23 +110,24 @@ class CanonicalDecodeTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_OUTPUT)
 
     def test_preserves_missing_probe_stream_taxonomy(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="open-chords-decode-stream-") as temporary:
-            workspace = Path(temporary)
-            media = workspace / "input/source-media"
-            media.parent.mkdir(parents=True)
-            self._write_stereo_fixture(media)
+        raised = self._decode_with_probe_output(b'{"streams":[]}')
+        self.assertEqual(raised.code, CanonicalDecodeFailureCode.PROBE_STREAM)
 
-            with (
-                patch("sidecar.open_chords_analysis.canonical_decode._probe_audio", return_value={}),
-                self.assertRaises(CanonicalDecodeError) as raised,
-            ):
-                decode_canonical(
-                    workspace,
-                    NativeToolchain(Path(sys.executable), Path(sys.executable)),
-                    CanonicalDecodeConfig(platform_profile="test"),
-                )
-
-        self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_STREAM)
+    def test_rejects_hostile_probe_stream_shapes(self) -> None:
+        malformed_outputs = (
+            b"{}",
+            b'{"streams":"audio"}',
+            b'{"streams":{"unexpected":true}}',
+            b'{"streams":[42]}',
+            b'{"streams":[{}]}',
+            b'{"streams":[{"codec_type":"video"}]}',
+            b'{"streams":[{"codec_type":"audio","channels":"2"}]}',
+            b'{"streams":[{"codec_type":"audio"},{"codec_type":"audio"}]}',
+        )
+        for output in malformed_outputs:
+            with self.subTest(output=output):
+                raised = self._decode_with_probe_output(output)
+                self.assertEqual(raised.code, CanonicalDecodeFailureCode.PROBE_OUTPUT)
 
     def test_decodes_the_same_staged_media_deterministically(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
@@ -373,6 +374,25 @@ class CanonicalDecodeTests(unittest.TestCase):
                 frames.extend(left.to_bytes(2, "little", signed=True))
                 frames.extend(right.to_bytes(2, "little", signed=True))
             fixture.writeframes(frames)
+
+    def _decode_with_probe_output(self, output: bytes) -> CanonicalDecodeError:
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-probe-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input/source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+
+            with (
+                patch("sidecar.open_chords_analysis.canonical_decode._run_tool") as run_tool,
+                self.assertRaises(CanonicalDecodeError) as raised,
+            ):
+                run_tool.return_value.stdout = output
+                decode_canonical(
+                    workspace,
+                    NativeToolchain(Path(sys.executable), Path(sys.executable)),
+                    CanonicalDecodeConfig(platform_profile="test"),
+                )
+        return raised.exception
 
 
 if __name__ == "__main__":
