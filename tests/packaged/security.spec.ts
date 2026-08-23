@@ -78,9 +78,9 @@ test.beforeAll(async () => {
 test.afterAll(() => {
   rmSync(packageRoot, {
     force: true,
-    maxRetries: 10,
+    maxRetries: 40,
     recursive: true,
-    retryDelay: 100,
+    retryDelay: 250,
   });
 });
 
@@ -115,7 +115,7 @@ test("installed artifact runs the main-owned sidecar lifecycle and reaps", async
   proof.stdout.on("data", capture);
   proof.stderr.on("data", capture);
 
-  const exit = await waitForApplicationExit(proof, 10_000);
+  const exit = await waitForApplicationExit(proof, 20_000);
   expect(exit, output).toEqual({ code: 0, signal: null });
 });
 
@@ -265,6 +265,16 @@ async function stopApplication(application: ReturnType<typeof spawn>): Promise<v
       clearTimeout(timeout);
       resolve();
     });
+    if (process.platform === "win32" && application.pid !== undefined) {
+      const terminator = spawn("taskkill", ["/pid", String(application.pid), "/t", "/f"], {
+        stdio: "ignore",
+      });
+      terminator.once("error", () => application.kill());
+      terminator.once("exit", (code) => {
+        if (code !== 0) application.kill();
+      });
+      return;
+    }
     if (!application.kill()) {
       clearTimeout(timeout);
       resolve();

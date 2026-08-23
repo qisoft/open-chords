@@ -19,9 +19,11 @@ jobs:
           - name: macOS 15 arm64
             os: macos-15
             arch: arm64
-          - name: Windows 11 x64
+            profile: darwin-arm64
+          - name: Windows Server 2025 x64 build profile
             os: windows-2025
             arch: x64
+            profile: windows-server-2025-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -29,6 +31,11 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.13.11
+          cache: pip
+          cache-dependency-path: sidecar/requirements-build.txt
       - name: Activate exact pnpm
         run: |
           corepack enable
@@ -38,6 +45,10 @@ jobs:
         run: test "$(node -p process.arch)" = "${{ matrix.arch }}"
       - name: Install reviewed dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install exact sidecar build dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --require-hashes
+          --only-binary=:all: -r sidecar/requirements-build.txt
       - name: Install checksum-verified Electron binary
         run: pnpm electron:install
       - name: Check formatting
@@ -56,6 +67,45 @@ jobs:
         run: pnpm test:python
       - name: Run isolated renderer smoke test
         run: pnpm test:renderer
+      - name: Build reviewed FFmpeg on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          tools/test-ffmpeg-build-manifest-reader.sh python3
+          tools/build-ffmpeg.sh ${{ matrix.profile }} build/native
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: UCRT64
+          install: >-
+            base-devel
+            curl
+            jq
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-libwinpthread
+            perl
+            tar
+            xz
+      - name: Export UCRT64 tools
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: echo "$(cygpath -w /ucrt64/bin)" >> "$GITHUB_PATH"
+      - name: Build reviewed FFmpeg on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          tools/test-ffmpeg-build-manifest-reader.sh jq
+          tools/test-windows-ffmpeg-runtime-verifier.sh
+          tools/build-ffmpeg.sh ${{ matrix.profile }} build/native
+      - name: Assemble frozen one-folder sidecar
+        run: >-
+          python tools/build-analysis-sidecar.py
+          --build-id ${{ github.sha }}
+          --native-root build/native/${{ matrix.profile }}
+          --output-root dist/analysis-sidecar
+          --platform-profile ${{ matrix.profile }}
+      - name: Run frozen sidecar decode smoke
+        run: pnpm test:frozen-sidecar
       - name: Build installable Forge artifact
         run: pnpm make -- --arch=${{ matrix.arch }}
       - name: Verify installed trust boundary

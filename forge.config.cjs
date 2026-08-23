@@ -28,7 +28,7 @@ function buildApplication() {
 module.exports = {
   packagerConfig: {
     asar: true,
-    extraResource: ["dist/sidecar-proof/packaged-sidecar-worker.cjs"],
+    extraResource: ["dist/analysis-sidecar/open-chords-analysis"],
   },
   rebuildConfig: {},
   makers: [new MakerZIP({}, ["darwin", "win32"])],

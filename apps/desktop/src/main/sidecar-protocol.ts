@@ -7,9 +7,14 @@ const Sha256Schema = z
   .string()
   .regex(/^[a-f0-9]{64}$/u)
   .brand<"Sha256">();
-const JobIdSchema = z.string().min(1).max(256).brand<"SidecarJobId">();
-const NonceSchema = z.string().min(1).max(256).brand<"SidecarNonce">();
-const RequestIdSchema = z.string().min(1).max(256).brand<"SidecarRequestId">();
+const Utf8IdentifierSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.isWellFormed(), "Identifier must be well-formed Unicode")
+  .refine((value) => Buffer.byteLength(value, "utf8") <= 256, "Identifier exceeds 256 UTF-8 bytes");
+const JobIdSchema = Utf8IdentifierSchema.brand<"SidecarJobId">();
+const NonceSchema = Utf8IdentifierSchema.brand<"SidecarNonce">();
+const RequestIdSchema = Utf8IdentifierSchema.brand<"SidecarRequestId">();
 const RelativeArtifactPathSchema = z
   .string()
   .min(1)

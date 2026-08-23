@@ -1,0 +1,59 @@
+{
+  "notices": [
+    {
+      "component": "MinGW-w64 winpthreads runtime",
+      "license": "MIT AND BSD-3-Clause",
+      "licenseTextSource": "https://github.com/mingw-w64/mingw-w64/blob/d7f3c52012c4af4fb526330117d9c86b266018dc/mingw-w64-libraries/winpthreads/COPYING"
+    },
+    {
+      "component": "OpenSSL",
+      "license": "Apache-2.0",
+      "licenseTextSource": "https://openssl-library.org/source/license/index.html",
+      "retrievedAt": "2026-08-23"
+    },
+    {
+      "component": "XZ Utils liblzma",
+      "license": "0BSD",
+      "licenseTextSource": "https://github.com/tukaani-project/xz/blob/28a66a3d1b6af89ed6ee841384c339629fda8264/COPYING.0BSD"
+    },
+    {
+      "component": "Zstandard",
+      "license": "BSD-3-Clause",
+      "licenseTextSource": "https://github.com/facebook/zstd/blob/0716f554df4262cf8530e006bfcc3d9d71e4314e/LICENSE"
+    },
+    {
+      "component": "mpdecimal",
+      "license": "BSD-2-Clause",
+      "licenseTextSource": "https://www.bytereef.org/mpdecimal/copyright.html",
+      "retrievedAt": "2026-08-23"
+    },
+    {
+      "component": "libffi",
+      "license": "MIT",
+      "licenseTextSource": "https://github.com/libffi/libffi/blob/71ce128d7acf4ef4c2c675c0751e2e37661dd868/LICENSE"
+    },
+    {
+      "component": "bzip2",
+      "license": "bzip2-1.0.6",
+      "licenseTextSource": "https://gitlab.com/bzip2/bzip2/-/blob/bzip2-1.0.8/LICENSE"
+    },
+    {
+      "component": "zlib",
+      "license": "Zlib",
+      "licenseTextSource": "https://github.com/madler/zlib/blob/e3dc0a85b7032e98380dec011bc8f2c2ee0d8fca/LICENSE"
+    },
+    {
+      "component": "Expat",
+      "license": "MIT",
+      "licenseTextSource": "https://github.com/libexpat/libexpat/blob/1185697878a3b09cada8e89f847a4c8315cd7ddc/COPYING"
+    },
+    {
+      "component": "Microsoft Visual C++ runtime",
+      "license": "LicenseRef-Microsoft-Visual-Cpp-Runtime",
+      "licenseTextSource": "https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/",
+      "retrievedAt": "2026-08-23"
+    }
+  ],
+  "scope": "License-text references only. They do not assert the source version of any packaged binary; exact shipped identities are the nativeFiles SHA-256 values.",
+  "schemaVersion": 1
+}
