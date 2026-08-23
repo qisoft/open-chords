@@ -27,6 +27,9 @@ describe("sidecar session identity bounds", () => {
         jobId: "é".repeat(128),
       }).jobId,
     ).toBe("é".repeat(128));
+    expect(() =>
+      parseSidecarSessionRequest({ ...request, jobId: `${"é".repeat(128)}a` }),
+    ).toThrowError(SidecarSessionError);
     expect(() => parseSidecarSessionRequest({ ...request, jobId: "é".repeat(129) })).toThrowError(
       SidecarSessionError,
     );

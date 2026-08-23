@@ -316,7 +316,7 @@ class ProtocolTests(unittest.TestCase):
             ["handshake"],
         )
 
-        for invalid_identifier in ("é" * 129, "\ud800"):
+        for invalid_identifier in ("é" * 128 + "a", "é" * 129, "\ud800"):
             rejected = {**accepted, "jobId": invalid_identifier}
             with self.assertRaisesRegex(ProtocolError, "invalid sidecar session identity"):
                 serve_one_session(self._reader(rejected), io.BytesIO(), Path.cwd(), runtime)
