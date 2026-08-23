@@ -33,8 +33,12 @@ import sys
 
 with open(sys.argv[1], encoding="utf-8") as manifest_file:
     value = json.load(manifest_file)[sys.argv[2]]
-if not isinstance(value, str) or not value or "\n" in value:
-    raise ValueError("manifest value must be a non-empty single-line string")
+if (
+    not isinstance(value, str)
+    or not value
+    or any(ord(character) < 32 or ord(character) == 127 for character in value)
+):
+    raise ValueError("manifest value must be a non-empty string without control characters")
 print(value)
 ' "${manifest}" "${key}"
     elif [[ "${mode}" == "array" ]]; then
@@ -47,9 +51,16 @@ with open(sys.argv[1], encoding="utf-8") as manifest_file:
 if (
     not isinstance(value, list)
     or not value
-    or any(not isinstance(item, str) or not item or "\n" in item for item in value)
+    or any(
+        not isinstance(item, str)
+        or not item
+        or any(ord(character) < 32 or ord(character) == 127 for character in item)
+        for item in value
+    )
 ):
-    raise ValueError("manifest value must be a non-empty array of non-empty single-line strings")
+    raise ValueError(
+        "manifest value must be a non-empty array of non-empty strings without control characters"
+    )
 print("\n".join(value))
 ' "${manifest}" "${key}"
     else
@@ -63,8 +74,8 @@ print("\n".join(value))
         .[$key] as $value
         | if (($value | type) != "string"
             or ($value | length) == 0
-            or ($value | contains("\n")))
-          then error("manifest value must be a non-empty single-line string")
+            or ($value | explode | any(. < 32 or . == 127)))
+          then error("manifest value must be a non-empty string without control characters")
           else $value
           end
       ' "${manifest}"
@@ -73,8 +84,13 @@ print("\n".join(value))
         .[$key] as $value
         | if (($value | type) != "array"
             or ($value | length) == 0
-            or any($value[]; (type != "string") or (length == 0) or contains("\n")))
-          then error("manifest value must be a non-empty array of non-empty single-line strings")
+            or any(
+              $value[];
+              (type != "string")
+              or (length == 0)
+              or (explode | any(. < 32 or . == 127))
+            ))
+          then error("manifest value must be a non-empty array of non-empty strings without control characters")
           else $value[]
           end
       ' "${manifest}"
