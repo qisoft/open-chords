@@ -509,6 +509,14 @@ export class ProjectLibrary {
     };
   }
 
+  async getProjectRange(projectId: string): Promise<ProjectOwnedRecords["projectRange"] | null> {
+    const entry = this.#entries.get(projectId);
+    if (entry === undefined || entry.location === "trashed" || entry.revision === undefined) {
+      return null;
+    }
+    return structuredClone(entry.revision.payload.records.projectRange);
+  }
+
   async resolveBlockedDependencies(input: {
     canonicalAudioFingerprint: string;
     modelStore: {
@@ -634,15 +642,7 @@ export class ProjectLibrary {
       }
       if (entry.revision.revision.projectRevisionId !== input.expectedProjectRevisionId)
         return { stale: true };
-      const source = entry.revision.payload.records.sources.find(
-        ({ id }) => id === entry.revision?.payload.records.projectRange.sourceId,
-      );
-      const sourceSnapshot = source?.snapshots.find((snapshot) =>
-        input.sourceIdentityKind === "source_snapshot"
-          ? snapshot.id === input.sourceSnapshotId
-          : snapshot.canonicalAudioFingerprint === input.canonicalAudioFingerprint,
-      );
-      if (sourceSnapshot?.canonicalAudioFingerprint !== input.canonicalAudioFingerprint) {
+      if (!analysisManifestSourceIsVerified(entry.revision.payload.records, input.manifest)) {
         throw new Error("Analysis candidate Source Snapshot is not verified by Project authority");
       }
       project.analysisRevisions.push(candidate);
@@ -2044,6 +2044,9 @@ function validateStoredPayload(input: unknown): StoredProjectPayload {
         manifest: record.manifest,
         revision,
       });
+      if (!analysisManifestSourceIsVerified(payload.records, record.manifest)) {
+        throw new Error("Analysis Manifest Source identity is not retained by Project authority");
+      }
     }
   }
   for (const revisionId of [...manifestsByRevision.keys(), ...legacyManifestless]) {
@@ -2099,6 +2102,20 @@ function buildStoredPayload(input: {
     records: input.records,
     schemaVersion: "1.0",
   });
+}
+
+function analysisManifestSourceIsVerified(
+  records: ProjectOwnedRecords,
+  manifest: AnalysisManifest,
+): boolean {
+  const identity = manifest.candidateIdentity;
+  const source = records.sources.find(({ id }) => id === records.projectRange.sourceId);
+  const snapshot = source?.snapshots.find((candidate) =>
+    identity.sourceIdentityKind === "source_snapshot"
+      ? candidate.id === identity.sourceSnapshotId
+      : candidate.canonicalAudioFingerprint === identity.canonicalAudioFingerprint,
+  );
+  return snapshot?.canonicalAudioFingerprint === identity.canonicalAudioFingerprint;
 }
 
 function validateLibrarySourceAuthority(entries: ReadonlyMap<string, LibraryEntry>): void {

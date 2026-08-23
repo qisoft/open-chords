@@ -332,6 +332,61 @@ describe("ProjectLibrary", () => {
     );
   });
 
+  it("rejects self-consistent Manifest provenance for a Source Snapshot the Project does not retain", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-source-");
+    const library = await openProjectLibrary({ stateRoot });
+    const envelope = goldenEnvelope();
+    const candidate = structuredClone(envelope.payload.analysisRevisions[0]!);
+    candidate.supportClaimIds = [];
+    const publication = analysisPublication(
+      "projectrevision_fixture",
+      candidate,
+      "attempt_unknown_source",
+    );
+    publication.manifest.candidateIdentity.sourceSnapshotId = "snapshot_not_retained";
+    const manifestHash = hashCanonical(publication.manifest);
+    publication.revision.id = `revision_${manifestHash.slice("sha256:".length)}`;
+    publication.revision.manifestHash = manifestHash;
+    envelope.payload.activeView = {
+      analysisRevisionId: publication.revision.id,
+      editHistoryPosition: 0,
+      editLayerId: "edit_unknown_source",
+      presentation: {
+        beginnerView: false,
+        enharmonicPreference: "contextual",
+        transposeSemitones: 0,
+      },
+    };
+    envelope.payload.analysisRevisions = [publication.revision];
+    envelope.payload.editLayers = [
+      {
+        analysisRevisionId: publication.revision.id,
+        id: "edit_unknown_source",
+        transactions: [],
+      },
+    ];
+    envelope.payload.lyricsAlignments = [];
+    envelope.payload.lyricsDocuments = [];
+    envelope.payload.supportClaims = [];
+
+    await expect(
+      library.createProject({
+        envelope,
+        records: {
+          ...ownedRecords(),
+          analysisManifests: [
+            {
+              analysisRevisionId: publication.revision.id,
+              hash: manifestHash,
+              manifest: publication.manifest,
+            },
+          ],
+          legacyManifestlessAnalysisRevisionIds: [],
+        },
+      }),
+    ).rejects.toThrow("Source identity is not retained");
+  });
+
   it("keeps Source verification separate from Model Store recipe resolution", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-analysis-dependencies-");
     const library = await openProjectLibrary({ stateRoot });

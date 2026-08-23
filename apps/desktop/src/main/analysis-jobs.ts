@@ -35,6 +35,16 @@ const AnalysisProgressSchema = z.strictObject({
   profile: z.enum(["eco", "balanced", "fast"]),
   stage: PipelineStageSchema,
 });
+const AnalysisProjectRangeSchema = z
+  .strictObject({
+    endSourceSample: z.number().int().positive(),
+    sourceId: z.string().min(1),
+    startSourceSample: z.number().int().nonnegative(),
+  })
+  .refine(
+    ({ endSourceSample, startSourceSample }) => endSourceSample > startSourceSample,
+    "Analysis Project Range must be non-empty",
+  );
 
 const AnalysisJobSchema = z.strictObject({
   attemptIds: z.array(z.string().min(1)),
@@ -46,6 +56,7 @@ const AnalysisJobSchema = z.strictObject({
   profile: z.enum(["eco", "balanced", "fast"]),
   progress: AnalysisProgressSchema.optional(),
   projectId: z.string().min(1),
+  projectRange: AnalysisProjectRangeSchema,
   publishedAnalysisRevisionId: z.string().min(1).optional(),
   queuePosition: z.number().int().nonnegative(),
   recipe: AnalysisRecipeSchema,
@@ -193,19 +204,27 @@ function validateCheckpointDocument(
   }
 }
 
-const AnalysisCheckpointSchema = AnalysisCheckpointCandidateSchema.omit({ document: true }).extend({
-  artifactHash: Sha256Schema,
-  byteSize: z
-    .number()
-    .int()
-    .positive()
-    .max(1024 * 1024),
-  createdAt: TimestampSchema,
-  expiresAt: TimestampSchema,
-  id: z.string().min(1),
-  jobId: z.string().min(1),
-  upstreamIdentityHash: Sha256Schema,
-});
+const AnalysisCheckpointSchema = AnalysisCheckpointCandidateSchema.omit({ document: true })
+  .extend({
+    artifactHash: Sha256Schema,
+    byteSize: z
+      .number()
+      .int()
+      .positive()
+      .max(1024 * 1024),
+    createdAt: TimestampSchema,
+    expiresAt: TimestampSchema,
+    id: z.string().min(1),
+    jobId: z.string().min(1),
+    predecessorArtifactHashes: z.array(Sha256Schema).max(1),
+    projectRangeHash: Sha256Schema,
+    upstreamIdentityHash: Sha256Schema,
+  })
+  .refine(
+    ({ predecessorArtifactHashes, stage }) =>
+      predecessorArtifactHashes.length === (stage === "shared_features" ? 0 : 1),
+    "Checkpoint predecessor lineage must match its DAG stage",
+  );
 const AnalysisCircuitBreakerSchema = z.strictObject({
   classification: z.enum(["containment_violation", "integrity_violation", "protocol_violation"]),
   openedAt: TimestampSchema,
@@ -257,6 +276,11 @@ export class AnalysisRunError extends Error {
 }
 
 type AnalysisProjectAuthority = {
+  getProjectRange(projectId: string): Promise<{
+    endSourceSample: number;
+    sourceId: string;
+    startSourceSample: number;
+  } | null>;
   getSnapshot(projectId: string): Promise<{
     eventSequence: number;
     project: ProjectContract;
@@ -547,8 +571,12 @@ export class AnalysisJobs {
       const recipe = AnalysisRecipeSchema.parse(input.recipe);
       const sourceIdentityKind = input.sourceIdentityKind ?? "source_snapshot";
       const recipeHash = hashContent(canonicalAnalysisRecipeContent(recipe));
+      const rawProjectRange = await this.#authority.getProjectRange(input.projectId);
+      if (rawProjectRange === null) throw new Error(`Project ${input.projectId} was not found`);
+      const projectRange = AnalysisProjectRangeSchema.parse(rawProjectRange);
       const key = hashIdentity({
         projectId: input.projectId,
+        projectRange,
         recipeHash,
         sourceIdentity:
           sourceIdentityKind === "source_snapshot"
@@ -563,6 +591,7 @@ export class AnalysisJobs {
       const timestamp = this.#now().toISOString();
       const blockedDependencies = await this.#resolveBlockedDependencies({
         ...input,
+        projectRange,
         sourceIdentityKind,
       });
       const job = AnalysisJobSchema.parse({
@@ -574,6 +603,7 @@ export class AnalysisJobs {
         key,
         profile: recipe.profile.name,
         projectId: input.projectId,
+        projectRange,
         queuePosition: nextQueuePosition(this.#state.jobs),
         recipe,
         recipeHash,
@@ -648,21 +678,39 @@ export class AnalysisJobs {
       jobId: started.job.id,
     };
     try {
+      const reusableCheckpoints = await this.#matchingCheckpoints(
+        started.job,
+        started.projectDurationSamples,
+      );
+      if (reusableCheckpoints.length > 0) {
+        await this.#serializeMutation(async () => {
+          const attempt = this.#requireAttempt(started.attempt.id);
+          attempt.checkpointIds = reusableCheckpoints.map(({ id }) => id);
+          await this.#persist();
+        });
+      }
+      const availableCheckpoints = new Map<
+        AnalysisCheckpointCandidate["stage"],
+        AnalysisCheckpoint
+      >(reusableCheckpoints.map((checkpoint) => [checkpoint.stage, checkpoint]));
       const result = await this.#runWithDeadline(
         started.attempt,
         controller,
         this.#runner.run({
           attemptId: started.attempt.id,
-          checkpoints: await this.#matchingCheckpoints(started.job, started.projectDurationSamples),
+          checkpoints: reusableCheckpoints,
           job: started.job,
           reportProgress: (progress) => this.#reportProgress(started.job.id, progress),
-          saveCheckpoint: (checkpoint) =>
-            this.#saveCheckpoint(
+          saveCheckpoint: async (checkpoint) => {
+            const saved = await this.#saveCheckpoint(
               started.job.id,
               started.attempt.id,
               started.projectDurationSamples,
+              availableCheckpoints,
               checkpoint,
-            ),
+            );
+            availableCheckpoints.set(saved.stage, saved);
+          },
           signal: controller.signal,
         }),
       );
@@ -777,10 +825,19 @@ export class AnalysisJobs {
   async #resolveBlockedDependencies(input: {
     canonicalAudioFingerprint: string;
     projectId: string;
+    projectRange: z.infer<typeof AnalysisProjectRangeSchema>;
     recipe: AnalysisRecipe;
     sourceIdentityKind: "canonical_audio" | "source_snapshot";
     sourceSnapshotId: string;
   }): Promise<z.infer<typeof BlockedDependencySchema>[]> {
+    const currentRange = await this.#authority.getProjectRange(input.projectId);
+    if (
+      currentRange === null ||
+      canonicalSerialize(AnalysisProjectRangeSchema.parse(currentRange)) !==
+        canonicalSerialize(input.projectRange)
+    ) {
+      return [{ id: input.sourceSnapshotId, kind: "media" }];
+    }
     return z
       .array(BlockedDependencySchema)
       .parse(await this.#dependencies.resolveBlockedDependencies(input))
@@ -890,14 +947,37 @@ export class AnalysisJobs {
   ): Promise<ReusableAnalysisCheckpoint[]> {
     const now = this.#now().getTime();
     const matching: ReusableAnalysisCheckpoint[] = [];
-    for (const checkpoint of this.#state.checkpoints) {
-      if (
-        checkpoint.jobId !== job.id ||
-        checkpoint.upstreamIdentityHash !== checkpointIdentity(job, checkpoint.stage) ||
-        Date.parse(checkpoint.expiresAt) <= now
-      ) {
-        continue;
+    const projectRangeHash = hashIdentity(job.projectRange);
+    for (const stage of checkpointStagesForJob(job)) {
+      const sharedFeatures = matching.find(
+        ({ stage: retainedStage }) => retainedStage === "shared_features",
+      );
+      const predecessorArtifactHashes =
+        stage === "shared_features"
+          ? []
+          : sharedFeatures === undefined
+            ? undefined
+            : [sharedFeatures.artifactHash];
+      if (predecessorArtifactHashes === undefined) continue;
+      const upstreamIdentityHash = checkpointIdentity(
+        job,
+        stage,
+        projectRangeHash,
+        predecessorArtifactHashes,
+      );
+      const candidates = this.#state.checkpoints.filter(
+        (checkpoint) =>
+          checkpoint.jobId === job.id &&
+          checkpoint.stage === stage &&
+          checkpoint.projectRangeHash === projectRangeHash &&
+          checkpoint.upstreamIdentityHash === upstreamIdentityHash &&
+          Date.parse(checkpoint.expiresAt) > now,
+      );
+      if (candidates.length > 1) {
+        throw checkpointIntegrityFailure(stage, "Checkpoint lineage has multiple stage artifacts");
       }
+      const checkpoint = candidates[0];
+      if (checkpoint === undefined) continue;
       try {
         const content = await readFile(checkpointArtifactPath(this.#path, checkpoint.artifactHash));
         if (
@@ -915,13 +995,10 @@ export class AnalysisJobs {
         }
         matching.push({ ...checkpoint, document });
       } catch {
-        throw new AnalysisRunError({
-          classification: "integrity_violation",
-          message: "Analysis Checkpoint artifact failed main-owned integrity validation",
-          nextAction: "repair_installation",
-          retryable: false,
-          stage: checkpoint.stage,
-        });
+        throw checkpointIntegrityFailure(
+          checkpoint.stage,
+          "Analysis Checkpoint artifact failed main-owned integrity validation",
+        );
       }
     }
     return structuredClone(matching);
@@ -962,8 +1039,9 @@ export class AnalysisJobs {
     jobId: string,
     attemptId: string,
     projectDurationSamples: number,
+    availableCheckpoints: ReadonlyMap<AnalysisCheckpointCandidate["stage"], AnalysisCheckpoint>,
     rawCheckpoint: AnalysisCheckpointCandidate,
-  ): Promise<void> {
+  ): Promise<AnalysisCheckpoint> {
     const parsed = AnalysisCheckpointCandidateSchema.safeParse(rawCheckpoint);
     if (!parsed.success) {
       throw new Error("Analysis Checkpoint must be a validated non-media stage artifact");
@@ -975,18 +1053,42 @@ export class AnalysisJobs {
       throw new Error("Analysis Checkpoint kind must match its completed pipeline stage");
     }
     validateCheckpointDocument(parsed.data.document, projectDurationSamples);
+    if (!checkpointStagesForJob(this.#requireJob(jobId)).includes(parsed.data.stage)) {
+      throw new Error("Analysis Checkpoint stage is not part of the Job Recipe");
+    }
     const content = canonicalSerialize(parsed.data.document);
     const byteSize = Buffer.byteLength(content);
     if (byteSize > 1024 * 1024) throw new Error("Analysis Checkpoint artifact exceeds 1 MiB");
     const artifactHash = hashBytes(Buffer.from(content, "utf8"));
-    await this.#serializeMutation(async () => {
+    const existingAvailable = availableCheckpoints.get(parsed.data.stage);
+    if (existingAvailable !== undefined) {
+      if (existingAvailable.artifactHash === artifactHash) return existingAvailable;
+      throw new Error("Analysis Checkpoint lineage already has a different stage artifact");
+    }
+    const sharedFeatures = availableCheckpoints.get("shared_features");
+    const predecessorArtifactHashes =
+      parsed.data.stage === "shared_features"
+        ? []
+        : sharedFeatures === undefined
+          ? undefined
+          : [sharedFeatures.artifactHash];
+    if (predecessorArtifactHashes === undefined) {
+      throw new Error("Analysis Checkpoint is missing its exact shared-features predecessor");
+    }
+    return this.#serializeMutation(async () => {
       const job = this.#requireJob(jobId);
       const attempt = this.#requireAttempt(attemptId);
       if (job.state !== "running" || attempt.state !== "running") {
         throw new Error("Analysis Checkpoint arrived outside its active Attempt");
       }
       const createdAt = this.#now();
-      const upstreamIdentityHash = checkpointIdentity(job, parsed.data.stage);
+      const projectRangeHash = hashIdentity(job.projectRange);
+      const upstreamIdentityHash = checkpointIdentity(
+        job,
+        parsed.data.stage,
+        projectRangeHash,
+        predecessorArtifactHashes,
+      );
       const checkpoint = AnalysisCheckpointSchema.parse({
         artifactHash,
         byteSize,
@@ -995,15 +1097,27 @@ export class AnalysisJobs {
         id: `checkpoint_${hashIdentity({ artifactHash, jobId, upstreamIdentityHash }).slice("sha256:".length)}`,
         jobId,
         kind: parsed.data.kind,
+        predecessorArtifactHashes,
+        projectRangeHash,
         stage: parsed.data.stage,
         upstreamIdentityHash,
       });
+      const existingLineage = this.#state.checkpoints.find(
+        (retained) =>
+          retained.jobId === job.id &&
+          retained.stage === checkpoint.stage &&
+          retained.upstreamIdentityHash === checkpoint.upstreamIdentityHash,
+      );
+      if (existingLineage !== undefined && existingLineage.artifactHash !== artifactHash) {
+        throw new Error("Analysis Checkpoint lineage already has a different stage artifact");
+      }
       await atomicWrite(checkpointArtifactPath(this.#path, artifactHash), content);
       if (!this.#state.checkpoints.some(({ id }) => id === checkpoint.id)) {
         this.#state.checkpoints.push(checkpoint);
       }
       if (!attempt.checkpointIds.includes(checkpoint.id)) attempt.checkpointIds.push(checkpoint.id);
       await this.#persist();
+      return checkpoint;
     });
   }
 
@@ -1181,10 +1295,40 @@ function normalizeTerminationReason(reason: unknown): "cancelled" | "deadline" |
 function checkpointIdentity(
   job: AnalysisJobSnapshot,
   stage: AnalysisCheckpointCandidate["stage"],
+  projectRangeHash: string,
+  predecessorArtifactHashes: readonly string[],
 ): string {
   return hashIdentity({
     canonicalAudioFingerprint: job.canonicalAudioFingerprint,
+    predecessorArtifactHashes,
+    projectRangeHash,
     recipeHash: job.recipeHash,
+    stage,
+  });
+}
+
+function checkpointStagesForJob(job: AnalysisJobSnapshot): AnalysisCheckpointCandidate["stage"][] {
+  const capabilities = new Set(job.recipe.capabilities);
+  return [
+    "shared_features",
+    ...CAPABILITY_STAGES.filter(
+      (stage) =>
+        (stage === "rhythm" && (capabilities.has("rhythm") || capabilities.has("meter"))) ||
+        (stage === "harmony" && (capabilities.has("key") || capabilities.has("chords"))) ||
+        (stage === "sections" && capabilities.has("sections")),
+    ),
+  ];
+}
+
+function checkpointIntegrityFailure(
+  stage: AnalysisCheckpointCandidate["stage"],
+  message: string,
+): AnalysisRunError {
+  return new AnalysisRunError({
+    classification: "integrity_violation",
+    message,
+    nextAction: "repair_installation",
+    retryable: false,
     stage,
   });
 }

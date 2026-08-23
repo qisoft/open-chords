@@ -16,8 +16,10 @@ the runner adapter to confirm termination of every persisted in-flight Attempt b
 converts any other in-flight Attempt to `interrupted`, and requires explicit confirmation for
 previously queued work.
 The Job Key explicitly selects either Source Snapshot identity or canonical-audio fingerprint
-identity, then hashes that alternative with Project and Recipe. Cancellation does not release the
-key: resubmission returns the same Job, and explicit retry creates a new immutable Attempt.
+identity, then hashes that alternative with Project, the exact Project Range, and Recipe. A range
+change creates a different Job and blocks stale queued work during the pre-Attempt recheck.
+Cancellation does not release the key: resubmission returns the same Job, and explicit retry creates
+a new immutable Attempt.
 
 ## Adapter seams
 
@@ -29,8 +31,9 @@ metadata first and startup also removes unreferenced content-addressed artifacts
 retryable after a crash. The callback schemas are strict stage-specific structures for shared
 chroma/onset features, rhythm beats, harmony regions, or section boundaries. Main requires ordered,
 non-overlapping, Project-range-bounded stage data both before storage and before reuse; the
-structures have no field capable of carrying PCM, media fragments, paths, or arbitrary process
-state. Progress is monotonic and explicitly labelled
+durable upstream identity binds the range and exact predecessor artifact hash, and only one artifact
+may occupy a stage in that lineage. The structures have no field capable of carrying PCM, media
+fragments, paths, or arbitrary process state. Progress is monotonic and explicitly labelled
 `benchmark_approximate`. Every Attempt persists a main-owned deadline; a timer races the runner and
 aborts a hung execution with the stable `deadline` failure class. Cancellation, sleep, and deadline
 paths retain the global slot until the runner adapter confirms escalated process termination and
@@ -56,7 +59,8 @@ Reviewable Revisions and do not move Active View. Publication is idempotent for 
 candidate with identical content, closing the crash window between Project Head commit and Job state
 acknowledgement. The complete content-addressed Analysis Manifest is stored in Project-owned records
 with the Revision, rehashed on reopen, and survives operational Attempt/Checkpoint pruning as
-permanent portable provenance.
+permanent portable provenance. Reopen revalidates that provenance against the retained Source
+Snapshot or canonical-audio fingerprint, not only against the Revision bytes.
 Projects written before Manifest retention are upgraded in memory by the v1 storage migration,
 which records their existing Analysis Revision IDs as explicitly legacy-manifestless. New writes
 must provide exactly one retained Manifest or explicit legacy marker for every Analysis Revision.

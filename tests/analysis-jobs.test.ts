@@ -22,7 +22,8 @@ type AnalysisJobRunner = ProductionOptions["runner"];
 type DependencyInput = Parameters<
   ProductionOptions["dependencies"]["resolveBlockedDependencies"]
 >[0];
-type TestAuthority = AnalysisProjectAuthority & {
+type TestAuthority = Omit<AnalysisProjectAuthority, "getProjectRange"> & {
+  getProjectRange?: AnalysisProjectAuthority["getProjectRange"];
   resolveBlockedDependencies?: (
     input: DependencyInput,
   ) => ReturnType<ProductionOptions["dependencies"]["resolveBlockedDependencies"]>;
@@ -46,6 +47,19 @@ async function openAnalysisJobs(options: {
   runner: TestRunner;
   stateRoot: string;
 }) {
+  const authority: AnalysisProjectAuthority = {
+    ...options.authority,
+    getProjectRange:
+      options.authority.getProjectRange ??
+      (async (projectId) => {
+        const snapshot = await options.authority.getSnapshot(projectId);
+        return {
+          endSourceSample: snapshot?.project.durationSamples ?? 48_000,
+          sourceId: "source_fixture",
+          startSourceSample: 0,
+        };
+      }),
+  };
   const testRunner: AnalysisJobRunner = {
     run: async (input) => {
       const result = await options.runner.run(input);
@@ -94,7 +108,7 @@ async function openAnalysisJobs(options: {
   };
   return AnalysisJobs.open({
     ...options,
-    authority: options.authority,
+    authority,
     dependencies: {
       resolveBlockedDependencies: options.authority.resolveBlockedDependencies ?? (async () => []),
     },
@@ -565,6 +579,97 @@ describe("AnalysisJobs", () => {
 
     expect(rejected).toEqual(["rhythm", "harmony"]);
     expect(jobs.get("job_invalid_checkpoint").checkpoints).toEqual([]);
+  });
+
+  it("binds downstream Checkpoints to one exact shared-features lineage", async () => {
+    const stateRoot = await temporaryDirectory();
+    let runs = 0;
+    let reusedExactLineage = false;
+    const lineageRejections: string[] = [];
+    const shared = {
+      document: {
+        format: "open-chords/analysis-checkpoint" as const,
+        frames: [checkpointFeatureFrame],
+        kind: "shared_features" as const,
+      },
+      kind: "shared_features" as const,
+      stage: "shared_features" as const,
+    };
+    const harmony = {
+      document: {
+        format: "open-chords/analysis-checkpoint" as const,
+        kind: "harmony" as const,
+        regions: [{ candidate: "C", confidence: 0.9, endSample: 8_000, startSample: 0 }],
+      },
+      kind: "harmony" as const,
+      stage: "harmony" as const,
+    };
+    const ids = ["job_lineage", "attempt_lineage_one", "attempt_lineage_two"];
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+      },
+      idFactory: () => ids.shift()!,
+      runner: {
+        run: async (input) => {
+          runs += 1;
+          if (runs === 1) {
+            try {
+              await input.saveCheckpoint(harmony);
+            } catch (error) {
+              lineageRejections.push(String(error));
+            }
+            await input.saveCheckpoint(shared);
+            await input.saveCheckpoint(harmony);
+            try {
+              await input.saveCheckpoint({
+                ...harmony,
+                document: {
+                  ...harmony.document,
+                  regions: [{ candidate: "G", confidence: 0.8, endSample: 8_000, startSample: 0 }],
+                },
+              });
+            } catch (error) {
+              lineageRejections.push(String(error));
+            }
+          } else {
+            const [reusedShared, reusedHarmony] = input.checkpoints;
+            reusedExactLineage =
+              reusedShared?.stage === "shared_features" &&
+              reusedHarmony?.stage === "harmony" &&
+              reusedHarmony.predecessorArtifactHashes[0] === reusedShared.artifactHash;
+          }
+          throw new AnalysisRunError({
+            classification: "component_failure",
+            message: "Retry lineage fixture",
+            nextAction: "retry",
+            retryable: true,
+            stage: "harmony",
+          });
+        },
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+    await jobs.runNext();
+    await jobs.retry("job_lineage");
+    await jobs.runNext();
+
+    expect(reusedExactLineage).toBe(true);
+    expect(lineageRejections).toEqual([
+      expect.stringMatching(/predecessor/u),
+      expect.stringMatching(/different stage artifact/u),
+    ]);
   });
 
   it("persists cancellation and ignores a late successful result", async () => {
@@ -1172,6 +1277,46 @@ describe("AnalysisJobs", () => {
       sourceSnapshotId: "snapshot_two",
     });
     expect(sameFingerprint.id).toBe(firstFingerprint.id);
+  });
+
+  it("creates a new Job identity and blocks old work when the Project Range changes", async () => {
+    let startSourceSample = 0;
+    const rangeAuthority: TestAuthority = {
+      getProjectRange: async () => ({
+        endSourceSample: startSourceSample + goldenProject.durationSamples,
+        sourceId: "source_fixture",
+        startSourceSample,
+      }),
+      getSnapshot: async () => ({
+        eventSequence: 1,
+        project: structuredClone(goldenProject),
+        projectRevisionId: "projectrevision_current",
+      }),
+      publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+    };
+    const ids = ["job_range_old", "job_range_new"];
+    const jobs = await openAnalysisJobs({
+      authority: rangeAuthority,
+      idFactory: () => ids.shift()!,
+      runner,
+      stateRoot: await temporaryDirectory(),
+    });
+    const request = {
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    } as const;
+    const oldRange = await jobs.submit(request);
+    startSourceSample = 1_000;
+    const newRange = await jobs.submit(request);
+
+    expect(newRange.id).not.toBe(oldRange.id);
+    await expect(jobs.runNext()).resolves.toMatchObject({
+      blockedDependencies: [{ id: "snapshot_fixture", kind: "media" }],
+      id: "job_range_old",
+      state: "blocked",
+    });
   });
 
   it("rejects a tampered retained Checkpoint before runner reuse", async () => {
