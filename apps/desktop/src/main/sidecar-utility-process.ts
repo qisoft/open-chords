@@ -88,3 +88,12 @@ export async function waitForUtilityReap(
     );
   }
 }
+
+export async function terminateAndReapUtilityProcess(
+  child: UtilityProcessHandle,
+  exited: Promise<number>,
+  timeoutMs = 5_000,
+): Promise<void> {
+  if (child.pid !== undefined) child.kill();
+  await waitForUtilityReap(exited, timeoutMs);
+}

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
+import { once, type EventEmitter } from "node:events";
 
 import { SidecarSessionError, type SidecarProcessLauncher } from "./sidecar-protocol.ts";
 
@@ -81,14 +81,20 @@ async function waitForSpawn(child: ChildProcess): Promise<void> {
   });
 }
 
-async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+type ChildExitHandle = EventEmitter & Pick<ChildProcess, "exitCode" | "signalCode">;
+
+export async function waitForExit(child: ChildExitHandle, timeoutMs: number): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) return true;
+  const exitWait = new AbortController();
   let timeout: ReturnType<typeof setTimeout>;
   const timedOut = new Promise<false>((resolve) => {
     timeout = setTimeout(() => resolve(false), timeoutMs);
   });
-  const exited = once(child, "exit").then(() => true as const);
-  const result = await Promise.race([exited, timedOut]);
-  clearTimeout(timeout!);
-  return result;
+  try {
+    const exited = once(child, "exit", { signal: exitWait.signal }).then(() => true as const);
+    return await Promise.race([exited, timedOut]);
+  } finally {
+    clearTimeout(timeout!);
+    exitWait.abort();
+  }
 }

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   observeUtilityExit,
+  terminateAndReapUtilityProcess,
   waitForUtilitySpawn,
   type UtilityProcessHandle,
 } from "../apps/desktop/src/main/sidecar-utility-process.ts";
@@ -63,6 +64,17 @@ describe("utility-process lifecycle", () => {
     child.spawn();
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(child.killCalls).toBeGreaterThan(0);
+    expect(child.pid).toBeUndefined();
+  });
+
+  it("terminates and reaps a spawned process before reporting an invalid launch", async () => {
+    const child = new DelayedUtilityProcess();
+    const exited = observeUtilityExit(child);
+    child.spawn();
+
+    await terminateAndReapUtilityProcess(child, exited, 100);
+
+    expect(child.killCalls).toBe(1);
     expect(child.pid).toBeUndefined();
   });
 });

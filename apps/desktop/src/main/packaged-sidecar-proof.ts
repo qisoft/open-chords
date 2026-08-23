@@ -10,6 +10,7 @@ import {
 } from "./sidecar-session.ts";
 import {
   observeUtilityExit,
+  terminateAndReapUtilityProcess,
   waitForUtilityReap,
   waitForUtilitySpawn,
 } from "./sidecar-utility-process.ts";
@@ -62,6 +63,7 @@ function createPackagedUtilityProcessLauncherForProof(
       await waitForUtilitySpawn(child, exited, signal);
       const stdout = child.stdout;
       if (child.pid === undefined || stdout === null) {
+        await terminateAndReapUtilityProcess(child, exited);
         throw new SidecarSessionError(
           "launch_failure",
           "Packaged sidecar utility process pipe was unavailable",
