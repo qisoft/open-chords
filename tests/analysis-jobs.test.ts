@@ -1,20 +1,78 @@
+import { createHash } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
+import { canonicalSerialize } from "@open-chords/domain";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   AnalysisRunError,
-  openAnalysisJobs,
+  openAnalysisJobs as openProductionAnalysisJobs,
+  type AnalysisCandidateManifest,
   type AnalysisJobRunner,
   type AnalysisProjectAuthority,
   type AnalysisRecipe,
 } from "../apps/desktop/src/main/analysis-jobs.ts";
 
 const temporaryRoots: string[] = [];
+
+type TestAuthority = Omit<AnalysisProjectAuthority, "resolveBlockedDependencies"> &
+  Partial<Pick<AnalysisProjectAuthority, "resolveBlockedDependencies">>;
+type RunnerInput = Parameters<AnalysisJobRunner["run"]>[0];
+type RunnerOutput = Awaited<ReturnType<AnalysisJobRunner["run"]>>;
+type TestRunner = {
+  run(
+    input: RunnerInput,
+  ): Promise<Omit<RunnerOutput, "manifest"> & { manifest?: AnalysisCandidateManifest }>;
+};
+
+async function openAnalysisJobs(options: {
+  authority: TestAuthority;
+  idFactory?: () => string;
+  now?: () => Date;
+  runner: TestRunner;
+  stateRoot: string;
+}) {
+  const testRunner: AnalysisJobRunner = {
+    run: async (input) => {
+      const result = await options.runner.run(input);
+      const manifest =
+        result.manifest ??
+        ({
+          attemptId: input.attemptId,
+          canonicalAudioFingerprint: input.job.canonicalAudioFingerprint,
+          jobKey: input.job.key,
+          projectId: input.job.projectId,
+          recipeHash: input.job.recipeHash,
+          sourceSnapshotId: input.job.sourceSnapshotId,
+        } satisfies AnalysisCandidateManifest);
+      const manifestHash = `sha256:${createHash("sha256")
+        .update(canonicalSerialize(manifest))
+        .digest("hex")}`;
+      return {
+        ...result,
+        manifest,
+        revision: {
+          ...result.revision,
+          id: `revision_${manifestHash.slice("sha256:".length)}`,
+          manifestHash,
+          projectId: input.job.projectId,
+        },
+      };
+    },
+  };
+  return openProductionAnalysisJobs({
+    ...options,
+    authority: {
+      ...options.authority,
+      resolveBlockedDependencies: options.authority.resolveBlockedDependencies ?? (async () => []),
+    },
+    runner: testRunner,
+  });
+}
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { force: true, recursive: true });
@@ -44,7 +102,8 @@ const recipe: AnalysisRecipe = {
     "preflight",
     "canonical_decode",
     "shared_features",
-    "analysis",
+    "rhythm",
+    "harmony",
     "assemble",
     "main_validation",
     "publish",
@@ -59,12 +118,12 @@ const recipe: AnalysisRecipe = {
   settings: { hopLength: 512 },
 };
 
-const authority: AnalysisProjectAuthority = {
+const authority: TestAuthority = {
   getSnapshot: async () => null,
   publishAnalysisRevision: async () => ({ notFound: true }),
 };
 
-const runner: AnalysisJobRunner = {
+const runner: TestRunner = {
   run: async () => new Promise(() => undefined),
 };
 
@@ -121,7 +180,7 @@ describe("AnalysisJobs", () => {
       ...structuredClone(goldenProject.analysisRevisions[0]!),
       id: "revision_candidate",
     };
-    const successfulAuthority: AnalysisProjectAuthority = {
+    const successfulAuthority: TestAuthority = {
       getSnapshot: async () => ({
         eventSequence: 1,
         project: structuredClone(goldenProject),
@@ -132,14 +191,15 @@ describe("AnalysisJobs", () => {
         return { projectRevisionId: "projectrevision_published" };
       },
     };
-    const successfulRunner: AnalysisJobRunner = {
+    const successfulRunner: TestRunner = {
       run: async () => ({
         revision: candidate,
         stageOutcomes: [
           { stage: "preflight", state: "completed" },
           { stage: "canonical_decode", state: "completed" },
           { stage: "shared_features", state: "completed" },
-          { stage: "analysis", state: "completed_with_abstentions" },
+          { stage: "rhythm", state: "completed" },
+          { stage: "harmony", state: "completed_with_abstentions" },
           { stage: "assemble", state: "completed" },
         ],
       }),
@@ -160,7 +220,8 @@ describe("AnalysisJobs", () => {
 
     await jobs.runNext();
 
-    expect(published).toEqual(["revision_candidate"]);
+    expect(published).toHaveLength(1);
+    const publishedRevisionId = published[0]!;
     expect(jobs.get("job_success")).toMatchObject({
       attempts: [
         {
@@ -171,7 +232,7 @@ describe("AnalysisJobs", () => {
       ],
       job: {
         attemptIds: ["attempt_success"],
-        publishedAnalysisRevisionId: "revision_candidate",
+        publishedAnalysisRevisionId: publishedRevisionId,
         state: "succeeded",
       },
     });
@@ -184,7 +245,7 @@ describe("AnalysisJobs", () => {
       id: "revision_retry",
     };
     let publications = 0;
-    const retryAuthority: AnalysisProjectAuthority = {
+    const retryAuthority: TestAuthority = {
       getSnapshot: async () => ({
         eventSequence: 1,
         project: structuredClone(goldenProject),
@@ -196,7 +257,7 @@ describe("AnalysisJobs", () => {
       },
     };
     let runs = 0;
-    const retryRunner: AnalysisJobRunner = {
+    const retryRunner: TestRunner = {
       run: async () => {
         runs += 1;
         if (runs === 1) {
@@ -205,7 +266,7 @@ describe("AnalysisJobs", () => {
             message: "Harmony decoder rejected its bounded output",
             nextAction: "retry",
             retryable: true,
-            stage: "analysis",
+            stage: "harmony",
           });
         }
         return {
@@ -214,7 +275,8 @@ describe("AnalysisJobs", () => {
             { stage: "preflight", state: "completed" },
             { stage: "canonical_decode", state: "completed" },
             { stage: "shared_features", state: "completed" },
-            { stage: "analysis", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
             { stage: "assemble", state: "completed" },
           ],
         };
@@ -243,7 +305,7 @@ describe("AnalysisJobs", () => {
           failure: {
             classification: "component_failure",
             retryable: true,
-            stage: "analysis",
+            stage: "harmony",
           },
           id: "attempt_failed",
           state: "failed",
@@ -266,7 +328,7 @@ describe("AnalysisJobs", () => {
     const seenCheckpointCounts: number[] = [];
     let rejectedMediaCheckpoint = false;
     let runs = 0;
-    const checkpointRunner: AnalysisJobRunner = {
+    const checkpointRunner: TestRunner = {
       run: async (input) => {
         seenCheckpointCounts.push(input.checkpoints.length);
         runs += 1;
@@ -294,7 +356,7 @@ describe("AnalysisJobs", () => {
             message: "Harmony failed after reusable features",
             nextAction: "retry",
             retryable: true,
-            stage: "analysis",
+            stage: "harmony",
           });
         }
         return {
@@ -306,7 +368,8 @@ describe("AnalysisJobs", () => {
             { stage: "preflight", state: "completed" },
             { stage: "canonical_decode", state: "completed" },
             { stage: "shared_features", state: "completed" },
-            { stage: "analysis", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
             { stage: "assemble", state: "completed" },
           ],
         };
@@ -357,7 +420,7 @@ describe("AnalysisJobs", () => {
     const resultReleased = new Promise<void>((resolve) => {
       releaseResult = resolve;
     });
-    const cancellableRunner: AnalysisJobRunner = {
+    const cancellableRunner: TestRunner = {
       run: async ({ signal }) => {
         reportStarted();
         await new Promise<void>((resolve) => {
@@ -373,13 +436,14 @@ describe("AnalysisJobs", () => {
             { stage: "preflight", state: "completed" },
             { stage: "canonical_decode", state: "completed" },
             { stage: "shared_features", state: "completed" },
-            { stage: "analysis", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
             { stage: "assemble", state: "completed" },
           ],
         };
       },
     };
-    const cancelAuthority: AnalysisProjectAuthority = {
+    const cancelAuthority: TestAuthority = {
       getSnapshot: async () => ({
         eventSequence: 1,
         project: structuredClone(goldenProject),
@@ -432,7 +496,7 @@ describe("AnalysisJobs", () => {
     const resultReleased = new Promise<void>((resolve) => {
       releaseResult = resolve;
     });
-    const crashingRunner: AnalysisJobRunner = {
+    const crashingRunner: TestRunner = {
       run: async () => {
         reportStarted();
         await resultReleased;
@@ -445,13 +509,14 @@ describe("AnalysisJobs", () => {
             { stage: "preflight", state: "completed" },
             { stage: "canonical_decode", state: "completed" },
             { stage: "shared_features", state: "completed" },
-            { stage: "analysis", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
             { stage: "assemble", state: "completed" },
           ],
         };
       },
     };
-    const crashAuthority: AnalysisProjectAuthority = {
+    const crashAuthority: TestAuthority = {
       getSnapshot: async () => ({
         eventSequence: 1,
         project: structuredClone(goldenProject),
@@ -495,7 +560,8 @@ describe("AnalysisJobs", () => {
   it("keeps missing dependencies blocked and runs confirmed work FIFO with monotonic progress", async () => {
     const stateRoot = await temporaryDirectory();
     const runOrder: string[] = [];
-    const schedulerRunner: AnalysisJobRunner = {
+    let modelReady = false;
+    const schedulerRunner: TestRunner = {
       run: async (input) => {
         runOrder.push(input.job.id);
         await input.reportProgress({
@@ -506,7 +572,7 @@ describe("AnalysisJobs", () => {
         await input.reportProgress({
           completedFraction: 0.75,
           elapsedMs: 300,
-          stage: "analysis",
+          stage: "harmony",
         });
         await expect(
           input.reportProgress({ completedFraction: 0.5, elapsedMs: 301, stage: "assemble" }),
@@ -520,7 +586,8 @@ describe("AnalysisJobs", () => {
             { stage: "preflight", state: "completed" },
             { stage: "canonical_decode", state: "completed" },
             { stage: "shared_features", state: "completed" },
-            { stage: "analysis", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
             { stage: "assemble", state: "completed" },
           ],
         };
@@ -534,6 +601,10 @@ describe("AnalysisJobs", () => {
           project: structuredClone(goldenProject),
           projectRevisionId: "projectrevision_current",
         }),
+        resolveBlockedDependencies: async ({ sourceSnapshotId }) =>
+          sourceSnapshotId === "snapshot_fixture" && !modelReady
+            ? [{ id: "model_missing", kind: "model" as const }]
+            : [],
         publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_next" }),
       },
       idFactory: () => ids.shift()!,
@@ -541,7 +612,6 @@ describe("AnalysisJobs", () => {
       stateRoot,
     });
     await jobs.submit({
-      blockedDependencies: [{ id: "model_missing", kind: "model" }],
       canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
       projectId: "project_golden",
       recipe,
@@ -567,9 +637,160 @@ describe("AnalysisJobs", () => {
       stage: "publish",
     });
 
-    await jobs.refreshBlockedDependencies("job_blocked", []);
+    modelReady = true;
+    await jobs.refreshBlockedDependencies("job_blocked");
     await jobs.runNext();
     expect(runOrder).toEqual(["job_ready", "job_blocked"]);
+  });
+
+  it("rechecks main-owned dependencies immediately before creating an Attempt", async () => {
+    const stateRoot = await temporaryDirectory();
+    let dependencyMissing = false;
+    let runs = 0;
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+        resolveBlockedDependencies: async () =>
+          dependencyMissing ? [{ id: "dictionary_chords", kind: "dictionary" as const }] : [],
+      },
+      idFactory: () => "job_dependency_recheck",
+      runner: {
+        run: async () => {
+          runs += 1;
+          return new Promise(() => undefined);
+        },
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+
+    dependencyMissing = true;
+    await expect(jobs.runNext()).resolves.toMatchObject({ state: "blocked" });
+    expect(jobs.get("job_dependency_recheck")).toMatchObject({
+      attempts: [],
+      job: {
+        blockedDependencies: [{ id: "dictionary_chords", kind: "dictionary" }],
+        state: "blocked",
+      },
+    });
+    expect(runs).toBe(0);
+  });
+
+  it("rejects a candidate whose manifest belongs to another Job identity", async () => {
+    const stateRoot = await temporaryDirectory();
+    let publications = 0;
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => {
+          publications += 1;
+          return { projectRevisionId: "projectrevision_forbidden" };
+        },
+      },
+      idFactory: (() => {
+        const ids = ["job_identity", "attempt_identity"];
+        return () => ids.shift()!;
+      })(),
+      runner: {
+        run: async (input) => ({
+          manifest: {
+            attemptId: input.attemptId,
+            canonicalAudioFingerprint: input.job.canonicalAudioFingerprint,
+            jobKey: `sha256:${"f".repeat(64)}`,
+            projectId: input.job.projectId,
+            recipeHash: input.job.recipeHash,
+            sourceSnapshotId: input.job.sourceSnapshotId,
+          },
+          revision: structuredClone(goldenProject.analysisRevisions[0]!),
+          stageOutcomes: [
+            { stage: "preflight", state: "completed" },
+            { stage: "canonical_decode", state: "completed" },
+            { stage: "shared_features", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
+            { stage: "assemble", state: "completed" },
+          ],
+        }),
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+
+    await expect(jobs.runNext()).resolves.toMatchObject({ state: "blocked" });
+    expect(jobs.get("job_identity").attempts).toMatchObject([
+      { failure: { classification: "integrity_violation" }, state: "failed" },
+    ]);
+    expect(publications).toBe(0);
+  });
+
+  it("reconciles a committed candidate when the publication acknowledgement is lost", async () => {
+    const stateRoot = await temporaryDirectory();
+    const project = structuredClone(goldenProject);
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: project.analysisRevisions.length,
+          project: structuredClone(project),
+          projectRevisionId:
+            project.analysisRevisions.length > goldenProject.analysisRevisions.length
+              ? "projectrevision_committed"
+              : "projectrevision_current",
+        }),
+        publishAnalysisRevision: async ({ revision }) => {
+          project.analysisRevisions.push(structuredClone(revision));
+          throw new Error("Publication acknowledgement was lost after durable commit");
+        },
+      },
+      idFactory: (() => {
+        const ids = ["job_ack", "attempt_ack"];
+        return () => ids.shift()!;
+      })(),
+      runner: {
+        run: async () => ({
+          revision: structuredClone(goldenProject.analysisRevisions[0]!),
+          stageOutcomes: [
+            { stage: "preflight", state: "completed" },
+            { stage: "canonical_decode", state: "completed" },
+            { stage: "shared_features", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
+            { stage: "assemble", state: "completed" },
+          ],
+        }),
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+
+    await expect(jobs.runNext()).resolves.toMatchObject({ state: "succeeded" });
+    expect(jobs.get("job_ack")).toMatchObject({
+      attempts: [{ publishedProjectRevisionId: "projectrevision_committed", state: "succeeded" }],
+      job: { state: "succeeded" },
+    });
   });
 
   it("persists sleep interruption before abort and requires an explicit retry", async () => {
@@ -578,7 +799,7 @@ describe("AnalysisJobs", () => {
     const started = new Promise<void>((resolve) => {
       reportStarted = resolve;
     });
-    const sleepingRunner: AnalysisJobRunner = {
+    const sleepingRunner: TestRunner = {
       run: async ({ signal }) => {
         reportStarted();
         await new Promise<void>((_resolve, reject) => {
@@ -626,7 +847,7 @@ describe("AnalysisJobs", () => {
   it("expires failed Attempt evidence and reusable Checkpoints after seven days", async () => {
     const stateRoot = await temporaryDirectory();
     let now = new Date("2026-08-23T12:00:00Z");
-    const retentionRunner: AnalysisJobRunner = {
+    const retentionRunner: TestRunner = {
       run: async (input) => {
         await input.saveCheckpoint({
           artifactHash: `sha256:${"7".repeat(64)}`,
@@ -639,7 +860,7 @@ describe("AnalysisJobs", () => {
           message: "Analysis failed after features",
           nextAction: "retry",
           retryable: true,
-          stage: "analysis",
+          stage: "harmony",
         });
       },
     };
@@ -683,7 +904,7 @@ describe("AnalysisJobs", () => {
   it("opens the circuit on integrity failure until restart", async () => {
     const stateRoot = await temporaryDirectory();
     let runs = 0;
-    const circuitRunner: AnalysisJobRunner = {
+    const circuitRunner: TestRunner = {
       run: async ({ job }) => {
         runs += 1;
         if (runs === 1) {
@@ -704,7 +925,8 @@ describe("AnalysisJobs", () => {
             { stage: "preflight", state: "completed" },
             { stage: "canonical_decode", state: "completed" },
             { stage: "shared_features", state: "completed" },
-            { stage: "analysis", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
             { stage: "assemble", state: "completed" },
           ],
         };
@@ -781,7 +1003,8 @@ describe("AnalysisJobs", () => {
               { stage: "preflight", state: "completed" },
               { stage: "canonical_decode", state: "completed" },
               { stage: "shared_features", state: "completed" },
-              { stage: "analysis", state: "completed" },
+              { stage: "rhythm", state: "completed" },
+              { stage: "harmony", state: "completed" },
               { stage: "assemble", state: "completed" },
             ],
           };

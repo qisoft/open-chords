@@ -33,6 +33,7 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
+import type { AnalysisRecipe } from "./analysis-jobs.ts";
 import {
   locatorMatchesSourceIdentity,
   ProjectOwnedRecordsSchema,
@@ -507,6 +508,31 @@ export class ProjectLibrary {
     };
   }
 
+  async resolveBlockedDependencies(input: {
+    canonicalAudioFingerprint: string;
+    projectId: string;
+    recipe: AnalysisRecipe;
+    sourceSnapshotId: string;
+  }): Promise<Array<{ id: string; kind: "media" | "model" }>> {
+    const entry = this.#entries.get(input.projectId);
+    if (entry === undefined || entry.location === "trashed" || entry.revision === undefined) {
+      return [{ id: input.sourceSnapshotId, kind: "media" }];
+    }
+    const source = entry.revision.payload.records.sources.find(
+      ({ id }) => id === entry.revision?.payload.records.projectRange.sourceId,
+    );
+    const snapshot = source?.snapshots.find(({ id }) => id === input.sourceSnapshotId);
+    if (snapshot?.canonicalAudioFingerprint !== input.canonicalAudioFingerprint) {
+      return [{ id: input.sourceSnapshotId, kind: "media" }];
+    }
+    const verifiedComponents = new Set(
+      snapshot.provenance.components.map(({ hash, id, version }) => `${id}\0${version}\0${hash}`),
+    );
+    return [...input.recipe.components, input.recipe.numericalBackend]
+      .filter(({ hash, id, version }) => !verifiedComponents.has(`${id}\0${version}\0${hash}`))
+      .map(({ id }) => ({ id, kind: "model" as const }));
+  }
+
   async commitEditTransaction(input: {
     expectedProjectRevisionId: string;
     projectId: string;
@@ -546,9 +572,14 @@ export class ProjectLibrary {
   }
 
   async publishAnalysisRevision(input: {
+    attemptId: string;
+    canonicalAudioFingerprint: string;
     expectedProjectRevisionId: string;
+    jobKey: string;
     projectId: string;
+    recipeHash: string;
     revision: AnalysisRevision;
+    sourceSnapshotId: string;
   }): Promise<
     { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
   > {
@@ -558,16 +589,39 @@ export class ProjectLibrary {
       if (entry.status === "damaged" || entry.revision === undefined)
         throw new ProjectLibraryDamagedError(input.projectId);
       if (entry.compatibility === "read_only") return { readOnly: true };
-      if (entry.revision.revision.projectRevisionId !== input.expectedProjectRevisionId)
-        return { stale: true };
 
       const candidate = AnalysisRevisionSchema.parse(input.revision);
-      if (candidate.projectId !== input.projectId) {
-        throw new Error("Analysis Revision belongs to another Project");
+      const expectedManifestHash = sha256Canonical({
+        attemptId: input.attemptId,
+        canonicalAudioFingerprint: input.canonicalAudioFingerprint,
+        jobKey: input.jobKey,
+        projectId: input.projectId,
+        recipeHash: input.recipeHash,
+        sourceSnapshotId: input.sourceSnapshotId,
+      });
+      if (
+        candidate.projectId !== input.projectId ||
+        candidate.manifestHash !== expectedManifestHash ||
+        candidate.id !== `revision_${expectedManifestHash.slice("sha256:".length)}`
+      ) {
+        throw new Error("Analysis Revision identity does not match its Job candidate manifest");
       }
       const project = structuredClone(entry.revision.payload.envelope.payload);
-      if (project.analysisRevisions.some(({ id }) => id === candidate.id)) {
-        throw new Error(`Analysis Revision ${candidate.id} already exists`);
+      const existing = project.analysisRevisions.find(({ id }) => id === candidate.id);
+      if (existing !== undefined) {
+        if (canonicalSerialize(existing) !== canonicalSerialize(candidate)) {
+          throw new Error(`Analysis Revision ${candidate.id} conflicts with published content`);
+        }
+        return { projectRevisionId: entry.revision.revision.projectRevisionId };
+      }
+      if (entry.revision.revision.projectRevisionId !== input.expectedProjectRevisionId)
+        return { stale: true };
+      const source = entry.revision.payload.records.sources.find(
+        ({ id }) => id === entry.revision?.payload.records.projectRange.sourceId,
+      );
+      const sourceSnapshot = source?.snapshots.find(({ id }) => id === input.sourceSnapshotId);
+      if (sourceSnapshot?.canonicalAudioFingerprint !== input.canonicalAudioFingerprint) {
+        throw new Error("Analysis candidate Source Snapshot is not verified by Project authority");
       }
       project.analysisRevisions.push(candidate);
       if (project.activeView === null) {
@@ -2254,6 +2308,10 @@ async function readRegularStorageFile(path: string): Promise<string> {
 
 function hashContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+function sha256Canonical(value: unknown): string {
+  return hashContent(canonicalSerialize(value));
 }
 
 async function writeDurableFile(

@@ -6,8 +6,9 @@ import {
   DESKTOP_IPC_VERSION,
   ProjectEventSchema,
 } from "@open-chords/contracts";
-import { app, dialog, type BrowserWindow, type WebContents } from "electron";
+import { app, dialog, powerMonitor, type BrowserWindow, type WebContents } from "electron";
 
+import { AnalysisRunError, openAnalysisJobs, type AnalysisJobs } from "./analysis-jobs.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
@@ -37,6 +38,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   const ownsSingleInstance = app.requestSingleInstanceLock();
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
+  let analysisJobsAuthority: AnalysisJobs | null = null;
   const rendererContexts = new Map<
     number,
     {
@@ -69,11 +71,29 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
     app.on("window-all-closed", () => {
       if (process.platform !== "darwin") app.quit();
     });
+    powerMonitor.on("suspend", () => {
+      void analysisJobsAuthority?.interruptForSleep().catch(() => app.exit(1));
+    });
 
     const desktopReady = app
       .whenReady()
       .then(async () => {
         const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
+        analysisJobsAuthority = await openAnalysisJobs({
+          authority: projectLibrary,
+          runner: {
+            run: async () => {
+              throw new AnalysisRunError({
+                classification: "blocked_dependency",
+                message: "The analysis runner is not installed in this build",
+                nextAction: "repair_installation",
+                retryable: false,
+                stage: "preflight",
+              });
+            },
+          },
+          stateRoot: app.getPath("userData"),
+        });
         const localMedia = new LocalMediaService({
           library: projectLibrary,
           pickFile: async () => {

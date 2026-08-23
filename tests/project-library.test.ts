@@ -155,6 +155,34 @@ function envelopeForProject(projectId: string) {
   return envelope;
 }
 
+function analysisPublication(
+  expectedProjectRevisionId: string,
+  revision: ReturnType<typeof goldenEnvelope>["payload"]["analysisRevisions"][number],
+  attemptId: string,
+) {
+  const identity = {
+    attemptId,
+    canonicalAudioFingerprint:
+      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    jobKey: `sha256:${"a".repeat(64)}`,
+    projectId: "project_golden",
+    recipeHash: `sha256:${"b".repeat(64)}`,
+    sourceSnapshotId: "snapshot_fixture",
+  };
+  const manifestHash = `sha256:${createHash("sha256")
+    .update(canonicalSerialize(identity))
+    .digest("hex")}`;
+  return {
+    ...identity,
+    expectedProjectRevisionId,
+    revision: {
+      ...revision,
+      id: `revision_${manifestHash.slice("sha256:".length)}`,
+      manifestHash,
+    },
+  };
+}
+
 const DURABILITY_TEST_TIMEOUT_MS = 15_000;
 
 describe("ProjectLibrary", () => {
@@ -176,36 +204,38 @@ describe("ProjectLibrary", () => {
       records: ownedRecords(),
     });
 
-    const first = await library.publishAnalysisRevision({
-      expectedProjectRevisionId: created.projectRevisionId,
-      projectId: "project_golden",
-      revision: firstCandidate,
-    });
+    const firstPublication = analysisPublication(
+      created.projectRevisionId,
+      firstCandidate,
+      "attempt_first",
+    );
+    const first = await library.publishAnalysisRevision(firstPublication);
     expect(first).toHaveProperty("projectRevisionId");
     if (!("projectRevisionId" in first)) throw new Error("First analysis was not published");
     const afterFirst = await library.getSnapshot("project_golden");
     expect(afterFirst?.project.activeView).toMatchObject({
-      analysisRevisionId: "revision_first_analysis",
+      analysisRevisionId: firstPublication.revision.id,
       editHistoryPosition: 0,
     });
     expect(afterFirst?.project.editLayers).toMatchObject([
-      { analysisRevisionId: "revision_first_analysis", transactions: [] },
+      { analysisRevisionId: firstPublication.revision.id, transactions: [] },
     ]);
 
     const secondCandidate = structuredClone(firstCandidate);
     secondCandidate.id = "revision_reviewable_analysis";
-    const second = await library.publishAnalysisRevision({
-      expectedProjectRevisionId: first.projectRevisionId,
-      projectId: "project_golden",
-      revision: secondCandidate,
-    });
+    const secondPublication = analysisPublication(
+      first.projectRevisionId,
+      secondCandidate,
+      "attempt_second",
+    );
+    const second = await library.publishAnalysisRevision(secondPublication);
     expect(second).toHaveProperty("projectRevisionId");
     const afterSecond = await library.getSnapshot("project_golden");
     expect(afterSecond?.project.analysisRevisions.map(({ id }) => id)).toEqual([
-      "revision_first_analysis",
-      "revision_reviewable_analysis",
+      firstPublication.revision.id,
+      secondPublication.revision.id,
     ]);
-    expect(afterSecond?.project.activeView?.analysisRevisionId).toBe("revision_first_analysis");
+    expect(afterSecond?.project.activeView?.analysisRevisionId).toBe(firstPublication.revision.id);
     expect((await library.readProject("project_golden")).revisions.at(-1)?.reason).toBe(
       "analysis_publication",
     );
@@ -222,20 +252,16 @@ describe("ProjectLibrary", () => {
     candidate.id = "revision_rejected";
 
     await expect(
-      library.publishAnalysisRevision({
-        expectedProjectRevisionId: "projectrevision_stale",
-        projectId: "project_golden",
-        revision: candidate,
-      }),
+      library.publishAnalysisRevision(
+        analysisPublication("projectrevision_stale", candidate, "attempt_stale"),
+      ),
     ).resolves.toEqual({ stale: true });
     const invalid = structuredClone(candidate);
     invalid.timeline.chordEvents[0]!.endSample += 1;
     await expect(
-      library.publishAnalysisRevision({
-        expectedProjectRevisionId: created.projectRevisionId,
-        projectId: "project_golden",
-        revision: invalid,
-      }),
+      library.publishAnalysisRevision(
+        analysisPublication(created.projectRevisionId, invalid, "attempt_invalid"),
+      ),
     ).rejects.toThrow(/invariants|timeline|contiguous/iu);
     expect((await library.getSnapshot("project_golden"))?.projectRevisionId).toBe(
       created.projectRevisionId,

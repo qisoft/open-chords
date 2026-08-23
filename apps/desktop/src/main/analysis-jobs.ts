@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
+  AnalysisRevisionSchema,
   canonicalSerialize,
   type AnalysisRevision,
   type ProjectContract,
@@ -13,40 +14,56 @@ const STATE_FILE = "analysis-jobs/state.json";
 const OPERATIONAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const TimestampSchema = z.iso.datetime({ offset: true });
-const PipelineSchema = z.tuple([
-  z.literal("preflight"),
-  z.literal("canonical_decode"),
-  z.literal("shared_features"),
-  z.literal("analysis"),
-  z.literal("assemble"),
-  z.literal("main_validation"),
-  z.literal("publish"),
-]);
+const RUNNER_PREFIX_STAGES = ["preflight", "canonical_decode", "shared_features"] as const;
+const CAPABILITY_STAGES = ["rhythm", "harmony", "sections"] as const;
+const RUNNER_SUFFIX_STAGES = ["assemble"] as const;
+const MAIN_STAGES = ["main_validation", "publish"] as const;
+const ALL_PIPELINE_STAGES = [
+  ...RUNNER_PREFIX_STAGES,
+  ...CAPABILITY_STAGES,
+  ...RUNNER_SUFFIX_STAGES,
+  ...MAIN_STAGES,
+] as const;
+const PipelineStageSchema = z.enum(ALL_PIPELINE_STAGES);
 const VersionedComponentSchema = z.strictObject({
   hash: Sha256Schema,
   id: z.string().min(1),
   version: z.string().min(1),
 });
-const AnalysisRecipeSchema = z.strictObject({
-  capabilities: z
-    .array(z.enum(["rhythm", "meter", "key", "chords", "sections"]))
-    .min(1)
-    .refine((values) => new Set(values).size === values.length, "Capabilities must be unique"),
-  components: z
-    .array(VersionedComponentSchema)
-    .min(1)
-    .refine(
-      (components) => new Set(components.map(({ id }) => id)).size === components.length,
-      "Component IDs must be unique",
-    ),
-  numericalBackend: VersionedComponentSchema,
-  pipeline: PipelineSchema,
-  profile: VersionedComponentSchema.extend({
-    name: z.enum(["eco", "balanced", "fast"]),
-  }),
-  seeds: z.record(z.string().min(1), z.number().int()),
-  settings: z.record(z.string().min(1), z.union([z.boolean(), z.number().finite(), z.string()])),
-});
+const AnalysisRecipeSchema = z
+  .strictObject({
+    capabilities: z
+      .array(z.enum(["rhythm", "meter", "key", "chords", "sections"]))
+      .min(1)
+      .refine((values) => new Set(values).size === values.length, "Capabilities must be unique"),
+    components: z
+      .array(VersionedComponentSchema)
+      .min(1)
+      .refine(
+        (components) => new Set(components.map(({ id }) => id)).size === components.length,
+        "Component IDs must be unique",
+      ),
+    numericalBackend: VersionedComponentSchema,
+    pipeline: z.array(PipelineStageSchema),
+    profile: VersionedComponentSchema.extend({
+      name: z.enum(["eco", "balanced", "fast"]),
+    }),
+    seeds: z.record(z.string().min(1), z.number().int()),
+    settings: z.record(z.string().min(1), z.union([z.boolean(), z.number().finite(), z.string()])),
+  })
+  .superRefine((recipe, context) => {
+    const expected = expectedPipeline(recipe.capabilities);
+    if (
+      recipe.pipeline.length !== expected.length ||
+      recipe.pipeline.some((stage, index) => stage !== expected[index])
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: `Pipeline must be ${expected.join(" -> ")} for the requested capabilities`,
+        path: ["pipeline"],
+      });
+    }
+  });
 const BlockedDependencySchema = z.strictObject({
   id: z.string().min(1),
   kind: z.enum(["consent", "dictionary", "license", "media", "model"]),
@@ -56,15 +73,7 @@ const AnalysisProgressSchema = z.strictObject({
   elapsedMs: z.number().int().nonnegative(),
   estimateKind: z.literal("benchmark_approximate"),
   profile: z.enum(["eco", "balanced", "fast"]),
-  stage: z.enum([
-    "preflight",
-    "canonical_decode",
-    "shared_features",
-    "analysis",
-    "assemble",
-    "main_validation",
-    "publish",
-  ]),
+  stage: PipelineStageSchema,
 });
 
 export type AnalysisRecipe = z.infer<typeof AnalysisRecipeSchema>;
@@ -97,19 +106,11 @@ const AnalysisJobSchema = z.strictObject({
   updatedAt: TimestampSchema,
 });
 const RunnerStageOutcomeSchema = z.strictObject({
-  stage: z.enum(["preflight", "canonical_decode", "shared_features", "analysis", "assemble"]),
+  stage: z.enum([...RUNNER_PREFIX_STAGES, ...CAPABILITY_STAGES, ...RUNNER_SUFFIX_STAGES]),
   state: z.enum(["completed", "completed_with_abstentions"]),
 });
 const AnalysisStageOutcomeSchema = z.strictObject({
-  stage: z.enum([
-    "preflight",
-    "canonical_decode",
-    "shared_features",
-    "analysis",
-    "assemble",
-    "main_validation",
-    "publish",
-  ]),
+  stage: PipelineStageSchema,
   state: z.enum(["completed", "completed_with_abstentions"]),
 });
 const AnalysisFailureSchema = z.strictObject({
@@ -142,7 +143,7 @@ const AnalysisCheckpointCandidateSchema = z.strictObject({
     .positive()
     .max(1024 * 1024 * 1024),
   kind: z.enum(["shared_features", "rhythm", "harmony", "sections"]),
-  stage: z.enum(["shared_features", "analysis"]),
+  stage: z.enum(["shared_features", ...CAPABILITY_STAGES]),
 });
 const AnalysisCheckpointSchema = AnalysisCheckpointCandidateSchema.extend({
   createdAt: TimestampSchema,
@@ -158,6 +159,8 @@ const AnalysisCircuitBreakerSchema = z.strictObject({
 const AnalysisAttemptSchema = z.strictObject({
   cancelRequestedAt: TimestampSchema.optional(),
   checkpointIds: z.array(z.string().min(1)),
+  candidateAnalysisRevisionId: z.string().min(1).optional(),
+  candidateManifestHash: Sha256Schema.optional(),
   expectedProjectRevisionId: z.string().min(1),
   failure: AnalysisFailureSchema.optional(),
   finishedAt: TimestampSchema.optional(),
@@ -184,6 +187,17 @@ export type AnalysisFailure = z.infer<typeof AnalysisFailureSchema>;
 export type AnalysisCheckpoint = z.infer<typeof AnalysisCheckpointSchema>;
 export type AnalysisCheckpointCandidate = z.infer<typeof AnalysisCheckpointCandidateSchema>;
 
+const AnalysisCandidateManifestSchema = z.strictObject({
+  attemptId: z.string().min(1),
+  canonicalAudioFingerprint: Sha256Schema,
+  jobKey: Sha256Schema,
+  projectId: z.string().min(1),
+  recipeHash: Sha256Schema,
+  sourceSnapshotId: z.string().min(1),
+});
+
+export type AnalysisCandidateManifest = z.infer<typeof AnalysisCandidateManifestSchema>;
+
 export class AnalysisRunError extends Error {
   readonly failure: AnalysisFailure;
 
@@ -201,10 +215,21 @@ export type AnalysisProjectAuthority = {
     project: ProjectContract;
     projectRevisionId: string;
   } | null>;
-  publishAnalysisRevision(input: {
-    expectedProjectRevisionId: string;
+  resolveBlockedDependencies(input: {
+    canonicalAudioFingerprint: string;
     projectId: string;
+    recipe: AnalysisRecipe;
+    sourceSnapshotId: string;
+  }): Promise<z.infer<typeof BlockedDependencySchema>[]>;
+  publishAnalysisRevision(input: {
+    attemptId: string;
+    canonicalAudioFingerprint: string;
+    expectedProjectRevisionId: string;
+    jobKey: string;
+    projectId: string;
+    recipeHash: string;
     revision: AnalysisRevision;
+    sourceSnapshotId: string;
   }): Promise<
     { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
   >;
@@ -223,6 +248,7 @@ export type AnalysisJobRunner = {
     saveCheckpoint: (checkpoint: AnalysisCheckpointCandidate) => Promise<void>;
     signal: AbortSignal;
   }): Promise<{
+    manifest: AnalysisCandidateManifest;
     revision: AnalysisRevision;
     stageOutcomes: z.infer<typeof RunnerStageOutcomeSchema>[];
   }>;
@@ -237,13 +263,7 @@ type AnalysisJobsOptions = {
 };
 
 export async function openAnalysisJobs(options: AnalysisJobsOptions): Promise<AnalysisJobs> {
-  const path = join(options.stateRoot, STATE_FILE);
-  const loaded = await readState(path);
-  const state = recoverStateAfterRestart(loaded.state, options.now?.() ?? new Date());
-  state.runtimeSessionId = randomUUID();
-  const analysisJobs = new AnalysisJobs(options, path, state);
-  await analysisJobs.persist();
-  return analysisJobs;
+  return AnalysisJobs.open(options);
 }
 
 export class AnalysisJobs {
@@ -256,7 +276,7 @@ export class AnalysisJobs {
   readonly #runner: AnalysisJobRunner;
   #state: z.infer<typeof AnalysisJobStateSchema>;
 
-  constructor(
+  private constructor(
     options: AnalysisJobsOptions,
     path: string,
     state: z.infer<typeof AnalysisJobStateSchema>,
@@ -269,6 +289,20 @@ export class AnalysisJobs {
     this.#state = state;
   }
 
+  static async open(options: AnalysisJobsOptions): Promise<AnalysisJobs> {
+    const path = join(options.stateRoot, STATE_FILE);
+    const state = await readState(path);
+    const recovered = await recoverStateAfterRestart(
+      state,
+      options.authority,
+      options.now?.() ?? new Date(),
+    );
+    recovered.runtimeSessionId = randomUUID();
+    const analysisJobs = new AnalysisJobs(options, path, recovered);
+    await analysisJobs.#persist();
+    return analysisJobs;
+  }
+
   async confirmQueued(jobId: string): Promise<AnalysisJobSnapshot> {
     return this.#serializeMutation(async () => {
       const job = this.#requireJob(jobId);
@@ -277,7 +311,7 @@ export class AnalysisJobs {
       }
       job.state = "queued";
       job.updatedAt = this.#now().toISOString();
-      await this.persist();
+      await this.#persist();
       return structuredClone(job);
     });
   }
@@ -290,7 +324,7 @@ export class AnalysisJobs {
       message: "Analysis Attempt was interrupted by system sleep",
       nextAction: "retry",
       retryable: true,
-      stage: "analysis",
+      stage: "preflight",
     });
     await this.#serializeMutation(async () => {
       const job = this.#requireJob(active.jobId);
@@ -302,7 +336,7 @@ export class AnalysisJobs {
       attempt.state = "failed";
       job.state = "retryable";
       job.updatedAt = timestamp;
-      await this.persist();
+      await this.#persist();
     });
     active.controller.abort(new AnalysisRunError(failure));
   }
@@ -325,7 +359,7 @@ export class AnalysisJobs {
         throw new Error("Analysis Job cannot be cancelled from its current state");
       }
       job.updatedAt = timestamp;
-      await this.persist();
+      await this.#persist();
       return structuredClone(job);
     });
     if (this.#active?.jobId === jobId) {
@@ -335,7 +369,7 @@ export class AnalysisJobs {
           message: "Analysis Attempt was cancelled",
           nextAction: "retry",
           retryable: true,
-          stage: "analysis",
+          stage: cancelled.progress?.stage ?? "preflight",
         }),
       );
     }
@@ -373,7 +407,7 @@ export class AnalysisJobs {
         queuedJob.queuePosition = position;
         queuedJob.updatedAt = this.#now().toISOString();
       }
-      await this.persist();
+      await this.#persist();
     });
   }
 
@@ -392,7 +426,7 @@ export class AnalysisJobs {
     };
   }
 
-  async persist(): Promise<void> {
+  async #persist(): Promise<void> {
     await atomicWrite(this.#path, canonicalSerialize(AnalysisJobStateSchema.parse(this.#state)));
   }
 
@@ -415,12 +449,11 @@ export class AnalysisJobs {
       }
       this.#state.attempts = retainedAttempts;
       this.#state.checkpoints = retainedCheckpoints;
-      await this.persist();
+      await this.#persist();
     });
   }
 
   async submit(input: {
-    blockedDependencies?: readonly z.infer<typeof BlockedDependencySchema>[];
     canonicalAudioFingerprint: string;
     projectId: string;
     recipe: AnalysisRecipe;
@@ -440,9 +473,7 @@ export class AnalysisJobs {
       );
       if (existing !== undefined) return structuredClone(existing);
       const timestamp = this.#now().toISOString();
-      const blockedDependencies = z
-        .array(BlockedDependencySchema)
-        .parse(input.blockedDependencies ?? []);
+      const blockedDependencies = await this.#resolveBlockedDependencies(input);
       const job = AnalysisJobSchema.parse({
         attemptIds: [],
         blockedDependencies,
@@ -460,7 +491,7 @@ export class AnalysisJobs {
         updatedAt: timestamp,
       });
       this.#state.jobs.push(job);
-      await this.persist();
+      await this.#persist();
       return structuredClone(job);
     });
   }
@@ -475,6 +506,14 @@ export class AnalysisJobs {
         .filter(({ state }) => state === "queued")
         .toSorted((left, right) => left.queuePosition - right.queuePosition)[0];
       if (job === undefined) return null;
+      const blockedDependencies = await this.#resolveBlockedDependencies(job);
+      if (blockedDependencies.length > 0) {
+        job.blockedDependencies = blockedDependencies;
+        job.state = "blocked";
+        job.updatedAt = this.#now().toISOString();
+        await this.#persist();
+        return { blockedJob: structuredClone(job) };
+      }
       const project = await this.#authority.getSnapshot(job.projectId);
       if (project === null) throw new Error(`Project ${job.projectId} was not found`);
       const timestamp = this.#now().toISOString();
@@ -498,10 +537,11 @@ export class AnalysisJobs {
       job.state = "running";
       job.updatedAt = timestamp;
       this.#state.attempts.push(attempt);
-      await this.persist();
+      await this.#persist();
       return { attempt: structuredClone(attempt), job: structuredClone(job) };
     });
     if (started === null) return null;
+    if ("blockedJob" in started) return started.blockedJob;
 
     const controller = new AbortController();
     this.#active = {
@@ -519,45 +559,36 @@ export class AnalysisJobs {
           this.#saveCheckpoint(started.job.id, started.attempt.id, checkpoint),
         signal: controller.signal,
       });
-      await this.#assertCurrentAttempt(started.job.id, started.attempt.id, controller.signal);
-      const stageOutcomes = validateRunnerStageOutcomes(result.stageOutcomes);
-      const publication = await this.#authority.publishAnalysisRevision({
-        expectedProjectRevisionId: started.attempt.expectedProjectRevisionId,
-        projectId: started.job.projectId,
-        revision: result.revision,
-      });
-      if (!("projectRevisionId" in publication)) {
-        throw new AnalysisRunError({
-          classification: "stale" in publication ? "stale_result" : "blocked_input",
-          message: "Analysis candidate was not published by the Project authority",
-          nextAction: "stale" in publication ? "retry" : "check_input",
-          retryable: "stale" in publication,
-          stage: "publish",
-        });
-      }
-      return this.#serializeMutation(async () => {
+      const candidate = validateAnalysisCandidate(started.job, started.attempt.id, result);
+      return await this.#serializeMutation(async () => {
+        await this.#assertCurrentAttempt(started.job.id, started.attempt.id, controller.signal);
         const job = this.#requireJob(started.job.id);
         const attempt = this.#requireAttempt(started.attempt.id);
-        const timestamp = this.#now().toISOString();
-        attempt.finishedAt = timestamp;
-        attempt.publishedProjectRevisionId = publication.projectRevisionId;
-        attempt.stageOutcomes = [
-          ...stageOutcomes,
-          { stage: "main_validation", state: "completed" },
-          { stage: "publish", state: "completed" },
-        ];
-        attempt.state = "succeeded";
-        job.publishedAnalysisRevisionId = result.revision.id;
-        job.progress = {
-          completedFraction: 1,
-          elapsedMs: job.progress?.elapsedMs ?? 0,
-          estimateKind: "benchmark_approximate",
-          profile: job.profile,
-          stage: "publish",
-        };
-        job.state = "succeeded";
-        job.updatedAt = timestamp;
-        await this.persist();
+        attempt.candidateAnalysisRevisionId = candidate.revision.id;
+        attempt.candidateManifestHash = candidate.revision.manifestHash;
+        attempt.stageOutcomes = candidate.stageOutcomes;
+        await this.#persist();
+        const publication = await this.#authority.publishAnalysisRevision({
+          attemptId: attempt.id,
+          canonicalAudioFingerprint: job.canonicalAudioFingerprint,
+          expectedProjectRevisionId: attempt.expectedProjectRevisionId,
+          jobKey: job.key,
+          projectId: job.projectId,
+          recipeHash: job.recipeHash,
+          revision: candidate.revision,
+          sourceSnapshotId: job.sourceSnapshotId,
+        });
+        if (!("projectRevisionId" in publication)) {
+          throw new AnalysisRunError({
+            classification: "stale" in publication ? "stale_result" : "blocked_input",
+            message: "Analysis candidate was not published by the Project authority",
+            nextAction: "stale" in publication ? "retry" : "check_input",
+            retryable: "stale" in publication,
+            stage: "publish",
+          });
+        }
+        this.#completePublication(job, attempt, publication.projectRevisionId);
+        await this.#persist();
         return structuredClone(job);
       });
     } catch (error) {
@@ -566,6 +597,19 @@ export class AnalysisJobs {
       return this.#serializeMutation(async () => {
         const job = this.#requireJob(started.job.id);
         const attempt = this.#requireAttempt(started.attempt.id);
+        const snapshot = await this.#authority.getSnapshot(job.projectId);
+        const published = snapshot?.project.analysisRevisions.find(
+          ({ id }) => id === attempt.candidateAnalysisRevisionId,
+        );
+        if (
+          snapshot !== null &&
+          published !== undefined &&
+          published.manifestHash === attempt.candidateManifestHash
+        ) {
+          this.#completePublication(job, attempt, snapshot.projectRevisionId);
+          await this.#persist();
+          return structuredClone(job);
+        }
         const timestamp = this.#now().toISOString();
         attempt.failure = failure;
         attempt.finishedAt = timestamp;
@@ -583,7 +627,7 @@ export class AnalysisJobs {
           };
         }
         job.updatedAt = timestamp;
-        await this.persist();
+        await this.#persist();
         return structuredClone(job);
       });
     } finally {
@@ -598,28 +642,74 @@ export class AnalysisJobs {
       job.state = "queued";
       job.queuePosition = nextQueuePosition(this.#state.jobs);
       job.updatedAt = this.#now().toISOString();
-      await this.persist();
+      await this.#persist();
       return structuredClone(job);
     });
   }
 
-  async refreshBlockedDependencies(
-    jobId: string,
-    rawDependencies: readonly z.infer<typeof BlockedDependencySchema>[],
-  ): Promise<AnalysisJobSnapshot> {
+  async refreshBlockedDependencies(jobId: string): Promise<AnalysisJobSnapshot> {
     return this.#serializeMutation(async () => {
       const job = this.#requireJob(jobId);
       if (job.state !== "blocked") throw new Error("Analysis Job is not blocked");
-      const blockedDependencies = z.array(BlockedDependencySchema).parse(rawDependencies);
+      const blockedDependencies = await this.#resolveBlockedDependencies(job);
       job.blockedDependencies = blockedDependencies;
       if (blockedDependencies.length === 0) {
         job.state = "queued";
         job.queuePosition = nextQueuePosition(this.#state.jobs);
       }
       job.updatedAt = this.#now().toISOString();
-      await this.persist();
+      await this.#persist();
       return structuredClone(job);
     });
+  }
+
+  async #resolveBlockedDependencies(input: {
+    canonicalAudioFingerprint: string;
+    projectId: string;
+    recipe: AnalysisRecipe;
+    sourceSnapshotId: string;
+  }): Promise<z.infer<typeof BlockedDependencySchema>[]> {
+    return z
+      .array(BlockedDependencySchema)
+      .parse(await this.#authority.resolveBlockedDependencies(input))
+      .toSorted(
+        (left, right) => left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id),
+      );
+  }
+
+  #completePublication(
+    job: AnalysisJobSnapshot,
+    attempt: AnalysisAttemptSnapshot,
+    projectRevisionId: string,
+  ): void {
+    if (
+      attempt.candidateAnalysisRevisionId === undefined ||
+      attempt.candidateManifestHash === undefined
+    ) {
+      throw new Error("Published Analysis Attempt has no validated candidate identity");
+    }
+    const timestamp = this.#now().toISOString();
+    delete attempt.failure;
+    attempt.finishedAt = timestamp;
+    attempt.publishedProjectRevisionId = projectRevisionId;
+    attempt.stageOutcomes = [
+      ...attempt.stageOutcomes.filter(
+        ({ stage }) => !MAIN_STAGES.some((mainStage) => mainStage === stage),
+      ),
+      { stage: "main_validation", state: "completed" },
+      { stage: "publish", state: "completed" },
+    ];
+    attempt.state = "succeeded";
+    job.publishedAnalysisRevisionId = attempt.candidateAnalysisRevisionId;
+    job.progress = {
+      completedFraction: 1,
+      elapsedMs: job.progress?.elapsedMs ?? 0,
+      estimateKind: "benchmark_approximate",
+      profile: job.profile,
+      stage: "publish",
+    };
+    job.state = "succeeded";
+    job.updatedAt = timestamp;
   }
 
   #requireJob(jobId: string): AnalysisJobSnapshot {
@@ -673,7 +763,7 @@ export class AnalysisJobs {
       }
       job.progress = progress;
       job.updatedAt = this.#now().toISOString();
-      await this.persist();
+      await this.#persist();
     });
   }
 
@@ -705,7 +795,7 @@ export class AnalysisJobs {
         this.#state.checkpoints.push(checkpoint);
       }
       if (!attempt.checkpointIds.includes(checkpoint.id)) attempt.checkpointIds.push(checkpoint.id);
-      await this.persist();
+      await this.#persist();
     });
   }
 
@@ -716,9 +806,9 @@ export class AnalysisJobs {
   ): Promise<void> {
     if (signal.aborted) throw signal.reason;
     const durable = await readState(this.#path);
-    const currentJob = durable.state.jobs.find(({ id }) => id === jobId);
+    const currentJob = durable.jobs.find(({ id }) => id === jobId);
     if (
-      durable.state.runtimeSessionId !== this.#state.runtimeSessionId ||
+      durable.runtimeSessionId !== this.#state.runtimeSessionId ||
       currentJob?.state !== "running"
     ) {
       if (currentJob === undefined) {
@@ -727,12 +817,12 @@ export class AnalysisJobs {
           message: "Analysis Job disappeared during its Attempt",
           nextAction: "retry",
           retryable: true,
-          stage: "analysis",
+          stage: "preflight",
         });
       }
       throw new SupersededRuntimeError(structuredClone(currentJob));
     }
-    const currentAttempt = durable.state.attempts.find(({ id }) => id === attemptId);
+    const currentAttempt = durable.attempts.find(({ id }) => id === attemptId);
     if (currentAttempt?.state !== "running") {
       throw new SupersededRuntimeError(structuredClone(currentJob));
     }
@@ -760,16 +850,11 @@ function emptyState(): z.infer<typeof AnalysisJobStateSchema> {
   };
 }
 
-async function readState(
-  path: string,
-): Promise<{ existed: boolean; state: z.infer<typeof AnalysisJobStateSchema> }> {
+async function readState(path: string): Promise<z.infer<typeof AnalysisJobStateSchema>> {
   try {
-    return {
-      existed: true,
-      state: AnalysisJobStateSchema.parse(JSON.parse(await readFile(path, "utf8"))),
-    };
+    return AnalysisJobStateSchema.parse(JSON.parse(await readFile(path, "utf8")));
   } catch (error) {
-    if (isMissingPathError(error)) return { existed: false, state: emptyState() };
+    if (isMissingPathError(error)) return emptyState();
     throw error;
   }
 }
@@ -807,14 +892,77 @@ function nextQueuePosition(jobs: readonly AnalysisJobSnapshot[]): number {
 }
 
 function validateRunnerStageOutcomes(
+  job: AnalysisJobSnapshot,
   rawOutcomes: readonly z.infer<typeof RunnerStageOutcomeSchema>[],
 ): z.infer<typeof RunnerStageOutcomeSchema>[] {
-  const outcomes = z.array(RunnerStageOutcomeSchema).length(5).parse(rawOutcomes);
-  const expected = ["preflight", "canonical_decode", "shared_features", "analysis", "assemble"];
+  const expected = expectedPipeline(job.recipe.capabilities).slice(0, -MAIN_STAGES.length);
+  const outcomes = z.array(RunnerStageOutcomeSchema).length(expected.length).parse(rawOutcomes);
   if (outcomes.some(({ stage }, index) => stage !== expected[index])) {
     throw new Error("Analysis runner did not complete the declared DAG in order");
   }
   return outcomes;
+}
+
+function expectedPipeline(
+  capabilities: readonly AnalysisRecipe["capabilities"][number][],
+): Array<z.infer<typeof PipelineStageSchema>> {
+  const requested = new Set(capabilities);
+  const capabilityStages = CAPABILITY_STAGES.filter(
+    (stage) =>
+      (stage === "rhythm" && (requested.has("rhythm") || requested.has("meter"))) ||
+      (stage === "harmony" && (requested.has("key") || requested.has("chords"))) ||
+      (stage === "sections" && requested.has("sections")),
+  );
+  return [...RUNNER_PREFIX_STAGES, ...capabilityStages, ...RUNNER_SUFFIX_STAGES, ...MAIN_STAGES];
+}
+
+function validateAnalysisCandidate(
+  job: AnalysisJobSnapshot,
+  attemptId: string,
+  raw: {
+    manifest: AnalysisCandidateManifest;
+    revision: AnalysisRevision;
+    stageOutcomes: z.infer<typeof RunnerStageOutcomeSchema>[];
+  },
+): {
+  revision: AnalysisRevision;
+  stageOutcomes: z.infer<typeof RunnerStageOutcomeSchema>[];
+} {
+  const manifest = AnalysisCandidateManifestSchema.parse(raw.manifest);
+  const expectedManifest = AnalysisCandidateManifestSchema.parse({
+    attemptId,
+    canonicalAudioFingerprint: job.canonicalAudioFingerprint,
+    jobKey: job.key,
+    projectId: job.projectId,
+    recipeHash: job.recipeHash,
+    sourceSnapshotId: job.sourceSnapshotId,
+  });
+  if (canonicalSerialize(manifest) !== canonicalSerialize(expectedManifest)) {
+    throw new AnalysisRunError({
+      classification: "integrity_violation",
+      message: "Analysis candidate identity does not match its Job and Attempt",
+      nextAction: "repair_installation",
+      retryable: false,
+      stage: "main_validation",
+    });
+  }
+  const manifestHash = hashIdentity(manifest);
+  const expectedRevisionId = `revision_${manifestHash.slice("sha256:".length)}`;
+  const revision = AnalysisRevisionSchema.parse(raw.revision);
+  if (
+    revision.projectId !== job.projectId ||
+    revision.manifestHash !== manifestHash ||
+    revision.id !== expectedRevisionId
+  ) {
+    throw new AnalysisRunError({
+      classification: "integrity_violation",
+      message: "Analysis Revision is not derived from its verified candidate manifest",
+      nextAction: "repair_installation",
+      retryable: false,
+      stage: "main_validation",
+    });
+  }
+  return { revision, stageOutcomes: validateRunnerStageOutcomes(job, raw.stageOutcomes) };
 }
 
 function normalizeRunFailure(error: unknown): AnalysisFailure {
@@ -848,10 +996,11 @@ class SupersededRuntimeError extends Error {
   }
 }
 
-function recoverStateAfterRestart(
+async function recoverStateAfterRestart(
   state: z.infer<typeof AnalysisJobStateSchema>,
+  authority: AnalysisProjectAuthority,
   now: Date,
-): z.infer<typeof AnalysisJobStateSchema> {
+): Promise<z.infer<typeof AnalysisJobStateSchema>> {
   const recovered = structuredClone(state);
   recovered.circuitBreaker = null;
   const timestamp = now.toISOString();
@@ -868,6 +1017,41 @@ function recoverStateAfterRestart(
         (attemptState === "running" || attemptState === "cancelling"),
     );
     if (attempt === undefined) continue;
+    if (
+      attempt.candidateAnalysisRevisionId !== undefined &&
+      attempt.candidateManifestHash !== undefined
+    ) {
+      const snapshot = await authority.getSnapshot(job.projectId);
+      const published = snapshot?.project.analysisRevisions.find(
+        ({ id }) => id === attempt.candidateAnalysisRevisionId,
+      );
+      if (
+        snapshot !== null &&
+        published !== undefined &&
+        published.manifestHash === attempt.candidateManifestHash
+      ) {
+        delete attempt.failure;
+        attempt.finishedAt = timestamp;
+        attempt.publishedProjectRevisionId = snapshot.projectRevisionId;
+        attempt.stageOutcomes = [
+          ...attempt.stageOutcomes,
+          { stage: "main_validation", state: "completed" },
+          { stage: "publish", state: "completed" },
+        ];
+        attempt.state = "succeeded";
+        job.publishedAnalysisRevisionId = published.id;
+        job.progress = {
+          completedFraction: 1,
+          elapsedMs: job.progress?.elapsedMs ?? 0,
+          estimateKind: "benchmark_approximate",
+          profile: job.profile,
+          stage: "publish",
+        };
+        job.state = "succeeded";
+        job.updatedAt = timestamp;
+        continue;
+      }
+    }
     const wasCancelling = job.state === "cancelling";
     attempt.failure = AnalysisFailureSchema.parse({
       classification: wasCancelling ? "cancelled" : "interrupted",
@@ -876,7 +1060,7 @@ function recoverStateAfterRestart(
         : "Analysis Attempt was interrupted by restart",
       nextAction: "retry",
       retryable: true,
-      stage: "analysis",
+      stage: "preflight",
     });
     attempt.finishedAt = timestamp;
     attempt.state = wasCancelling ? "cancelled" : "failed";
