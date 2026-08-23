@@ -1,3 +1,5 @@
+import type { Writable } from "node:stream";
+
 import { z } from "zod";
 
 import { decodeSidecarFrames, encodeSidecarFrame } from "./sidecar-protocol.ts";
@@ -13,10 +15,13 @@ const StartSchema = z.object({
   type: z.literal("start"),
 });
 
-export async function runPackagedSidecarProof(): Promise<void> {
-  for await (const rawMessage of decodeSidecarFrames(process.stdin)) {
+export async function runPackagedSidecarProof(
+  input: AsyncIterable<Uint8Array> = process.stdin,
+  output: Writable = process.stdout,
+): Promise<void> {
+  for await (const rawMessage of decodeSidecarFrames(input)) {
     const message = StartSchema.parse(rawMessage);
-    await writeFrame({
+    await writeFrame(output, {
       capabilities: ["analysis"],
       manifestHash: message.manifestHash,
       nonce: message.nonce,
@@ -24,7 +29,7 @@ export async function runPackagedSidecarProof(): Promise<void> {
       sequence: 0,
       type: "handshake",
     });
-    await writeFrame({
+    await writeFrame(output, {
       artifact: { byteSize: 42, path: "result.json", sha256: "b".repeat(64) },
       jobId: message.jobId,
       nonce: message.nonce,
@@ -32,14 +37,28 @@ export async function runPackagedSidecarProof(): Promise<void> {
       sequence: 1,
       type: "result",
     });
+    await endOutput(output);
+    return;
   }
+
+  throw new Error("Packaged sidecar proof closed before receiving a start frame");
 }
 
-async function writeFrame(message: unknown): Promise<void> {
+async function writeFrame(output: Writable, message: unknown): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    process.stdout.write(encodeSidecarFrame(message), (error) => {
+    output.write(encodeSidecarFrame(message), (error) => {
       if (error === null || error === undefined) resolve();
       else reject(error);
+    });
+  });
+}
+
+async function endOutput(output: Writable): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    output.once("error", reject);
+    output.end(() => {
+      output.off("error", reject);
+      resolve();
     });
   });
 }
