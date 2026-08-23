@@ -11,7 +11,7 @@
     "-select_streams",
     "a:0",
     "-show_entries",
-    "stream=codec_name,codec_type,sample_rate,channels,channel_layout",
+    "stream=codec_type",
     "-of",
     "json"
   ]

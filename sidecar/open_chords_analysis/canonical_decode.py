@@ -249,7 +249,7 @@ def _probe_audio(
                 "-select_streams",
                 "a:0",
                 "-show_entries",
-                "stream=codec_name,codec_type,sample_rate,channels,channel_layout",
+                "stream=codec_type",
                 "-of",
                 "json",
                 str(input_path),
@@ -290,6 +290,16 @@ def _probe_audio(
             "ffprobe returned an invalid result",
             code=CanonicalDecodeFailureCode.PROBE_OUTPUT,
         )
+    if not set(parsed).issubset({"programs", "stream_groups", "streams"}):
+        raise CanonicalDecodeError(
+            "ffprobe returned unexpected result fields",
+            code=CanonicalDecodeFailureCode.PROBE_OUTPUT,
+        )
+    if any(parsed.get(field, []) != [] for field in ("programs", "stream_groups")):
+        raise CanonicalDecodeError(
+            "ffprobe returned unexpected grouped streams",
+            code=CanonicalDecodeFailureCode.PROBE_OUTPUT,
+        )
     streams = parsed.get("streams")
     if (
         not isinstance(streams, list)
@@ -304,25 +314,7 @@ def _probe_audio(
 
 
 def _is_bounded_audio_stream(stream: object) -> bool:
-    if not isinstance(stream, dict) or stream.get("codec_type") != "audio":
-        return False
-    expected_fields: tuple[tuple[str, type, int], ...] = (
-        ("codec_name", str, 128),
-        ("sample_rate", str, 32),
-        ("channels", int, 64),
-        ("channel_layout", str, 256),
-    )
-    for field, expected_type, upper_bound in expected_fields:
-        value = stream.get(field)
-        if value is None:
-            continue
-        if type(value) is not expected_type:
-            return False
-        if isinstance(value, str) and not 0 < len(value) <= upper_bound:
-            return False
-        if isinstance(value, int) and not 0 < value <= upper_bound:
-            return False
-    return True
+    return isinstance(stream, dict) and stream == {"codec_type": "audio"}
 
 
 def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResult:

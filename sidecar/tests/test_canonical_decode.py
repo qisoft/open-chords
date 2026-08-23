@@ -152,11 +152,16 @@ class CanonicalDecodeTests(unittest.TestCase):
     def test_rejects_hostile_probe_stream_shapes(self) -> None:
         malformed_outputs = (
             b"{}",
+            b'{"streams":[],"unexpected":"private"}',
+            b'{"programs":[{}],"streams":[]}',
+            b'{"stream_groups":{},"streams":[]}',
             b'{"streams":"audio"}',
             b'{"streams":{"unexpected":true}}',
             b'{"streams":[42]}',
             b'{"streams":[{}]}',
             b'{"streams":[{"codec_type":"video"}]}',
+            b'{"streams":[{"codec_type":"audio","unexpected":"private"}]}',
+            b'{"streams":[{"codec_type":"audio","sample_rate":"garbage"}]}',
             b'{"streams":[{"codec_type":"audio","channels":"2"}]}',
             b'{"streams":[{"codec_type":"audio"},{"codec_type":"audio"}]}',
         )
