@@ -262,19 +262,31 @@ def _validate_native_closure(
     native_files: list[dict[str, str]],
     ffmpeg_build: dict[str, object],
 ) -> None:
-    packaged_names = {Path(entry["path"]).name.lower() for entry in native_files}
+    packaged_paths = {
+        path.relative_to(runtime_root).as_posix().lower()
+        for path in runtime_root.rglob("*")
+        if path.is_file() or path.is_symlink()
+    }
     if sys.platform == "darwin":
         for entry in native_files:
             if entry["format"] != "mach-o":
                 continue
             owner = runtime_root / entry["path"]
-            dependencies = _macho_dependencies(owner)
+            identity, dependencies, rpaths = _macho_load_commands(owner)
             for dependency in dependencies:
-                _validate_macho_dependency(runtime_root, owner, dependency, packaged_names)
+                if dependency != identity:
+                    _validate_macho_dependency(
+                        runtime_root,
+                        owner,
+                        dependency,
+                        rpaths,
+                        packaged_paths,
+                    )
         return
     if os.name == "nt":
         allowed_system = {
-            str(name).lower() for name in ffmpeg_build["windowsSystemDlls"]
+            str(name).lower()
+            for name in ffmpeg_build["windowsFrozenRuntimeSystemDlls"]
         }
         inspector = shutil.which("objdump") or "C:/msys64/ucrt64/bin/objdump.exe"
         if not Path(inspector).is_file():
@@ -283,34 +295,69 @@ def _validate_native_closure(
             if entry["format"] != "pe":
                 continue
             dependencies = _pe_dependencies(runtime_root / entry["path"], inspector)
-            _validate_pe_dependencies(entry["path"], dependencies, packaged_names, allowed_system)
+            _validate_pe_dependencies(entry["path"], dependencies, packaged_paths, allowed_system)
         return
     raise RuntimeError("frozen native closure validation has no declared platform profile")
 
 
-def _macho_dependencies(path: Path) -> list[str]:
-    result = subprocess.run(
+def _macho_load_commands(path: Path) -> tuple[str | None, list[str], list[str]]:
+    dependencies_result = subprocess.run(
         ["otool", "-L", str(path)],
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
-    return [line.strip().split(" (", 1)[0] for line in result.stdout.splitlines()[1:] if line.strip()]
+    identity_result = subprocess.run(
+        ["otool", "-D", str(path)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    commands_result = subprocess.run(
+        ["otool", "-l", str(path)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    dependencies = [
+        line.strip().split(" (", 1)[0]
+        for line in dependencies_result.stdout.splitlines()[1:]
+        if line.strip()
+    ]
+    identity_lines = identity_result.stdout.splitlines()[1:]
+    identity = identity_lines[0].strip() if identity_lines else None
+    command_lines = commands_result.stdout.splitlines()
+    rpaths = [
+        command_lines[index + 2].strip().split(" (offset", 1)[0].removeprefix("path ")
+        for index, line in enumerate(command_lines[:-2])
+        if line.strip() == "cmd LC_RPATH"
+    ]
+    return identity, dependencies, rpaths
 
 
 def _validate_macho_dependency(
     runtime_root: Path,
     owner: Path,
     dependency: str,
-    packaged_names: set[str],
+    rpaths: list[str],
+    packaged_paths: set[str],
 ) -> None:
     if dependency.startswith(("/System/Library/", "/usr/lib/")):
         return
     if dependency.startswith("@rpath/"):
-        if Path(dependency).name.lower() in packaged_names:
+        suffix = dependency.removeprefix("@rpath/")
+        matches = {
+            relative
+            for rpath in rpaths
+            if (relative := _packaged_macho_candidate(runtime_root, owner, rpath, suffix))
+            in packaged_paths
+        }
+        if len(matches) == 1:
             return
-        raise RuntimeError(f"Unpackaged Mach-O dependency for {owner.name}: {dependency}")
+        raise RuntimeError(f"Unresolvable Mach-O dependency for {owner.name}: {dependency}")
     relative_prefixes = {
         "@loader_path/": owner.parent,
         "@executable_path/": runtime_root,
@@ -318,10 +365,30 @@ def _validate_macho_dependency(
     for prefix, base in relative_prefixes.items():
         if dependency.startswith(prefix):
             candidate = (base / dependency.removeprefix(prefix)).resolve(strict=True)
-            if candidate.is_relative_to(runtime_root.resolve(strict=True)):
+            relative = candidate.relative_to(runtime_root.resolve(strict=True)).as_posix().lower()
+            if relative in packaged_paths:
                 return
             break
     raise RuntimeError(f"Unreviewed Mach-O dependency for {owner.name}: {dependency}")
+
+
+def _packaged_macho_candidate(
+    runtime_root: Path,
+    owner: Path,
+    rpath: str,
+    dependency_suffix: str,
+) -> str:
+    if rpath.startswith("@loader_path"):
+        base = owner.parent / rpath.removeprefix("@loader_path").removeprefix("/")
+    elif rpath.startswith("@executable_path"):
+        base = runtime_root / rpath.removeprefix("@executable_path").removeprefix("/")
+    else:
+        return ""
+    candidate = (base / dependency_suffix).resolve(strict=False)
+    root = runtime_root.resolve(strict=True)
+    if not candidate.is_relative_to(root):
+        return ""
+    return candidate.relative_to(root).as_posix().lower()
 
 
 def _pe_dependencies(path: Path, inspector: str) -> list[str]:
@@ -339,12 +406,26 @@ def _pe_dependencies(path: Path, inspector: str) -> list[str]:
 def _validate_pe_dependencies(
     owner: str,
     dependencies: list[str],
-    packaged_names: set[str],
+    packaged_paths: set[str],
     allowed_system: set[str],
 ) -> None:
+    owner_path = Path(owner)
+    loader_roots = (
+        {owner_path.parent.as_posix()}
+        if owner_path.parts[0].lower() == "tools"
+        else {"", "_internal", owner_path.parent.as_posix()}
+    )
     for dependency in dependencies:
         dependency_lower = dependency.lower()
-        if dependency_lower not in packaged_names and dependency_lower not in allowed_system:
+        if dependency_lower in allowed_system:
+            continue
+        matches = {
+            (Path(root) / dependency).as_posix().removeprefix("./").lower()
+            for root in loader_roots
+            if (Path(root) / dependency).as_posix().removeprefix("./").lower()
+            in packaged_paths
+        }
+        if len(matches) != 1:
             raise RuntimeError(f"Unpackaged PE dependency for {owner}: {dependency}")
 
 

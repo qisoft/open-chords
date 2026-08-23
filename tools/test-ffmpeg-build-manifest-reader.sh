@@ -28,7 +28,7 @@ assert_scalar_rejected() {
   fi
 }
 
-printf '%s\n' '{"version":"8.1.2","configureArguments":["--disable-network","--disable-doc"],"windowsConfigureArguments":["--disable-pthreads","--enable-w32threads"],"windowsRuntimeDlls":["libwinpthread-1.dll"],"windowsRuntimePackage":"mingw-w64-ucrt-x86_64-libwinpthread","windowsRuntimePackageUrl":"https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-libwinpthread","windowsSystemDlls":["KERNEL32.dll","MSVCRT.dll"]}' > "${fixture_root}/valid.json"
+printf '%s\n' '{"version":"8.1.2","configureArguments":["--disable-network","--disable-doc"],"windowsConfigureArguments":["--disable-pthreads","--enable-w32threads"],"windowsFrozenRuntimeSystemDlls":["COMCTL32.dll","KERNEL32.dll"],"windowsRuntimeDlls":["libwinpthread-1.dll"],"windowsRuntimePackage":"mingw-w64-ucrt-x86_64-libwinpthread","windowsRuntimePackageUrl":"https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-libwinpthread","windowsSystemDlls":["KERNEL32.dll","MSVCRT.dll"]}' > "${fixture_root}/valid.json"
 printf '%s\n' '{"version":"8.1.2"}' > "${fixture_root}/missing.json"
 printf '%s\n' '{"configureArguments":[]}' > "${fixture_root}/empty.json"
 printf '%s\n' '{"configureArguments":["--disable-network",42]}' > "${fixture_root}/non-string.json"
@@ -51,6 +51,9 @@ windows_array="$(bash "${manifest_reader}" array "${fixture_root}/valid.json" wi
 
 windows_system_dlls="$(bash "${manifest_reader}" array "${fixture_root}/valid.json" windowsSystemDlls "${reader}")"
 [[ "${windows_system_dlls}" == $'KERNEL32.dll\nMSVCRT.dll' ]]
+
+windows_frozen_runtime_system_dlls="$(bash "${manifest_reader}" array "${fixture_root}/valid.json" windowsFrozenRuntimeSystemDlls "${reader}")"
+[[ "${windows_frozen_runtime_system_dlls}" == $'COMCTL32.dll\nKERNEL32.dll' ]]
 
 windows_runtime_dlls="$(bash "${manifest_reader}" array "${fixture_root}/valid.json" windowsRuntimeDlls "${reader}")"
 [[ "${windows_runtime_dlls}" == 'libwinpthread-1.dll' ]]

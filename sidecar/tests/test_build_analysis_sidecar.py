@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import runpy
 import tempfile
 import unittest
@@ -101,33 +102,46 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix="open-chords-macho-closure-") as temporary:
             runtime_root = Path(temporary).resolve()
-            owner = runtime_root / "open-chords-analysis"
+            owner = runtime_root / "_internal/python3.13/lib-dynload/_ssl.so"
+            owner.parent.mkdir(parents=True)
             owner.write_bytes(b"sidecar")
+            packaged_library = runtime_root / "_internal/libcrypto.3.dylib"
+            packaged_library.write_bytes(b"crypto")
             validate_dependency(
                 runtime_root,
                 owner,
                 "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
-                {"open-chords-analysis", "libcrypto.3.dylib"},
+                [],
+                {"_internal/libcrypto.3.dylib", "_internal/python3.13/lib-dynload/_ssl.so"},
             )
             validate_dependency(
                 runtime_root,
                 owner,
                 "@rpath/libcrypto.3.dylib",
-                {"open-chords-analysis", "libcrypto.3.dylib"},
+                ["@loader_path/../.."],
+                {"_internal/libcrypto.3.dylib", "_internal/python3.13/lib-dynload/_ssl.so"},
             )
-            with self.assertRaisesRegex(RuntimeError, "Unpackaged Mach-O dependency"):
+            unrelated_library = runtime_root / "unrelated/libmissing.dylib"
+            unrelated_library.parent.mkdir()
+            unrelated_library.write_bytes(b"unrelated")
+            with self.assertRaisesRegex(RuntimeError, "Unresolvable Mach-O dependency"):
                 validate_dependency(
                     runtime_root,
                     owner,
                     "@rpath/libmissing.dylib",
-                    {"open-chords-analysis"},
+                    ["@loader_path/../.."],
+                    {
+                        "_internal/python3.13/lib-dynload/_ssl.so",
+                        "unrelated/libmissing.dylib",
+                    },
                 )
             with self.assertRaisesRegex(RuntimeError, "Unreviewed Mach-O dependency"):
                 validate_dependency(
                     runtime_root,
                     owner,
                     "/opt/homebrew/lib/libhost.dylib",
-                    {"open-chords-analysis"},
+                    [],
+                    {"_internal/python3.13/lib-dynload/_ssl.so"},
                 )
 
     def test_rejects_unpackaged_pe_dependencies(self) -> None:
@@ -138,16 +152,24 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
         validate_dependencies(
             "open-chords-analysis.exe",
             ["KERNEL32.dll", "python313.dll"],
-            {"open-chords-analysis.exe", "python313.dll"},
+            {"open-chords-analysis.exe", "_internal/python313.dll"},
             {"kernel32.dll"},
         )
         with self.assertRaisesRegex(RuntimeError, "Unpackaged PE dependency"):
             validate_dependencies(
-                "open-chords-analysis.exe",
-                ["host-only.dll"],
-                {"open-chords-analysis.exe"},
+                "tools/ffmpeg.exe",
+                ["python313.dll"],
+                {"tools/ffmpeg.exe", "unrelated/python313.dll"},
                 {"kernel32.dll"},
             )
+
+    def test_keeps_ffmpeg_and_frozen_runtime_system_authorities_separate(self) -> None:
+        manifest = json.loads(
+            (Path(__file__).resolve().parents[1] / "native/ffmpeg-build.json").read_text("utf-8")
+        )
+
+        self.assertNotIn("COMCTL32.dll", manifest["windowsSystemDlls"])
+        self.assertIn("COMCTL32.dll", manifest["windowsFrozenRuntimeSystemDlls"])
 
 
 if __name__ == "__main__":
