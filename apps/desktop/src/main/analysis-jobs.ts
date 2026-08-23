@@ -575,14 +575,16 @@ export class AnalysisJobs {
       const rawProjectRange = await this.#authority.getProjectRange(input.projectId);
       if (rawProjectRange === null) throw new Error(`Project ${input.projectId} was not found`);
       const projectRange = AnalysisProjectRangeSchema.parse(rawProjectRange);
-      const existingProjectJob = this.#state.jobs.find(
+      const existingProjectJobs = this.#state.jobs.filter(
         ({ projectId }) => projectId === input.projectId,
       );
       if (
-        existingProjectJob !== undefined &&
-        canonicalSerialize(existingProjectJob.projectRange) !== canonicalSerialize(projectRange)
+        existingProjectJobs.some(
+          (job) => canonicalSerialize(job.projectRange) !== canonicalSerialize(projectRange),
+        )
       ) {
-        return this.#rejectSubmitRangeIntegrity(existingProjectJob, projectRangeIntegrityFailure());
+        const activeProjectJob = existingProjectJobs.find(({ id }) => id === this.#active?.jobId);
+        return this.#rejectSubmitRangeIntegrity(activeProjectJob, projectRangeIntegrityFailure());
       }
       const key = hashIdentity({
         projectId: input.projectId,
@@ -883,7 +885,7 @@ export class AnalysisJobs {
   }
 
   async #rejectSubmitRangeIntegrity(
-    job: AnalysisJobSnapshot,
+    activeJob: AnalysisJobSnapshot | undefined,
     error: AnalysisRunError,
   ): Promise<never> {
     const timestamp = this.#now().toISOString();
@@ -891,20 +893,20 @@ export class AnalysisJobs {
       classification: "integrity_violation",
       openedAt: timestamp,
     };
-    const active = this.#active?.jobId === job.id ? this.#active : undefined;
+    const active = this.#active?.jobId === activeJob?.id ? this.#active : undefined;
     const attempt =
       active === undefined
         ? undefined
         : this.#state.attempts.find(({ id }) => id === active.attemptId);
-    if (active !== undefined && attempt !== undefined) {
+    if (activeJob !== undefined && active !== undefined && attempt !== undefined) {
       attempt.failure = error.failure;
       attempt.finishedAt = timestamp;
       attempt.state = "failed";
-      job.state = "blocked";
-      job.updatedAt = timestamp;
+      activeJob.state = "blocked";
+      activeJob.updatedAt = timestamp;
     }
     await this.#persist();
-    if (active !== undefined && attempt !== undefined) {
+    if (activeJob !== undefined && active !== undefined && attempt !== undefined) {
       active.controller.abort(error);
       try {
         await this.#terminateRunner(attempt.id, "interrupted");

@@ -1466,6 +1466,93 @@ describe("AnalysisJobs", () => {
     expect(jobs.get("job_succeeded_range").job).toEqual(succeeded);
   });
 
+  it("contains the active same-Project Job even when an earlier Job is already terminal", async () => {
+    let startSourceSample = 0;
+    let reportSecondStarted!: () => void;
+    const secondStarted = new Promise<void>((resolve) => {
+      reportSecondStarted = resolve;
+    });
+    const terminations: Array<{ attemptId: string; reason: string }> = [];
+    const ids = [
+      "job_terminal_first",
+      "attempt_terminal_first",
+      "job_active_second",
+      "attempt_active_second",
+    ];
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getProjectRange: async () => ({
+          endSourceSample: startSourceSample + goldenProject.durationSamples,
+          sourceId: "source_fixture",
+          startSourceSample,
+        }),
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_published" }),
+      },
+      idFactory: () => ids.shift()!,
+      runner: {
+        run: async (input) => {
+          if (input.job.id === "job_active_second") {
+            reportSecondStarted();
+            await new Promise<void>((_resolve, reject) => {
+              input.signal.addEventListener("abort", () => reject(input.signal.reason), {
+                once: true,
+              });
+            });
+            throw new Error("unreachable");
+          }
+          return {
+            revision: structuredClone(goldenProject.analysisRevisions[0]!),
+            stageOutcomes: [
+              { stage: "preflight", state: "completed" },
+              { stage: "canonical_decode", state: "completed" },
+              { stage: "shared_features", state: "completed" },
+              { stage: "rhythm", state: "completed" },
+              { stage: "harmony", state: "completed" },
+              { stage: "assemble", state: "completed" },
+            ],
+          };
+        },
+        terminateAndWait: async (input) => {
+          terminations.push(input);
+        },
+      },
+      stateRoot: await temporaryDirectory(),
+    });
+    const firstRequest = {
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    } as const;
+    const secondRecipe: AnalysisRecipe = {
+      ...recipe,
+      settings: { ...recipe.settings, hopLength: 1_024 },
+    };
+    await jobs.submit(firstRequest);
+    await jobs.runNext();
+    const terminal = jobs.get("job_terminal_first").job;
+    await jobs.submit({ ...firstRequest, recipe: secondRecipe });
+    const activeRun = jobs.runNext();
+    await secondStarted;
+    startSourceSample = 1_000;
+
+    await expect(jobs.submit(firstRequest)).rejects.toMatchObject({
+      failure: { classification: "integrity_violation" },
+    });
+    await activeRun;
+    expect(jobs.get("job_terminal_first").job).toEqual(terminal);
+    expect(jobs.get("job_active_second")).toMatchObject({
+      attempts: [{ failure: { classification: "integrity_violation" }, state: "failed" }],
+      job: { state: "blocked" },
+    });
+    expect(terminations).toEqual([{ attemptId: "attempt_active_second", reason: "interrupted" }]);
+  });
+
   it("rejects a tampered retained Checkpoint before runner reuse", async () => {
     const stateRoot = await temporaryDirectory();
     let runs = 0;
