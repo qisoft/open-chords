@@ -51,7 +51,7 @@
     },
     {
       "component": "zstd",
-      "license": "BSD-3-Clause OR GPL-2.0-only",
+      "license": "BSD-3-Clause",
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "Zstandard",
       "role": "CPython runtime dependency",
