@@ -1278,11 +1278,29 @@ async function atomicWrite(path: string, content: string): Promise<void> {
     await file.close();
   }
   await rename(temporary, path);
-  const directory = await open(parent, "r");
+  await syncDirectory(parent);
+}
+
+async function syncDirectory(path: string): Promise<void> {
   try {
-    await directory.sync();
-  } finally {
-    await directory.close();
+    const directory = await open(path, "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } catch (error) {
+    if (
+      process.platform === "win32" &&
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof error.code === "string" &&
+      ["EISDIR", "EINVAL", "ENOTSUP", "EPERM"].includes(error.code)
+    ) {
+      return;
+    }
+    throw error;
   }
 }
 
