@@ -230,42 +230,21 @@ async function acquireSidecarProcess(
   signal: AbortSignal,
 ): Promise<SidecarProcess> {
   if (signal.aborted) throw acquisitionAbortError(request, signal);
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const abort = () => {
-      if (settled) return;
-      settled = true;
-      reject(acquisitionAbortError(request, signal));
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    void launcher.launch(request, signal).then(
-      (process) => {
-        signal.removeEventListener("abort", abort);
-        if (settled || signal.aborted) {
-          const reason =
-            signal.reason instanceof SidecarSessionError ? signal.reason.code : "cancelled";
-          void process.stop(reason).catch(() => undefined);
-          return true;
-        }
-        settled = true;
-        resolve(process);
-        return true;
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", abort);
-        if (settled) return true;
-        settled = true;
-        reject(
-          error instanceof SidecarSessionError
-            ? error
-            : new SidecarSessionError("launch_failure", "Sidecar launch failed", {
-                cause: error,
-              }),
-        );
-        return true;
-      },
-    );
-  });
+  let process: SidecarProcess;
+  try {
+    process = await launcher.launch(request, signal);
+  } catch (error) {
+    if (error instanceof SidecarSessionError && error.code === "cleanup_failure") throw error;
+    if (signal.aborted) throw acquisitionAbortError(request, signal);
+    throw error instanceof SidecarSessionError
+      ? error
+      : new SidecarSessionError("launch_failure", "Sidecar launch failed", { cause: error });
+  }
+  if (!signal.aborted) return process;
+
+  const reason = signal.reason instanceof SidecarSessionError ? signal.reason.code : "cancelled";
+  await releaseProcess(process, reason);
+  throw acquisitionAbortError(request, signal);
 }
 
 function acquisitionAbortError(

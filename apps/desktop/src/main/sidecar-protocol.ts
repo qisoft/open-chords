@@ -44,6 +44,16 @@ const SessionMessageBaseSchema = z
     sequence: z.number().int().positive(),
   })
   .strict();
+const StartSchema = z
+  .object({
+    jobId: JobIdSchema,
+    manifestHash: Sha256Schema,
+    nonce: NonceSchema,
+    requestId: RequestIdSchema,
+    sequence: z.literal(0),
+    type: z.literal("start"),
+  })
+  .strict();
 const ResultSchema = SessionMessageBaseSchema.extend({
   artifact: z.object({
     byteSize: z.number().int().nonnegative(),
@@ -286,6 +296,16 @@ export function parseSidecarSessionRequest(
   const parsed = SidecarSessionRequestSchema.safeParse(input);
   if (!parsed.success) {
     throw new SidecarSessionError("invalid_request", "Invalid sidecar request", {
+      cause: parsed.error,
+    });
+  }
+  return parsed.data;
+}
+
+export function parseSidecarStartMessage(input: unknown): z.output<typeof StartSchema> {
+  const parsed = StartSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new SidecarSessionError("protocol_violation", "Invalid sidecar start message", {
       cause: parsed.error,
     });
   }

@@ -11,10 +11,8 @@ import { app, dialog, type BrowserWindow, type WebContents } from "electron";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
-import {
-  PACKAGED_SIDECAR_PROOF_ARGUMENT,
-  runPackagedSidecarProof,
-} from "./packaged-sidecar-proof.ts";
+import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-constants.ts";
+import { runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
 import {
@@ -25,10 +23,13 @@ import { createDesktopWindow, hardenWebContents } from "./shell.ts";
 import { presentDesktopWindow } from "./window-lifecycle.ts";
 
 if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
-  void runPackagedSidecarProof().then(
-    () => app.exit(0),
-    () => app.exit(1),
-  );
+  void app
+    .whenReady()
+    .then(runPackagedSidecarProof)
+    .then(
+      () => app.exit(0),
+      () => app.exit(1),
+    );
 } else {
   registerRendererScheme();
 

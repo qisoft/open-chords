@@ -1,64 +1,99 @@
-import type { Writable } from "node:stream";
+import { join } from "node:path";
 
-import { z } from "zod";
+import { utilityProcess } from "electron";
 
-import { decodeSidecarFrames, encodeSidecarFrame } from "./sidecar-protocol.ts";
+import {
+  createEffectSidecarClient,
+  parseSidecarSessionRequest,
+  SidecarSessionError,
+  type SidecarProcessLauncher,
+} from "./sidecar-session.ts";
+import {
+  observeUtilityExit,
+  waitForUtilityReap,
+  waitForUtilitySpawn,
+} from "./sidecar-utility-process.ts";
 
-export const PACKAGED_SIDECAR_PROOF_ARGUMENT = "--sidecar-lifecycle-proof";
-
-const StartSchema = z.object({
-  jobId: z.string().min(1).max(256),
-  manifestHash: z.string().regex(/^[a-f0-9]{64}$/u),
-  nonce: z.string().min(1).max(256),
-  requestId: z.string().min(1).max(256),
-  sequence: z.literal(0),
-  type: z.literal("start"),
-});
-
-export async function runPackagedSidecarProof(
-  input: AsyncIterable<Uint8Array> = process.stdin,
-  output: Writable = process.stdout,
-): Promise<void> {
-  for await (const rawMessage of decodeSidecarFrames(input)) {
-    const message = StartSchema.parse(rawMessage);
-    await writeFrame(output, {
-      capabilities: ["analysis"],
-      manifestHash: message.manifestHash,
-      nonce: message.nonce,
-      protocolVersion: 1,
-      sequence: 0,
-      type: "handshake",
-    });
-    await writeFrame(output, {
-      artifact: { byteSize: 42, path: "result.json", sha256: "b".repeat(64) },
-      jobId: message.jobId,
-      nonce: message.nonce,
-      requestId: message.requestId,
-      sequence: 1,
-      type: "result",
-    });
-    await endOutput(output);
-    return;
+export async function runPackagedSidecarProof(): Promise<void> {
+  let stopReason: string | undefined;
+  const client = createEffectSidecarClient(
+    createPackagedUtilityProcessLauncherForProof((reason) => {
+      stopReason = reason;
+    }),
+  );
+  const request = parseSidecarSessionRequest({
+    jobId: "job-packaged-proof",
+    manifestHash: "a".repeat(64),
+    nonce: "nonce-packaged-proof",
+    requestId: "request-packaged-proof",
+    timeoutMs: 5_000,
+  });
+  try {
+    const result = await client.runSession(request);
+    if (
+      result.artifact.path !== "result.json" ||
+      result.jobId !== request.jobId ||
+      result.requestId !== request.requestId ||
+      stopReason !== "completed"
+    ) {
+      throw new Error("Packaged sidecar lifecycle proof returned unexpected evidence");
+    }
+  } finally {
+    await client.dispose();
   }
-
-  throw new Error("Packaged sidecar proof closed before receiving a start frame");
 }
 
-async function writeFrame(output: Writable, message: unknown): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    output.write(encodeSidecarFrame(message), (error) => {
-      if (error === null || error === undefined) resolve();
-      else reject(error);
-    });
-  });
+function createPackagedUtilityProcessLauncherForProof(
+  onStop: (reason: string) => void,
+): SidecarProcessLauncher {
+  return {
+    async launch(_request, signal) {
+      const child = utilityProcess.fork(
+        join(process.resourcesPath, "packaged-sidecar-worker.cjs"),
+        [],
+        {
+          cwd: process.resourcesPath,
+          env: {},
+          serviceName: "Open Chords packaged sidecar proof",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = observeUtilityExit(child);
+      await waitForUtilitySpawn(child, exited, signal);
+      const stdout = child.stdout;
+      if (child.pid === undefined || stdout === null) {
+        throw new SidecarSessionError(
+          "launch_failure",
+          "Packaged sidecar utility process pipe was unavailable",
+        );
+      }
+      child.stderr?.on("data", () => undefined);
+      let stopped = false;
+      return {
+        stdout: readUtilityOutput(stdout),
+        async stop(reason) {
+          if (stopped) return;
+          stopped = true;
+          onStop(reason);
+          if (child.pid === undefined) return;
+          if (!child.kill()) {
+            throw new SidecarSessionError(
+              "cleanup_failure",
+              "Packaged sidecar utility process could not be terminated",
+            );
+          }
+          await waitForUtilityReap(exited);
+        },
+        async write(frame) {
+          child.postMessage(Buffer.from(frame));
+        },
+      };
+    },
+  };
 }
 
-async function endOutput(output: Writable): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    output.once("error", reject);
-    output.end(() => {
-      output.off("error", reject);
-      resolve();
-    });
-  });
+async function* readUtilityOutput(stdout: NodeJS.ReadableStream): AsyncIterable<Uint8Array> {
+  for await (const chunk of stdout as AsyncIterable<string | Uint8Array>) {
+    yield typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+  }
 }

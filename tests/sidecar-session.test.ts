@@ -5,6 +5,7 @@ import {
   createPromiseSidecarClient,
   encodeSidecarFrame,
   parseSidecarSessionRequest,
+  SidecarSessionError,
   type SidecarProcess,
   type SidecarProcessLauncher,
   type SidecarSessionRequest,
@@ -364,6 +365,70 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
 
     expect(await result).toMatchObject({ code: "cancelled" });
     expect(probe.wasAborted()).toBe(true);
+    await client.dispose();
+  });
+
+  it("awaits cleanup when acquisition resolves after cancellation", async () => {
+    const controller = new AbortController();
+    let finishStop!: () => void;
+    let stopStarted = false;
+    let stopFinished = false;
+    const process = new FakeProcess([]);
+    process.stop = async (reason) => {
+      process.stops.push(reason);
+      stopStarted = true;
+      await new Promise<void>((resolve) => {
+        finishStop = resolve;
+      });
+      stopFinished = true;
+    };
+    const client = createClient({
+      launch: async (_request, signal) => {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return process;
+      },
+    });
+    let settled = false;
+    const result = client
+      .runSession({ ...request, signal: controller.signal })
+      .catch((error: unknown) => error)
+      .finally(() => {
+        settled = true;
+      });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    controller.abort();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(stopStarted).toBe(true);
+    expect(settled).toBe(false);
+    finishStop();
+    expect(await result).toMatchObject({ code: "cancelled" });
+    expect(stopFinished).toBe(true);
+    expect(process.stops).toEqual(["cancelled"]);
+    await client.dispose();
+  });
+
+  it("preserves acquisition cleanup failure over cancellation", async () => {
+    const controller = new AbortController();
+    const client = createClient({
+      launch: async (_request, signal) => {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new SidecarSessionError("cleanup_failure", "Late process could not be reaped");
+      },
+    });
+    const result = client
+      .runSession({ ...request, signal: controller.signal })
+      .catch((error: unknown) => error);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    controller.abort();
+
+    expect(await result).toMatchObject({ code: "cleanup_failure" });
     await client.dispose();
   });
 

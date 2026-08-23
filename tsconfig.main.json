@@ -5,5 +5,9 @@
     "tsBuildInfoFile": "./node_modules/.cache/typescript/main.tsbuildinfo",
     "types": ["node", "electron"]
   },
-  "include": ["apps/desktop/src/main/**/*.ts", "vite.main.config.ts"]
+  "include": [
+    "apps/desktop/src/main/**/*.ts",
+    "vite.main.config.ts",
+    "vite.sidecar-proof.config.ts"
+  ]
 }
