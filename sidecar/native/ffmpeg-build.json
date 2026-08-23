@@ -36,5 +36,16 @@
   "sourceSha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
   "sourceUrl": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
   "version": "8.1.2",
-  "windowsConfigureArguments": ["--extra-ldflags=-static"]
+  "windowsConfigureArguments": ["--disable-pthreads", "--enable-w32threads"],
+  "windowsSystemDlls": [
+    "ADVAPI32.dll",
+    "BCRYPT.dll",
+    "KERNEL32.dll",
+    "MSVCRT.dll",
+    "OLE32.dll",
+    "SHELL32.dll",
+    "USER32.dll",
+    "WINMM.dll",
+    "WS2_32.dll"
+  ]
 }

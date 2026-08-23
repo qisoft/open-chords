@@ -28,7 +28,7 @@ assert_scalar_rejected() {
   fi
 }
 
-printf '%s\n' '{"version":"8.1.2","configureArguments":["--disable-network","--disable-doc"],"windowsConfigureArguments":["--extra-ldflags=-static"]}' > "${fixture_root}/valid.json"
+printf '%s\n' '{"version":"8.1.2","configureArguments":["--disable-network","--disable-doc"],"windowsConfigureArguments":["--disable-pthreads","--enable-w32threads"],"windowsSystemDlls":["KERNEL32.dll","MSVCRT.dll"]}' > "${fixture_root}/valid.json"
 printf '%s\n' '{"version":"8.1.2"}' > "${fixture_root}/missing.json"
 printf '%s\n' '{"configureArguments":[]}' > "${fixture_root}/empty.json"
 printf '%s\n' '{"configureArguments":["--disable-network",42]}' > "${fixture_root}/non-string.json"
@@ -47,7 +47,10 @@ array="$(bash "${manifest_reader}" array "${fixture_root}/valid.json" configureA
 [[ "${array}" == $'--disable-network\n--disable-doc' ]]
 
 windows_array="$(bash "${manifest_reader}" array "${fixture_root}/valid.json" windowsConfigureArguments "${reader}")"
-[[ "${windows_array}" == '--extra-ldflags=-static' ]]
+[[ "${windows_array}" == $'--disable-pthreads\n--enable-w32threads' ]]
+
+windows_system_dlls="$(bash "${manifest_reader}" array "${fixture_root}/valid.json" windowsSystemDlls "${reader}")"
+[[ "${windows_system_dlls}" == $'KERNEL32.dll\nMSVCRT.dll' ]]
 
 assert_array_rejected "${fixture_root}/missing.json"
 assert_array_rejected "${fixture_root}/empty.json"

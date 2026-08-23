@@ -59,7 +59,9 @@ make install
 popd >/dev/null
 
 if [[ "${platform_profile}" == "windows-server-2025-x64" ]]; then
-  bash "${repository_root}/tools/verify-windows-ffmpeg-runtime.sh" "${install_root}/bin"
+  bash "${repository_root}/tools/verify-windows-ffmpeg-runtime.sh" \
+    "${install_root}/bin" \
+    "${build_manifest}"
 fi
 
 mkdir -p "${install_root}/licenses"
