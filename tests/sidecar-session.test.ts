@@ -6,6 +6,7 @@ import {
   encodeSidecarFrame,
   type SidecarProcess,
   type SidecarProcessLauncher,
+  type SidecarSessionRequest,
 } from "../apps/desktop/src/main/sidecar-session.ts";
 
 const request = {
@@ -18,6 +19,7 @@ const request = {
 
 class FakeProcess implements SidecarProcess {
   readonly commands: unknown[] = [];
+  readonly events: string[] = [];
   readonly stops: string[] = [];
   stdout: AsyncIterable<Uint8Array>;
 
@@ -31,11 +33,18 @@ class FakeProcess implements SidecarProcess {
   }
 
   async stop(reason: string): Promise<void> {
+    this.events.push(`stop:${reason}`);
     this.stops.push(reason);
   }
 
   async write(frame: Uint8Array): Promise<void> {
-    this.commands.push(decodeSingleFrame(frame));
+    const command = decodeSingleFrame(frame);
+    this.commands.push(command);
+    const type =
+      typeof command === "object" && command !== null && "type" in command
+        ? command.type
+        : undefined;
+    this.events.push(`write:${String(type)}`);
   }
 }
 
@@ -48,21 +57,21 @@ function decodeSingleFrame(frame: Uint8Array): unknown {
   return JSON.parse(buffer.subarray(4, 4 + buffer.readUInt32BE(0)).toString("utf8"));
 }
 
-function successMessages() {
+function successMessages(session: SidecarSessionRequest = request) {
   return [
     {
       capabilities: ["analysis"],
-      manifestHash: request.manifestHash,
-      nonce: request.nonce,
+      manifestHash: session.manifestHash,
+      nonce: session.nonce,
       protocolVersion: 1,
       sequence: 0,
       type: "handshake",
     },
     {
       artifact: { byteSize: 42, path: "result.json", sha256: "b".repeat(64) },
-      jobId: request.jobId,
-      nonce: request.nonce,
-      requestId: request.requestId,
+      jobId: session.jobId,
+      nonce: session.nonce,
+      requestId: session.requestId,
       sequence: 1,
       type: "result",
     },
@@ -77,7 +86,10 @@ const clients = [
 describe.each(clients)("%s sidecar client", (_name, createClient) => {
   it("runs a fragmented, manifest-verified session and releases the process", async () => {
     const process = new FakeProcess(successMessages(), 7);
-    const client = createClient(launcherFor(process));
+    const client = createClient(launcherFor(process), {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
+    });
 
     await expect(client.runSession(request)).resolves.toEqual({
       artifact: { byteSize: 42, path: "result.json", sha256: "b".repeat(64) },
@@ -100,7 +112,10 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
 
   it("rejects a mismatched nonce as a typed protocol failure", async () => {
     const process = new FakeProcess([{ ...successMessages()[0], nonce: "wrong-nonce" }]);
-    const client = createClient(launcherFor(process));
+    const client = createClient(launcherFor(process), {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
+    });
 
     await expect(client.runSession(request)).rejects.toMatchObject({
       code: "protocol_violation",
@@ -118,13 +133,36 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
       await new Promise<void>((resolve) => {
         releaseOutput = resolve;
       });
+      process.events.push("receive:late_result");
       yield encodeSidecarFrame(successMessages()[1]);
+      process.events.push("receive:cancel_ack");
+      yield encodeSidecarFrame({
+        jobId: request.jobId,
+        nonce: request.nonce,
+        requestId: request.requestId,
+        sequence: 2,
+        type: "cancel_ack",
+      });
+      process.events.push("receive:cleanup_complete");
+      yield encodeSidecarFrame({
+        jobId: request.jobId,
+        nonce: request.nonce,
+        requestId: request.requestId,
+        sequence: 3,
+        type: "cleanup_complete",
+      });
     })();
-    const client = createClient(launcherFor(process));
+    const client = createClient(launcherFor(process), {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
+    });
     const result = client.runSession({ ...request, signal: controller.signal });
     const rejection = result.catch((error: unknown) => error);
     await new Promise<void>((resolve) => setImmediate(resolve));
     controller.abort();
+    while (process.commands.length < 2) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
     releaseOutput();
 
     expect(await rejection).toMatchObject({ code: "cancelled" });
@@ -136,6 +174,77 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
       type: "cancel",
     });
     expect(process.stops).toEqual(["cancelled"]);
+    expect(process.events).toEqual([
+      "write:start",
+      "write:cancel",
+      "receive:late_result",
+      "receive:cancel_ack",
+      "receive:cleanup_complete",
+      "stop:cancelled",
+    ]);
+    await client.dispose();
+  });
+
+  it("cannot publish a cancelled session's late result into the next session", async () => {
+    const controller = new AbortController();
+    let releaseCancelledOutput!: () => void;
+    const cancelledProcess = new FakeProcess([]);
+    cancelledProcess.stdout = (async function* () {
+      yield encodeSidecarFrame(successMessages()[0]);
+      await new Promise<void>((resolve) => {
+        releaseCancelledOutput = resolve;
+      });
+      yield encodeSidecarFrame(successMessages()[1]);
+      yield encodeSidecarFrame({
+        jobId: request.jobId,
+        nonce: request.nonce,
+        requestId: request.requestId,
+        sequence: 2,
+        type: "cancel_ack",
+      });
+      yield encodeSidecarFrame({
+        jobId: request.jobId,
+        nonce: request.nonce,
+        requestId: request.requestId,
+        sequence: 3,
+        type: "cleanup_complete",
+      });
+    })();
+    const nextRequest = {
+      ...request,
+      jobId: "job-2",
+      nonce: "nonce-2",
+      requestId: "request-2",
+    };
+    const nextProcess = new FakeProcess(successMessages(nextRequest));
+    const launches = [cancelledProcess, nextProcess];
+    const client = createClient(
+      {
+        launch: async () => {
+          const process = launches.shift();
+          if (process === undefined) throw new Error("Unexpected launch");
+          return process;
+        },
+      },
+      { cancelAckTimeoutMs: 5, cooperativeCleanupTimeoutMs: 5 },
+    );
+    const cancelled = client
+      .runSession({ ...request, signal: controller.signal })
+      .catch((error: unknown) => error);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort();
+    while (cancelledProcess.commands.length < 2) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    releaseCancelledOutput();
+
+    expect(await cancelled).toMatchObject({ code: "cancelled" });
+    await expect(client.runSession(nextRequest)).resolves.toMatchObject({
+      jobId: nextRequest.jobId,
+      requestId: nextRequest.requestId,
+    });
+    expect(cancelledProcess.stops).toEqual(["cancelled"]);
+    expect(nextProcess.stops).toEqual(["completed"]);
     await client.dispose();
   });
 
@@ -146,7 +255,10 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
         next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
       }),
     };
-    const client = createClient(launcherFor(process));
+    const client = createClient(launcherFor(process), {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
+    });
 
     await expect(client.runSession({ ...request, timeoutMs: 5 })).rejects.toMatchObject({
       code: "timeout",
@@ -163,6 +275,8 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
       }),
     };
     const client = createClient(launcherFor(process), {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
       handshakeTimeoutMs: 5,
       heartbeatTimeoutMs: 50,
     });
@@ -181,6 +295,8 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
       await new Promise(() => undefined);
     })();
     const client = createClient(launcherFor(process), {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
       handshakeTimeoutMs: 50,
       heartbeatTimeoutMs: 5,
     });
@@ -194,7 +310,10 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
 
   it("reports EOF before a terminal result", async () => {
     const process = new FakeProcess([successMessages()[0]]);
-    const client = createClient(launcherFor(process));
+    const client = createClient(launcherFor(process), {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
+    });
 
     await expect(client.runSession(request)).rejects.toMatchObject({
       code: "unexpected_eof",
@@ -244,7 +363,10 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
         next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
       }),
     };
-    const client = createClient(launcherFor(process));
+    const client = createClient(launcherFor(process), {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
+    });
     const result = client.runSession(request).catch((error: unknown) => error);
     await new Promise<void>((resolve) => setImmediate(resolve));
 

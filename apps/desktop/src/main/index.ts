@@ -18,9 +18,14 @@ import {
   type DesktopSecurityConfiguration,
 } from "./renderer-security.ts";
 import { createDesktopWindow, hardenWebContents } from "./shell.ts";
+import { MAIN_SIDECAR_PACKAGED_SEAM } from "./sidecar-session.ts";
 import { presentDesktopWindow } from "./window-lifecycle.ts";
 
 registerRendererScheme();
+
+if (MAIN_SIDECAR_PACKAGED_SEAM !== "open-chords/main-sidecar-lifecycle/v1") {
+  throw new Error("Main-sidecar packaged seam is incompatible");
+}
 
 const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
 const ownsSingleInstance = app.requestSingleInstanceLock();

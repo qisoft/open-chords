@@ -100,6 +100,22 @@ test("packaged shell flips every security fuse explicitly", async () => {
   });
 });
 
+test("installed artifact keeps the sidecar lifecycle seam in Electron main", () => {
+  const archive = join(resourcesPath, "app.asar");
+  const mainMap: unknown = JSON.parse(
+    extractFile(archive, join("dist", "main", "main.cjs.map")).toString("utf8"),
+  );
+  const preloadMap: unknown = JSON.parse(
+    extractFile(archive, join("dist", "preload", "preload.cjs.map")).toString("utf8"),
+  );
+  const sourceMapSchema = z.object({ sources: z.array(z.string()) });
+  const mainSources = sourceMapSchema.parse(mainMap).sources;
+  const preloadSources = sourceMapSchema.parse(preloadMap).sources;
+
+  expect(mainSources).toContain("../../apps/desktop/src/main/sidecar-session.ts");
+  expect(preloadSources.some((source) => source.includes("sidecar-session"))).toBe(false);
+});
+
 test("installed shell exposes only named capabilities and manifest assets", async () => {
   const rawManifest: unknown = JSON.parse(
     extractFile(
