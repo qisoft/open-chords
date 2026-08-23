@@ -99,6 +99,42 @@ class CanonicalDecodeTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_EXECUTION)
 
+    def test_classifies_probe_runtime_failure(self) -> None:
+        with (
+            patch(
+                "sidecar.open_chords_analysis.canonical_decode._sanitize_external_tool_runtime",
+                side_effect=OSError("injected runtime preparation failure"),
+            ),
+            self.assertRaises(CanonicalDecodeError) as raised,
+        ):
+            _probe_audio(Path(sys.executable), Path("/workspace/input/source-media"), threading.Event())
+
+        self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_RUNTIME)
+
+    def test_classifies_probe_spawn_failure(self) -> None:
+        with (
+            patch(
+                "sidecar.open_chords_analysis.canonical_decode.subprocess.Popen",
+                side_effect=OSError("injected process spawn failure"),
+            ),
+            self.assertRaises(CanonicalDecodeError) as raised,
+        ):
+            _probe_audio(Path(sys.executable), Path("/workspace/input/source-media"), threading.Event())
+
+        self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_SPAWN)
+
+    def test_classifies_probe_process_failure(self) -> None:
+        with (
+            patch(
+                "sidecar.open_chords_analysis.canonical_decode._run_tool",
+                side_effect=CanonicalDecodeError("injected nonzero process outcome"),
+            ),
+            self.assertRaises(CanonicalDecodeError) as raised,
+        ):
+            _probe_audio(Path("/tools/ffprobe"), Path("/workspace/input/source-media"), threading.Event())
+
+        self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_PROCESS)
+
     def test_classifies_invalid_probe_output(self) -> None:
         with (
             patch("sidecar.open_chords_analysis.canonical_decode._run_tool") as run_tool,

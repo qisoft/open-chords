@@ -146,7 +146,7 @@ class ProtocolTests(unittest.TestCase):
 
             messages = self._messages(output.getvalue())
             self.assertEqual([message["type"] for message in messages], ["handshake", "error"])
-            self.assertEqual(messages[1]["code"], "canonical_probe_execution_failed")
+            self.assertEqual(messages[1]["code"], "canonical_probe_process_failed")
             self.assertEqual(messages[1]["message"], "Canonical media decode failed")
             self.assertNotIn("private", json.dumps(messages))
 

@@ -31,7 +31,10 @@ class CanonicalDecodeFailureCode(str, Enum):
     PREPARE = "canonical_prepare_failed"
     PROBE = "canonical_probe_failed"
     PROBE_EXECUTION = "canonical_probe_execution_failed"
+    PROBE_PROCESS = "canonical_probe_process_failed"
     PROBE_OUTPUT = "canonical_probe_output_failed"
+    PROBE_RUNTIME = "canonical_probe_runtime_failed"
+    PROBE_SPAWN = "canonical_probe_spawn_failed"
     PROBE_STREAM = "canonical_probe_stream_missing"
     TRANSCODE = "canonical_transcode_failed"
     ARTIFACT_VALIDATION = "canonical_artifact_validation_failed"
@@ -55,6 +58,14 @@ class CanonicalDecodeError(RuntimeError):
 
 class CanonicalDecodeCancelled(CanonicalDecodeError):
     """Canonical decode stopped cooperatively before publication."""
+
+
+class _NativeToolRuntimeError(RuntimeError):
+    """Frozen runtime preparation failed before a native tool spawn."""
+
+
+class _NativeToolSpawnError(RuntimeError):
+    """The operating system rejected a native tool spawn."""
 
 
 @dataclass(frozen=True)
@@ -247,6 +258,21 @@ def _probe_audio(
         )
     except CanonicalDecodeCancelled:
         raise
+    except _NativeToolRuntimeError as error:
+        raise CanonicalDecodeError(
+            "ffprobe runtime preparation failed",
+            code=CanonicalDecodeFailureCode.PROBE_RUNTIME,
+        ) from error
+    except _NativeToolSpawnError as error:
+        raise CanonicalDecodeError(
+            "ffprobe process spawn failed",
+            code=CanonicalDecodeFailureCode.PROBE_SPAWN,
+        ) from error
+    except CanonicalDecodeError as error:
+        raise CanonicalDecodeError(
+            "ffprobe process failed",
+            code=CanonicalDecodeFailureCode.PROBE_PROCESS,
+        ) from error
     except Exception as error:
         raise CanonicalDecodeError(
             "ffprobe execution failed",
@@ -301,15 +327,21 @@ def _is_bounded_audio_stream(stream: object) -> bool:
 
 def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResult:
     _raise_if_cancelled(cancellation)
-    _sanitize_external_tool_runtime()
-    process = subprocess.Popen(
-        arguments,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=_tool_environment(),
-        shell=False,
-    )
+    try:
+        _sanitize_external_tool_runtime()
+    except Exception as error:
+        raise _NativeToolRuntimeError("native tool runtime preparation failed") from error
+    try:
+        process = subprocess.Popen(
+            arguments,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_tool_environment(),
+            shell=False,
+        )
+    except Exception as error:
+        raise _NativeToolSpawnError("native tool process spawn failed") from error
     stdout = bytearray()
     stderr = bytearray()
     exceeded = threading.Event()
