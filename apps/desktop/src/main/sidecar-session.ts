@@ -95,11 +95,7 @@ export function createPromiseSidecarClient(
         process = await acquireSidecarProcess(
           launcher,
           request,
-          AbortSignal.any(
-            request.signal === undefined
-              ? [timeout.signal, disposeSignal]
-              : [timeout.signal, disposeSignal, request.signal],
-          ),
+          combineAcquisitionSignals(request.signal, timeout.signal, disposeSignal),
         );
         return await runSidecarProtocol(
           process,
@@ -155,11 +151,7 @@ export function createEffectSidecarClient(
             acquireSidecarProcess(
               launcherService,
               request,
-              AbortSignal.any(
-                request.signal === undefined
-                  ? [signal, disposeSignal, timeout.signal]
-                  : [signal, disposeSignal, timeout.signal, request.signal],
-              ),
+              combineAcquisitionSignals(request.signal, signal, disposeSignal, timeout.signal),
             ),
         }),
       );
@@ -290,4 +282,13 @@ function acquisitionAbortError(
     : new SidecarSessionError("cancelled", "Sidecar acquisition was interrupted", {
         cause: lifecycleSignal.reason,
       });
+}
+
+function combineAcquisitionSignals(
+  requestSignal: AbortSignal | undefined,
+  ...lifecycleSignals: readonly AbortSignal[]
+): AbortSignal {
+  return AbortSignal.any(
+    requestSignal === undefined ? [...lifecycleSignals] : [...lifecycleSignals, requestSignal],
+  );
 }

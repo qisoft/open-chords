@@ -125,6 +125,36 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
     await client.dispose();
   });
 
+  it("rejects a skipped sidecar sequence", async () => {
+    const process = new FakeProcess([
+      successMessages()[0],
+      { ...successMessages()[1], sequence: 2 },
+    ]);
+    const client = createClient(launcherFor(process));
+
+    await expect(client.runSession(request)).rejects.toMatchObject({
+      code: "protocol_violation",
+    });
+    expect(process.stops).toEqual(["protocol_violation"]);
+    await client.dispose();
+  });
+
+  it("accepts a valid heartbeat before the terminal result", async () => {
+    const process = new FakeProcess([
+      successMessages()[0],
+      { nonce: request.nonce, sequence: 1, type: "heartbeat" },
+      { ...successMessages()[1], sequence: 2 },
+    ]);
+    const client = createClient(launcherFor(process));
+
+    await expect(client.runSession(request)).resolves.toMatchObject({
+      jobId: request.jobId,
+      requestId: request.requestId,
+    });
+    expect(process.stops).toEqual(["completed"]);
+    await client.dispose();
+  });
+
   it("cancels, cleans up, and ignores a late result", async () => {
     const controller = new AbortController();
     let releaseOutput!: () => void;
