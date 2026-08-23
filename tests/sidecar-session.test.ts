@@ -53,6 +53,29 @@ function launcherFor(process: FakeProcess): SidecarProcessLauncher {
   return { launch: async () => process };
 }
 
+function createHangingLauncherProbe(): {
+  launcher: SidecarProcessLauncher;
+  wasAborted(): boolean;
+} {
+  let aborted = false;
+  return {
+    launcher: {
+      launch: async (_request, signal) =>
+        new Promise<SidecarProcess>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        }),
+    },
+    wasAborted: () => aborted,
+  };
+}
+
 function decodeSingleFrame(frame: Uint8Array): unknown {
   const buffer = Buffer.from(frame);
   return JSON.parse(buffer.subarray(4, 4 + buffer.readUInt32BE(0)).toString("utf8"));
@@ -136,6 +159,22 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
       code: "protocol_violation",
     });
     expect(process.stops).toEqual(["protocol_violation"]);
+    await client.dispose();
+  });
+
+  it("rejects an oversized inbound frame before reading its payload", async () => {
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(1024 * 1024 + 1, 0);
+    const process = new FakeProcess([]);
+    process.stdout = (async function* () {
+      yield header;
+    })();
+    const client = createClient(launcherFor(process));
+
+    await expect(client.runSession(request)).rejects.toMatchObject({
+      code: "frame_too_large",
+    });
+    expect(process.stops).toEqual(["frame_too_large"]);
     await client.dispose();
   });
 
@@ -299,47 +338,23 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
   });
 
   it("interrupts a hanging acquisition with a typed timeout", async () => {
-    let launchWasAborted = false;
-    const client = createClient(
-      {
-        launch: async (_request, signal) =>
-          new Promise<SidecarProcess>((_resolve, reject) => {
-            signal.addEventListener(
-              "abort",
-              () => {
-                launchWasAborted = true;
-                reject(signal.reason);
-              },
-              { once: true },
-            );
-          }),
-      },
-      { cancelAckTimeoutMs: 5, cooperativeCleanupTimeoutMs: 5 },
-    );
+    const probe = createHangingLauncherProbe();
+    const client = createClient(probe.launcher, {
+      cancelAckTimeoutMs: 5,
+      cooperativeCleanupTimeoutMs: 5,
+    });
 
     await expect(client.runSession({ ...request, timeoutMs: 5 })).rejects.toMatchObject({
       code: "timeout",
     });
-    expect(launchWasAborted).toBe(true);
+    expect(probe.wasAborted()).toBe(true);
     await client.dispose();
   });
 
   it("interrupts a hanging acquisition with typed user cancellation", async () => {
     const controller = new AbortController();
-    let launchWasAborted = false;
-    const client = createClient({
-      launch: async (_request, signal) =>
-        new Promise<SidecarProcess>((_resolve, reject) => {
-          signal.addEventListener(
-            "abort",
-            () => {
-              launchWasAborted = true;
-              reject(signal.reason);
-            },
-            { once: true },
-          );
-        }),
-    });
+    const probe = createHangingLauncherProbe();
+    const client = createClient(probe.launcher);
     const result = client
       .runSession({ ...request, signal: controller.signal })
       .catch((error: unknown) => error);
@@ -348,7 +363,7 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
     controller.abort();
 
     expect(await result).toMatchObject({ code: "cancelled" });
-    expect(launchWasAborted).toBe(true);
+    expect(probe.wasAborted()).toBe(true);
     await client.dispose();
   });
 
