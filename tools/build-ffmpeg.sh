@@ -43,12 +43,24 @@ configure_arguments_output="$(
 while IFS= read -r argument; do
   configure_arguments+=("${argument}")
 done <<< "${configure_arguments_output}"
+if [[ "${platform_profile}" == "windows-server-2025-x64" ]]; then
+  windows_arguments_output="$(
+    bash "${manifest_reader}" array "${build_manifest}" windowsConfigureArguments
+  )"
+  while IFS= read -r argument; do
+    configure_arguments+=("${argument}")
+  done <<< "${windows_arguments_output}"
+fi
 
 pushd "${build_root}" >/dev/null
 "${source_root}/ffmpeg-${version}/configure" "${configure_arguments[@]}"
 make -j2
 make install
 popd >/dev/null
+
+if [[ "${platform_profile}" == "windows-server-2025-x64" ]]; then
+  bash "${repository_root}/tools/verify-windows-ffmpeg-runtime.sh" "${install_root}/bin"
+fi
 
 mkdir -p "${install_root}/licenses"
 cp "${source_root}/ffmpeg-${version}/COPYING.LGPLv2.1" "${install_root}/licenses/FFmpeg-LGPL-2.1.txt"

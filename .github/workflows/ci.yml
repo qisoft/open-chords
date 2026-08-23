@@ -88,6 +88,7 @@ jobs:
         shell: msys2 {0}
         run: |
           tools/test-ffmpeg-build-manifest-reader.sh jq
+          tools/test-windows-ffmpeg-runtime-verifier.sh
           tools/build-ffmpeg.sh ${{ matrix.profile }} build/native
       - name: Assemble frozen one-folder sidecar
         run: >-
