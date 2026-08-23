@@ -1,4 +1,4 @@
-import { Effect, Either, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Either, Layer, ManagedRuntime } from "effect";
 
 import {
   normalizeSidecarError,
@@ -16,22 +16,28 @@ import {
 
 export {
   encodeSidecarFrame,
+  parseSidecarSessionRequest,
   SidecarSessionError,
   type SidecarProcess,
   type SidecarProcessLauncher,
   type SidecarProtocolPolicy,
   type SidecarSessionErrorCode,
   type SidecarSessionRequest,
+  type SidecarSessionRequestInput,
   type SidecarSessionResult,
 } from "./sidecar-protocol.ts";
 export { createUncontainedSpawnLauncherForProof } from "./sidecar-proof-process.ts";
-
-export const MAIN_SIDECAR_PACKAGED_SEAM = "open-chords/main-sidecar-lifecycle/v1";
 
 export interface SidecarClient {
   runSession(request: SidecarSessionRequest): Promise<SidecarSessionResult>;
   dispose(): Promise<void>;
 }
+
+type SessionGuard = ReturnType<typeof createSessionGuard>;
+const SidecarLauncherService = Context.GenericTag<SidecarProcessLauncher>(
+  "open-chords/SidecarLauncher",
+);
+const SessionGuardService = Context.GenericTag<SessionGuard>("open-chords/SidecarSessionGuard");
 
 function createSessionGuard() {
   let active = false;
@@ -86,11 +92,11 @@ export function createPromiseSidecarClient(
       let process: SidecarProcess | undefined;
       let stopReason: "completed" | SidecarSessionErrorCode = "completed";
       try {
-        try {
-          process = await launcher.launch(request);
-        } catch (cause) {
-          throw new SidecarSessionError("launch_failure", "Sidecar launch failed", { cause });
-        }
+        process = await acquireSidecarProcess(
+          launcher,
+          request,
+          AbortSignal.any([timeout.signal, disposeSignal]),
+        );
         return await runSidecarProtocol(
           process,
           request,
@@ -114,24 +120,41 @@ export function createEffectSidecarClient(
   policyOverrides: Partial<SidecarProtocolPolicy> = {},
 ): SidecarClient {
   const policy = resolveProtocolPolicy(policyOverrides);
-  const runtime = ManagedRuntime.make(Layer.empty);
-  const guard = createSessionGuard();
+  const runtime = ManagedRuntime.make(
+    Layer.merge(
+      Layer.succeed(SidecarLauncherService, launcher),
+      Layer.scoped(
+        SessionGuardService,
+        Effect.acquireRelease(Effect.sync(createSessionGuard), (guard) =>
+          Effect.promise(() => guard.dispose()),
+        ),
+      ),
+    ),
+  );
+  const guardPromise = runtime.runPromise(SessionGuardService);
   return {
     async dispose() {
-      await guard.dispose();
+      await guardPromise;
       await runtime.dispose();
     },
     async runSession(request) {
       validateSidecarRequest(request);
+      const guard = await guardPromise;
       const disposeSignal = guard.enter();
       const timeout = createSessionTimeout(request.timeoutMs);
       let cleanupFailure: SidecarSessionError | undefined;
       let stopReason: "completed" | SidecarSessionErrorCode = "completed";
-      const acquire = Effect.tryPromise({
-        catch: (cause) =>
-          new SidecarSessionError("launch_failure", "Sidecar launch failed", { cause }),
-        try: () => launcher.launch(request),
-      });
+      const acquire = Effect.flatMap(SidecarLauncherService, (launcherService) =>
+        Effect.tryPromise({
+          catch: normalizeSidecarError,
+          try: (signal) =>
+            acquireSidecarProcess(
+              launcherService,
+              request,
+              AbortSignal.any([signal, disposeSignal, timeout.signal]),
+            ),
+        }),
+      );
       const program = Effect.acquireUseRelease(
         acquire,
         (process) =>
@@ -199,4 +222,48 @@ async function releaseProcess(
   } catch (cause) {
     throw new SidecarSessionError("cleanup_failure", "Sidecar cleanup failed", { cause });
   }
+}
+
+async function acquireSidecarProcess(
+  launcher: SidecarProcessLauncher,
+  request: SidecarSessionRequest,
+  signal: AbortSignal,
+): Promise<SidecarProcess> {
+  if (signal.aborted) throw signal.reason;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    void launcher.launch(request, signal).then(
+      (process) => {
+        signal.removeEventListener("abort", abort);
+        if (settled || signal.aborted) {
+          const reason =
+            signal.reason instanceof SidecarSessionError ? signal.reason.code : "cancelled";
+          void process.stop(reason).catch(() => undefined);
+          return true;
+        }
+        settled = true;
+        resolve(process);
+        return true;
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort);
+        if (settled) return true;
+        settled = true;
+        reject(
+          error instanceof SidecarSessionError
+            ? error
+            : new SidecarSessionError("launch_failure", "Sidecar launch failed", {
+                cause: error,
+              }),
+        );
+        return true;
+      },
+    );
+  });
 }

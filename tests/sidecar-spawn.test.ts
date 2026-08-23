@@ -5,6 +5,7 @@ import { expect, it } from "vitest";
 import {
   createPromiseSidecarClient,
   createUncontainedSpawnLauncherForProof,
+  parseSidecarSessionRequest,
 } from "../apps/desktop/src/main/sidecar-session.ts";
 
 it("proves the protocol across a real child-process boundary and reaps the child", async () => {
@@ -21,13 +22,15 @@ it("proves the protocol across a real child-process boundary and reaps the child
   const client = createPromiseSidecarClient(launcher);
 
   await expect(
-    client.runSession({
-      jobId: "job-cross-process",
-      manifestHash: "a".repeat(64),
-      nonce: "nonce-cross-process",
-      requestId: "request-cross-process",
-      timeoutMs: 2_000,
-    }),
+    client.runSession(
+      parseSidecarSessionRequest({
+        jobId: "job-cross-process",
+        manifestHash: "a".repeat(64),
+        nonce: "nonce-cross-process",
+        requestId: "request-cross-process",
+        timeoutMs: 2_000,
+      }),
+    ),
   ).resolves.toMatchObject({
     artifact: { path: "result.json" },
     jobId: "job-cross-process",

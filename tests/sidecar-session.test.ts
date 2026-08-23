@@ -4,18 +4,19 @@ import {
   createEffectSidecarClient,
   createPromiseSidecarClient,
   encodeSidecarFrame,
+  parseSidecarSessionRequest,
   type SidecarProcess,
   type SidecarProcessLauncher,
   type SidecarSessionRequest,
 } from "../apps/desktop/src/main/sidecar-session.ts";
 
-const request = {
+const request = parseSidecarSessionRequest({
   jobId: "job-1",
   manifestHash: "a".repeat(64),
   nonce: "nonce-1",
   requestId: "request-1",
   timeoutMs: 100,
-} as const;
+});
 
 class FakeProcess implements SidecarProcess {
   readonly commands: unknown[] = [];
@@ -210,12 +211,12 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
         type: "cleanup_complete",
       });
     })();
-    const nextRequest = {
+    const nextRequest = parseSidecarSessionRequest({
       ...request,
       jobId: "job-2",
       nonce: "nonce-2",
       requestId: "request-2",
-    };
+    });
     const nextProcess = new FakeProcess(successMessages(nextRequest));
     const launches = [cancelledProcess, nextProcess];
     const client = createClient(
@@ -264,6 +265,32 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
       code: "timeout",
     });
     expect(process.stops).toEqual(["timeout"]);
+    await client.dispose();
+  });
+
+  it("interrupts a hanging acquisition with a typed timeout", async () => {
+    let launchWasAborted = false;
+    const client = createClient(
+      {
+        launch: async (_request, signal) =>
+          new Promise<SidecarProcess>((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                launchWasAborted = true;
+                reject(signal.reason);
+              },
+              { once: true },
+            );
+          }),
+      },
+      { cancelAckTimeoutMs: 5, cooperativeCleanupTimeoutMs: 5 },
+    );
+
+    await expect(client.runSession({ ...request, timeoutMs: 5 })).rejects.toMatchObject({
+      code: "timeout",
+    });
+    expect(launchWasAborted).toBe(true);
     await client.dispose();
   });
 

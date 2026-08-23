@@ -19,12 +19,13 @@ export function createUncontainedSpawnLauncherForProof(
   options: ProofSpawnOptions,
 ): SidecarProcessLauncher {
   return {
-    async launch() {
+    async launch(_request, signal) {
       const child = spawn(options.executablePath, [...options.args], {
         cwd: options.cwd,
         env: { ...options.env },
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
+        signal,
         windowsHide: true,
       });
       await waitForSpawn(child);

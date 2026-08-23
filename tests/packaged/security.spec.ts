@@ -12,7 +12,13 @@ import extractZip from "extract-zip";
 import { z } from "zod";
 
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
+import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
+import {
+  createPromiseSidecarClient,
+  createUncontainedSpawnLauncherForProof,
+  parseSidecarSessionRequest,
+} from "../../apps/desktop/src/main/sidecar-session.ts";
 
 const PRODUCT_NAME = "Open Chords";
 const EXPECTED_RENDERER_CSP = [
@@ -100,20 +106,32 @@ test("packaged shell flips every security fuse explicitly", async () => {
   });
 });
 
-test("installed artifact keeps the sidecar lifecycle seam in Electron main", () => {
-  const archive = join(resourcesPath, "app.asar");
-  const mainMap: unknown = JSON.parse(
-    extractFile(archive, join("dist", "main", "main.cjs.map")).toString("utf8"),
+test("installed artifact runs the main-sidecar protocol and reaps the process", async () => {
+  const client = createPromiseSidecarClient(
+    createUncontainedSpawnLauncherForProof({
+      args: [PACKAGED_SIDECAR_PROOF_ARGUMENT],
+      cwd: packageRoot,
+      env: {},
+      executablePath,
+    }),
   );
-  const preloadMap: unknown = JSON.parse(
-    extractFile(archive, join("dist", "preload", "preload.cjs.map")).toString("utf8"),
-  );
-  const sourceMapSchema = z.object({ sources: z.array(z.string()) });
-  const mainSources = sourceMapSchema.parse(mainMap).sources;
-  const preloadSources = sourceMapSchema.parse(preloadMap).sources;
 
-  expect(mainSources).toContain("../../apps/desktop/src/main/sidecar-session.ts");
-  expect(preloadSources.some((source) => source.includes("sidecar-session"))).toBe(false);
+  await expect(
+    client.runSession(
+      parseSidecarSessionRequest({
+        jobId: "job-packaged-proof",
+        manifestHash: "a".repeat(64),
+        nonce: "nonce-packaged-proof",
+        requestId: "request-packaged-proof",
+        timeoutMs: 5_000,
+      }),
+    ),
+  ).resolves.toMatchObject({
+    artifact: { path: "result.json" },
+    jobId: "job-packaged-proof",
+    requestId: "request-packaged-proof",
+  });
+  await client.dispose();
 });
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {

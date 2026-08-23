@@ -3,7 +3,13 @@ import { z } from "zod";
 const MAX_FRAME_BYTES = 1024 * 1024;
 const PROTOCOL_VERSION = 1;
 
-const HashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+const Sha256Schema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/u)
+  .brand<"Sha256">();
+const JobIdSchema = z.string().min(1).max(256).brand<"SidecarJobId">();
+const NonceSchema = z.string().min(1).max(256).brand<"SidecarNonce">();
+const RequestIdSchema = z.string().min(1).max(256).brand<"SidecarRequestId">();
 const RelativeArtifactPathSchema = z
   .string()
   .min(1)
@@ -15,53 +21,46 @@ const RelativeArtifactPathSchema = z
       !/^[a-z]:/iu.test(path) &&
       !path.split(/[\\/]/u).includes(".."),
     "Artifact path must remain relative to the job workspace",
-  );
+  )
+  .brand<"JobWorkspaceRelativePath">();
 const HandshakeSchema = z.object({
   capabilities: z.array(z.string()).max(32),
-  manifestHash: HashSchema,
-  nonce: z.string().min(1).max(256),
+  manifestHash: Sha256Schema,
+  nonce: NonceSchema,
   protocolVersion: z.literal(PROTOCOL_VERSION),
   sequence: z.literal(0),
   type: z.literal("handshake"),
 });
 const HeartbeatSchema = z.object({
-  nonce: z.string().min(1).max(256),
+  nonce: NonceSchema,
   sequence: z.number().int().positive(),
   type: z.literal("heartbeat"),
 });
-const ResultSchema = z.object({
+const SessionMessageBaseSchema = z
+  .object({
+    jobId: JobIdSchema,
+    nonce: NonceSchema,
+    requestId: RequestIdSchema,
+    sequence: z.number().int().positive(),
+  })
+  .strict();
+const ResultSchema = SessionMessageBaseSchema.extend({
   artifact: z.object({
     byteSize: z.number().int().nonnegative(),
     path: RelativeArtifactPathSchema,
-    sha256: HashSchema,
+    sha256: Sha256Schema,
   }),
-  jobId: z.string().min(1).max(256),
-  nonce: z.string().min(1).max(256),
-  requestId: z.string().min(1).max(256),
-  sequence: z.number().int().positive(),
   type: z.literal("result"),
 });
-const ErrorSchema = z.object({
+const ErrorSchema = SessionMessageBaseSchema.extend({
   code: z.string().min(1).max(64),
-  jobId: z.string().min(1).max(256),
   message: z.string().min(1).max(2048),
-  nonce: z.string().min(1).max(256),
-  requestId: z.string().min(1).max(256),
-  sequence: z.number().int().positive(),
   type: z.literal("error"),
 });
-const CancelAckSchema = z.object({
-  jobId: z.string().min(1).max(256),
-  nonce: z.string().min(1).max(256),
-  requestId: z.string().min(1).max(256),
-  sequence: z.number().int().positive(),
+const CancelAckSchema = SessionMessageBaseSchema.extend({
   type: z.literal("cancel_ack"),
 });
-const CleanupCompleteSchema = z.object({
-  jobId: z.string().min(1).max(256),
-  nonce: z.string().min(1).max(256),
-  requestId: z.string().min(1).max(256),
-  sequence: z.number().int().positive(),
+const CleanupCompleteSchema = SessionMessageBaseSchema.extend({
   type: z.literal("cleanup_complete"),
 });
 const SidecarMessageSchema = z.discriminatedUnion("type", [
@@ -90,22 +89,24 @@ export type SidecarSessionErrorCode =
   | "timeout"
   | "unexpected_eof";
 
-export type SidecarSessionRequest = {
-  jobId: string;
-  manifestHash: string;
-  nonce: string;
-  requestId: string;
-  signal?: AbortSignal;
-  timeoutMs: number;
-};
+const SidecarSessionRequestSchema = z.object({
+  jobId: JobIdSchema,
+  manifestHash: Sha256Schema,
+  nonce: NonceSchema,
+  requestId: RequestIdSchema,
+  signal: z.instanceof(AbortSignal).optional(),
+  timeoutMs: z.number().positive().finite(),
+});
+
+export type SidecarSessionRequestInput = z.input<typeof SidecarSessionRequestSchema>;
+export type SidecarSessionRequest = z.output<typeof SidecarSessionRequestSchema>;
 
 type SidecarSessionIdentity = Pick<SidecarSessionRequest, "jobId" | "nonce" | "requestId">;
 
-export type SidecarSessionResult = {
-  artifact: { byteSize: number; path: string; sha256: string };
-  jobId: string;
-  requestId: string;
-};
+export type SidecarSessionResult = Pick<
+  z.output<typeof ResultSchema>,
+  "artifact" | "jobId" | "requestId"
+>;
 
 export interface SidecarProcess {
   readonly stdout: AsyncIterable<Uint8Array>;
@@ -114,7 +115,7 @@ export interface SidecarProcess {
 }
 
 export interface SidecarProcessLauncher {
-  launch(request: SidecarSessionRequest): Promise<SidecarProcess>;
+  launch(request: SidecarSessionRequest, signal: AbortSignal): Promise<SidecarProcess>;
 }
 
 export type SidecarProtocolPolicy = {
@@ -173,7 +174,6 @@ class FrameDecoder {
 }
 
 class OutputInbox {
-  readonly #decoder = new FrameDecoder();
   #ended = false;
   #failure: SidecarSessionError | undefined;
   readonly #messages: unknown[] = [];
@@ -234,11 +234,10 @@ class OutputInbox {
 
   async #pump(stdout: AsyncIterable<Uint8Array>): Promise<void> {
     try {
-      for await (const chunk of stdout) {
-        this.#messages.push(...this.#decoder.push(chunk));
+      for await (const message of decodeSidecarFrames(stdout)) {
+        this.#messages.push(message);
         this.#notify();
       }
-      this.#decoder.finish();
     } catch (error) {
       this.#failure = normalizeSidecarError(error);
     } finally {
@@ -263,18 +262,34 @@ export function encodeSidecarFrame(message: unknown): Uint8Array {
   return frame;
 }
 
+export async function* decodeSidecarFrames(input: AsyncIterable<Uint8Array>): AsyncGenerator {
+  const decoder = new FrameDecoder();
+  for await (const chunk of input) {
+    yield* decoder.push(chunk);
+  }
+  decoder.finish();
+}
+
 export function normalizeSidecarError(error: unknown): SidecarSessionError {
   if (error instanceof SidecarSessionError) return error;
   return new SidecarSessionError("process_failure", "Sidecar session failed", { cause: error });
 }
 
 export function validateSidecarRequest(request: SidecarSessionRequest): void {
-  if (!HashSchema.safeParse(request.manifestHash).success) {
-    throw new SidecarSessionError("invalid_request", "Manifest hash must be SHA-256 hex");
+  const parsed = SidecarSessionRequestSchema.safeParse(request);
+  if (!parsed.success) throw new SidecarSessionError("invalid_request", "Invalid sidecar request");
+}
+
+export function parseSidecarSessionRequest(
+  input: SidecarSessionRequestInput,
+): SidecarSessionRequest {
+  const parsed = SidecarSessionRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new SidecarSessionError("invalid_request", "Invalid sidecar request", {
+      cause: parsed.error,
+    });
   }
-  if (!Number.isFinite(request.timeoutMs) || request.timeoutMs <= 0) {
-    throw new SidecarSessionError("invalid_request", "Timeout must be positive");
-  }
+  return parsed.data;
 }
 
 export function resolveProtocolPolicy(
