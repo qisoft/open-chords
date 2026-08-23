@@ -173,7 +173,9 @@ def serve_one_session(
                 stdout,
                 {
                     **_identity(start, sequence),
-                    "code": "canonical_decode_failed",
+                    "code": payload.code
+                    if isinstance(payload, CanonicalDecodeError)
+                    else "canonical_decode_failed",
                     "message": "Canonical media decode failed",
                     "type": "error",
                 },

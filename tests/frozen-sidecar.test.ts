@@ -101,7 +101,10 @@ it.skipIf(executablePath === undefined)(
             }),
           );
         } catch (error) {
-          errorCode = error instanceof SidecarSessionError ? error.code : "unknown";
+          if (error instanceof SidecarSessionError) {
+            const remoteCode = /^Sidecar ([a-z_]{1,64}):/u.exec(error.message)?.[1];
+            errorCode = remoteCode === undefined ? error.code : `${error.code}/${remoteCode}`;
+          }
         }
         if (result === undefined) {
           throw new Error(

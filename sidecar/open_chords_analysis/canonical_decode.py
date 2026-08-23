@@ -26,6 +26,10 @@ TOOL_TIMEOUT_SECONDS: Final = 30
 class CanonicalDecodeError(RuntimeError):
     """A stable failure at the canonical-decode boundary."""
 
+    def __init__(self, message: str, *, code: str = "canonical_decode_failed") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class CanonicalDecodeCancelled(CanonicalDecodeError):
     """Canonical decode stopped cooperatively before publication."""
@@ -70,6 +74,7 @@ def decode_canonical(
     temporary_output = output_path.with_suffix(".wav.partial")
     temporary_manifest = manifest_path.with_suffix(".json.partial")
     artifacts = (temporary_output, output_path, temporary_manifest, manifest_path)
+    failure_code = "canonical_prepare_failed"
     for artifact in artifacts:
         artifact.unlink(missing_ok=True)
     input_path = _workspace_file(workspace, INPUT_PATH, must_exist=True)
@@ -79,9 +84,11 @@ def decode_canonical(
     cancellation = cancellation or threading.Event()
     try:
         _raise_if_cancelled(cancellation)
+        failure_code = "canonical_probe_failed"
         probe = _probe_audio(ffprobe, input_path, cancellation)
         if not probe.get("streams"):
             raise CanonicalDecodeError("staged media has no decodable audio stream")
+        failure_code = "canonical_transcode_failed"
         _run_tool(
             [
                 str(ffmpeg),
@@ -127,6 +134,7 @@ def decode_canonical(
             cancellation,
         )
         _raise_if_cancelled(cancellation)
+        failure_code = "canonical_artifact_validation_failed"
         os.replace(temporary_output, output_path)
         canonical_audio = _inspect_canonical_wav(output_path)
         _raise_if_cancelled(cancellation)
@@ -140,6 +148,7 @@ def decode_canonical(
             "sampleRate": CANONICAL_SAMPLE_RATE,
             "schemaVersion": 1,
         }
+        failure_code = "canonical_tool_identity_failed"
         manifest = {
             "artifact": _descriptor_json(_file_descriptor(workspace, output_path)),
             "canonicalAudio": canonical_audio,
@@ -154,11 +163,20 @@ def decode_canonical(
                 "ffprobe": _tool_identity(ffprobe, "-version", cancellation),
             },
         }
+        failure_code = "canonical_publication_failed"
         manifest_bytes = _canonical_json(manifest)
         _raise_if_cancelled(cancellation)
         _write_atomic(manifest_path, manifest_bytes)
         _raise_if_cancelled(cancellation)
         return _file_descriptor(workspace, manifest_path)
+    except CanonicalDecodeCancelled:
+        for artifact in artifacts:
+            artifact.unlink(missing_ok=True)
+        raise
+    except CanonicalDecodeError as error:
+        for artifact in artifacts:
+            artifact.unlink(missing_ok=True)
+        raise CanonicalDecodeError("Canonical media decode failed", code=failure_code) from error
     except Exception:
         for artifact in artifacts:
             artifact.unlink(missing_ok=True)
