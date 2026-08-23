@@ -28,6 +28,7 @@ while IFS= read -r dependency; do
   allowed_system_dlls+=("${dependency,,}")
 done <<< "${allowed_system_dlls_output}"
 
+violations=()
 for tool in ffmpeg.exe ffprobe.exe; do
   binary="${binary_directory}/${tool}"
   if [[ ! -f "${binary}" ]]; then
@@ -55,8 +56,8 @@ for tool in ffmpeg.exe ffprobe.exe; do
       find "${runtime_search_roots[@]}" -maxdepth 1 -type f -iname "${dependency}" -print -quit 2>/dev/null
     )"
     if [[ -n "${mingw_dependency}" ]]; then
-      echo "${tool} retains an external MinGW runtime dependency: ${dependency}" >&2
-      exit 1
+      violations+=("${tool} retains an external MinGW runtime dependency: ${dependency}")
+      continue
     fi
     dependency_is_allowed=false
     for allowed_dependency in "${allowed_system_dlls[@]}"; do
@@ -66,8 +67,12 @@ for tool in ffmpeg.exe ffprobe.exe; do
       fi
     done
     if [[ "${dependency_is_allowed}" != true ]]; then
-      echo "${tool} imports an unreviewed Windows DLL: ${dependency}" >&2
-      exit 1
+      violations+=("${tool} imports an unreviewed Windows DLL: ${dependency}")
     fi
   done
 done
+
+if [[ ${#violations[@]} -ne 0 ]]; then
+  printf '%s\n' "${violations[@]}" >&2
+  exit 1
+fi

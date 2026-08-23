@@ -13,6 +13,7 @@ printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'case "${FAKE_OBJDUMP_RE
   '  system) printf "%s\n" "DLL Name: KERNEL32.dll" "DLL Name: USER32.dll" ;;' \
   '  mingw) printf "%s\n" "DLL Name: KERNEL32.dll" "DLL Name: libwinpthread-1.dll" ;;' \
   '  unknown) printf "%s\n" "DLL Name: unexpected-runtime.dll" ;;' \
+  '  multiple) printf "%s\n" "DLL Name: libwinpthread-1.dll" "DLL Name: unexpected-runtime.dll" ;;' \
   '  malformed) printf "%s\n" "DLL Name: ../runtime.dll" ;;' \
   '  empty) ;;' \
   '  failure) exit 1 ;;' \
@@ -35,6 +36,10 @@ for rejected_result in mingw unknown malformed empty failure; do
     exit 1
   fi
 done
+
+multiple_errors="$(run_verifier multiple 2>&1 || true)"
+[[ "${multiple_errors}" == *"external MinGW runtime dependency: libwinpthread-1.dll"* ]]
+[[ "${multiple_errors}" == *"unreviewed Windows DLL: unexpected-runtime.dll"* ]]
 
 rm "${fixture_root}/bin/ffprobe.exe"
 if run_verifier system >/dev/null 2>&1; then
