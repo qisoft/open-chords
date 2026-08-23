@@ -35,7 +35,9 @@ FFprobe is limited to the first audio stream and a small named JSON field set. B
 
 The resulting license is LGPL-2.1-or-later. `sidecar/native/ffmpeg-build.json` is the machine-readable source/configuration authority.
 
-`tools/build-analysis-sidecar.py` freezes the stdlib-only Python entry point with exact PyInstaller build dependencies, copies only the project-built `ffmpeg` and `ffprobe`, records observed versions where the build proves them, packages the project, primary native, and third-party license texts, and writes the final full-folder runtime manifest. Transitive native source versions are not inferred from license references: their exact shipped identities are the per-file SHA-256 values. Magic-byte detection plus native suffix checks require every native executable, shared library, framework binary, and Python extension to map to a declared component; packaging fails closed on an unclassified native file. Forge copies this one-folder directory outside ASAR under `Resources/open-chords-analysis`.
+`tools/build-analysis-sidecar.py` freezes the stdlib-only Python entry point with exact PyInstaller build dependencies and copies the reviewed native closure. That closure is the project-built `ffmpeg` and `ffprobe` on every target plus the declared `libwinpthread-1.dll` beside those tools on Windows. The Windows build copies that DLL from the declared MSYS2 package, records the observed package name/version, package URL, and DLL SHA-256 in `windows-runtime.json`, and packages the exact license notice supplied by that package. A recursive PE-import gate requires both tools and every packaged runtime DLL to import only an explicitly reviewed Windows system DLL or another declared packaged runtime DLL; missing, unreachable, external MinGW, and unreviewed imports fail the build.
+
+The assembler records observed versions where the build proves them, packages the project, primary native, and third-party license texts, and writes the final full-folder runtime manifest. Transitive native source versions are not inferred from license references: their exact shipped identities are the per-file SHA-256 values, supplemented by recorded package provenance where available. Magic-byte detection plus native suffix checks require every native executable, shared library, framework binary, and Python extension to map to a declared component; packaging fails closed on an unclassified native file. Forge copies this one-folder directory outside ASAR under `Resources/open-chords-analysis`.
 
 For a local macOS arm64 package, build the native runtime before Forge:
 
@@ -57,7 +59,7 @@ pnpm test:packaged
 
 CI builds on macOS arm64 and a Windows Server 2025 x64 GitHub-hosted build profile using native runners; PyInstaller is not used as a cross-compiler. Each profile:
 
-1. verifies and builds the pinned FFmpeg source;
+1. verifies and builds the pinned FFmpeg source and the reviewed target-specific native runtime closure;
 2. assembles the one-folder Python runtime;
 3. decodes the same fixture twice through the framed child-process seam with an empty environment and compares manifests;
 4. creates the Forge ZIP;
