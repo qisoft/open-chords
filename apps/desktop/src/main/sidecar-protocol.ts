@@ -10,6 +10,7 @@ const Sha256Schema = z
 const Utf8IdentifierSchema = z
   .string()
   .min(1)
+  .refine((value) => value.isWellFormed(), "Identifier must be well-formed Unicode")
   .refine((value) => Buffer.byteLength(value, "utf8") <= 256, "Identifier exceeds 256 UTF-8 bytes");
 const JobIdSchema = Utf8IdentifierSchema.brand<"SidecarJobId">();
 const NonceSchema = Utf8IdentifierSchema.brand<"SidecarNonce">();

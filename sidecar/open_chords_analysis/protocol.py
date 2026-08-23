@@ -224,10 +224,7 @@ def _parse_start(message: object) -> _Start:
     ):
         raise ProtocolError("invalid sidecar start semantics")
     identifiers = [message["jobId"], message["nonce"], message["requestId"]]
-    if any(
-        not isinstance(value, str) or not value or len(value.encode()) > MAX_ID_BYTES
-        for value in identifiers
-    ):
+    if any(not _valid_identifier(value) for value in identifiers):
         raise ProtocolError("invalid sidecar session identity")
     manifest_hash = message["manifestHash"]
     if not isinstance(manifest_hash, str) or SHA256_PATTERN.fullmatch(manifest_hash) is None:
@@ -252,10 +249,7 @@ def _parse_cancel(message: object) -> _Cancel:
     if message["type"] != "cancel" or type(message["sequence"]) is not int:
         raise ProtocolError("invalid sidecar cancel semantics")
     identifiers = [message["jobId"], message["nonce"], message["requestId"]]
-    if any(
-        not isinstance(value, str) or not value or len(value.encode()) > MAX_ID_BYTES
-        for value in identifiers
-    ):
+    if any(not _valid_identifier(value) for value in identifiers):
         raise ProtocolError("invalid sidecar cancel identity")
     return _Cancel(
         job_id=message["jobId"],
@@ -281,6 +275,15 @@ def _read_exact(
             raise ProtocolError(failure)
         content.extend(chunk)
     return bytes(content)
+
+
+def _valid_identifier(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        return len(value.encode("utf-8")) <= MAX_ID_BYTES
+    except UnicodeEncodeError:
+        return False
 
 
 def _identity(start: _Start, sequence: int) -> dict[str, int | str]:

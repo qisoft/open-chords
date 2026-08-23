@@ -295,6 +295,32 @@ class ProtocolTests(unittest.TestCase):
             ["handshake"],
         )
 
+    def test_enforces_well_formed_256_byte_identifiers(self) -> None:
+        runtime = FrozenRuntime(
+            manifest_hash="b" * 64,
+            platform_profile="test",
+            toolchain=NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
+        )
+        accepted = {
+            "jobId": "é" * 128,
+            "manifestHash": "a" * 64,
+            "nonce": "nonce-protocol",
+            "requestId": "request-protocol",
+            "sequence": 0,
+            "type": "start",
+        }
+        output = io.BytesIO()
+        serve_one_session(self._reader(accepted), output, Path.cwd(), runtime)
+        self.assertEqual(
+            [message["type"] for message in self._messages(output.getvalue())],
+            ["handshake"],
+        )
+
+        for invalid_identifier in ("é" * 129, "\ud800"):
+            rejected = {**accepted, "jobId": invalid_identifier}
+            with self.assertRaisesRegex(ProtocolError, "invalid sidecar session identity"):
+                serve_one_session(self._reader(rejected), io.BytesIO(), Path.cwd(), runtime)
+
     def test_rejects_a_truncated_control_frame(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")
@@ -341,6 +367,10 @@ class ProtocolTests(unittest.TestCase):
     def _frame(message: object) -> bytes:
         payload = json.dumps(message, separators=(",", ":")).encode()
         return struct.pack(">I", len(payload)) + payload
+
+    @classmethod
+    def _reader(cls, message: object) -> io.BytesIO:
+        return io.BytesIO(cls._frame(message))
 
     @classmethod
     def _start_frame(cls, manifest_hash: str = "a" * 64) -> bytes:
