@@ -22,11 +22,13 @@ import {
   ProjectEnvelopeSchema,
 } from "@open-chords/contracts";
 import {
+  AnalysisRevisionSchema,
   canonicalSerialize,
   EditTransactionSchema,
   parseProjectContract,
   StableIdSchema,
   type EditTransaction,
+  type AnalysisRevision,
   type ProjectContract,
 } from "@open-chords/domain";
 import { z } from "zod";
@@ -64,7 +66,14 @@ const ProjectRevisionRecordSchema = z.strictObject({
   payloadObjectHash: HashSchema,
   projectId: StableIdSchema,
   projectRevisionId: ProjectRevisionIdSchema,
-  reason: z.enum(["created", "edit_transaction", "migration", "restored", "rollback"]),
+  reason: z.enum([
+    "analysis_publication",
+    "created",
+    "edit_transaction",
+    "migration",
+    "restored",
+    "rollback",
+  ]),
   schemaVersion: z.literal("1.0"),
 });
 const RevisionPointerSchema = z.strictObject({
@@ -531,6 +540,67 @@ export class ProjectLibrary {
         entry.revision.revision.projectRevisionId,
         entry.revision.pointer.sequence + 1,
         "edit_transaction",
+      );
+      return { projectRevisionId: next.revision.projectRevisionId };
+    });
+  }
+
+  async publishAnalysisRevision(input: {
+    expectedProjectRevisionId: string;
+    projectId: string;
+    revision: AnalysisRevision;
+  }): Promise<
+    { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
+  > {
+    return this.#serializeMutation(async () => {
+      const entry = this.#entries.get(input.projectId);
+      if (entry === undefined || entry.location === "trashed") return { notFound: true };
+      if (entry.status === "damaged" || entry.revision === undefined)
+        throw new ProjectLibraryDamagedError(input.projectId);
+      if (entry.compatibility === "read_only") return { readOnly: true };
+      if (entry.revision.revision.projectRevisionId !== input.expectedProjectRevisionId)
+        return { stale: true };
+
+      const candidate = AnalysisRevisionSchema.parse(input.revision);
+      if (candidate.projectId !== input.projectId) {
+        throw new Error("Analysis Revision belongs to another Project");
+      }
+      const project = structuredClone(entry.revision.payload.envelope.payload);
+      if (project.analysisRevisions.some(({ id }) => id === candidate.id)) {
+        throw new Error(`Analysis Revision ${candidate.id} already exists`);
+      }
+      project.analysisRevisions.push(candidate);
+      if (project.activeView === null) {
+        const editLayerId = `edit_${randomUUID().replaceAll("-", "")}`;
+        project.editLayers.push({
+          analysisRevisionId: candidate.id,
+          id: editLayerId,
+          transactions: [],
+        });
+        project.activeView = {
+          analysisRevisionId: candidate.id,
+          editHistoryPosition: 0,
+          editLayerId,
+          presentation: {
+            beginnerView: false,
+            enharmonicPreference: "contextual",
+            transposeSemitones: 0,
+          },
+        };
+      }
+      const payload = buildStoredPayload({
+        envelope: {
+          ...entry.revision.payload.envelope,
+          payload: parseProjectContract(project),
+        },
+        records: entry.revision.payload.records,
+      });
+      const next = await this.#commitPayload(
+        input.projectId,
+        payload,
+        entry.revision.revision.projectRevisionId,
+        entry.revision.pointer.sequence + 1,
+        "analysis_publication",
       );
       return { projectRevisionId: next.revision.projectRevisionId };
     });

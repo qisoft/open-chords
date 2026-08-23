@@ -1,9 +1,11 @@
 export { canonicalSerialize } from "./canonical.ts";
 export { materializeEffectiveTimeline, type EffectiveTimeline } from "./projection.ts";
 export {
+  AnalysisRevisionSchema,
   EditTransactionSchema,
   ProjectContractSchema,
   StableIdSchema,
+  type AnalysisRevision,
   type EditTransaction,
   type LyricsAlignment,
   type ProjectContract,

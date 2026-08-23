@@ -158,6 +158,90 @@ function envelopeForProject(projectId: string) {
 const DURABILITY_TEST_TIMEOUT_MS = 15_000;
 
 describe("ProjectLibrary", () => {
+  it("atomically publishes the first Analysis Revision and keeps later results reviewable", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-analysis-publication-");
+    const library = await openProjectLibrary({ stateRoot });
+    const emptyEnvelope = goldenEnvelope();
+    const firstCandidate = structuredClone(emptyEnvelope.payload.analysisRevisions[0]!);
+    firstCandidate.id = "revision_first_analysis";
+    firstCandidate.supportClaimIds = [];
+    emptyEnvelope.payload.activeView = null;
+    emptyEnvelope.payload.analysisRevisions = [];
+    emptyEnvelope.payload.editLayers = [];
+    emptyEnvelope.payload.lyricsAlignments = [];
+    emptyEnvelope.payload.lyricsDocuments = [];
+    emptyEnvelope.payload.supportClaims = [];
+    const created = await library.createProject({
+      envelope: emptyEnvelope,
+      records: ownedRecords(),
+    });
+
+    const first = await library.publishAnalysisRevision({
+      expectedProjectRevisionId: created.projectRevisionId,
+      projectId: "project_golden",
+      revision: firstCandidate,
+    });
+    expect(first).toHaveProperty("projectRevisionId");
+    if (!("projectRevisionId" in first)) throw new Error("First analysis was not published");
+    const afterFirst = await library.getSnapshot("project_golden");
+    expect(afterFirst?.project.activeView).toMatchObject({
+      analysisRevisionId: "revision_first_analysis",
+      editHistoryPosition: 0,
+    });
+    expect(afterFirst?.project.editLayers).toMatchObject([
+      { analysisRevisionId: "revision_first_analysis", transactions: [] },
+    ]);
+
+    const secondCandidate = structuredClone(firstCandidate);
+    secondCandidate.id = "revision_reviewable_analysis";
+    const second = await library.publishAnalysisRevision({
+      expectedProjectRevisionId: first.projectRevisionId,
+      projectId: "project_golden",
+      revision: secondCandidate,
+    });
+    expect(second).toHaveProperty("projectRevisionId");
+    const afterSecond = await library.getSnapshot("project_golden");
+    expect(afterSecond?.project.analysisRevisions.map(({ id }) => id)).toEqual([
+      "revision_first_analysis",
+      "revision_reviewable_analysis",
+    ]);
+    expect(afterSecond?.project.activeView?.analysisRevisionId).toBe("revision_first_analysis");
+    expect((await library.readProject("project_golden")).revisions.at(-1)?.reason).toBe(
+      "analysis_publication",
+    );
+  });
+
+  it("preserves Project Head when an Analysis candidate is stale or invalid", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-analysis-rejection-");
+    const library = await openProjectLibrary({ stateRoot });
+    const created = await library.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const candidate = structuredClone(goldenEnvelope().payload.analysisRevisions[0]!);
+    candidate.id = "revision_rejected";
+
+    await expect(
+      library.publishAnalysisRevision({
+        expectedProjectRevisionId: "projectrevision_stale",
+        projectId: "project_golden",
+        revision: candidate,
+      }),
+    ).resolves.toEqual({ stale: true });
+    const invalid = structuredClone(candidate);
+    invalid.timeline.chordEvents[0]!.endSample += 1;
+    await expect(
+      library.publishAnalysisRevision({
+        expectedProjectRevisionId: created.projectRevisionId,
+        projectId: "project_golden",
+        revision: invalid,
+      }),
+    ).rejects.toThrow(/invariants|timeline|contiguous/iu);
+    expect((await library.getSnapshot("project_golden"))?.projectRevisionId).toBe(
+      created.projectRevisionId,
+    );
+  });
+
   it(
     "publishes immutable revisions, commits through the ProjectAuthority seam, and reopens",
     async () => {
