@@ -95,6 +95,22 @@ class RuntimeManifestTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeManifestError, "could not be resolved"):
                 write_runtime_manifest(runtime_root, build_id="test-build", platform_profile="test")
 
+    def test_rejects_a_required_executable_symlink(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-runtime-required-link-") as temporary:
+            runtime_root = self._runtime_root(Path(temporary))
+            suffix = ".exe" if os.name == "nt" else ""
+            executable = runtime_root / f"open-chords-analysis{suffix}"
+            target = runtime_root / "sidecar.bin"
+            executable.replace(target)
+            try:
+                executable.symlink_to(target.name)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"symbolic links are unavailable: {error}")
+
+            write_runtime_manifest(runtime_root, build_id="test-build", platform_profile="test")
+            with self.assertRaisesRegex(RuntimeManifestError, "required executable"):
+                load_frozen_runtime(runtime_root)
+
     @staticmethod
     def _runtime_root(runtime_root: Path) -> Path:
         tools = runtime_root / "tools"

@@ -115,6 +115,7 @@ def main() -> None:
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
         )
         native_files = _native_files(assembled)
+        _validate_native_closure(assembled, native_files, ffmpeg_build)
         present_components = {entry["component"] for entry in native_files} | {"pyinstaller"}
         inventory["dependencies"] = [
             {**dependency, "present": dependency["component"] in present_components}
@@ -254,6 +255,97 @@ def _native_component(relative: str, binary_format: str | None) -> str | None:
     if binary_format is not None or name.endswith((".dll", ".dylib", ".exe", ".pyd", ".so")):
         raise RuntimeError(f"Unclassified native runtime file: {relative}")
     return None
+
+
+def _validate_native_closure(
+    runtime_root: Path,
+    native_files: list[dict[str, str]],
+    ffmpeg_build: dict[str, object],
+) -> None:
+    packaged_names = {Path(entry["path"]).name.lower() for entry in native_files}
+    if sys.platform == "darwin":
+        for entry in native_files:
+            if entry["format"] != "mach-o":
+                continue
+            owner = runtime_root / entry["path"]
+            dependencies = _macho_dependencies(owner)
+            for dependency in dependencies:
+                _validate_macho_dependency(runtime_root, owner, dependency, packaged_names)
+        return
+    if os.name == "nt":
+        allowed_system = {
+            str(name).lower() for name in ffmpeg_build["windowsSystemDlls"]
+        }
+        inspector = shutil.which("objdump") or "C:/msys64/ucrt64/bin/objdump.exe"
+        if not Path(inspector).is_file():
+            raise FileNotFoundError("objdump was not found for frozen PE closure validation")
+        for entry in native_files:
+            if entry["format"] != "pe":
+                continue
+            dependencies = _pe_dependencies(runtime_root / entry["path"], inspector)
+            _validate_pe_dependencies(entry["path"], dependencies, packaged_names, allowed_system)
+        return
+    raise RuntimeError("frozen native closure validation has no declared platform profile")
+
+
+def _macho_dependencies(path: Path) -> list[str]:
+    result = subprocess.run(
+        ["otool", "-L", str(path)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return [line.strip().split(" (", 1)[0] for line in result.stdout.splitlines()[1:] if line.strip()]
+
+
+def _validate_macho_dependency(
+    runtime_root: Path,
+    owner: Path,
+    dependency: str,
+    packaged_names: set[str],
+) -> None:
+    if dependency.startswith(("/System/Library/", "/usr/lib/")):
+        return
+    if dependency.startswith("@rpath/"):
+        if Path(dependency).name.lower() in packaged_names:
+            return
+        raise RuntimeError(f"Unpackaged Mach-O dependency for {owner.name}: {dependency}")
+    relative_prefixes = {
+        "@loader_path/": owner.parent,
+        "@executable_path/": runtime_root,
+    }
+    for prefix, base in relative_prefixes.items():
+        if dependency.startswith(prefix):
+            candidate = (base / dependency.removeprefix(prefix)).resolve(strict=True)
+            if candidate.is_relative_to(runtime_root.resolve(strict=True)):
+                return
+            break
+    raise RuntimeError(f"Unreviewed Mach-O dependency for {owner.name}: {dependency}")
+
+
+def _pe_dependencies(path: Path, inspector: str) -> list[str]:
+    result = subprocess.run(
+        [inspector, "-p", str(path)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    prefix = "DLL Name:"
+    return [line.split(prefix, 1)[1].strip() for line in result.stdout.splitlines() if prefix in line]
+
+
+def _validate_pe_dependencies(
+    owner: str,
+    dependencies: list[str],
+    packaged_names: set[str],
+    allowed_system: set[str],
+) -> None:
+    for dependency in dependencies:
+        dependency_lower = dependency.lower()
+        if dependency_lower not in packaged_names and dependency_lower not in allowed_system:
+            raise RuntimeError(f"Unpackaged PE dependency for {owner}: {dependency}")
 
 
 def _dependencies_for_profile(

@@ -94,6 +94,61 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
             ["shared"],
         )
 
+    def test_rejects_unpackaged_macho_dependencies(self) -> None:
+        validate_dependency = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_validate_macho_dependency"]
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-macho-closure-") as temporary:
+            runtime_root = Path(temporary).resolve()
+            owner = runtime_root / "open-chords-analysis"
+            owner.write_bytes(b"sidecar")
+            validate_dependency(
+                runtime_root,
+                owner,
+                "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+                {"open-chords-analysis", "libcrypto.3.dylib"},
+            )
+            validate_dependency(
+                runtime_root,
+                owner,
+                "@rpath/libcrypto.3.dylib",
+                {"open-chords-analysis", "libcrypto.3.dylib"},
+            )
+            with self.assertRaisesRegex(RuntimeError, "Unpackaged Mach-O dependency"):
+                validate_dependency(
+                    runtime_root,
+                    owner,
+                    "@rpath/libmissing.dylib",
+                    {"open-chords-analysis"},
+                )
+            with self.assertRaisesRegex(RuntimeError, "Unreviewed Mach-O dependency"):
+                validate_dependency(
+                    runtime_root,
+                    owner,
+                    "/opt/homebrew/lib/libhost.dylib",
+                    {"open-chords-analysis"},
+                )
+
+    def test_rejects_unpackaged_pe_dependencies(self) -> None:
+        validate_dependencies = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_validate_pe_dependencies"]
+
+        validate_dependencies(
+            "open-chords-analysis.exe",
+            ["KERNEL32.dll", "python313.dll"],
+            {"open-chords-analysis.exe", "python313.dll"},
+            {"kernel32.dll"},
+        )
+        with self.assertRaisesRegex(RuntimeError, "Unpackaged PE dependency"):
+            validate_dependencies(
+                "open-chords-analysis.exe",
+                ["host-only.dll"],
+                {"open-chords-analysis.exe"},
+                {"kernel32.dll"},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

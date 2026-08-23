@@ -139,7 +139,12 @@ def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
         f"tools/ffmpeg{executable_suffix}",
         f"tools/ffprobe{executable_suffix}",
     }
-    if not required_paths <= expected_paths:
+    required_regular_files = {
+        entry["path"]
+        for entry in files
+        if entry["path"] in required_paths and entry["type"] == "file"
+    }
+    if required_regular_files != required_paths:
         raise RuntimeManifestError("frozen runtime manifest misses a required executable")
     return FrozenRuntime(
         manifest_hash=hashlib.sha256(content).hexdigest(),
