@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import math
 import shutil
@@ -22,12 +23,50 @@ from sidecar.open_chords_analysis.canonical_decode import (
     _NativeToolOutputLimitError,
     _NativeToolTimeoutError,
     _probe_audio,
+    _run_tool,
     _sanitize_external_tool_runtime,
     decode_canonical,
 )
 
 
 class CanonicalDecodeTests(unittest.TestCase):
+    def test_reaps_native_process_when_reader_start_fails(self) -> None:
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(),
+            stderr=io.BytesIO(),
+            stdout=io.BytesIO(),
+            wait=unittest.mock.Mock(return_value=0),
+        )
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.subprocess.Popen", return_value=process),
+            patch(
+                "sidecar.open_chords_analysis.canonical_decode.threading.Thread.start",
+                side_effect=RuntimeError("injected reader start failure"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            _run_tool([sys.executable, "-V"], threading.Event())
+
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=1)
+
+    def test_reaps_native_process_when_wait_fails(self) -> None:
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(),
+            stderr=io.BytesIO(),
+            stdout=io.BytesIO(),
+            wait=unittest.mock.Mock(side_effect=[RuntimeError("injected wait failure"), 0]),
+        )
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.subprocess.Popen", return_value=process),
+            self.assertRaises(RuntimeError),
+        ):
+            _run_tool([sys.executable, "-V"], threading.Event())
+
+        process.kill.assert_called_once_with()
+        self.assertEqual(process.wait.call_count, 2)
+        self.assertEqual(process.wait.call_args_list[-1], unittest.mock.call(timeout=1))
+
     def test_leaves_the_unfrozen_windows_dll_search_path_unchanged(self) -> None:
         set_dll_directory = unittest.mock.Mock(return_value=1)
         windows_api = SimpleNamespace(

@@ -396,13 +396,16 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
         threading.Thread(target=capture, args=(process.stdout, stdout), daemon=True),
         threading.Thread(target=capture, args=(process.stderr, stderr), daemon=True),
     ]
-    for reader in readers:
-        reader.start()
-    deadline = time.monotonic() + TOOL_TIMEOUT_SECONDS
+    started_readers: list[threading.Thread] = []
     cancelled = False
     timed_out = False
-    return_code: int
+    return_code: int | None = None
+    reaped = False
     try:
+        for reader in readers:
+            reader.start()
+            started_readers.append(reader)
+        deadline = time.monotonic() + TOOL_TIMEOUT_SECONDS
         while True:
             if cancellation.is_set():
                 cancelled = True
@@ -415,16 +418,22 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
                 break
             try:
                 return_code = process.wait(timeout=min(0.05, remaining))
+                reaped = True
                 break
             except subprocess.TimeoutExpired:
                 continue
         if cancelled or timed_out:
             return_code = process.wait()
+            reaped = True
     finally:
-        for reader in readers:
+        if not reaped:
+            _terminate_and_reap(process)
+        for reader in started_readers:
             reader.join(timeout=1)
         process.stdout.close()
         process.stderr.close()
+    if return_code is None:
+        raise RuntimeError("native media tool ended without a process status")
     if cancelled:
         raise CanonicalDecodeCancelled("canonical decode was cancelled")
     if timed_out:
@@ -434,6 +443,15 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
     if return_code != 0:
         raise _NativeToolExitError(return_code)
     return _ToolResult(bytes(stdout), bytes(stderr))
+
+
+def _terminate_and_reap(process: subprocess.Popen[bytes]) -> None:
+    process.kill()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=1)
 
 
 def _sanitize_external_tool_runtime() -> None:
