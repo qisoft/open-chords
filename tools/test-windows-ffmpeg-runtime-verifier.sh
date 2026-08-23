@@ -17,6 +17,18 @@ printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'binary="${@: -1}"' 'cas
   '    else' \
   '      printf "%s\n" "DLL Name: KERNEL32.dll" "DLL Name: libwinpthread-1.dll"' \
   '    fi ;;' \
+  '  transitive_unknown)' \
+  '    if [[ "${binary}" == *libwinpthread-1.dll ]]; then' \
+  '      printf "%s\n" "DLL Name: unexpected-runtime.dll"' \
+  '    else' \
+  '      printf "%s\n" "DLL Name: libwinpthread-1.dll"' \
+  '    fi ;;' \
+  '  transitive_mingw)' \
+  '    if [[ "${binary}" == *libwinpthread-1.dll ]]; then' \
+  '      printf "%s\n" "DLL Name: libgcc_s_seh-1.dll"' \
+  '    else' \
+  '      printf "%s\n" "DLL Name: libwinpthread-1.dll"' \
+  '    fi ;;' \
   '  system) printf "%s\n" "DLL Name: KERNEL32.dll" "DLL Name: USER32.dll" ;;' \
   '  mingw) printf "%s\n" "DLL Name: KERNEL32.dll" "DLL Name: libgcc_s_seh-1.dll" ;;' \
   '  unknown) printf "%s\n" "DLL Name: unexpected-runtime.dll" ;;' \
@@ -47,6 +59,12 @@ done
 multiple_errors="$(run_verifier multiple 2>&1 || true)"
 [[ "${multiple_errors}" == *"external MinGW runtime dependency: libgcc_s_seh-1.dll"* ]]
 [[ "${multiple_errors}" == *"unreviewed Windows DLL: unexpected-runtime.dll"* ]]
+
+transitive_unknown_errors="$(run_verifier transitive_unknown 2>&1 || true)"
+[[ "${transitive_unknown_errors}" == *"libwinpthread-1.dll imports an unreviewed Windows DLL: unexpected-runtime.dll"* ]]
+
+transitive_mingw_errors="$(run_verifier transitive_mingw 2>&1 || true)"
+[[ "${transitive_mingw_errors}" == *"libwinpthread-1.dll retains an external MinGW runtime dependency: libgcc_s_seh-1.dll"* ]]
 
 rm "${fixture_root}/bin/ffprobe.exe"
 if run_verifier packaged >/dev/null 2>&1; then

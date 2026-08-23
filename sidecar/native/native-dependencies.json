@@ -35,7 +35,7 @@
     },
     {
       "component": "winpthreads",
-      "license": "MIT AND BSD-3-Clause-Clear",
+      "license": "MIT AND BSD-3-Clause",
       "licenseFile": "licenses/Winpthreads-Licenses.txt",
       "name": "MinGW-w64 winpthreads runtime",
       "packageRepository": "https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-libwinpthread",

@@ -2,7 +2,7 @@
   "notices": [
     {
       "component": "MinGW-w64 winpthreads runtime",
-      "license": "MIT AND BSD-3-Clause-Clear",
+      "license": "MIT AND BSD-3-Clause",
       "licenseTextSource": "https://github.com/mingw-w64/mingw-w64/blob/master/mingw-w64-libraries/winpthreads/COPYING"
     },
     {
