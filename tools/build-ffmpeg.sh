@@ -12,36 +12,11 @@ mkdir -p "${output_root}"
 output_root="$(cd "${output_root}" && pwd)"
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_manifest="${repository_root}/sidecar/native/ffmpeg-build.json"
-if command -v python3 >/dev/null 2>&1; then
-  python_command="python3"
-elif command -v python >/dev/null 2>&1; then
-  python_command="python"
-elif command -v jq >/dev/null 2>&1; then
-  python_command=""
-else
-  echo "Python or jq is required to read the reviewed FFmpeg build manifest" >&2
-  exit 1
-fi
-json_value() {
-  if [[ -n "${python_command}" ]]; then
-    "${python_command}" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "${build_manifest}" "$1"
-  else
-    jq -er --arg key "$1" '.[$key] | strings' "${build_manifest}"
-  fi
-}
-json_array_values() {
-  if [[ -n "${python_command}" ]]; then
-    "${python_command}" -c \
-      'import json,sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]]))' \
-      "${build_manifest}" "$1"
-  else
-    jq -er --arg key "$1" '.[$key][] | strings' "${build_manifest}"
-  fi
-}
-version="$(json_value version)"
-archive="$(json_value sourceArchive)"
-expected_sha256="$(json_value sourceSha256)"
-source_url="$(json_value sourceUrl)"
+manifest_reader="${repository_root}/tools/read-ffmpeg-build-manifest.sh"
+version="$(bash "${manifest_reader}" scalar "${build_manifest}" version)"
+archive="$(bash "${manifest_reader}" scalar "${build_manifest}" sourceArchive)"
+expected_sha256="$(bash "${manifest_reader}" scalar "${build_manifest}" sourceSha256)"
+source_url="$(bash "${manifest_reader}" scalar "${build_manifest}" sourceUrl)"
 download_root="${output_root}/downloads"
 source_root="${output_root}/source"
 build_root="${output_root}/build/${platform_profile}-reviewed-v1"
@@ -62,11 +37,12 @@ if [[ ! -f "${source_root}/ffmpeg-${version}/configure" ]]; then
 fi
 
 configure_arguments=("--prefix=${install_root}")
+configure_arguments_output="$(
+  bash "${manifest_reader}" array "${build_manifest}" configureArguments
+)"
 while IFS= read -r argument; do
   configure_arguments+=("${argument}")
-done < <(
-  json_array_values configureArguments
-)
+done <<< "${configure_arguments_output}"
 
 pushd "${build_root}" >/dev/null
 "${source_root}/ffmpeg-${version}/configure" "${configure_arguments[@]}"

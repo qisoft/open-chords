@@ -68,7 +68,9 @@ jobs:
       - name: Build reviewed FFmpeg on macOS
         if: runner.os == 'macOS'
         shell: bash
-        run: tools/build-ffmpeg.sh ${{ matrix.profile }} build/native
+        run: |
+          tools/test-ffmpeg-build-manifest-reader.sh python3
+          tools/build-ffmpeg.sh ${{ matrix.profile }} build/native
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
         with:
@@ -84,7 +86,9 @@ jobs:
       - name: Build reviewed FFmpeg on Windows
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: tools/build-ffmpeg.sh ${{ matrix.profile }} build/native
+        run: |
+          tools/test-ffmpeg-build-manifest-reader.sh jq
+          tools/build-ffmpeg.sh ${{ matrix.profile }} build/native
       - name: Assemble frozen one-folder sidecar
         run: >-
           python tools/build-analysis-sidecar.py
