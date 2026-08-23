@@ -12,6 +12,7 @@ import {
   createPromiseSidecarClient,
   createUncontainedSpawnLauncherForProof,
   parseSidecarSessionRequest,
+  SidecarSessionError,
 } from "../apps/desktop/src/main/sidecar-session.ts";
 
 const executablePath = process.env.OPEN_CHORDS_FROZEN_SIDECAR;
@@ -87,7 +88,8 @@ it.skipIf(executablePath === undefined)(
         }),
       );
       try {
-        let result;
+        let result: Awaited<ReturnType<typeof client.runSession>> | undefined;
+        let errorCode = "unknown";
         try {
           result = await client.runSession(
             parseSidecarSessionRequest({
@@ -99,9 +101,11 @@ it.skipIf(executablePath === undefined)(
             }),
           );
         } catch (error) {
+          errorCode = error instanceof SidecarSessionError ? error.code : "unknown";
+        }
+        if (result === undefined) {
           throw new Error(
-            `Frozen sidecar failed; bounded native diagnostics: ${nativeToolDiagnostics(runtimeRoot, inputPath, workspace)}`,
-            { cause: error },
+            `Frozen sidecar failed (${errorCode}); bounded native diagnostics: ${nativeToolDiagnostics(runtimeRoot, inputPath, workspace)}`,
           );
         }
         expect(result.artifact.path).toBe("artifacts/decode-manifest.json");
@@ -173,6 +177,7 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
       ? { SYSTEMROOT: process.env.SYSTEMROOT ?? "C:\\Windows" }
       : { LANG: "C", LC_ALL: "C" };
   const diagnosticOutput = join(workspace, "artifacts", "diagnostic.wav");
+  mkdirSync(dirname(diagnosticOutput), { recursive: true });
   const checks = [
     ["ffprobe-version", ffprobe, ["-version"]],
     [
@@ -215,7 +220,7 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
       const diagnostic = spawnSync(command, arguments_, {
         env: environment,
         stdio: "ignore",
-        timeout: 10_000,
+        timeout: 1_000,
       });
       return `${label}=${diagnostic.error?.name ?? diagnostic.signal ?? diagnostic.status ?? "unknown"}`;
     })
