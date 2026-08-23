@@ -192,6 +192,21 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
     "json",
     inputPath,
   ];
+  const fullProbeArguments = [
+    "-v",
+    "error",
+    "-probesize",
+    "1048576",
+    "-analyzeduration",
+    "5000000",
+    "-select_streams",
+    "a:0",
+    "-show_entries",
+    "stream=codec_name,codec_type,sample_rate,channels,channel_layout",
+    "-of",
+    "json",
+    inputPath,
+  ];
   const decodeArguments = [
     "-v",
     "error",
@@ -209,6 +224,8 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
   const checks = [
     ["ffprobe-basic", ffprobe, probeArguments],
     ["ffprobe-whitelist", ffprobe, withProtocolWhitelist(probeArguments)],
+    ["ffprobe-full", ffprobe, fullProbeArguments],
+    ["ffprobe-full-whitelist", ffprobe, withProtocolWhitelist(fullProbeArguments)],
     ["ffmpeg-basic", ffmpeg, decodeArguments],
     ["ffmpeg-whitelist", ffmpeg, withProtocolWhitelist(decodeArguments)],
   ] as const;
@@ -216,12 +233,27 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
     .map(([label, command, arguments_]) => {
       const diagnostic = spawnSync(command, arguments_, {
         env: environment,
-        stdio: "ignore",
+        encoding: "utf8",
+        maxBuffer: 64 * 1024,
         timeout: 1_000,
       });
-      return `${label}=${diagnostic.error?.name ?? diagnostic.signal ?? diagnostic.status ?? "unknown"}`;
+      const outcome = diagnostic.error?.name ?? diagnostic.signal ?? diagnostic.status ?? "unknown";
+      if (!label.startsWith("ffprobe")) return `${label}=${outcome}`;
+      return `${label}=${outcome}/${probeOutputShape(diagnostic.stdout)}/out-${Buffer.byteLength(diagnostic.stdout ?? "")}/err-${Buffer.byteLength(diagnostic.stderr ?? "")}`;
     })
     .join(",");
+}
+
+function probeOutputShape(output: string | null): string {
+  try {
+    const parsed: unknown = JSON.parse(output ?? "");
+    if (typeof parsed !== "object" || parsed === null || !("streams" in parsed))
+      return "no-streams";
+    const streams = (parsed as { streams?: unknown }).streams;
+    return Array.isArray(streams) ? `streams-${streams.length}` : "invalid-streams";
+  } catch {
+    return "invalid-json";
+  }
 }
 
 function withProtocolWhitelist(arguments_: string[]): string[] {
