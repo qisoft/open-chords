@@ -281,6 +281,7 @@ def _validate_native_closure(
                     )
         return
     if os.name == "nt":
+        packaged_native_paths = {path.lower() for path in packaged_native_paths}
         allowed_system = {
             str(name).lower()
             for name in ffmpeg_build["windowsFrozenRuntimeSystemDlls"]
@@ -304,16 +305,16 @@ def _packaged_native_paths(
     native_files: list[dict[str, str]],
 ) -> set[str]:
     runtime_root = runtime_root.resolve(strict=True)
-    native_paths = {entry["path"].lower() for entry in native_files}
+    native_paths = {entry["path"] for entry in native_files}
     for path in runtime_root.rglob("*"):
         if not path.is_symlink():
             continue
         resolved = path.resolve(strict=True)
         if not resolved.is_relative_to(runtime_root):
             continue
-        resolved_relative = resolved.relative_to(runtime_root).as_posix().lower()
+        resolved_relative = resolved.relative_to(runtime_root).as_posix()
         if resolved_relative in native_paths:
-            native_paths.add(path.relative_to(runtime_root).as_posix().lower())
+            native_paths.add(path.relative_to(runtime_root).as_posix())
     return native_paths
 
 
@@ -388,7 +389,7 @@ def _validate_macho_dependency(
     for prefix, base in relative_prefixes.items():
         if dependency.startswith(prefix):
             candidate = (base / dependency.removeprefix(prefix)).resolve(strict=True)
-            relative = candidate.relative_to(runtime_root.resolve(strict=True)).as_posix().lower()
+            relative = candidate.relative_to(runtime_root.resolve(strict=True)).as_posix()
             if relative in packaged_paths:
                 return
             break
@@ -418,7 +419,7 @@ def _packaged_macho_candidate(
     root = runtime_root.resolve(strict=True)
     if not candidate.is_relative_to(root):
         return ""
-    return candidate.relative_to(root).as_posix().lower()
+    return candidate.relative_to(root).as_posix()
 
 
 def _pe_dependencies(path: Path, inspector: str) -> list[str]:

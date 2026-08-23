@@ -159,6 +159,14 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
                     ["@loader_path_fake/.."],
                     {"_internal/libcrypto.3.dylib", "_internal/python3.13/lib-dynload/_ssl.so"},
                 )
+            with self.assertRaisesRegex(RuntimeError, "Unresolvable Mach-O dependency"):
+                validate_dependency(
+                    runtime_root,
+                    owner,
+                    "@rpath/LIBCRYPTO.3.DYLIB",
+                    ["@loader_path/../.."],
+                    {"_internal/libcrypto.3.dylib", "_internal/python3.13/lib-dynload/_ssl.so"},
+                )
             with self.assertRaisesRegex(RuntimeError, "Unreviewed Mach-O dependency"):
                 validate_dependency(
                     runtime_root,
@@ -202,8 +210,8 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
                 ],
             )
 
-            self.assertIn("_internal/python", indexed)
-            self.assertIn("_internal/python.framework/versions/3.13/python", indexed)
+            self.assertIn("_internal/Python", indexed)
+            self.assertIn("_internal/Python.framework/Versions/3.13/Python", indexed)
             self.assertNotIn("_internal/not-a-native-library", indexed)
             with self.assertRaisesRegex(RuntimeError, "Unresolvable Mach-O dependency"):
                 validate_dependency(
