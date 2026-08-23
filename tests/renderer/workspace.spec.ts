@@ -217,7 +217,7 @@ function goldenRecords(): ProjectOwnedRecords {
     analysisManifests: [],
     exportReceipts: [],
     extensions: {},
-    legacyManifestlessAnalysisRevisionIds: [],
+    legacyManifestlessAnalysisRevisionIds: ["revision_original", "revision_reviewable"],
     projectRange: { endSourceSample: 48_000, sourceId: "source_fixture", startSourceSample: 0 },
     sources: [
       {
