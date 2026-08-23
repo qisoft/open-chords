@@ -1472,7 +1472,7 @@ describe("AnalysisJobs", () => {
     const secondStarted = new Promise<void>((resolve) => {
       reportSecondStarted = resolve;
     });
-    const terminations: Array<{ attemptId: string; reason: string }> = [];
+    let terminationCalls = 0;
     const ids = [
       "job_terminal_first",
       "attempt_terminal_first",
@@ -1517,8 +1517,9 @@ describe("AnalysisJobs", () => {
             ],
           };
         },
-        terminateAndWait: async (input) => {
-          terminations.push(input);
+        terminateAndWait: () => {
+          terminationCalls += 1;
+          throw new Error("Synchronous cleanup failure");
         },
       },
       stateRoot: await temporaryDirectory(),
@@ -1542,15 +1543,16 @@ describe("AnalysisJobs", () => {
     startSourceSample = 1_000;
 
     await expect(jobs.submit(firstRequest)).rejects.toMatchObject({
-      failure: { classification: "integrity_violation" },
+      failure: { classification: "containment_violation" },
     });
     await activeRun;
     expect(jobs.get("job_terminal_first").job).toEqual(terminal);
     expect(jobs.get("job_active_second")).toMatchObject({
-      attempts: [{ failure: { classification: "integrity_violation" }, state: "failed" }],
+      attempts: [{ failure: { classification: "containment_violation" }, state: "failed" }],
       job: { state: "blocked" },
     });
-    expect(terminations).toEqual([{ attemptId: "attempt_active_second", reason: "interrupted" }]);
+    expect(jobs.circuitBreaker()).toMatchObject({ classification: "containment_violation" });
+    expect(terminationCalls).toBe(1);
   });
 
   it("rejects a tampered retained Checkpoint before runner reuse", async () => {

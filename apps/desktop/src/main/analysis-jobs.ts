@@ -930,7 +930,9 @@ export class AnalysisJobs {
   ): Promise<void> {
     const existing = this.#terminationPromises.get(attemptId);
     if (existing !== undefined) return existing;
-    const termination = this.#runner.terminateAndWait({ attemptId, reason });
+    const termination = Promise.resolve().then(() =>
+      this.#runner.terminateAndWait({ attemptId, reason }),
+    );
     this.#terminationPromises.set(attemptId, termination);
     return termination;
   }
