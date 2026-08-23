@@ -76,6 +76,7 @@ jobs:
           install: >-
             base-devel
             curl
+            jq
             mingw-w64-ucrt-x86_64-gcc
             perl
             tar

@@ -14,11 +14,29 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_manifest="${repository_root}/sidecar/native/ffmpeg-build.json"
 if command -v python3 >/dev/null 2>&1; then
   python_command="python3"
-else
+elif command -v python >/dev/null 2>&1; then
   python_command="python"
+elif command -v jq >/dev/null 2>&1; then
+  python_command=""
+else
+  echo "Python or jq is required to read the reviewed FFmpeg build manifest" >&2
+  exit 1
 fi
 json_value() {
-  "${python_command}" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "${build_manifest}" "$1"
+  if [[ -n "${python_command}" ]]; then
+    "${python_command}" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "${build_manifest}" "$1"
+  else
+    jq -er --arg key "$1" '.[$key] | strings' "${build_manifest}"
+  fi
+}
+json_array_values() {
+  if [[ -n "${python_command}" ]]; then
+    "${python_command}" -c \
+      'import json,sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]]))' \
+      "${build_manifest}" "$1"
+  else
+    jq -er --arg key "$1" '.[$key][] | strings' "${build_manifest}"
+  fi
 }
 version="$(json_value version)"
 archive="$(json_value sourceArchive)"
@@ -47,9 +65,7 @@ configure_arguments=("--prefix=${install_root}")
 while IFS= read -r argument; do
   configure_arguments+=("${argument}")
 done < <(
-  "${python_command}" -c \
-    'import json,sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["configureArguments"]))' \
-    "${build_manifest}"
+  json_array_values configureArguments
 )
 
 pushd "${build_root}" >/dev/null
