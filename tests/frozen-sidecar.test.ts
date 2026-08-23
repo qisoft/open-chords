@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -86,15 +87,23 @@ it.skipIf(executablePath === undefined)(
         }),
       );
       try {
-        const result = await client.runSession(
-          parseSidecarSessionRequest({
-            jobId: `job-frozen-${suffix}`,
-            manifestHash,
-            nonce: `nonce-frozen-${suffix}`,
-            requestId: `request-frozen-${suffix}`,
-            timeoutMs: 10_000,
-          }),
-        );
+        let result;
+        try {
+          result = await client.runSession(
+            parseSidecarSessionRequest({
+              jobId: `job-frozen-${suffix}`,
+              manifestHash,
+              nonce: `nonce-frozen-${suffix}`,
+              requestId: `request-frozen-${suffix}`,
+              timeoutMs: 10_000,
+            }),
+          );
+        } catch (error) {
+          throw new Error(
+            `Frozen sidecar failed; bounded native diagnostics: ${nativeToolDiagnostics(runtimeRoot, inputPath, workspace)}`,
+            { cause: error },
+          );
+        }
         expect(result.artifact.path).toBe("artifacts/decode-manifest.json");
         manifests.push(JSON.parse(readFileSync(join(workspace, result.artifact.path), "utf8")));
       } finally {
@@ -153,4 +162,62 @@ function isNativeBinary(path: string): boolean {
     ].includes(magic) ||
     /\.(?:dll|dylib|exe|pyd|so)$/iu.test(path)
   );
+}
+
+function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace: string): string {
+  const executableSuffix = process.platform === "win32" ? ".exe" : "";
+  const ffmpeg = join(runtimeRoot, "tools", `ffmpeg${executableSuffix}`);
+  const ffprobe = join(runtimeRoot, "tools", `ffprobe${executableSuffix}`);
+  const environment =
+    process.platform === "win32"
+      ? { SYSTEMROOT: process.env.SYSTEMROOT ?? "C:\\Windows" }
+      : { LANG: "C", LC_ALL: "C" };
+  const diagnosticOutput = join(workspace, "artifacts", "diagnostic.wav");
+  const checks = [
+    ["ffprobe-version", ffprobe, ["-version"]],
+    [
+      "ffprobe-input",
+      ffprobe,
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "json",
+        inputPath,
+      ],
+    ],
+    ["ffmpeg-version", ffmpeg, ["-version"]],
+    [
+      "ffmpeg-decode",
+      ffmpeg,
+      [
+        "-v",
+        "error",
+        "-i",
+        inputPath,
+        "-map",
+        "0:a:0",
+        "-c:a",
+        "pcm_s16le",
+        "-f",
+        "wav",
+        "-y",
+        diagnosticOutput,
+      ],
+    ],
+  ] as const;
+  return checks
+    .map(([label, command, arguments_]) => {
+      const diagnostic = spawnSync(command, arguments_, {
+        env: environment,
+        stdio: "ignore",
+        timeout: 10_000,
+      });
+      return `${label}=${diagnostic.error?.name ?? diagnostic.signal ?? diagnostic.status ?? "unknown"}`;
+    })
+    .join(",");
 }
