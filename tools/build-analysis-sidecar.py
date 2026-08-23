@@ -365,7 +365,7 @@ def _validate_macho_dependency(
     if dependency.startswith("/"):
         normalized = posixpath.normpath(dependency)
         if any(
-            normalized == root or normalized.startswith(f"{root}/")
+            normalized.startswith(f"{root}/")
             for root in ("/System/Library", "/usr/lib")
         ):
             return
@@ -401,11 +401,18 @@ def _packaged_macho_candidate(
     rpath: str,
     dependency_suffix: str,
 ) -> str:
-    if rpath.startswith("@loader_path"):
-        base = owner.parent / rpath.removeprefix("@loader_path").removeprefix("/")
-    elif rpath.startswith("@executable_path"):
-        base = runtime_root / rpath.removeprefix("@executable_path").removeprefix("/")
-    else:
+    base: Path | None = None
+    for token, token_root in (
+        ("@loader_path", owner.parent),
+        ("@executable_path", runtime_root),
+    ):
+        if rpath == token:
+            base = token_root
+            break
+        if rpath.startswith(f"{token}/"):
+            base = token_root / rpath.removeprefix(f"{token}/")
+            break
+    if base is None:
         return ""
     candidate = (base / dependency_suffix).resolve(strict=False)
     root = runtime_root.resolve(strict=True)
