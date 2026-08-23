@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,9 +18,11 @@ class RuntimeManifestTests(unittest.TestCase):
             runtime_root = Path(temporary)
             tools = runtime_root / "tools"
             tools.mkdir()
-            (runtime_root / "open-chords-analysis").write_bytes(b"sidecar")
-            (tools / "ffmpeg").write_bytes(b"ffmpeg")
-            (tools / "ffprobe").write_bytes(b"ffprobe")
+            executable_suffix = ".exe" if os.name == "nt" else ""
+            (runtime_root / f"open-chords-analysis{executable_suffix}").write_bytes(b"sidecar")
+            ffmpeg = tools / f"ffmpeg{executable_suffix}"
+            ffmpeg.write_bytes(b"ffmpeg")
+            (tools / f"ffprobe{executable_suffix}").write_bytes(b"ffprobe")
             (runtime_root / "native-dependencies.json").write_text("{}\n", "utf-8")
 
             expected_hash = write_runtime_manifest(
@@ -31,9 +34,9 @@ class RuntimeManifestTests(unittest.TestCase):
 
             self.assertEqual(runtime.manifest_hash, expected_hash)
             self.assertEqual(runtime.platform_profile, "darwin-arm64-test")
-            self.assertEqual(runtime.toolchain.ffmpeg, (tools / "ffmpeg").resolve())
+            self.assertEqual(runtime.toolchain.ffmpeg, ffmpeg.resolve())
 
-            (tools / "ffmpeg").write_bytes(b"changed")
+            ffmpeg.write_bytes(b"changed")
             with self.assertRaisesRegex(RuntimeManifestError, "hash mismatch"):
                 load_frozen_runtime(runtime_root)
 

@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 
@@ -141,11 +142,21 @@ def _tool_version(command: list[str]) -> str:
 
 
 def _python_license() -> Path:
-    executable = Path(sys.executable).resolve()
+    return _find_python_license(
+        Path(sys.executable).resolve(),
+        Path(sysconfig.get_path("stdlib")),
+    )
+
+
+def _find_python_license(executable: Path, stdlib: Path) -> Path:
+    stdlib_license = stdlib / "LICENSE.txt"
+    if stdlib_license.is_file():
+        return stdlib_license
     for parent in executable.parents:
-        candidate = parent / "LICENSE"
-        if candidate.is_file():
-            return candidate
+        for name in ("LICENSE", "LICENSE.txt"):
+            candidate = parent / name
+            if candidate.is_file():
+                return candidate
     raise FileNotFoundError("CPython LICENSE was not found beside the exact build interpreter")
 
 
