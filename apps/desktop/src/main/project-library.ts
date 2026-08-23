@@ -22,6 +22,9 @@ import {
   ProjectEnvelopeSchema,
 } from "@open-chords/contracts";
 import {
+  canonicalAnalysisManifestContent,
+  canonicalAnalysisOutputContents,
+  canonicalAnalysisRecipeContent,
   AnalysisRevisionSchema,
   canonicalSerialize,
   EditTransactionSchema,
@@ -29,11 +32,12 @@ import {
   StableIdSchema,
   type EditTransaction,
   type AnalysisRevision,
+  type AnalysisManifest,
+  type AnalysisRecipe,
   type ProjectContract,
 } from "@open-chords/domain";
 import { z } from "zod";
 
-import type { AnalysisManifest, AnalysisRecipe } from "./analysis-jobs.ts";
 import {
   locatorMatchesSourceIdentity,
   ProjectOwnedRecordsSchema,
@@ -593,8 +597,9 @@ export class ProjectLibrary {
       if (entry.compatibility === "read_only") return { readOnly: true };
 
       const candidate = AnalysisRevisionSchema.parse(input.revision);
-      const expectedManifestHash = sha256Canonical(input.manifest);
+      const expectedManifestHash = hashContent(canonicalAnalysisManifestContent(input.manifest));
       const candidateIdentity = input.manifest.candidateIdentity;
+      const outputContents = canonicalAnalysisOutputContents(candidate);
       if (
         candidateIdentity.attemptId !== input.attemptId ||
         candidateIdentity.canonicalAudioFingerprint !== input.canonicalAudioFingerprint ||
@@ -603,10 +608,10 @@ export class ProjectLibrary {
         candidateIdentity.recipeHash !== input.recipeHash ||
         candidateIdentity.sourceIdentityKind !== input.sourceIdentityKind ||
         candidateIdentity.sourceSnapshotId !== input.sourceSnapshotId ||
-        sha256Canonical(input.manifest.recipe) !== input.recipeHash ||
-        input.manifest.acceptedOutputHashes.timeline !== sha256Canonical(candidate.timeline) ||
+        hashContent(canonicalAnalysisRecipeContent(input.manifest.recipe)) !== input.recipeHash ||
+        input.manifest.acceptedOutputHashes.timeline !== hashContent(outputContents.timeline) ||
         input.manifest.acceptedOutputHashes.supportClaimIds !==
-          sha256Canonical(candidate.supportClaimIds) ||
+          hashContent(outputContents.supportClaimIds) ||
         candidate.projectId !== input.projectId ||
         candidate.manifestHash !== expectedManifestHash ||
         candidate.id !== `revision_${expectedManifestHash.slice("sha256:".length)}`
@@ -1993,12 +1998,22 @@ function validateStoredPayload(input: unknown): StoredProjectPayload {
   if (projectMajor !== supportedMajor)
     throw new ProjectLibraryIncompatibleSchemaError(payload.envelope.payload.schemaVersion);
   parseContractEnvelope(payload.envelope);
-  for (const record of payload.records.analysisManifests) {
-    const revision = payload.envelope.payload.analysisRevisions.find(
-      ({ id }) => id === record.analysisRevisionId,
-    );
-    if (revision === undefined || revision.manifestHash !== record.hash) {
+  const manifestsByRevision = new Map(
+    payload.records.analysisManifests.map((record) => [record.analysisRevisionId, record]),
+  );
+  const legacyManifestless = new Set(payload.records.legacyManifestlessAnalysisRevisionIds);
+  for (const revision of payload.envelope.payload.analysisRevisions) {
+    const record = manifestsByRevision.get(revision.id);
+    if ((record === undefined) === !legacyManifestless.has(revision.id)) {
+      throw new Error("Analysis Revision must have exactly one Manifest or explicit legacy state");
+    }
+    if (record !== undefined && revision.manifestHash !== record.hash) {
       throw new Error("Analysis Manifest record does not match its Analysis Revision");
+    }
+  }
+  for (const revisionId of [...manifestsByRevision.keys(), ...legacyManifestless]) {
+    if (!payload.envelope.payload.analysisRevisions.some(({ id }) => id === revisionId)) {
+      throw new Error("Analysis Manifest provenance references an unknown Analysis Revision");
     }
   }
   const { projectRange } = payload.records;
@@ -2342,10 +2357,6 @@ async function readRegularStorageFile(path: string): Promise<string> {
 
 function hashContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
-}
-
-function sha256Canonical(value: unknown): string {
-  return hashContent(canonicalSerialize(value));
 }
 
 async function writeDurableFile(

@@ -5,15 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
-import { canonicalSerialize } from "@open-chords/domain";
-import { afterEach, describe, expect, it } from "vitest";
-
 import {
-  AnalysisRunError,
-  AnalysisJobs,
+  canonicalSerialize,
   type AnalysisManifest,
   type AnalysisRecipe,
-} from "../apps/desktop/src/main/analysis-jobs.ts";
+} from "@open-chords/domain";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { AnalysisRunError, AnalysisJobs } from "../apps/desktop/src/main/analysis-jobs.ts";
 
 const temporaryRoots: string[] = [];
 
@@ -1266,6 +1265,79 @@ describe("AnalysisJobs", () => {
       attempts: [],
       checkpoints: [],
       job: { attemptIds: [], recipeHash: submitted.recipeHash, state: "retryable" },
+    });
+  });
+
+  it("keeps a shared checkpoint artifact while any retained Checkpoint references it", async () => {
+    const stateRoot = await temporaryDirectory();
+    let now = new Date("2026-08-23T12:00:00Z");
+    let reusedCheckpoint = false;
+    const ids = [
+      "job_old_checkpoint",
+      "attempt_old_checkpoint",
+      "job_retained_checkpoint",
+      "attempt_retained_checkpoint",
+      "attempt_reusing_checkpoint",
+    ];
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+      },
+      idFactory: () => ids.shift()!,
+      now: () => now,
+      runner: {
+        run: async (input) => {
+          reusedCheckpoint ||= input.checkpoints.length === 1;
+          await input.saveCheckpoint({
+            document: {
+              format: "open-chords/analysis-checkpoint",
+              frames: [checkpointFeatureFrame],
+              kind: "shared_features",
+            },
+            kind: "shared_features",
+            stage: "shared_features",
+          });
+          throw new AnalysisRunError({
+            classification: "component_failure",
+            message: "Analysis failed after shared features",
+            nextAction: "retry",
+            retryable: true,
+            stage: "harmony",
+          });
+        },
+      },
+      stateRoot,
+    });
+
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_old",
+    });
+    await jobs.runNext();
+    now = new Date("2026-08-24T12:00:00Z");
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"b".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_retained",
+    });
+    await jobs.runNext();
+
+    now = new Date("2026-08-30T12:00:00.001Z");
+    await jobs.pruneOperationalEvidence();
+    await jobs.retry("job_retained_checkpoint");
+    await jobs.runNext();
+
+    expect(reusedCheckpoint).toBe(true);
+    expect(jobs.get("job_retained_checkpoint").attempts.at(-1)).toMatchObject({
+      failure: { classification: "component_failure" },
     });
   });
 

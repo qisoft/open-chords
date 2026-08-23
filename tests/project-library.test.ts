@@ -66,6 +66,7 @@ function ownedRecords(): ProjectOwnedRecords {
       },
     ],
     extensions: {},
+    legacyManifestlessAnalysisRevisionIds: ["revision_original", "revision_reviewable"],
     projectRange: {
       endSourceSample: 58_000,
       sourceId: "source_fixture",
@@ -248,6 +249,36 @@ function hashCanonical(value: unknown): string {
 const DURABILITY_TEST_TIMEOUT_MS = 15_000;
 
 describe("ProjectLibrary", () => {
+  it("rejects Analysis Revisions without a Manifest or explicit legacy provenance", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-provenance-");
+    const library = await openProjectLibrary({ stateRoot });
+
+    await expect(
+      library.createProject({
+        envelope: goldenEnvelope(),
+        records: { ...ownedRecords(), legacyManifestlessAnalysisRevisionIds: [] },
+      }),
+    ).rejects.toThrow("Analysis Revision must have exactly one Manifest or explicit legacy state");
+  });
+
+  it("does not reopen a stored Analysis Revision after its provenance is removed", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-reopen-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
+      removeAnalysisProvenance: true,
+      version: "1.0.0",
+    });
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(reopened.listProjects()).toEqual([
+      expect.objectContaining({ projectId: "project_golden", status: "damaged" }),
+    ]);
+    await expect(reopened.getSnapshot("project_golden")).rejects.toThrow(
+      ProjectLibraryDamagedError,
+    );
+  });
+
   it("keeps Source verification separate from Model Store recipe resolution", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-analysis-dependencies-");
     const library = await openProjectLibrary({ stateRoot });
@@ -304,7 +335,7 @@ describe("ProjectLibrary", () => {
     emptyEnvelope.payload.supportClaims = [];
     const created = await library.createProject({
       envelope: emptyEnvelope,
-      records: ownedRecords(),
+      records: { ...ownedRecords(), legacyManifestlessAnalysisRevisionIds: [] },
     });
 
     const firstPublication = analysisPublication(
@@ -2256,7 +2287,7 @@ function objectPath(activeRoot: string, hash: string): string {
 function rewriteStoredProjectEnvelope(
   activeRoot: string,
   projectId: string,
-  options: { addFutureCoreField?: boolean; version: string },
+  options: { addFutureCoreField?: boolean; removeAnalysisProvenance?: boolean; version: string },
 ): void {
   const projectDirectory = join(activeRoot, "projects", projectId);
   const headPath = join(projectDirectory, "HEAD.json");
@@ -2276,12 +2307,22 @@ function rewriteStoredProjectEnvelope(
           schemaVersion: z.string(),
         })
         .loose(),
+      records: z
+        .object({
+          analysisManifests: z.array(z.unknown()),
+          legacyManifestlessAnalysisRevisionIds: z.array(z.string()),
+        })
+        .loose(),
     })
     .loose()
     .parse(JSON.parse(readFileSync(objectPath(activeRoot, revision.payloadObjectHash), "utf8")));
   payload.envelope.schemaVersion = options.version;
   payload.envelope.payload.schemaVersion = options.version;
   if (options.addFutureCoreField === true) payload.envelope.futureCoreField = "unsupported";
+  if (options.removeAnalysisProvenance === true) {
+    payload.records.analysisManifests = [];
+    payload.records.legacyManifestlessAnalysisRevisionIds = [];
+  }
   const payloadContent = canonicalSerialize(payload);
   const payloadHash = hashFixtureContent(payloadContent);
   writeFileSync(objectPath(activeRoot, payloadHash), payloadContent);

@@ -593,6 +593,7 @@ export class LocalMediaService {
         analysisManifests: [],
         exportReceipts: [],
         extensions: {},
+        legacyManifestlessAnalysisRevisionIds: [],
         projectRange: {
           endSourceSample: input.endSourceSample,
           sourceId,

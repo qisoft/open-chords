@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { canonicalSerialize } from "@open-chords/domain";
-import { StableIdSchema } from "@open-chords/domain";
+import {
+  AnalysisManifestSchema,
+  canonicalAnalysisManifestContent,
+  StableIdSchema,
+} from "@open-chords/domain";
 import { z } from "zod";
-
-import { AnalysisManifestSchema } from "./analysis-jobs.ts";
 
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const TimestampSchema = z.iso.datetime({ offset: true });
@@ -137,17 +138,16 @@ export const ExportReceiptSchema = z.strictObject({
 
 export const ProjectOwnedRecordsSchema = z
   .strictObject({
-    analysisManifests: z
-      .array(
-        z.strictObject({
-          analysisRevisionId: StableIdSchema,
-          hash: Sha256Schema,
-          manifest: AnalysisManifestSchema,
-        }),
-      )
-      .default([]),
+    analysisManifests: z.array(
+      z.strictObject({
+        analysisRevisionId: StableIdSchema,
+        hash: Sha256Schema,
+        manifest: AnalysisManifestSchema,
+      }),
+    ),
     exportReceipts: z.array(ExportReceiptSchema),
     extensions: z.record(z.string().regex(/^[a-z0-9]+(?:\.[a-z0-9-]+)+$/), z.unknown()),
+    legacyManifestlessAnalysisRevisionIds: z.array(StableIdSchema),
     projectRange: z.strictObject({
       endSourceSample: z.number().int().positive(),
       sourceId: StableIdSchema,
@@ -162,10 +162,20 @@ export const ProjectOwnedRecordsSchema = z
       ["analysisManifests"],
       context,
     );
+    if (
+      new Set(records.legacyManifestlessAnalysisRevisionIds).size !==
+      records.legacyManifestlessAnalysisRevisionIds.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Legacy manifestless Analysis Revision IDs must be unique",
+        path: ["legacyManifestlessAnalysisRevisionIds"],
+      });
+    }
     const manifestHashes = new Set<string>();
     for (const [index, record] of records.analysisManifests.entries()) {
       const actualHash = `sha256:${createHash("sha256")
-        .update(canonicalSerialize(record.manifest))
+        .update(canonicalAnalysisManifestContent(record.manifest))
         .digest("hex")}`;
       if (record.hash !== actualHash) {
         context.addIssue({

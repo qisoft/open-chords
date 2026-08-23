@@ -3,8 +3,23 @@ import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
+  ANALYSIS_CAPABILITY_STAGES as CAPABILITY_STAGES,
+  ANALYSIS_MAIN_STAGES as MAIN_STAGES,
+  ANALYSIS_RUNNER_PREFIX_STAGES as RUNNER_PREFIX_STAGES,
+  ANALYSIS_RUNNER_SUFFIX_STAGES as RUNNER_SUFFIX_STAGES,
+  AnalysisCandidateIdentitySchema,
+  AnalysisManifestSchema,
+  AnalysisPipelineStageSchema as PipelineStageSchema,
+  AnalysisRecipeSchema,
   AnalysisRevisionSchema,
+  AnalysisStageOutcomeSchema,
+  analysisPipelineForCapabilities as expectedPipeline,
+  canonicalAnalysisManifestContent,
+  canonicalAnalysisOutputContents,
+  canonicalAnalysisRecipeContent,
   canonicalSerialize,
+  type AnalysisManifest,
+  type AnalysisRecipe,
   type AnalysisRevision,
   type ProjectContract,
 } from "@open-chords/domain";
@@ -14,56 +29,6 @@ const STATE_FILE = "analysis-jobs/state.json";
 const OPERATIONAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const TimestampSchema = z.iso.datetime({ offset: true });
-const RUNNER_PREFIX_STAGES = ["preflight", "canonical_decode", "shared_features"] as const;
-const CAPABILITY_STAGES = ["rhythm", "harmony", "sections"] as const;
-const RUNNER_SUFFIX_STAGES = ["assemble"] as const;
-const MAIN_STAGES = ["main_validation", "publish"] as const;
-const ALL_PIPELINE_STAGES = [
-  ...RUNNER_PREFIX_STAGES,
-  ...CAPABILITY_STAGES,
-  ...RUNNER_SUFFIX_STAGES,
-  ...MAIN_STAGES,
-] as const;
-const PipelineStageSchema = z.enum(ALL_PIPELINE_STAGES);
-const VersionedComponentSchema = z.strictObject({
-  hash: Sha256Schema,
-  id: z.string().min(1),
-  version: z.string().min(1),
-});
-const AnalysisRecipeSchema = z
-  .strictObject({
-    capabilities: z
-      .array(z.enum(["rhythm", "meter", "key", "chords", "sections"]))
-      .min(1)
-      .refine((values) => new Set(values).size === values.length, "Capabilities must be unique"),
-    components: z
-      .array(VersionedComponentSchema)
-      .min(1)
-      .refine(
-        (components) => new Set(components.map(({ id }) => id)).size === components.length,
-        "Component IDs must be unique",
-      ),
-    numericalBackend: VersionedComponentSchema,
-    pipeline: z.array(PipelineStageSchema),
-    profile: VersionedComponentSchema.extend({
-      name: z.enum(["eco", "balanced", "fast"]),
-    }),
-    seeds: z.record(z.string().min(1), z.number().int()),
-    settings: z.record(z.string().min(1), z.union([z.boolean(), z.number().finite(), z.string()])),
-  })
-  .superRefine((recipe, context) => {
-    const expected = expectedPipeline(recipe.capabilities);
-    if (
-      recipe.pipeline.length !== expected.length ||
-      recipe.pipeline.some((stage, index) => stage !== expected[index])
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: `Pipeline must be ${expected.join(" -> ")} for the requested capabilities`,
-        path: ["pipeline"],
-      });
-    }
-  });
 const BlockedDependencySchema = z.strictObject({
   id: z.string().min(1),
   kind: z.enum(["consent", "dictionary", "license", "media", "model"]),
@@ -75,8 +40,6 @@ const AnalysisProgressSchema = z.strictObject({
   profile: z.enum(["eco", "balanced", "fast"]),
   stage: PipelineStageSchema,
 });
-
-export type AnalysisRecipe = z.infer<typeof AnalysisRecipeSchema>;
 
 const AnalysisJobSchema = z.strictObject({
   attemptIds: z.array(z.string().min(1)),
@@ -108,10 +71,6 @@ const AnalysisJobSchema = z.strictObject({
 });
 const RunnerStageOutcomeSchema = z.strictObject({
   stage: z.enum([...RUNNER_PREFIX_STAGES, ...CAPABILITY_STAGES, ...RUNNER_SUFFIX_STAGES]),
-  state: z.enum(["completed", "completed_with_abstentions"]),
-});
-const AnalysisStageOutcomeSchema = z.strictObject({
-  stage: PipelineStageSchema,
   state: z.enum(["completed", "completed_with_abstentions"]),
 });
 const AnalysisFailureSchema = z.strictObject({
@@ -250,37 +209,6 @@ export type AnalysisCheckpointCandidate = z.infer<typeof AnalysisCheckpointCandi
 type ReusableAnalysisCheckpoint = AnalysisCheckpoint & {
   document: z.infer<typeof AnalysisCheckpointCandidateSchema>["document"];
 };
-
-const AnalysisCandidateIdentitySchema = z.strictObject({
-  attemptId: z.string().min(1),
-  canonicalAudioFingerprint: Sha256Schema,
-  jobKey: Sha256Schema,
-  projectId: z.string().min(1),
-  recipeHash: Sha256Schema,
-  sourceIdentityKind: z.enum(["canonical_audio", "source_snapshot"]),
-  sourceSnapshotId: z.string().min(1),
-});
-
-export const AnalysisManifestSchema = z.strictObject({
-  acceptedOutputHashes: z.strictObject({
-    supportClaimIds: Sha256Schema,
-    timeline: Sha256Schema,
-  }),
-  candidateIdentity: AnalysisCandidateIdentitySchema,
-  format: z.literal("open-chords/analysis-manifest"),
-  recipe: AnalysisRecipeSchema,
-  reproducibilityConditions: z.strictObject({
-    componentHashes: z.array(Sha256Schema).min(1),
-    numericalBackendHash: Sha256Schema,
-    profileHash: Sha256Schema,
-    seedsHash: Sha256Schema,
-    settingsHash: Sha256Schema,
-  }),
-  stageOutcomes: z.array(RunnerStageOutcomeSchema),
-  warnings: z.array(z.string().min(1).max(512)).max(100),
-});
-
-export type AnalysisManifest = z.infer<typeof AnalysisManifestSchema>;
 
 export class AnalysisRunError extends Error {
   readonly failure: AnalysisFailure;
@@ -542,6 +470,9 @@ export class AnalysisJobs {
         ({ expiresAt }) => Date.parse(expiresAt) <= this.#now().getTime(),
       );
       const retainedCheckpointIds = new Set(retainedCheckpoints.map(({ id }) => id));
+      const retainedArtifactHashes = new Set(
+        retainedCheckpoints.map(({ artifactHash }) => artifactHash),
+      );
       for (const attempt of retainedAttempts) {
         attempt.checkpointIds = attempt.checkpointIds.filter((id) => retainedCheckpointIds.has(id));
       }
@@ -552,7 +483,9 @@ export class AnalysisJobs {
       this.#state.checkpoints = retainedCheckpoints;
       await this.#persist();
       for (const checkpoint of expiredCheckpoints) {
-        await rm(checkpointArtifactPath(this.#path, checkpoint.artifactHash), { force: true });
+        if (!retainedArtifactHashes.has(checkpoint.artifactHash)) {
+          await rm(checkpointArtifactPath(this.#path, checkpoint.artifactHash), { force: true });
+        }
       }
     });
   }
@@ -567,7 +500,7 @@ export class AnalysisJobs {
     return this.#serializeMutation(async () => {
       const recipe = AnalysisRecipeSchema.parse(input.recipe);
       const sourceIdentityKind = input.sourceIdentityKind ?? "source_snapshot";
-      const recipeHash = hashIdentity(recipe);
+      const recipeHash = hashContent(canonicalAnalysisRecipeContent(recipe));
       const key = hashIdentity({
         projectId: input.projectId,
         recipeHash,
@@ -611,6 +544,7 @@ export class AnalysisJobs {
 
   async runNext(): Promise<AnalysisJobSnapshot | null> {
     const started = await this.#serializeMutation(async () => {
+      if (this.#active !== undefined) return null;
       if (this.#state.circuitBreaker !== null) return null;
       if (this.#state.jobs.some(({ state }) => state === "running" || state === "cancelling")) {
         return null;
@@ -1093,7 +1027,11 @@ async function atomicWrite(path: string, content: string): Promise<void> {
 }
 
 function hashIdentity(value: unknown): string {
-  return `sha256:${createHash("sha256").update(canonicalSerialize(value)).digest("hex")}`;
+  return hashContent(canonicalSerialize(value));
+}
+
+function hashContent(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
 function hashBytes(value: Uint8Array): string {
@@ -1118,7 +1056,7 @@ function nextQueuePosition(jobs: readonly AnalysisJobSnapshot[]): number {
 
 function validateRunnerStageOutcomes(
   job: AnalysisJobSnapshot,
-  rawOutcomes: readonly z.infer<typeof RunnerStageOutcomeSchema>[],
+  rawOutcomes: readonly z.infer<typeof AnalysisStageOutcomeSchema>[],
 ): z.infer<typeof RunnerStageOutcomeSchema>[] {
   const expected = expectedPipeline(job.recipe.capabilities).slice(0, -MAIN_STAGES.length);
   const outcomes = z.array(RunnerStageOutcomeSchema).length(expected.length).parse(rawOutcomes);
@@ -1126,19 +1064,6 @@ function validateRunnerStageOutcomes(
     throw new Error("Analysis runner did not complete the declared DAG in order");
   }
   return outcomes;
-}
-
-function expectedPipeline(
-  capabilities: readonly AnalysisRecipe["capabilities"][number][],
-): Array<z.infer<typeof PipelineStageSchema>> {
-  const requested = new Set(capabilities);
-  const capabilityStages = CAPABILITY_STAGES.filter(
-    (stage) =>
-      (stage === "rhythm" && (requested.has("rhythm") || requested.has("meter"))) ||
-      (stage === "harmony" && (requested.has("key") || requested.has("chords"))) ||
-      (stage === "sections" && requested.has("sections")),
-  );
-  return [...RUNNER_PREFIX_STAGES, ...capabilityStages, ...RUNNER_SUFFIX_STAGES, ...MAIN_STAGES];
 }
 
 function validateAnalysisCandidate(
@@ -1171,14 +1096,15 @@ function validateAnalysisCandidate(
     seedsHash: hashIdentity(job.recipe.seeds),
     settingsHash: hashIdentity(job.recipe.settings),
   };
+  const outputContents = canonicalAnalysisOutputContents(revision);
   const stageOutcomes = validateRunnerStageOutcomes(job, manifest.stageOutcomes);
   if (
     canonicalSerialize(manifest.candidateIdentity) !== canonicalSerialize(expectedIdentity) ||
     canonicalSerialize(manifest.recipe) !== canonicalSerialize(job.recipe) ||
     canonicalSerialize(manifest.reproducibilityConditions) !==
       canonicalSerialize(expectedReproducibility) ||
-    manifest.acceptedOutputHashes.timeline !== hashIdentity(revision.timeline) ||
-    manifest.acceptedOutputHashes.supportClaimIds !== hashIdentity(revision.supportClaimIds)
+    manifest.acceptedOutputHashes.timeline !== hashContent(outputContents.timeline) ||
+    manifest.acceptedOutputHashes.supportClaimIds !== hashContent(outputContents.supportClaimIds)
   ) {
     throw new AnalysisRunError({
       classification: "integrity_violation",
@@ -1188,7 +1114,7 @@ function validateAnalysisCandidate(
       stage: "main_validation",
     });
   }
-  const manifestHash = hashIdentity(manifest);
+  const manifestHash = hashContent(canonicalAnalysisManifestContent(manifest));
   const expectedRevisionId = `revision_${manifestHash.slice("sha256:".length)}`;
   if (
     revision.projectId !== job.projectId ||
