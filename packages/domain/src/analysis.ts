@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { canonicalSerialize } from "./canonical.ts";
-import { type AnalysisRevision } from "./schema.ts";
+import { AnalysisRevisionSchema, type AnalysisRevision } from "./schema.ts";
 
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 
@@ -98,6 +98,7 @@ export const AnalysisManifestSchema = z.strictObject({
 
 export type AnalysisManifest = z.infer<typeof AnalysisManifestSchema>;
 export type AnalysisRecipe = z.infer<typeof AnalysisRecipeSchema>;
+export type AnalysisCandidateIdentity = z.infer<typeof AnalysisCandidateIdentitySchema>;
 
 export function analysisPipelineForCapabilities(
   capabilities: readonly AnalysisRecipe["capabilities"][number][],
@@ -117,6 +118,12 @@ export function analysisPipelineForCapabilities(
   ];
 }
 
+export function analysisRunnerPipelineForCapabilities(
+  capabilities: readonly AnalysisRecipe["capabilities"][number][],
+): Array<z.infer<typeof AnalysisPipelineStageSchema>> {
+  return analysisPipelineForCapabilities(capabilities).slice(0, -ANALYSIS_MAIN_STAGES.length);
+}
+
 export function canonicalAnalysisManifestContent(manifest: AnalysisManifest): string {
   return canonicalSerialize(AnalysisManifestSchema.parse(manifest));
 }
@@ -133,4 +140,64 @@ export function canonicalAnalysisOutputContents(revision: AnalysisRevision): {
     supportClaimIds: canonicalSerialize(revision.supportClaimIds),
     timeline: canonicalSerialize(revision.timeline),
   };
+}
+
+export function validateAnalysisManifestProvenance(input: {
+  digest: (canonicalContent: string) => string;
+  expectedCandidateIdentity?: AnalysisCandidateIdentity;
+  expectedRecipe?: AnalysisRecipe;
+  manifest: AnalysisManifest;
+  revision: AnalysisRevision;
+}): {
+  manifest: AnalysisManifest;
+  manifestHash: string;
+  recipeHash: string;
+  revision: AnalysisRevision;
+} {
+  const manifest = AnalysisManifestSchema.parse(input.manifest);
+  const revision = AnalysisRevisionSchema.parse(input.revision);
+  const recipeHash = input.digest(canonicalAnalysisRecipeContent(manifest.recipe));
+  const expectedStages = analysisRunnerPipelineForCapabilities(manifest.recipe.capabilities);
+  const expectedReproducibility = {
+    componentHashes: manifest.recipe.components.map(({ hash }) => hash),
+    numericalBackendHash: manifest.recipe.numericalBackend.hash,
+    profileHash: manifest.recipe.profile.hash,
+    seedsHash: input.digest(canonicalSerialize(manifest.recipe.seeds)),
+    settingsHash: input.digest(canonicalSerialize(manifest.recipe.settings)),
+  };
+  const outputContents = canonicalAnalysisOutputContents(revision);
+  const stageOutcomesMatch =
+    manifest.stageOutcomes.length === expectedStages.length &&
+    manifest.stageOutcomes.every(({ stage }, index) => stage === expectedStages[index]);
+  const expectedIdentityMatches =
+    input.expectedCandidateIdentity === undefined ||
+    canonicalSerialize(manifest.candidateIdentity) ===
+      canonicalSerialize(AnalysisCandidateIdentitySchema.parse(input.expectedCandidateIdentity));
+  const expectedRecipeMatches =
+    input.expectedRecipe === undefined ||
+    canonicalAnalysisRecipeContent(manifest.recipe) ===
+      canonicalAnalysisRecipeContent(input.expectedRecipe);
+
+  if (
+    !stageOutcomesMatch ||
+    !expectedIdentityMatches ||
+    !expectedRecipeMatches ||
+    manifest.candidateIdentity.projectId !== revision.projectId ||
+    manifest.candidateIdentity.recipeHash !== recipeHash ||
+    canonicalSerialize(manifest.reproducibilityConditions) !==
+      canonicalSerialize(expectedReproducibility) ||
+    manifest.acceptedOutputHashes.timeline !== input.digest(outputContents.timeline) ||
+    manifest.acceptedOutputHashes.supportClaimIds !== input.digest(outputContents.supportClaimIds)
+  ) {
+    throw new Error("Analysis Manifest provenance does not match its Recipe and Revision");
+  }
+
+  const manifestHash = input.digest(canonicalAnalysisManifestContent(manifest));
+  if (
+    revision.manifestHash !== manifestHash ||
+    revision.id !== `revision_${manifestHash.slice("sha256:".length)}`
+  ) {
+    throw new Error("Analysis Revision identity is not derived from its Manifest");
+  }
+  return { manifest, manifestHash, recipeHash, revision };
 }

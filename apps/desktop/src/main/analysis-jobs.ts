@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -7,17 +7,12 @@ import {
   ANALYSIS_MAIN_STAGES as MAIN_STAGES,
   ANALYSIS_RUNNER_PREFIX_STAGES as RUNNER_PREFIX_STAGES,
   ANALYSIS_RUNNER_SUFFIX_STAGES as RUNNER_SUFFIX_STAGES,
-  AnalysisCandidateIdentitySchema,
-  AnalysisManifestSchema,
   AnalysisPipelineStageSchema as PipelineStageSchema,
   AnalysisRecipeSchema,
-  AnalysisRevisionSchema,
   AnalysisStageOutcomeSchema,
-  analysisPipelineForCapabilities as expectedPipeline,
-  canonicalAnalysisManifestContent,
-  canonicalAnalysisOutputContents,
   canonicalAnalysisRecipeContent,
   canonicalSerialize,
+  validateAnalysisManifestProvenance,
   type AnalysisManifest,
   type AnalysisRecipe,
   type AnalysisRevision,
@@ -158,6 +153,46 @@ const AnalysisCheckpointCandidateSchema = z.strictObject({
   kind: z.enum(["shared_features", "rhythm", "harmony", "sections"]),
   stage: z.enum(["shared_features", ...CAPABILITY_STAGES]),
 });
+
+function validateCheckpointDocument(
+  document: z.infer<typeof CheckpointDocumentSchema>,
+  projectDurationSamples: number,
+): void {
+  if (!Number.isSafeInteger(projectDurationSamples) || projectDurationSamples <= 0) {
+    throw new Error("Analysis Checkpoint requires a positive Project duration");
+  }
+  if (document.kind === "harmony") {
+    for (const [index, region] of document.regions.entries()) {
+      const previous = document.regions[index - 1];
+      if (
+        region.startSample >= region.endSample ||
+        region.endSample > projectDurationSamples ||
+        (previous !== undefined && region.startSample < previous.endSample)
+      ) {
+        throw new Error(
+          "Harmony Checkpoint regions must be ordered, non-overlapping, and in range",
+        );
+      }
+    }
+    return;
+  }
+  const points =
+    document.kind === "shared_features"
+      ? document.frames
+      : document.kind === "rhythm"
+        ? document.beats
+        : document.boundaries;
+  for (const [index, point] of points.entries()) {
+    const previous = points[index - 1];
+    if (
+      point.atSample >= projectDurationSamples ||
+      (previous !== undefined && point.atSample <= previous.atSample)
+    ) {
+      throw new Error("Analysis Checkpoint samples must be strictly ordered and in Project range");
+    }
+  }
+}
+
 const AnalysisCheckpointSchema = AnalysisCheckpointCandidateSchema.omit({ document: true }).extend({
   artifactHash: Sha256Schema,
   byteSize: z
@@ -318,6 +353,7 @@ export class AnalysisJobs {
   static async open(options: AnalysisJobsOptions): Promise<AnalysisJobs> {
     const path = join(options.stateRoot, STATE_FILE);
     const state = await readState(path);
+    await terminatePersistedAttempts(state, options.runner);
     const recovered = await recoverStateAfterRestart(
       state,
       options.authority,
@@ -326,6 +362,7 @@ export class AnalysisJobs {
     recovered.runtimeSessionId = randomUUID();
     const analysisJobs = new AnalysisJobs(options, path, recovered);
     await analysisJobs.#persist();
+    await analysisJobs.#removeUnreferencedCheckpointArtifacts();
     return analysisJobs;
   }
 
@@ -466,13 +503,7 @@ export class AnalysisJobs {
       const retainedCheckpoints = this.#state.checkpoints.filter(
         ({ expiresAt }) => Date.parse(expiresAt) > this.#now().getTime(),
       );
-      const expiredCheckpoints = this.#state.checkpoints.filter(
-        ({ expiresAt }) => Date.parse(expiresAt) <= this.#now().getTime(),
-      );
       const retainedCheckpointIds = new Set(retainedCheckpoints.map(({ id }) => id));
-      const retainedArtifactHashes = new Set(
-        retainedCheckpoints.map(({ artifactHash }) => artifactHash),
-      );
       for (const attempt of retainedAttempts) {
         attempt.checkpointIds = attempt.checkpointIds.filter((id) => retainedCheckpointIds.has(id));
       }
@@ -482,12 +513,27 @@ export class AnalysisJobs {
       this.#state.attempts = retainedAttempts;
       this.#state.checkpoints = retainedCheckpoints;
       await this.#persist();
-      for (const checkpoint of expiredCheckpoints) {
-        if (!retainedArtifactHashes.has(checkpoint.artifactHash)) {
-          await rm(checkpointArtifactPath(this.#path, checkpoint.artifactHash), { force: true });
-        }
-      }
+      await this.#removeUnreferencedCheckpointArtifacts();
     });
+  }
+
+  async #removeUnreferencedCheckpointArtifacts(): Promise<void> {
+    const directory = join(dirname(this.#path), "checkpoints");
+    let entries: string[];
+    try {
+      entries = await readdir(directory);
+    } catch (error) {
+      if (isMissingPathError(error)) return;
+      throw error;
+    }
+    const referencedFiles = new Set(
+      this.#state.checkpoints.map(({ artifactHash }) => `${artifactHash.slice(7)}.json`),
+    );
+    for (const entry of entries) {
+      if (/^[a-f0-9]{64}\.json$/u.test(entry) && !referencedFiles.has(entry)) {
+        await rm(join(directory, entry), { force: true });
+      }
+    }
   }
 
   async submit(input: {
@@ -586,7 +632,11 @@ export class AnalysisJobs {
       job.updatedAt = timestamp;
       this.#state.attempts.push(attempt);
       await this.#persist();
-      return { attempt: structuredClone(attempt), job: structuredClone(job) };
+      return {
+        attempt: structuredClone(attempt),
+        job: structuredClone(job),
+        projectDurationSamples: project.project.durationSamples,
+      };
     });
     if (started === null) return null;
     if ("blockedJob" in started) return started.blockedJob;
@@ -603,11 +653,16 @@ export class AnalysisJobs {
         controller,
         this.#runner.run({
           attemptId: started.attempt.id,
-          checkpoints: await this.#matchingCheckpoints(started.job),
+          checkpoints: await this.#matchingCheckpoints(started.job, started.projectDurationSamples),
           job: started.job,
           reportProgress: (progress) => this.#reportProgress(started.job.id, progress),
           saveCheckpoint: (checkpoint) =>
-            this.#saveCheckpoint(started.job.id, started.attempt.id, checkpoint),
+            this.#saveCheckpoint(
+              started.job.id,
+              started.attempt.id,
+              started.projectDurationSamples,
+              checkpoint,
+            ),
           signal: controller.signal,
         }),
       );
@@ -829,7 +884,10 @@ export class AnalysisJobs {
     return attempt;
   }
 
-  async #matchingCheckpoints(job: AnalysisJobSnapshot): Promise<ReusableAnalysisCheckpoint[]> {
+  async #matchingCheckpoints(
+    job: AnalysisJobSnapshot,
+    projectDurationSamples: number,
+  ): Promise<ReusableAnalysisCheckpoint[]> {
     const now = this.#now().getTime();
     const matching: ReusableAnalysisCheckpoint[] = [];
     for (const checkpoint of this.#state.checkpoints) {
@@ -851,6 +909,7 @@ export class AnalysisJobs {
         const document = AnalysisCheckpointCandidateSchema.shape.document.parse(
           JSON.parse(content.toString("utf8")),
         );
+        validateCheckpointDocument(document, projectDurationSamples);
         if (document.kind !== checkpoint.kind) {
           throw new Error("Checkpoint document kind does not match retained metadata");
         }
@@ -902,6 +961,7 @@ export class AnalysisJobs {
   async #saveCheckpoint(
     jobId: string,
     attemptId: string,
+    projectDurationSamples: number,
     rawCheckpoint: AnalysisCheckpointCandidate,
   ): Promise<void> {
     const parsed = AnalysisCheckpointCandidateSchema.safeParse(rawCheckpoint);
@@ -914,6 +974,7 @@ export class AnalysisJobs {
     if (parsed.data.stage !== parsed.data.kind) {
       throw new Error("Analysis Checkpoint kind must match its completed pipeline stage");
     }
+    validateCheckpointDocument(parsed.data.document, projectDurationSamples);
     const content = canonicalSerialize(parsed.data.document);
     const byteSize = Buffer.byteLength(content);
     if (byteSize > 1024 * 1024) throw new Error("Analysis Checkpoint artifact exceeds 1 MiB");
@@ -1054,18 +1115,6 @@ function nextQueuePosition(jobs: readonly AnalysisJobSnapshot[]): number {
   return Math.max(-1, ...jobs.map(({ queuePosition }) => queuePosition)) + 1;
 }
 
-function validateRunnerStageOutcomes(
-  job: AnalysisJobSnapshot,
-  rawOutcomes: readonly z.infer<typeof AnalysisStageOutcomeSchema>[],
-): z.infer<typeof RunnerStageOutcomeSchema>[] {
-  const expected = expectedPipeline(job.recipe.capabilities).slice(0, -MAIN_STAGES.length);
-  const outcomes = z.array(RunnerStageOutcomeSchema).length(expected.length).parse(rawOutcomes);
-  if (outcomes.some(({ stage }, index) => stage !== expected[index])) {
-    throw new Error("Analysis runner did not complete the declared DAG in order");
-  }
-  return outcomes;
-}
-
 function validateAnalysisCandidate(
   job: AnalysisJobSnapshot,
   attemptId: string,
@@ -1078,34 +1127,28 @@ function validateAnalysisCandidate(
   revision: AnalysisRevision;
   stageOutcomes: z.infer<typeof RunnerStageOutcomeSchema>[];
 } {
-  const manifest = AnalysisManifestSchema.parse(raw.manifest);
-  const revision = AnalysisRevisionSchema.parse(raw.revision);
-  const expectedIdentity = AnalysisCandidateIdentitySchema.parse({
-    attemptId,
-    canonicalAudioFingerprint: job.canonicalAudioFingerprint,
-    jobKey: job.key,
-    projectId: job.projectId,
-    recipeHash: job.recipeHash,
-    sourceIdentityKind: job.sourceIdentityKind,
-    sourceSnapshotId: job.sourceSnapshotId,
-  });
-  const expectedReproducibility = {
-    componentHashes: job.recipe.components.map(({ hash }) => hash),
-    numericalBackendHash: job.recipe.numericalBackend.hash,
-    profileHash: job.recipe.profile.hash,
-    seedsHash: hashIdentity(job.recipe.seeds),
-    settingsHash: hashIdentity(job.recipe.settings),
-  };
-  const outputContents = canonicalAnalysisOutputContents(revision);
-  const stageOutcomes = validateRunnerStageOutcomes(job, manifest.stageOutcomes);
-  if (
-    canonicalSerialize(manifest.candidateIdentity) !== canonicalSerialize(expectedIdentity) ||
-    canonicalSerialize(manifest.recipe) !== canonicalSerialize(job.recipe) ||
-    canonicalSerialize(manifest.reproducibilityConditions) !==
-      canonicalSerialize(expectedReproducibility) ||
-    manifest.acceptedOutputHashes.timeline !== hashContent(outputContents.timeline) ||
-    manifest.acceptedOutputHashes.supportClaimIds !== hashContent(outputContents.supportClaimIds)
-  ) {
+  try {
+    const verified = validateAnalysisManifestProvenance({
+      digest: hashContent,
+      expectedCandidateIdentity: {
+        attemptId,
+        canonicalAudioFingerprint: job.canonicalAudioFingerprint,
+        jobKey: job.key,
+        projectId: job.projectId,
+        recipeHash: job.recipeHash,
+        sourceIdentityKind: job.sourceIdentityKind,
+        sourceSnapshotId: job.sourceSnapshotId,
+      },
+      expectedRecipe: job.recipe,
+      manifest: raw.manifest,
+      revision: raw.revision,
+    });
+    return {
+      manifest: verified.manifest,
+      revision: verified.revision,
+      stageOutcomes: z.array(RunnerStageOutcomeSchema).parse(verified.manifest.stageOutcomes),
+    };
+  } catch {
     throw new AnalysisRunError({
       classification: "integrity_violation",
       message: "Analysis Manifest identity, provenance, or accepted output hashes are invalid",
@@ -1114,22 +1157,6 @@ function validateAnalysisCandidate(
       stage: "main_validation",
     });
   }
-  const manifestHash = hashContent(canonicalAnalysisManifestContent(manifest));
-  const expectedRevisionId = `revision_${manifestHash.slice("sha256:".length)}`;
-  if (
-    revision.projectId !== job.projectId ||
-    revision.manifestHash !== manifestHash ||
-    revision.id !== expectedRevisionId
-  ) {
-    throw new AnalysisRunError({
-      classification: "integrity_violation",
-      message: "Analysis Revision is not derived from its verified candidate manifest",
-      nextAction: "repair_installation",
-      retryable: false,
-      stage: "main_validation",
-    });
-  }
-  return { manifest, revision, stageOutcomes };
 }
 
 function normalizeRunFailure(error: unknown): AnalysisFailure {
@@ -1168,6 +1195,21 @@ class SupersededRuntimeError extends Error {
   constructor(currentJob: AnalysisJobSnapshot) {
     super("Analysis Attempt belongs to an obsolete runtime session");
     this.currentJob = currentJob;
+  }
+}
+
+async function terminatePersistedAttempts(
+  state: z.infer<typeof AnalysisJobStateSchema>,
+  runner: AnalysisJobRunner,
+): Promise<void> {
+  const activeAttempts = state.attempts.filter(
+    ({ state: attemptState }) => attemptState === "running" || attemptState === "cancelling",
+  );
+  for (const attempt of activeAttempts) {
+    await runner.terminateAndWait({
+      attemptId: attempt.id,
+      reason: attempt.state === "cancelling" ? "cancelled" : "interrupted",
+    });
   }
 }
 

@@ -11,9 +11,12 @@ export {
   AnalysisRecipeSchema,
   AnalysisStageOutcomeSchema,
   analysisPipelineForCapabilities,
+  analysisRunnerPipelineForCapabilities,
   canonicalAnalysisManifestContent,
   canonicalAnalysisOutputContents,
   canonicalAnalysisRecipeContent,
+  validateAnalysisManifestProvenance,
+  type AnalysisCandidateIdentity,
   type AnalysisManifest,
   type AnalysisRecipe,
 } from "./analysis.ts";

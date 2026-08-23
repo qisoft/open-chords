@@ -22,14 +22,11 @@ import {
   ProjectEnvelopeSchema,
 } from "@open-chords/contracts";
 import {
-  canonicalAnalysisManifestContent,
-  canonicalAnalysisOutputContents,
-  canonicalAnalysisRecipeContent,
-  AnalysisRevisionSchema,
   canonicalSerialize,
   EditTransactionSchema,
   parseProjectContract,
   StableIdSchema,
+  validateAnalysisManifestProvenance,
   type EditTransaction,
   type AnalysisRevision,
   type AnalysisManifest,
@@ -596,28 +593,27 @@ export class ProjectLibrary {
         throw new ProjectLibraryDamagedError(input.projectId);
       if (entry.compatibility === "read_only") return { readOnly: true };
 
-      const candidate = AnalysisRevisionSchema.parse(input.revision);
-      const expectedManifestHash = hashContent(canonicalAnalysisManifestContent(input.manifest));
-      const candidateIdentity = input.manifest.candidateIdentity;
-      const outputContents = canonicalAnalysisOutputContents(candidate);
-      if (
-        candidateIdentity.attemptId !== input.attemptId ||
-        candidateIdentity.canonicalAudioFingerprint !== input.canonicalAudioFingerprint ||
-        candidateIdentity.jobKey !== input.jobKey ||
-        candidateIdentity.projectId !== input.projectId ||
-        candidateIdentity.recipeHash !== input.recipeHash ||
-        candidateIdentity.sourceIdentityKind !== input.sourceIdentityKind ||
-        candidateIdentity.sourceSnapshotId !== input.sourceSnapshotId ||
-        hashContent(canonicalAnalysisRecipeContent(input.manifest.recipe)) !== input.recipeHash ||
-        input.manifest.acceptedOutputHashes.timeline !== hashContent(outputContents.timeline) ||
-        input.manifest.acceptedOutputHashes.supportClaimIds !==
-          hashContent(outputContents.supportClaimIds) ||
-        candidate.projectId !== input.projectId ||
-        candidate.manifestHash !== expectedManifestHash ||
-        candidate.id !== `revision_${expectedManifestHash.slice("sha256:".length)}`
-      ) {
+      let verifiedCandidate;
+      try {
+        verifiedCandidate = validateAnalysisManifestProvenance({
+          digest: hashContent,
+          expectedCandidateIdentity: {
+            attemptId: input.attemptId,
+            canonicalAudioFingerprint: input.canonicalAudioFingerprint,
+            jobKey: input.jobKey,
+            projectId: input.projectId,
+            recipeHash: input.recipeHash,
+            sourceIdentityKind: input.sourceIdentityKind,
+            sourceSnapshotId: input.sourceSnapshotId,
+          },
+          manifest: input.manifest,
+          revision: input.revision,
+        });
+      } catch {
         throw new Error("Analysis Revision identity does not match its Job candidate manifest");
       }
+      const candidate = verifiedCandidate.revision;
+      const expectedManifestHash = verifiedCandidate.manifestHash;
       const project = structuredClone(entry.revision.payload.envelope.payload);
       const records = structuredClone(entry.revision.payload.records);
       const existing = project.analysisRevisions.find(({ id }) => id === candidate.id);
@@ -1467,7 +1463,7 @@ export class ProjectLibrary {
       );
     }
     try {
-      return StoredProjectPayloadSchema.parse(raw);
+      return StoredProjectPayloadSchema.parse(migrateStoredPayloadV1AnalysisProvenance(raw));
     } catch (error) {
       if (compatibility.futureMinor)
         throw new ProjectLibraryIncompatibleSchemaError(
@@ -1988,6 +1984,38 @@ export class ProjectLibrary {
   }
 }
 
+function migrateStoredPayloadV1AnalysisProvenance(input: unknown): unknown {
+  const legacy = z
+    .object({
+      envelope: z
+        .object({
+          payload: z
+            .object({ analysisRevisions: z.array(z.object({ id: StableIdSchema }).loose()) })
+            .loose(),
+        })
+        .loose(),
+      format: z.literal("open-chords/project-library-payload"),
+      records: z.object({}).loose(),
+      schemaVersion: z.literal("1.0"),
+    })
+    .loose()
+    .safeParse(input);
+  if (!legacy.success) return input;
+  const hasManifests = Object.hasOwn(legacy.data.records, "analysisManifests");
+  const hasLegacyIds = Object.hasOwn(legacy.data.records, "legacyManifestlessAnalysisRevisionIds");
+  if (hasManifests || hasLegacyIds) return input;
+  return {
+    ...legacy.data,
+    records: {
+      ...legacy.data.records,
+      analysisManifests: [],
+      legacyManifestlessAnalysisRevisionIds: legacy.data.envelope.payload.analysisRevisions.map(
+        ({ id }) => id,
+      ),
+    },
+  };
+}
+
 function validateStoredPayload(input: unknown): StoredProjectPayload {
   const payload = StoredProjectPayloadSchema.parse(input);
   const supportedMajor = parseSchemaVersion(CONTRACT_VERSION).major;
@@ -2009,6 +2037,13 @@ function validateStoredPayload(input: unknown): StoredProjectPayload {
     }
     if (record !== undefined && revision.manifestHash !== record.hash) {
       throw new Error("Analysis Manifest record does not match its Analysis Revision");
+    }
+    if (record !== undefined) {
+      validateAnalysisManifestProvenance({
+        digest: hashContent,
+        manifest: record.manifest,
+        revision,
+      });
     }
   }
   for (const revisionId of [...manifestsByRevision.keys(), ...legacyManifestless]) {

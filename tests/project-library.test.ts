@@ -267,7 +267,7 @@ describe("ProjectLibrary", () => {
     await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
     rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
       removeAnalysisProvenance: true,
-      version: "1.0.0",
+      version: "1.0",
     });
 
     const reopened = await openProjectLibrary({ stateRoot });
@@ -276,6 +276,59 @@ describe("ProjectLibrary", () => {
     ]);
     await expect(reopened.getSnapshot("project_golden")).rejects.toThrow(
       ProjectLibraryDamagedError,
+    );
+  });
+
+  it("migrates a v1 Project payload written before explicit Analysis provenance fields", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-migration-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
+      omitAnalysisProvenanceFields: true,
+      version: "1.0",
+    });
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    const snapshot = await reopened.getSnapshot("project_golden");
+    expect(snapshot?.project.analysisRevisions.map(({ id }) => id)).toEqual([
+      "revision_original",
+      "revision_reviewable",
+    ]);
+    expect(reopened.listProjects()).toEqual([
+      expect.objectContaining({ projectId: "project_golden", status: "active" }),
+    ]);
+  });
+
+  it("rejects a stored non-legacy Analysis Revision whose output no longer matches its Manifest", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-output-");
+    const library = await openProjectLibrary({ stateRoot });
+    const envelope = goldenEnvelope();
+    const candidate = structuredClone(envelope.payload.analysisRevisions[0]!);
+    candidate.id = "revision_manifest_output";
+    candidate.supportClaimIds = [];
+    envelope.payload.activeView = null;
+    envelope.payload.analysisRevisions = [];
+    envelope.payload.editLayers = [];
+    envelope.payload.lyricsAlignments = [];
+    envelope.payload.lyricsDocuments = [];
+    envelope.payload.supportClaims = [];
+    const created = await library.createProject({
+      envelope,
+      records: { ...ownedRecords(), legacyManifestlessAnalysisRevisionIds: [] },
+    });
+    const published = await library.publishAnalysisRevision(
+      analysisPublication(created.projectRevisionId, candidate, "attempt_manifest_output"),
+    );
+    if (!("projectRevisionId" in published)) throw new Error("Fixture publication failed");
+    rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
+      tamperLastAnalysisOutput: true,
+      version: "1.0",
+    });
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect((await reopened.getSnapshot("project_golden"))?.project.analysisRevisions).toEqual([]);
+    expect(reopened.listProjects()[0]?.recoveryReport?.lostProjectRevisionId).toBe(
+      published.projectRevisionId,
     );
   });
 
@@ -2287,7 +2340,13 @@ function objectPath(activeRoot: string, hash: string): string {
 function rewriteStoredProjectEnvelope(
   activeRoot: string,
   projectId: string,
-  options: { addFutureCoreField?: boolean; removeAnalysisProvenance?: boolean; version: string },
+  options: {
+    addFutureCoreField?: boolean;
+    omitAnalysisProvenanceFields?: boolean;
+    removeAnalysisProvenance?: boolean;
+    tamperLastAnalysisOutput?: boolean;
+    version: string;
+  },
 ): void {
   const projectDirectory = join(activeRoot, "projects", projectId);
   const headPath = join(projectDirectory, "HEAD.json");
@@ -2303,14 +2362,39 @@ function rewriteStoredProjectEnvelope(
     .object({
       envelope: z
         .object({
-          payload: z.object({ schemaVersion: z.string() }).loose(),
+          payload: z
+            .object({
+              analysisRevisions: z.array(
+                z
+                  .object({
+                    timeline: z
+                      .object({
+                        chordEvents: z.array(
+                          z
+                            .object({
+                              assertion: z
+                                .object({
+                                  evidence: z.array(z.object({ value: z.number() }).loose()),
+                                })
+                                .loose(),
+                            })
+                            .loose(),
+                        ),
+                      })
+                      .loose(),
+                  })
+                  .loose(),
+              ),
+              schemaVersion: z.string(),
+            })
+            .loose(),
           schemaVersion: z.string(),
         })
         .loose(),
       records: z
         .object({
-          analysisManifests: z.array(z.unknown()),
-          legacyManifestlessAnalysisRevisionIds: z.array(z.string()),
+          analysisManifests: z.array(z.unknown()).optional(),
+          legacyManifestlessAnalysisRevisionIds: z.array(z.string()).optional(),
         })
         .loose(),
     })
@@ -2323,6 +2407,17 @@ function rewriteStoredProjectEnvelope(
     payload.records.analysisManifests = [];
     payload.records.legacyManifestlessAnalysisRevisionIds = [];
   }
+  if (options.omitAnalysisProvenanceFields === true) {
+    delete payload.records.analysisManifests;
+    delete payload.records.legacyManifestlessAnalysisRevisionIds;
+  }
+  if (options.tamperLastAnalysisOutput === true) {
+    const evidence = payload.envelope.payload.analysisRevisions
+      .at(-1)
+      ?.timeline.chordEvents.flatMap(({ assertion }) => assertion.evidence)[0];
+    if (evidence === undefined) throw new Error("Analysis output fixture is missing");
+    evidence.value = evidence.value === 0.5 ? 0.6 : 0.5;
+  }
   const payloadContent = canonicalSerialize(payload);
   const payloadHash = hashFixtureContent(payloadContent);
   writeFileSync(objectPath(activeRoot, payloadHash), payloadContent);
@@ -2330,7 +2425,13 @@ function rewriteStoredProjectEnvelope(
   const revisionContent = canonicalSerialize({ ...revision, payloadObjectHash: payloadHash });
   const revisionHash = hashFixtureContent(revisionContent);
   writeFileSync(objectPath(activeRoot, revisionHash), revisionContent);
-  const pointerFile = readdirSync(join(projectDirectory, "revisions"))[0];
+  const pointerFile = readdirSync(join(projectDirectory, "revisions")).find((file) => {
+    const candidate = z
+      .object({ projectRevisionId: z.string() })
+      .loose()
+      .parse(JSON.parse(readFileSync(join(projectDirectory, "revisions", file), "utf8")));
+    return candidate.projectRevisionId === head.projectRevisionId;
+  });
   if (pointerFile === undefined) throw new Error("Revision pointer fixture is missing");
   const pointerPath = join(projectDirectory, "revisions", pointerFile);
   const pointer = z

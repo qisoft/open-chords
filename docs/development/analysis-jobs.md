@@ -11,9 +11,10 @@ interface is intentionally small:
 
 The module stores `analysis-jobs/state.json` beneath the main-owned state root with file and parent
 directory synchronization. A restart gives the store a new runtime-session identity, reconciles a
-candidate whose Project publication committed before its acknowledgement was recorded, converts
-any other in-flight Attempt to `interrupted`, and requires explicit confirmation for previously
-queued work.
+candidate whose Project publication committed before its acknowledgement was recorded, requires
+the runner adapter to confirm termination of every persisted in-flight Attempt before recovery,
+converts any other in-flight Attempt to `interrupted`, and requires explicit confirmation for
+previously queued work.
 The Job Key explicitly selects either Source Snapshot identity or canonical-audio fingerprint
 identity, then hashes that alternative with Project and Recipe. Cancellation does not release the
 key: resubmission returns the same Job, and explicit retry creates a new immutable Attempt.
@@ -23,10 +24,13 @@ key: resubmission returns the same Job, and explicit retry creates a new immutab
 `AnalysisJobRunner` is the cross-process adapter seam. It receives one immutable Job, an abort
 signal, exact matching non-media Checkpoints, and bounded callbacks for progress and new
 Checkpoints. Main validates the bounded checkpoint document, derives its hash and size from the
-actual bytes, stores it durably, and reopens and rehashes it before reuse. The callback schemas
-are strict stage-specific structures for shared chroma/onset features, rhythm beats, harmony
-regions, or section boundaries; they have no field capable of carrying PCM, media fragments, paths,
-or arbitrary process state. Progress is monotonic and explicitly labelled
+actual bytes, stores it durably, and reopens and rehashes it before reuse. Pruning persists retained
+metadata first and startup also removes unreferenced content-addressed artifacts, making cleanup
+retryable after a crash. The callback schemas are strict stage-specific structures for shared
+chroma/onset features, rhythm beats, harmony regions, or section boundaries. Main requires ordered,
+non-overlapping, Project-range-bounded stage data both before storage and before reuse; the
+structures have no field capable of carrying PCM, media fragments, paths, or arbitrary process
+state. Progress is monotonic and explicitly labelled
 `benchmark_approximate`. Every Attempt persists a main-owned deadline; a timer races the runner and
 aborts a hung execution with the stable `deadline` failure class. Cancellation, sleep, and deadline
 paths retain the global slot until the runner adapter confirms escalated process termination and
@@ -53,6 +57,9 @@ candidate with identical content, closing the crash window between Project Head 
 acknowledgement. The complete content-addressed Analysis Manifest is stored in Project-owned records
 with the Revision, rehashed on reopen, and survives operational Attempt/Checkpoint pruning as
 permanent portable provenance.
+Projects written before Manifest retention are upgraded in memory by the v1 storage migration,
+which records their existing Analysis Revision IDs as explicitly legacy-manifestless. New writes
+must provide exactly one retained Manifest or explicit legacy marker for every Analysis Revision.
 
 The runner and dependency types remain module-private until the DSP slice supplies a real production
 sidecar and Model Store adapter. There is deliberately no placeholder production runner: tests use

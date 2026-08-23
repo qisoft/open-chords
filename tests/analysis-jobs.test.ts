@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -496,6 +496,77 @@ describe("AnalysisJobs", () => {
     ]);
   });
 
+  it("rejects out-of-order and overlapping Checkpoint stage data", async () => {
+    const stateRoot = await temporaryDirectory();
+    const rejected: string[] = [];
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+      },
+      idFactory: (() => {
+        const ids = ["job_invalid_checkpoint", "attempt_invalid_checkpoint"];
+        return () => ids.shift()!;
+      })(),
+      runner: {
+        run: async (input) => {
+          for (const checkpoint of [
+            {
+              document: {
+                beats: [
+                  { atSample: 100, confidence: 1, role: "beat" as const },
+                  { atSample: 100, confidence: 1, role: "beat" as const },
+                ],
+                format: "open-chords/analysis-checkpoint" as const,
+                kind: "rhythm" as const,
+              },
+              kind: "rhythm" as const,
+              stage: "rhythm" as const,
+            },
+            {
+              document: {
+                format: "open-chords/analysis-checkpoint" as const,
+                kind: "harmony" as const,
+                regions: [
+                  { candidate: "C", confidence: 1, endSample: 200, startSample: 0 },
+                  { candidate: "G", confidence: 1, endSample: 300, startSample: 100 },
+                ],
+              },
+              kind: "harmony" as const,
+              stage: "harmony" as const,
+            },
+          ]) {
+            await expect(input.saveCheckpoint(checkpoint)).rejects.toThrow(/ordered|overlapping/u);
+            rejected.push(checkpoint.kind);
+          }
+          throw new AnalysisRunError({
+            classification: "component_failure",
+            message: "Fixture completed validation",
+            nextAction: "retry",
+            retryable: true,
+            stage: "harmony",
+          });
+        },
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+
+    await jobs.runNext();
+
+    expect(rejected).toEqual(["rhythm", "harmony"]);
+    expect(jobs.get("job_invalid_checkpoint").checkpoints).toEqual([]);
+  });
+
   it("persists cancellation and ignores a late successful result", async () => {
     const stateRoot = await temporaryDirectory();
     let publications = 0;
@@ -583,6 +654,7 @@ describe("AnalysisJobs", () => {
     const resultReleased = new Promise<void>((resolve) => {
       releaseResult = resolve;
     });
+    const terminations: Array<{ attemptId: string; reason: string }> = [];
     const crashingRunner: TestRunner = {
       run: async () => {
         reportStarted();
@@ -601,6 +673,9 @@ describe("AnalysisJobs", () => {
             { stage: "assemble", state: "completed" },
           ],
         };
+      },
+      terminateAndWait: async (input) => {
+        terminations.push(input);
       },
     };
     const crashAuthority: TestAuthority = {
@@ -639,6 +714,7 @@ describe("AnalysisJobs", () => {
       attempts: [{ failure: { classification: "interrupted" }, state: "failed" }],
       job: { state: "retryable" },
     });
+    expect(terminations).toEqual([{ attemptId: "attempt_interrupted", reason: "interrupted" }]);
     releaseResult();
     await expect(obsoleteRun).resolves.toMatchObject({ state: "retryable" });
     expect(publications).toBe(0);
@@ -1339,6 +1415,18 @@ describe("AnalysisJobs", () => {
     expect(jobs.get("job_retained_checkpoint").attempts.at(-1)).toMatchObject({
       failure: { classification: "component_failure" },
     });
+  });
+
+  it("removes an unreferenced checkpoint artifact during reopen recovery", async () => {
+    const stateRoot = await temporaryDirectory();
+    const checkpointDirectory = join(stateRoot, "analysis-jobs/checkpoints");
+    const orphanPath = join(checkpointDirectory, `${"f".repeat(64)}.json`);
+    mkdirSync(checkpointDirectory, { recursive: true });
+    writeFileSync(orphanPath, "{}");
+
+    await openAnalysisJobs({ authority, runner, stateRoot });
+
+    expect(existsSync(orphanPath)).toBe(false);
   });
 
   it("opens the circuit on integrity failure until restart", async () => {
