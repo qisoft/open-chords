@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 
 import { z } from "zod";
 
+import { EXPECTED_SIDECAR_MANIFEST_SHA256 } from "./sidecar-build-metadata.ts";
+import { verifyPackagedSidecarRuntime } from "./sidecar-runtime-integrity.ts";
 import {
   createEffectSidecarClient,
   createUncontainedSpawnLauncherForProof,
@@ -13,13 +15,10 @@ import {
 
 export async function runPackagedSidecarProof(): Promise<void> {
   const runtimeRoot = join(process.resourcesPath, "open-chords-analysis");
-  const executablePath = join(
+  const verifiedRuntime = verifyPackagedSidecarRuntime(
     runtimeRoot,
-    `open-chords-analysis${process.platform === "win32" ? ".exe" : ""}`,
+    EXPECTED_SIDECAR_MANIFEST_SHA256,
   );
-  const manifestHash = createHash("sha256")
-    .update(readFileSync(join(runtimeRoot, "runtime-manifest.json")))
-    .digest("hex");
   const workspace = mkdtempSync(join(tmpdir(), "open-chords-packaged-sidecar-"));
   const inputPath = join(workspace, "input", "source-media");
   mkdirSync(dirname(inputPath), { recursive: true });
@@ -29,12 +28,12 @@ export async function runPackagedSidecarProof(): Promise<void> {
       args: [],
       cwd: workspace,
       env: {},
-      executablePath,
+      executablePath: verifiedRuntime.executablePath,
     }),
   );
   const request = parseSidecarSessionRequest({
     jobId: "job-packaged-proof",
-    manifestHash,
+    manifestHash: verifiedRuntime.manifestHash,
     nonce: "nonce-packaged-proof",
     requestId: "request-packaged-proof",
     timeoutMs: 15_000,

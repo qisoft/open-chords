@@ -10,10 +10,20 @@ platform_profile="$1"
 output_root="$2"
 mkdir -p "${output_root}"
 output_root="$(cd "${output_root}" && pwd)"
-version="8.1.2"
-archive="ffmpeg-${version}.tar.xz"
-expected_sha256="464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
-source_url="https://ffmpeg.org/releases/${archive}"
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_manifest="${repository_root}/sidecar/native/ffmpeg-build.json"
+if command -v python3 >/dev/null 2>&1; then
+  python_command="python3"
+else
+  python_command="python"
+fi
+json_value() {
+  "${python_command}" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "${build_manifest}" "$1"
+}
+version="$(json_value version)"
+archive="$(json_value sourceArchive)"
+expected_sha256="$(json_value sourceSha256)"
+source_url="$(json_value sourceUrl)"
 download_root="${output_root}/downloads"
 source_root="${output_root}/source"
 build_root="${output_root}/build/${platform_profile}-reviewed-v1"
@@ -33,38 +43,13 @@ if [[ ! -f "${source_root}/ffmpeg-${version}/configure" ]]; then
   tar -xf "${download_root}/${archive}" -C "${source_root}"
 fi
 
-configure_arguments=(
-  "--prefix=${install_root}"
-  --disable-asm
-  --disable-autodetect
-  --disable-bsfs
-  --disable-debug
-  --disable-devices
-  --disable-doc
-  --disable-encoders
-  --disable-everything
-  --disable-ffplay
-  --disable-gpl
-  --disable-hwaccels
-  --disable-indevs
-  --disable-muxers
-  --disable-network
-  --disable-nonfree
-  --disable-outdevs
-  --disable-programs
-  --disable-protocols
-  --disable-shared
-  --disable-version3
-  --enable-decoder=aac,alac,flac,mp3,opus,pcm_f32le,pcm_f64le,pcm_s16be,pcm_s16le,pcm_s24be,pcm_s24le,pcm_s32le,vorbis
-  --enable-demuxer=flac,matroska,mov,mp3,ogg,wav
-  --enable-encoder=pcm_s16le
-  --enable-ffmpeg
-  --enable-ffprobe
-  --enable-filter=aformat,aresample,pan
-  --enable-muxer=wav
-  --enable-parser=aac,aac_latm,flac,mpegaudio,opus,vorbis
-  --enable-protocol=file,pipe
-  --enable-static
+configure_arguments=("--prefix=${install_root}")
+while IFS= read -r argument; do
+  configure_arguments+=("${argument}")
+done < <(
+  "${python_command}" -c \
+    'import json,sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["configureArguments"]))' \
+    "${build_manifest}"
 )
 
 pushd "${build_root}" >/dev/null

@@ -28,12 +28,33 @@ it.skipIf(executablePath === undefined)(
     const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
     const inventory = z
       .object({
-        dependencies: z.array(z.object({ license: z.string(), licenseFile: z.string() })),
+        dependencies: z.array(
+          z.object({
+            component: z.string(),
+            license: z.string(),
+            licenseFile: z.string(),
+            present: z.boolean(),
+          }),
+        ),
+        nativeFiles: z.array(
+          z.object({ component: z.string(), path: z.string(), sha256: z.string() }),
+        ),
       })
       .parse(JSON.parse(readFileSync(join(runtimeRoot, "native-dependencies.json"), "utf8")));
     for (const dependency of inventory.dependencies) {
       expect(dependency.license).not.toHaveLength(0);
       expect(readFileSync(join(runtimeRoot, dependency.licenseFile)).byteLength).toBeGreaterThan(0);
+    }
+    const dependenciesByComponent = new Map(
+      inventory.dependencies.map((dependency) => [dependency.component, dependency]),
+    );
+    for (const nativeFile of inventory.nativeFiles) {
+      expect(dependenciesByComponent.get(nativeFile.component)?.present).toBe(true);
+      expect(
+        createHash("sha256")
+          .update(readFileSync(join(runtimeRoot, nativeFile.path)))
+          .digest("hex"),
+      ).toBe(nativeFile.sha256);
     }
     const fixture = monoPcmWav(
       Array.from({ length: 48_000 }, (_value, index) => Math.round(Math.sin(index / 13) * 4_000)),
@@ -81,7 +102,8 @@ it.skipIf(executablePath === undefined)(
       },
       configuration: {
         value: {
-          platformProfile: process.platform === "win32" ? "windows-x64" : "darwin-arm64",
+          platformProfile:
+            process.platform === "win32" ? "windows-server-2025-x64" : "darwin-arm64",
         },
       },
       tools: {

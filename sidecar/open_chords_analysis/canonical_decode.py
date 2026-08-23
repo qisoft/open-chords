@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,10 @@ TOOL_TIMEOUT_SECONDS: Final = 30
 
 class CanonicalDecodeError(RuntimeError):
     """A stable failure at the canonical-decode boundary."""
+
+
+class CanonicalDecodeCancelled(CanonicalDecodeError):
+    """Canonical decode stopped cooperatively before publication."""
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,7 @@ def decode_canonical(
     workspace: Path,
     toolchain: NativeToolchain,
     config: CanonicalDecodeConfig,
+    cancellation: threading.Event | None = None,
 ) -> ArtifactDescriptor:
     """Decode the fixed staged input and publish a deterministic manifest."""
 
@@ -68,8 +74,10 @@ def decode_canonical(
     ffmpeg = _exact_executable(toolchain.ffmpeg)
     ffprobe = _exact_executable(toolchain.ffprobe)
     input_descriptor = _file_descriptor(workspace, input_path)
+    cancellation = cancellation or threading.Event()
+    _raise_if_cancelled(cancellation)
 
-    probe = _probe_audio(ffprobe, input_path)
+    probe = _probe_audio(ffprobe, input_path, cancellation)
     if not probe.get("streams"):
         raise CanonicalDecodeError("staged media has no decodable audio stream")
 
@@ -117,13 +125,16 @@ def decode_canonical(
                 "wav",
                 "-y",
                 str(temporary_output),
-            ]
+            ],
+            cancellation,
         )
+        _raise_if_cancelled(cancellation)
         os.replace(temporary_output, output_path)
     finally:
         temporary_output.unlink(missing_ok=True)
 
     canonical_audio = _inspect_canonical_wav(output_path, config)
+    _raise_if_cancelled(cancellation, output_path)
     if _file_descriptor(workspace, input_path) != input_descriptor:
         output_path.unlink(missing_ok=True)
         raise CanonicalDecodeError("staged media changed during canonical decode")
@@ -135,26 +146,36 @@ def decode_canonical(
         "sampleRate": config.sample_rate,
         "schemaVersion": 1,
     }
-    manifest = {
-        "artifact": _descriptor_json(_file_descriptor(workspace, output_path)),
-        "canonicalAudio": canonical_audio,
-        "configuration": {
-            "sha256": _sha256_bytes(_canonical_json(configuration)),
-            "value": configuration,
-        },
-        "input": _descriptor_json(input_descriptor),
-        "schemaVersion": 1,
-        "tools": {
-            "ffmpeg": _tool_identity(ffmpeg, "-version"),
-            "ffprobe": _tool_identity(ffprobe, "-version"),
-        },
-    }
+    try:
+        manifest = {
+            "artifact": _descriptor_json(_file_descriptor(workspace, output_path)),
+            "canonicalAudio": canonical_audio,
+            "configuration": {
+                "sha256": _sha256_bytes(_canonical_json(configuration)),
+                "value": configuration,
+            },
+            "input": _descriptor_json(input_descriptor),
+            "schemaVersion": 1,
+            "tools": {
+                "ffmpeg": _tool_identity(ffmpeg, "-version", cancellation),
+                "ffprobe": _tool_identity(ffprobe, "-version", cancellation),
+            },
+        }
+    except CanonicalDecodeCancelled:
+        output_path.unlink(missing_ok=True)
+        raise
     manifest_bytes = _canonical_json(manifest)
+    _raise_if_cancelled(cancellation, output_path)
     _write_atomic(manifest_path, manifest_bytes)
+    _raise_if_cancelled(cancellation, output_path, manifest_path)
     return _file_descriptor(workspace, manifest_path)
 
 
-def _probe_audio(ffprobe: Path, input_path: Path) -> dict[str, object]:
+def _probe_audio(
+    ffprobe: Path,
+    input_path: Path,
+    cancellation: threading.Event,
+) -> dict[str, object]:
     result = _run_tool(
         [
             str(ffprobe),
@@ -173,7 +194,8 @@ def _probe_audio(ffprobe: Path, input_path: Path) -> dict[str, object]:
             "-of",
             "json",
             str(input_path),
-        ]
+        ],
+        cancellation,
     )
     try:
         parsed = json.loads(result.stdout)
@@ -184,7 +206,8 @@ def _probe_audio(ffprobe: Path, input_path: Path) -> dict[str, object]:
     return parsed
 
 
-def _run_tool(arguments: list[str]) -> _ToolResult:
+def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResult:
+    _raise_if_cancelled(cancellation)
     process = subprocess.Popen(
         arguments,
         stdin=subprocess.DEVNULL,
@@ -213,17 +236,37 @@ def _run_tool(arguments: list[str]) -> _ToolResult:
     ]
     for reader in readers:
         reader.start()
+    deadline = time.monotonic() + TOOL_TIMEOUT_SECONDS
+    cancelled = False
+    timed_out = False
+    return_code: int
     try:
-        return_code = process.wait(timeout=TOOL_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired as error:
-        process.kill()
-        process.wait()
-        raise CanonicalDecodeError("native media tool exceeded its deadline") from error
+        while True:
+            if cancellation.is_set():
+                cancelled = True
+                process.kill()
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                process.kill()
+                break
+            try:
+                return_code = process.wait(timeout=min(0.05, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        if cancelled or timed_out:
+            return_code = process.wait()
     finally:
         for reader in readers:
             reader.join(timeout=1)
         process.stdout.close()
         process.stderr.close()
+    if cancelled:
+        raise CanonicalDecodeCancelled("canonical decode was cancelled")
+    if timed_out:
+        raise CanonicalDecodeError("native media tool exceeded its deadline")
     if exceeded.is_set():
         raise CanonicalDecodeError("native media tool exceeded its output budget")
     if return_code != 0:
@@ -259,9 +302,13 @@ def _inspect_canonical_wav(path: Path, config: CanonicalDecodeConfig) -> dict[st
     }
 
 
-def _tool_identity(path: Path, version_argument: str) -> dict[str, str]:
+def _tool_identity(
+    path: Path,
+    version_argument: str,
+    cancellation: threading.Event,
+) -> dict[str, str]:
     version_lines = (
-        _run_tool([str(path), version_argument])
+        _run_tool([str(path), version_argument], cancellation)
         .stdout.decode("utf-8", "replace")
         .splitlines()
     )
@@ -337,3 +384,11 @@ def _sha256_file(path: Path) -> str:
         while chunk := file.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _raise_if_cancelled(cancellation: threading.Event, *artifacts: Path) -> None:
+    if not cancellation.is_set():
+        return
+    for artifact in artifacts:
+        artifact.unlink(missing_ok=True)
+    raise CanonicalDecodeCancelled("canonical decode was cancelled")

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -74,6 +75,7 @@ def main() -> None:
             licenses / "FFmpeg-LGPL-2.1.txt",
         )
         shutil.copy2(_python_license(), licenses / "CPython-PSF-2.0.txt")
+        shutil.copy2(ROOT / "LICENSE", licenses / "Open-Chords-AGPL-3.0.txt")
         pyinstaller_distribution = importlib.metadata.distribution("pyinstaller")
         pyinstaller_license = next(
             file
@@ -88,9 +90,20 @@ def main() -> None:
             ROOT / "sidecar/native/ffmpeg-build.json",
             assembled / "ffmpeg-build.json",
         )
+        shutil.copy2(
+            ROOT / "sidecar/native/third-party-native-notices.json",
+            licenses / "Third-Party-Native-Notices.json",
+        )
         inventory = json.loads(
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
         )
+        native_files = _native_files(assembled)
+        present_components = {entry["component"] for entry in native_files} | {"pyinstaller"}
+        inventory["dependencies"] = [
+            {**dependency, "present": dependency["component"] in present_components}
+            for dependency in inventory["dependencies"]
+        ]
+        inventory["nativeFiles"] = native_files
         inventory["observed"] = {
             "python": sys.version.split()[0],
             "pyinstaller": _tool_version([sys.executable, "-m", "PyInstaller", "--version"]),
@@ -130,6 +143,63 @@ def _python_license() -> Path:
         if candidate.is_file():
             return candidate
     raise FileNotFoundError("CPython LICENSE was not found beside the exact build interpreter")
+
+
+def _native_files(runtime_root: Path) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for path in sorted(runtime_root.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(runtime_root).as_posix()
+        component = _native_component(relative)
+        if component is None:
+            continue
+        entries.append({"component": component, "path": relative, "sha256": _sha256(path)})
+    return entries
+
+
+def _native_component(relative: str) -> str | None:
+    lower = relative.lower()
+    name = Path(lower).name
+    if lower in {"open-chords-analysis", "open-chords-analysis.exe"}:
+        return "open-chords-sidecar"
+    if lower in {"tools/ffmpeg", "tools/ffmpeg.exe", "tools/ffprobe", "tools/ffprobe.exe"}:
+        return "ffmpeg"
+    if "libssl" in name or "libcrypto" in name:
+        return "openssl"
+    if "liblzma" in name:
+        return "xz"
+    if "libzstd" in name:
+        return "zstd"
+    if "libmpdec" in name:
+        return "mpdecimal"
+    if "libffi" in name:
+        return "libffi"
+    if "libbz2" in name or name == "bz2.dll":
+        return "bzip2"
+    if name in {"zlib.dll", "zlib1.dll"}:
+        return "zlib"
+    if "expat" in name and name.endswith((".dll", ".dylib")):
+        return "expat"
+    if name.startswith(("vcruntime", "msvcp", "ucrtbase", "api-ms-win-crt")):
+        return "msvc-runtime"
+    if lower.startswith("_internal/") and (
+        name == "python"
+        or name.startswith("python3") and name.endswith(".dll")
+        or name.endswith((".so", ".pyd"))
+    ):
+        return "cpython"
+    if name.endswith((".dll", ".dylib", ".exe", ".pyd", ".so")):
+        raise RuntimeError(f"Unclassified native runtime file: {relative}")
+    return None
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        while chunk := file.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 if __name__ == "__main__":

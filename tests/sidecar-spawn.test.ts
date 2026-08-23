@@ -8,6 +8,7 @@ import {
   createPromiseSidecarClient,
   createUncontainedSpawnLauncherForProof,
   parseSidecarSessionRequest,
+  SidecarSessionError,
 } from "../apps/desktop/src/main/sidecar-session.ts";
 
 it("proves the protocol across a real child-process boundary and reaps the child", async () => {
@@ -59,4 +60,41 @@ it("removes exit listeners when the child wait times out", async () => {
 
   expect(child.listenerCount("exit")).toBe(0);
   expect(child.listenerCount("error")).toBe(0);
+});
+
+it("terminates and reaps a sidecar that exceeds the stderr budget", async () => {
+  let childPid: number | undefined;
+  const client = createPromiseSidecarClient(
+    createUncontainedSpawnLauncherForProof({
+      args: [resolve("tests/fixtures/stderr-flood-sidecar.mjs")],
+      cwd: process.cwd(),
+      env: {},
+      executablePath: process.execPath,
+      onSpawn: (pid) => {
+        childPid = pid;
+      },
+    }),
+  );
+
+  await expect(
+    client.runSession(
+      parseSidecarSessionRequest({
+        jobId: "job-stderr-budget",
+        manifestHash: "a".repeat(64),
+        nonce: "nonce-stderr-budget",
+        requestId: "request-stderr-budget",
+        timeoutMs: 2_000,
+      }),
+    ),
+  ).rejects.toBeInstanceOf(SidecarSessionError);
+  await client.dispose();
+
+  expect(childPid).toBeTypeOf("number");
+  let childWasReaped = false;
+  try {
+    process.kill(childPid!, 0);
+  } catch {
+    childWasReaped = true;
+  }
+  expect(childWasReaped).toBe(true);
 });

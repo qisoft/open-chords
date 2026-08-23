@@ -1,0 +1,50 @@
+{
+  "notices": [
+    {
+      "component": "OpenSSL",
+      "license": "Apache-2.0",
+      "source": "https://github.com/openssl/openssl/blob/master/LICENSE.txt"
+    },
+    {
+      "component": "XZ Utils liblzma",
+      "license": "0BSD",
+      "source": "https://github.com/tukaani-project/xz/blob/master/COPYING.0BSD"
+    },
+    {
+      "component": "Zstandard",
+      "license": "BSD-3-Clause OR GPL-2.0-only",
+      "source": "https://github.com/facebook/zstd/blob/dev/LICENSE"
+    },
+    {
+      "component": "mpdecimal",
+      "license": "BSD-2-Clause",
+      "source": "https://www.bytereef.org/mpdecimal/download.html"
+    },
+    {
+      "component": "libffi",
+      "license": "MIT",
+      "source": "https://github.com/libffi/libffi/blob/master/LICENSE"
+    },
+    {
+      "component": "bzip2",
+      "license": "bzip2-1.0.6",
+      "source": "https://sourceware.org/git/?p=bzip2.git;a=blob;f=LICENSE"
+    },
+    {
+      "component": "zlib",
+      "license": "Zlib",
+      "source": "https://github.com/madler/zlib/blob/develop/LICENSE"
+    },
+    {
+      "component": "Expat",
+      "license": "MIT",
+      "source": "https://github.com/libexpat/libexpat/blob/master/COPYING"
+    },
+    {
+      "component": "Microsoft Visual C++ runtime",
+      "license": "LicenseRef-Microsoft-Visual-Cpp-Runtime",
+      "source": "https://visualstudio.microsoft.com/license-terms/"
+    }
+  ],
+  "schemaVersion": 1
+}

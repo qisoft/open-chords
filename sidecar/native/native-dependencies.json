@@ -1,6 +1,15 @@
 {
   "dependencies": [
     {
+      "component": "open-chords-sidecar",
+      "license": "AGPL-3.0-only",
+      "licenseFile": "licenses/Open-Chords-AGPL-3.0.txt",
+      "name": "Open Chords frozen executable",
+      "role": "sidecar application and protocol",
+      "version": "build-observed"
+    },
+    {
+      "component": "cpython",
       "license": "PSF-2.0",
       "licenseFile": "licenses/CPython-PSF-2.0.txt",
       "name": "CPython runtime",
@@ -8,6 +17,7 @@
       "version": "build-observed"
     },
     {
+      "component": "pyinstaller",
       "license": "GPL-2.0-or-later WITH Bootloader-exception",
       "licenseFile": "licenses/PyInstaller-COPYING.txt",
       "name": "PyInstaller",
@@ -15,12 +25,85 @@
       "version": "6.22.0"
     },
     {
+      "component": "ffmpeg",
       "configuration": "ffmpeg-build.json",
       "license": "LGPL-2.1-or-later",
       "licenseFile": "licenses/FFmpeg-LGPL-2.1.txt",
       "name": "FFmpeg and ffprobe",
       "role": "canonical decode and bounded probe",
       "version": "8.1.2"
+    },
+    {
+      "component": "openssl",
+      "license": "Apache-2.0",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "OpenSSL libssl and libcrypto",
+      "role": "CPython runtime dependency",
+      "version": "build-observed"
+    },
+    {
+      "component": "xz",
+      "license": "0BSD",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "XZ Utils liblzma",
+      "role": "CPython runtime dependency",
+      "version": "build-observed"
+    },
+    {
+      "component": "zstd",
+      "license": "BSD-3-Clause OR GPL-2.0-only",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "Zstandard",
+      "role": "CPython runtime dependency",
+      "version": "build-observed"
+    },
+    {
+      "component": "mpdecimal",
+      "license": "BSD-2-Clause",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "mpdecimal",
+      "role": "CPython runtime dependency",
+      "version": "build-observed"
+    },
+    {
+      "component": "libffi",
+      "license": "MIT",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "libffi",
+      "role": "CPython runtime dependency",
+      "version": "build-observed"
+    },
+    {
+      "component": "bzip2",
+      "license": "bzip2-1.0.6",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "bzip2",
+      "role": "CPython runtime dependency",
+      "version": "build-observed"
+    },
+    {
+      "component": "zlib",
+      "license": "Zlib",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "zlib",
+      "role": "CPython runtime dependency",
+      "version": "build-observed"
+    },
+    {
+      "component": "expat",
+      "license": "MIT",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "Expat",
+      "role": "CPython runtime dependency",
+      "version": "build-observed"
+    },
+    {
+      "component": "msvc-runtime",
+      "license": "LicenseRef-Microsoft-Visual-Cpp-Runtime",
+      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "name": "Microsoft Visual C++ runtime",
+      "role": "Windows CPython runtime dependency",
+      "version": "build-observed"
     }
   ],
   "schemaVersion": 1

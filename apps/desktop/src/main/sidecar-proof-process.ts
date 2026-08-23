@@ -11,6 +11,8 @@ type ProofSpawnOptions = {
   onSpawn?: (pid: number) => void;
 };
 
+const MAX_SIDECAR_STDERR_BYTES = 64 * 1024;
+
 /**
  * Cross-process protocol proof only. Ordinary spawn cannot provide the
  * platform containment contract required of the production launcher.
@@ -33,7 +35,13 @@ export function createUncontainedSpawnLauncherForProof(
         throw new SidecarSessionError("launch_failure", "Sidecar process pipes were unavailable");
       }
       const stdin = child.stdin;
-      child.stderr?.on("data", () => undefined);
+      let stderrBytes = 0;
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderrBytes += chunk.byteLength;
+        if (stderrBytes > MAX_SIDECAR_STDERR_BYTES && child.exitCode === null) {
+          child.kill("SIGKILL");
+        }
+      });
       options.onSpawn?.(child.pid);
       let stopped = false;
       return {
