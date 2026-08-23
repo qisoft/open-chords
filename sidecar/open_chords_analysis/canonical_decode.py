@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import wave
@@ -241,6 +243,7 @@ def _probe_audio(
 
 def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResult:
     _raise_if_cancelled(cancellation)
+    _sanitize_external_tool_runtime()
     process = subprocess.Popen(
         arguments,
         stdin=subprocess.DEVNULL,
@@ -305,6 +308,14 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
     if return_code != 0:
         raise CanonicalDecodeError(f"native media tool failed with exit code {return_code}")
     return _ToolResult(bytes(stdout), bytes(stderr))
+
+
+def _sanitize_external_tool_runtime() -> None:
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        return
+    # PyInstaller's bundle directory must not affect the pinned external tools' DLL resolution.
+    if ctypes.windll.kernel32.SetDllDirectoryW(None) == 0:
+        raise OSError("failed to restore the Windows DLL search path")
 
 
 def _tool_environment() -> dict[str, str]:

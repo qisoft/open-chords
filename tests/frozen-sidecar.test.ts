@@ -16,6 +16,11 @@ import {
 } from "../apps/desktop/src/main/sidecar-session.ts";
 
 const executablePath = process.env.OPEN_CHORDS_FROZEN_SIDECAR;
+const probeArgumentsFixture = z
+  .object({ arguments: z.array(z.string()) })
+  .parse(
+    JSON.parse(readFileSync(resolve("tests/fixtures/canonical-probe-arguments.json"), "utf8")),
+  );
 const temporaryRoots: string[] = [];
 
 afterAll(() => {
@@ -181,32 +186,8 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
   }
   const diagnosticOutput = join(workspace, "artifacts", "diagnostic.wav");
   mkdirSync(dirname(diagnosticOutput), { recursive: true });
-  const probeArguments = [
-    "-v",
-    "error",
-    "-select_streams",
-    "a:0",
-    "-show_entries",
-    "stream=codec_type",
-    "-of",
-    "json",
-    inputPath,
-  ];
-  const fullProbeArguments = [
-    "-v",
-    "error",
-    "-probesize",
-    "1048576",
-    "-analyzeduration",
-    "5000000",
-    "-select_streams",
-    "a:0",
-    "-show_entries",
-    "stream=codec_name,codec_type,sample_rate,channels,channel_layout",
-    "-of",
-    "json",
-    inputPath,
-  ];
+  const exactProbeArguments = [...probeArgumentsFixture.arguments, inputPath];
+  const fullProbeArguments = withoutProtocolWhitelist(exactProbeArguments);
   const decodeArguments = [
     "-v",
     "error",
@@ -222,10 +203,8 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
     diagnosticOutput,
   ];
   const checks = [
-    ["ffprobe-basic", ffprobe, probeArguments],
-    ["ffprobe-whitelist", ffprobe, withProtocolWhitelist(probeArguments)],
     ["ffprobe-full", ffprobe, fullProbeArguments],
-    ["ffprobe-full-whitelist", ffprobe, withProtocolWhitelist(fullProbeArguments)],
+    ["ffprobe-full-whitelist", ffprobe, exactProbeArguments],
     ["ffmpeg-basic", ffmpeg, decodeArguments],
     ["ffmpeg-whitelist", ffmpeg, withProtocolWhitelist(decodeArguments)],
   ] as const;
@@ -244,6 +223,16 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
     .join(",");
 }
 
+it.each([
+  ["invalid JSON", "{", "invalid-json"],
+  ["a non-object", "[]", "no-streams"],
+  ["a missing streams property", "{}", "no-streams"],
+  ["a non-array streams property", '{"streams":{}}', "invalid-streams"],
+  ["a bounded stream array", '{"streams":[{}]}', "streams-1"],
+])("classifies %s probe output", (_case, output, expected) => {
+  expect(probeOutputShape(output)).toBe(expected);
+});
+
 function probeOutputShape(output: string | null): string {
   try {
     const parsed: unknown = JSON.parse(output ?? "");
@@ -254,6 +243,12 @@ function probeOutputShape(output: string | null): string {
   } catch {
     return "invalid-json";
   }
+}
+
+function withoutProtocolWhitelist(arguments_: string[]): string[] {
+  const optionIndex = arguments_.indexOf("-protocol_whitelist");
+  if (optionIndex < 0) return arguments_;
+  return [...arguments_.slice(0, optionIndex), ...arguments_.slice(optionIndex + 2)];
 }
 
 function withProtocolWhitelist(arguments_: string[]): string[] {

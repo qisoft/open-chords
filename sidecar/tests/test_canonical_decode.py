@@ -9,6 +9,7 @@ import threading
 import unittest
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from sidecar.open_chords_analysis.canonical_decode import (
@@ -17,11 +18,75 @@ from sidecar.open_chords_analysis.canonical_decode import (
     CanonicalDecodeError,
     CanonicalDecodeFailureCode,
     NativeToolchain,
+    _probe_audio,
+    _sanitize_external_tool_runtime,
     decode_canonical,
 )
 
 
 class CanonicalDecodeTests(unittest.TestCase):
+    def test_leaves_the_unfrozen_windows_dll_search_path_unchanged(self) -> None:
+        set_dll_directory = unittest.mock.Mock(return_value=1)
+        windows_api = SimpleNamespace(
+            kernel32=SimpleNamespace(SetDllDirectoryW=set_dll_directory),
+        )
+
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.sys.platform", "win32"),
+            patch("sidecar.open_chords_analysis.canonical_decode.sys.frozen", False, create=True),
+            patch("sidecar.open_chords_analysis.canonical_decode.ctypes.windll", windows_api, create=True),
+        ):
+            _sanitize_external_tool_runtime()
+
+        set_dll_directory.assert_not_called()
+
+    def test_sanitizes_the_frozen_windows_dll_search_path(self) -> None:
+        set_dll_directory = unittest.mock.Mock(return_value=1)
+        windows_api = SimpleNamespace(
+            kernel32=SimpleNamespace(SetDllDirectoryW=set_dll_directory),
+        )
+
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.sys.platform", "win32"),
+            patch("sidecar.open_chords_analysis.canonical_decode.sys.frozen", True, create=True),
+            patch("sidecar.open_chords_analysis.canonical_decode.ctypes.windll", windows_api, create=True),
+        ):
+            _sanitize_external_tool_runtime()
+
+        set_dll_directory.assert_called_once_with(None)
+
+    def test_fails_closed_when_windows_dll_search_path_cannot_be_sanitized(self) -> None:
+        windows_api = SimpleNamespace(
+            kernel32=SimpleNamespace(SetDllDirectoryW=unittest.mock.Mock(return_value=0)),
+        )
+
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.sys.platform", "win32"),
+            patch("sidecar.open_chords_analysis.canonical_decode.sys.frozen", True, create=True),
+            patch("sidecar.open_chords_analysis.canonical_decode.ctypes.windll", windows_api, create=True),
+            self.assertRaises(OSError) as raised,
+        ):
+            _sanitize_external_tool_runtime()
+
+        self.assertEqual(str(raised.exception), "failed to restore the Windows DLL search path")
+
+    def test_probe_arguments_match_frozen_diagnostic_fixture(self) -> None:
+        fixture_path = Path("tests/fixtures/canonical-probe-arguments.json")
+        expected_arguments = json.loads(fixture_path.read_text("utf-8"))["arguments"]
+        ffprobe = Path("/tools/ffprobe")
+        input_path = Path("/workspace/input/source-media")
+
+        with patch(
+            "sidecar.open_chords_analysis.canonical_decode._run_tool",
+        ) as run_tool:
+            run_tool.return_value.stdout = b'{"streams":[]}'
+            _probe_audio(ffprobe, input_path, threading.Event())
+
+        self.assertEqual(
+            run_tool.call_args.args[0],
+            [str(ffprobe), *expected_arguments, str(input_path)],
+        )
+
     def test_decodes_the_same_staged_media_deterministically(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")
