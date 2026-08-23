@@ -26,6 +26,22 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
             ancestor_license.write_text("framework license", "utf-8")
             self.assertEqual(find_python_license(executable, stdlib), ancestor_license)
 
+    def test_classifies_all_windows_api_set_forwarders_as_msvc_runtime(self) -> None:
+        native_component = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_native_component"]
+
+        self.assertEqual(
+            native_component("_internal/api-ms-win-core-console-l1-1-0.dll", "pe"),
+            "msvc-runtime",
+        )
+        self.assertEqual(
+            native_component("_internal/api-ms-win-crt-runtime-l1-1-0.dll", "pe"),
+            "msvc-runtime",
+        )
+        with self.assertRaisesRegex(RuntimeError, "Unclassified native runtime file"):
+            native_component("_internal/unreviewed-runtime.dll", "pe")
+
 
 if __name__ == "__main__":
     unittest.main()

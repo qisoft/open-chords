@@ -204,7 +204,7 @@ def _native_component(relative: str, binary_format: str | None) -> str | None:
         return "zlib"
     if "expat" in name and name.endswith((".dll", ".dylib")):
         return "expat"
-    if name.startswith(("vcruntime", "msvcp", "ucrtbase", "api-ms-win-crt")):
+    if name.startswith(("vcruntime", "msvcp", "ucrtbase", "api-ms-win-")):
         return "msvc-runtime"
     if (
         lower.startswith("_internal/python.framework/versions/")
