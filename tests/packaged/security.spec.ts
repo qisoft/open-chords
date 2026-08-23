@@ -78,9 +78,9 @@ test.beforeAll(async () => {
 test.afterAll(() => {
   rmSync(packageRoot, {
     force: true,
-    maxRetries: 10,
+    maxRetries: 40,
     recursive: true,
-    retryDelay: 100,
+    retryDelay: 250,
   });
 });
 
@@ -265,6 +265,13 @@ async function stopApplication(application: ReturnType<typeof spawn>): Promise<v
       clearTimeout(timeout);
       resolve();
     });
+    if (process.platform === "win32" && application.pid !== undefined) {
+      const terminator = spawn("taskkill", ["/pid", String(application.pid), "/t", "/f"], {
+        stdio: "ignore",
+      });
+      terminator.once("error", () => application.kill());
+      return;
+    }
     if (!application.kill()) {
       clearTimeout(timeout);
       resolve();
