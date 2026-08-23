@@ -20,6 +20,8 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
+import { syncDirectory } from "./filesystem-durability.ts";
+
 const STATE_FILE = "analysis-jobs/state.json";
 const OPERATIONAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
@@ -1279,29 +1281,6 @@ async function atomicWrite(path: string, content: string): Promise<void> {
   }
   await rename(temporary, path);
   await syncDirectory(parent);
-}
-
-async function syncDirectory(path: string): Promise<void> {
-  try {
-    const directory = await open(path, "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error) {
-    if (
-      process.platform === "win32" &&
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      typeof error.code === "string" &&
-      ["EISDIR", "EINVAL", "ENOTSUP", "EPERM"].includes(error.code)
-    ) {
-      return;
-    }
-    throw error;
-  }
 }
 
 function hashIdentity(value: unknown): string {

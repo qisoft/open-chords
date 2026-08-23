@@ -35,6 +35,7 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
+import { syncDirectory } from "./filesystem-durability.ts";
 import {
   locatorMatchesSourceIdentity,
   ProjectOwnedRecordsSchema,
@@ -2478,27 +2479,6 @@ async function syncFile(path: string): Promise<void> {
     await handle.sync();
   } finally {
     await handle.close();
-  }
-}
-
-async function syncDirectory(path: string): Promise<void> {
-  try {
-    const handle = await open(path, "r");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  } catch (error) {
-    if (
-      process.platform === "win32" &&
-      isNodeError(error) &&
-      error.code !== undefined &&
-      ["EISDIR", "EINVAL", "ENOTSUP", "EPERM"].includes(error.code)
-    ) {
-      return;
-    }
-    throw error;
   }
 }
 
