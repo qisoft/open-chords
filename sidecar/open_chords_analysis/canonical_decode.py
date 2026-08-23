@@ -10,8 +10,9 @@ import threading
 import time
 import wave
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import BinaryIO, Final, Literal
+from typing import BinaryIO, Final
 
 CANONICAL_CHANNELS: Final = 1
 CANONICAL_SAMPLE_FORMAT: Final = "s16le"
@@ -21,26 +22,17 @@ OUTPUT_PATH: Final = Path("artifacts/canonical.wav")
 MANIFEST_PATH: Final = Path("artifacts/decode-manifest.json")
 MAX_TOOL_OUTPUT_BYTES: Final = 64 * 1024
 TOOL_TIMEOUT_SECONDS: Final = 30
-CanonicalDecodeFailureCode = Literal[
-    "canonical_decode_failed",
-    "canonical_prepare_failed",
-    "canonical_probe_failed",
-    "canonical_transcode_failed",
-    "canonical_artifact_validation_failed",
-    "canonical_tool_identity_failed",
-    "canonical_publication_failed",
-]
-CANONICAL_DECODE_FAILURE_CODES: Final[frozenset[str]] = frozenset(
-    {
-        "canonical_decode_failed",
-        "canonical_prepare_failed",
-        "canonical_probe_failed",
-        "canonical_transcode_failed",
-        "canonical_artifact_validation_failed",
-        "canonical_tool_identity_failed",
-        "canonical_publication_failed",
-    }
-)
+
+
+class CanonicalDecodeFailureCode(StrEnum):
+    DECODE = "canonical_decode_failed"
+    PREPARE = "canonical_prepare_failed"
+    PROBE = "canonical_probe_failed"
+    TRANSCODE = "canonical_transcode_failed"
+    ARTIFACT_VALIDATION = "canonical_artifact_validation_failed"
+    TOOL_IDENTITY = "canonical_tool_identity_failed"
+    PUBLICATION = "canonical_publication_failed"
+    CLEANUP = "canonical_cleanup_failed"
 
 
 class CanonicalDecodeError(RuntimeError):
@@ -50,7 +42,7 @@ class CanonicalDecodeError(RuntimeError):
         self,
         message: str,
         *,
-        code: CanonicalDecodeFailureCode = "canonical_decode_failed",
+        code: CanonicalDecodeFailureCode = CanonicalDecodeFailureCode.DECODE,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -93,7 +85,7 @@ def decode_canonical(
     """Decode the fixed staged input and publish a deterministic manifest."""
 
     artifacts: tuple[Path, ...] = ()
-    failure_code: CanonicalDecodeFailureCode = "canonical_prepare_failed"
+    failure_code = CanonicalDecodeFailureCode.PREPARE
     try:
         workspace = workspace.resolve(strict=True)
         output_path = _workspace_file(workspace, OUTPUT_PATH)
@@ -102,18 +94,20 @@ def decode_canonical(
         temporary_output = output_path.with_suffix(".wav.partial")
         temporary_manifest = manifest_path.with_suffix(".json.partial")
         artifacts = (temporary_output, output_path, temporary_manifest, manifest_path)
-        _cleanup_artifacts(artifacts)
+        if cleanup_error := _cleanup_artifacts(artifacts):
+            failure_code = CanonicalDecodeFailureCode.CLEANUP
+            raise cleanup_error
         input_path = _workspace_file(workspace, INPUT_PATH, must_exist=True)
         ffmpeg = _exact_executable(toolchain.ffmpeg)
         ffprobe = _exact_executable(toolchain.ffprobe)
         input_descriptor = _file_descriptor(workspace, input_path)
         cancellation = cancellation or threading.Event()
         _raise_if_cancelled(cancellation)
-        failure_code = "canonical_probe_failed"
+        failure_code = CanonicalDecodeFailureCode.PROBE
         probe = _probe_audio(ffprobe, input_path, cancellation)
         if not probe.get("streams"):
             raise CanonicalDecodeError("staged media has no decodable audio stream")
-        failure_code = "canonical_transcode_failed"
+        failure_code = CanonicalDecodeFailureCode.TRANSCODE
         _run_tool(
             [
                 str(ffmpeg),
@@ -159,7 +153,7 @@ def decode_canonical(
             cancellation,
         )
         _raise_if_cancelled(cancellation)
-        failure_code = "canonical_artifact_validation_failed"
+        failure_code = CanonicalDecodeFailureCode.ARTIFACT_VALIDATION
         os.replace(temporary_output, output_path)
         canonical_audio = _inspect_canonical_wav(output_path)
         _raise_if_cancelled(cancellation)
@@ -173,7 +167,7 @@ def decode_canonical(
             "sampleRate": CANONICAL_SAMPLE_RATE,
             "schemaVersion": 1,
         }
-        failure_code = "canonical_tool_identity_failed"
+        failure_code = CanonicalDecodeFailureCode.TOOL_IDENTITY
         manifest = {
             "artifact": _descriptor_json(_file_descriptor(workspace, output_path)),
             "canonicalAudio": canonical_audio,
@@ -188,20 +182,26 @@ def decode_canonical(
                 "ffprobe": _tool_identity(ffprobe, "-version", cancellation),
             },
         }
-        failure_code = "canonical_publication_failed"
+        failure_code = CanonicalDecodeFailureCode.PUBLICATION
         manifest_bytes = _canonical_json(manifest)
         _raise_if_cancelled(cancellation)
         _write_atomic(manifest_path, manifest_bytes)
         _raise_if_cancelled(cancellation)
         return _file_descriptor(workspace, manifest_path)
     except CanonicalDecodeCancelled:
-        _cleanup_artifacts(artifacts)
+        if cleanup_error := _cleanup_artifacts(artifacts):
+            raise CanonicalDecodeError(
+                "Canonical media cleanup failed",
+                code=CanonicalDecodeFailureCode.CLEANUP,
+            ) from cleanup_error
         raise
     except Exception as error:
-        _cleanup_artifacts(artifacts)
+        if cleanup_error := _cleanup_artifacts(artifacts):
+            raise CanonicalDecodeError(
+                "Canonical media cleanup failed",
+                code=CanonicalDecodeFailureCode.CLEANUP,
+            ) from cleanup_error
         raise CanonicalDecodeError("Canonical media decode failed", code=failure_code) from error
-    finally:
-        _cleanup_artifacts(artifacts[::2])
 
 
 def _probe_audio(
@@ -427,6 +427,11 @@ def _raise_if_cancelled(cancellation: threading.Event, *artifacts: Path) -> None
     raise CanonicalDecodeCancelled("canonical decode was cancelled")
 
 
-def _cleanup_artifacts(artifacts: tuple[Path, ...]) -> None:
+def _cleanup_artifacts(artifacts: tuple[Path, ...]) -> OSError | None:
+    first_error: OSError | None = None
     for artifact in artifacts:
-        artifact.unlink(missing_ok=True)
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError as error:
+            first_error = first_error or error
+    return first_error

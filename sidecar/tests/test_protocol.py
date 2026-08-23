@@ -18,6 +18,7 @@ from sidecar.open_chords_analysis import protocol
 from sidecar.open_chords_analysis.canonical_decode import (
     CanonicalDecodeCancelled,
     CanonicalDecodeError,
+    CanonicalDecodeFailureCode,
     NativeToolchain,
 )
 from sidecar.open_chords_analysis.protocol import FrozenRuntime, ProtocolError, serve_one_session
@@ -173,6 +174,50 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(messages[1]["code"], "canonical_decode_failed")
         self.assertEqual(messages[1]["message"], "Canonical media decode failed")
         self.assertNotIn("sensitive", json.dumps(messages))
+
+    def test_cleanup_failure_after_cancel_never_reports_cleanup_complete(self) -> None:
+        cancel = self._frame(
+            {
+                "jobId": "job-protocol",
+                "nonce": "nonce-protocol",
+                "requestId": "request-protocol",
+                "sequence": 1,
+                "type": "cancel",
+            }
+        )
+        output = io.BytesIO()
+        failure = CanonicalDecodeError(
+            "internal cleanup failure",
+            code=CanonicalDecodeFailureCode.CLEANUP,
+        )
+
+        with (
+            patch(
+                "sidecar.open_chords_analysis.protocol.decode_canonical",
+                side_effect=failure,
+            ),
+            patch(
+                "sidecar.open_chords_analysis.protocol._cleanup_decode_artifacts",
+                return_value=False,
+            ),
+        ):
+            serve_one_session(
+                io.BytesIO(self._start_frame() + cancel),
+                output,
+                Path.cwd(),
+                FrozenRuntime(
+                    manifest_hash="a" * 64,
+                    platform_profile="test",
+                    toolchain=NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
+                ),
+            )
+
+        messages = self._messages(output.getvalue())
+        self.assertEqual(
+            [message["type"] for message in messages],
+            ["handshake", "cancel_ack", "error"],
+        )
+        self.assertEqual(messages[-1]["code"], "canonical_cleanup_failed")
 
     def test_cancel_acknowledges_and_cleans_before_exit(self) -> None:
         ffmpeg = shutil.which("ffmpeg")

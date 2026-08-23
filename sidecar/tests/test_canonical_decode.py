@@ -5,6 +5,7 @@ import math
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 import wave
 from pathlib import Path
@@ -12,7 +13,9 @@ from unittest.mock import patch
 
 from sidecar.open_chords_analysis.canonical_decode import (
     CanonicalDecodeConfig,
+    CanonicalDecodeCancelled,
     CanonicalDecodeError,
+    CanonicalDecodeFailureCode,
     NativeToolchain,
     decode_canonical,
 )
@@ -202,6 +205,54 @@ class CanonicalDecodeTests(unittest.TestCase):
                     )
 
             self.assertEqual(raised.exception.code, "canonical_tool_identity_failed")
+
+    def test_cleanup_failure_attempts_every_artifact_and_replaces_cancellation(self) -> None:
+        cancellation = threading.Event()
+        attempted_after_cancellation: list[str] = []
+        original_unlink = Path.unlink
+
+        def cancel_during_probe(*_args: object, **_kwargs: object) -> object:
+            cancellation.set()
+            raise CanonicalDecodeCancelled("injected cancellation")
+
+        def fail_one_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+            if cancellation.is_set():
+                attempted_after_cancellation.append(path.name)
+                if path.name == "canonical.wav":
+                    raise PermissionError("injected cleanup denial")
+            original_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-cleanup-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input/source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+
+            with (
+                patch(
+                    "sidecar.open_chords_analysis.canonical_decode._probe_audio",
+                    side_effect=cancel_during_probe,
+                ),
+                patch.object(Path, "unlink", new=fail_one_cleanup),
+            ):
+                with self.assertRaises(CanonicalDecodeError) as raised:
+                    decode_canonical(
+                        workspace,
+                        NativeToolchain(Path(sys.executable), Path(sys.executable)),
+                        CanonicalDecodeConfig(platform_profile="test"),
+                        cancellation,
+                    )
+
+            self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.CLEANUP)
+            self.assertEqual(
+                set(attempted_after_cancellation),
+                {
+                    "canonical.wav.partial",
+                    "canonical.wav",
+                    "decode-manifest.json.partial",
+                    "decode-manifest.json",
+                },
+            )
 
     @staticmethod
     def _write_stereo_fixture(path: Path) -> None:

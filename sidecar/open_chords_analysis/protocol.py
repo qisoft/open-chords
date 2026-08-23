@@ -12,11 +12,11 @@ from queue import Empty, Queue
 from typing import BinaryIO, Final
 
 from .canonical_decode import (
-    CANONICAL_DECODE_FAILURE_CODES,
     ArtifactDescriptor,
     CanonicalDecodeConfig,
     CanonicalDecodeCancelled,
     CanonicalDecodeError,
+    CanonicalDecodeFailureCode,
     NativeToolchain,
     decode_canonical,
 )
@@ -123,6 +123,7 @@ def serve_one_session(
     sequence = 1
     cancel_received = False
     decode_finished = False
+    decode_cleanup_failed = False
     while True:
         try:
             event, payload = events.get(timeout=HEARTBEAT_INTERVAL_SECONDS)
@@ -145,15 +146,19 @@ def serve_one_session(
             _write_frame(stdout, {**_identity(start, sequence), "type": "cancel_ack"})
             sequence += 1
             if decode_finished:
-                _cleanup_decode_artifacts(workspace)
-                _write_frame(stdout, {**_identity(start, sequence), "type": "cleanup_complete"})
+                _write_cleanup_terminal(
+                    stdout,
+                    start,
+                    sequence,
+                    workspace,
+                    force_failure=decode_cleanup_failed,
+                )
                 return
             continue
         if event == "result":
             decode_finished = True
             if cancel_received:
-                _cleanup_decode_artifacts(workspace)
-                _write_frame(stdout, {**_identity(start, sequence), "type": "cleanup_complete"})
+                _write_cleanup_terminal(stdout, start, sequence, workspace)
                 return
             if not isinstance(payload, ArtifactDescriptor):
                 raise ProtocolError("canonical decode returned an invalid descriptor")
@@ -164,9 +169,18 @@ def serve_one_session(
             return
         if event in {"decode_cancelled", "decode_error"}:
             decode_finished = True
+            decode_cleanup_failed = (
+                isinstance(payload, CanonicalDecodeError)
+                and payload.code is CanonicalDecodeFailureCode.CLEANUP
+            )
             if cancel_received:
-                _cleanup_decode_artifacts(workspace)
-                _write_frame(stdout, {**_identity(start, sequence), "type": "cleanup_complete"})
+                _write_cleanup_terminal(
+                    stdout,
+                    start,
+                    sequence,
+                    workspace,
+                    force_failure=decode_cleanup_failed,
+                )
                 return
             if cancellation.is_set():
                 continue
@@ -176,8 +190,8 @@ def serve_one_session(
                     **_identity(start, sequence),
                     "code": payload.code
                     if isinstance(payload, CanonicalDecodeError)
-                    and payload.code in CANONICAL_DECODE_FAILURE_CODES
-                    else "canonical_decode_failed",
+                    and isinstance(payload.code, CanonicalDecodeFailureCode)
+                    else CanonicalDecodeFailureCode.DECODE,
                     "message": "Canonical media decode failed",
                     "type": "error",
                 },
@@ -311,7 +325,8 @@ def _cancel_matches(cancel: _Cancel, start: _Start, sequence: int) -> bool:
     )
 
 
-def _cleanup_decode_artifacts(workspace: Path) -> None:
+def _cleanup_decode_artifacts(workspace: Path) -> bool:
+    cleanup_succeeded = True
     for relative in (
         "artifacts/canonical.wav.partial",
         "artifacts/canonical.wav",
@@ -320,7 +335,34 @@ def _cleanup_decode_artifacts(workspace: Path) -> None:
     ):
         candidate = (workspace / relative).resolve(strict=False)
         if candidate.is_relative_to(workspace.resolve(strict=True)):
-            candidate.unlink(missing_ok=True)
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                cleanup_succeeded = False
+    return cleanup_succeeded
+
+
+def _write_cleanup_terminal(
+    stdout: BinaryIO,
+    start: _Start,
+    sequence: int,
+    workspace: Path,
+    *,
+    force_failure: bool = False,
+) -> None:
+    cleanup_succeeded = _cleanup_decode_artifacts(workspace)
+    if force_failure or not cleanup_succeeded:
+        _write_frame(
+            stdout,
+            {
+                **_identity(start, sequence),
+                "code": CanonicalDecodeFailureCode.CLEANUP,
+                "message": "Canonical media cleanup failed",
+                "type": "error",
+            },
+        )
+        return
+    _write_frame(stdout, {**_identity(start, sequence), "type": "cleanup_complete"})
 
 
 def _descriptor_json(descriptor: ArtifactDescriptor) -> dict[str, int | str]:
