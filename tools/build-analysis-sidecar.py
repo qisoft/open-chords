@@ -286,9 +286,7 @@ def _validate_native_closure(
             str(name).lower()
             for name in ffmpeg_build["windowsFrozenRuntimeSystemDlls"]
         }
-        inspector = shutil.which("objdump") or "C:/msys64/ucrt64/bin/objdump.exe"
-        if not Path(inspector).is_file():
-            raise FileNotFoundError("objdump was not found for frozen PE closure validation")
+        inspector = _windows_objdump()
         for entry in native_files:
             if entry["format"] != "pe":
                 continue
@@ -298,6 +296,13 @@ def _validate_native_closure(
             )
         return
     raise RuntimeError("frozen native closure validation has no declared platform profile")
+
+
+def _windows_objdump() -> str:
+    inspector = shutil.which("objdump")
+    if inspector is None:
+        raise FileNotFoundError("objdump was not found for frozen PE closure validation")
+    return inspector
 
 
 def _packaged_native_paths(

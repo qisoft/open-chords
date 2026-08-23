@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 class BuildAnalysisSidecarTests(unittest.TestCase):
@@ -242,6 +243,25 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
                 ["python313.dll"],
                 {"tools/ffmpeg.exe", "unrelated/python313.dll"},
                 {"kernel32.dll"},
+            )
+
+    def test_resolves_windows_objdump_only_from_path(self) -> None:
+        module = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )
+        windows_objdump = module["_windows_objdump"]
+
+        with patch.object(module["shutil"], "which", return_value=None):
+            with self.assertRaisesRegex(FileNotFoundError, "objdump was not found"):
+                windows_objdump()
+        with patch.object(
+            module["shutil"],
+            "which",
+            return_value="D:/runner-temp/msys64/ucrt64/bin/objdump.exe",
+        ):
+            self.assertEqual(
+                windows_objdump(),
+                "D:/runner-temp/msys64/ucrt64/bin/objdump.exe",
             )
 
     def test_keeps_ffmpeg_and_frozen_runtime_system_authorities_separate(self) -> None:
