@@ -30,6 +30,9 @@ class CanonicalDecodeFailureCode(str, Enum):
     DECODE = "canonical_decode_failed"
     PREPARE = "canonical_prepare_failed"
     PROBE = "canonical_probe_failed"
+    PROBE_EXECUTION = "canonical_probe_execution_failed"
+    PROBE_OUTPUT = "canonical_probe_output_failed"
+    PROBE_STREAM = "canonical_probe_stream_missing"
     TRANSCODE = "canonical_transcode_failed"
     ARTIFACT_VALIDATION = "canonical_artifact_validation_failed"
     TOOL_IDENTITY = "canonical_tool_identity_failed"
@@ -108,7 +111,10 @@ def decode_canonical(
         failure_code = CanonicalDecodeFailureCode.PROBE
         probe = _probe_audio(ffprobe, input_path, cancellation)
         if not probe.get("streams"):
-            raise CanonicalDecodeError("staged media has no decodable audio stream")
+            raise CanonicalDecodeError(
+                "staged media has no decodable audio stream",
+                code=CanonicalDecodeFailureCode.PROBE_STREAM,
+            )
         failure_code = CanonicalDecodeFailureCode.TRANSCODE
         _run_tool(
             [
@@ -203,7 +209,13 @@ def decode_canonical(
                 "Canonical media cleanup failed",
                 code=CanonicalDecodeFailureCode.CLEANUP,
             ) from cleanup_error
-        raise CanonicalDecodeError("Canonical media decode failed", code=failure_code) from error
+        bounded_code = (
+            error.code
+            if isinstance(error, CanonicalDecodeError)
+            and error.code is not CanonicalDecodeFailureCode.DECODE
+            else failure_code
+        )
+        raise CanonicalDecodeError("Canonical media decode failed", code=bounded_code) from error
 
 
 def _probe_audio(
@@ -211,33 +223,47 @@ def _probe_audio(
     input_path: Path,
     cancellation: threading.Event,
 ) -> dict[str, object]:
-    result = _run_tool(
-        [
-            str(ffprobe),
-            "-v",
-            "error",
-            "-protocol_whitelist",
-            "file,pipe",
-            "-probesize",
-            "1048576",
-            "-analyzeduration",
-            "5000000",
-            "-select_streams",
-            "a:0",
-            "-show_entries",
-            "stream=codec_name,codec_type,sample_rate,channels,channel_layout",
-            "-of",
-            "json",
-            str(input_path),
-        ],
-        cancellation,
-    )
+    try:
+        result = _run_tool(
+            [
+                str(ffprobe),
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "file,pipe",
+                "-probesize",
+                "1048576",
+                "-analyzeduration",
+                "5000000",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_name,codec_type,sample_rate,channels,channel_layout",
+                "-of",
+                "json",
+                str(input_path),
+            ],
+            cancellation,
+        )
+    except CanonicalDecodeCancelled:
+        raise
+    except Exception as error:
+        raise CanonicalDecodeError(
+            "ffprobe execution failed",
+            code=CanonicalDecodeFailureCode.PROBE_EXECUTION,
+        ) from error
     try:
         parsed = json.loads(result.stdout)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise CanonicalDecodeError("ffprobe returned invalid bounded JSON") from error
+        raise CanonicalDecodeError(
+            "ffprobe returned invalid bounded JSON",
+            code=CanonicalDecodeFailureCode.PROBE_OUTPUT,
+        ) from error
     if not isinstance(parsed, dict):
-        raise CanonicalDecodeError("ffprobe returned an invalid result")
+        raise CanonicalDecodeError(
+            "ffprobe returned an invalid result",
+            code=CanonicalDecodeFailureCode.PROBE_OUTPUT,
+        )
     return parsed
 
 

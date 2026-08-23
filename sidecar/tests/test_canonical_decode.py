@@ -87,6 +87,47 @@ class CanonicalDecodeTests(unittest.TestCase):
             [str(ffprobe), *expected_arguments, str(input_path)],
         )
 
+    def test_classifies_probe_execution_failure(self) -> None:
+        with (
+            patch(
+                "sidecar.open_chords_analysis.canonical_decode._run_tool",
+                side_effect=OSError("injected native execution failure"),
+            ),
+            self.assertRaises(CanonicalDecodeError) as raised,
+        ):
+            _probe_audio(Path("/tools/ffprobe"), Path("/workspace/input/source-media"), threading.Event())
+
+        self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_EXECUTION)
+
+    def test_classifies_invalid_probe_output(self) -> None:
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode._run_tool") as run_tool,
+            self.assertRaises(CanonicalDecodeError) as raised,
+        ):
+            run_tool.return_value.stdout = b"not-json"
+            _probe_audio(Path("/tools/ffprobe"), Path("/workspace/input/source-media"), threading.Event())
+
+        self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_OUTPUT)
+
+    def test_preserves_missing_probe_stream_taxonomy(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-stream-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input/source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+
+            with (
+                patch("sidecar.open_chords_analysis.canonical_decode._probe_audio", return_value={}),
+                self.assertRaises(CanonicalDecodeError) as raised,
+            ):
+                decode_canonical(
+                    workspace,
+                    NativeToolchain(Path(sys.executable), Path(sys.executable)),
+                    CanonicalDecodeConfig(platform_profile="test"),
+                )
+
+        self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_STREAM)
+
     def test_decodes_the_same_staged_media_deterministically(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")
