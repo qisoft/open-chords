@@ -36,7 +36,7 @@ with open(sys.argv[1], encoding="utf-8") as manifest_file:
 if (
     not isinstance(value, str)
     or not value
-    or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    or any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in value)
 ):
     raise ValueError("manifest value must be a non-empty string without control characters")
 print(value)
@@ -54,7 +54,7 @@ if (
     or any(
         not isinstance(item, str)
         or not item
-        or any(ord(character) < 32 or ord(character) == 127 for character in item)
+        or any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in item)
         for item in value
     )
 ):
@@ -74,7 +74,7 @@ print("\n".join(value))
         .[$key] as $value
         | if (($value | type) != "string"
             or ($value | length) == 0
-            or ($value | explode | any(. < 32 or . == 127)))
+            or ($value | explode | any(. < 32 or (. >= 127 and . <= 159))))
           then error("manifest value must be a non-empty string without control characters")
           else $value
           end
@@ -88,7 +88,7 @@ print("\n".join(value))
               $value[];
               (type != "string")
               or (length == 0)
-              or (explode | any(. < 32 or . == 127))
+              or (explode | any(. < 32 or (. >= 127 and . <= 159)))
             ))
           then error("manifest value must be a non-empty array of non-empty strings without control characters")
           else $value[]

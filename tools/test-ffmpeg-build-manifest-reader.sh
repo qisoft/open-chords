@@ -35,8 +35,10 @@ printf '%s\n' '{"configureArguments":["--disable-network",42]}' > "${fixture_roo
 printf '%s\n' '{"configureArguments":["--disable-network",""]}' > "${fixture_root}/empty-string.json"
 printf '%s\n' '{"configureArguments":["--disable-network","bad\u0000flag"]}' > "${fixture_root}/nul.json"
 printf '%s\n' '{"configureArguments":["--disable-network","bad\rflag"]}' > "${fixture_root}/carriage-return.json"
+printf '%s\n' '{"configureArguments":["--disable-network","bad\u0085flag"]}' > "${fixture_root}/c1-control.json"
 printf '%s\n' '{"version":"8.1.2\u0000changed"}' > "${fixture_root}/nul-scalar.json"
 printf '%s\n' '{"version":"8.1.2\rchanged"}' > "${fixture_root}/carriage-return-scalar.json"
+printf '%s\n' '{"version":"8.1.2\u0085changed"}' > "${fixture_root}/c1-control-scalar.json"
 
 scalar="$(bash "${manifest_reader}" scalar "${fixture_root}/valid.json" version "${reader}")"
 [[ "${scalar}" == "8.1.2" ]]
@@ -50,5 +52,7 @@ assert_array_rejected "${fixture_root}/non-string.json"
 assert_array_rejected "${fixture_root}/empty-string.json"
 assert_array_rejected "${fixture_root}/nul.json"
 assert_array_rejected "${fixture_root}/carriage-return.json"
+assert_array_rejected "${fixture_root}/c1-control.json"
 assert_scalar_rejected "${fixture_root}/nul-scalar.json"
 assert_scalar_rejected "${fixture_root}/carriage-return-scalar.json"
+assert_scalar_rejected "${fixture_root}/c1-control-scalar.json"
