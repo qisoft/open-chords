@@ -36,6 +36,7 @@ type TestRunner = {
     revision: RunnerOutput["revision"];
     stageOutcomes: AnalysisManifest["stageOutcomes"];
   }>;
+  terminateAndWait?: AnalysisJobRunner["terminateAndWait"];
 };
 
 async function openAnalysisJobs(options: {
@@ -90,6 +91,7 @@ async function openAnalysisJobs(options: {
         },
       };
     },
+    terminateAndWait: options.runner.terminateAndWait ?? (async () => undefined),
   };
   return AnalysisJobs.open({
     ...options,
@@ -180,6 +182,12 @@ const recipe: AnalysisRecipe = {
   },
   seeds: { decoder: 7 },
   settings: { hopLength: 512 },
+};
+
+const checkpointFeatureFrame = {
+  atSample: 0,
+  chroma: [0.8, 0.1, 0, 0, 0.2, 0, 0.1, 0, 0, 0.1, 0, 0],
+  onsetStrength: 0.7,
 };
 
 const authority: TestAuthority = {
@@ -402,10 +410,13 @@ describe("AnalysisJobs", () => {
           try {
             await Reflect.apply(input.saveCheckpoint, undefined, [
               {
-                artifactHash: `sha256:${"9".repeat(64)}`,
-                byteSize: 192_000,
-                kind: "canonical_pcm",
-                stage: "canonical_decode",
+                document: {
+                  format: "open-chords/analysis-checkpoint",
+                  kind: "shared_features",
+                  pcmBase64: "AAAAAA==",
+                },
+                kind: "shared_features",
+                stage: "shared_features",
               },
             ]);
           } catch (error) {
@@ -414,8 +425,8 @@ describe("AnalysisJobs", () => {
           await input.saveCheckpoint({
             document: {
               format: "open-chords/analysis-checkpoint",
+              frames: [checkpointFeatureFrame],
               kind: "shared_features",
-              values: { frameCount: 120, summary: "validated chroma features" },
             },
             kind: "shared_features",
             stage: "shared_features",
@@ -480,8 +491,8 @@ describe("AnalysisJobs", () => {
       undefined,
       {
         format: "open-chords/analysis-checkpoint",
+        frames: [checkpointFeatureFrame],
         kind: "shared_features",
-        values: { frameCount: 120, summary: "validated chroma features" },
       },
     ]);
   });
@@ -944,6 +955,15 @@ describe("AnalysisJobs", () => {
 
   it("enforces a persisted main-owned Attempt deadline even when the runner hangs", async () => {
     const stateRoot = await temporaryDirectory();
+    const terminations: Array<{ attemptId: string; reason: string }> = [];
+    let acknowledgeTermination!: () => void;
+    let reportTerminationStarted!: () => void;
+    const terminationAcknowledged = new Promise<void>((resolve) => {
+      acknowledgeTermination = resolve;
+    });
+    const terminationStarted = new Promise<void>((resolve) => {
+      reportTerminationStarted = resolve;
+    });
     const ids = ["job_deadline", "attempt_deadline"];
     const jobs = await openAnalysisJobs({
       attemptTimeoutMs: 5,
@@ -956,7 +976,14 @@ describe("AnalysisJobs", () => {
         publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
       },
       idFactory: () => ids.shift()!,
-      runner: { run: async () => new Promise(() => undefined) },
+      runner: {
+        run: async () => new Promise(() => undefined),
+        terminateAndWait: async (termination) => {
+          terminations.push(termination);
+          reportTerminationStarted();
+          await terminationAcknowledged;
+        },
+      },
       stateRoot,
     });
     await jobs.submit({
@@ -966,7 +993,11 @@ describe("AnalysisJobs", () => {
       sourceSnapshotId: "snapshot_fixture",
     });
 
-    await expect(jobs.runNext()).resolves.toMatchObject({ state: "retryable" });
+    const running = jobs.runNext();
+    await terminationStarted;
+    await expect(jobs.runNext()).resolves.toBeNull();
+    acknowledgeTermination();
+    await expect(running).resolves.toMatchObject({ state: "retryable" });
     expect(jobs.get("job_deadline").attempts).toMatchObject([
       {
         deadlineAt: expect.any(String),
@@ -974,6 +1005,7 @@ describe("AnalysisJobs", () => {
         state: "failed",
       },
     ]);
+    expect(terminations).toEqual([{ attemptId: "attempt_deadline", reason: "deadline" }]);
   });
 
   it("retries a cancelled Job without creating a duplicate Job Key", async () => {
@@ -1087,8 +1119,8 @@ describe("AnalysisJobs", () => {
           await input.saveCheckpoint({
             document: {
               format: "open-chords/analysis-checkpoint",
+              frames: [checkpointFeatureFrame],
               kind: "shared_features",
-              values: { frameCount: 64 },
             },
             kind: "shared_features",
             stage: "shared_features",
@@ -1185,8 +1217,8 @@ describe("AnalysisJobs", () => {
         await input.saveCheckpoint({
           document: {
             format: "open-chords/analysis-checkpoint",
+            frames: [checkpointFeatureFrame],
             kind: "shared_features",
-            values: { frameCount: 256 },
           },
           kind: "shared_features",
           stage: "shared_features",

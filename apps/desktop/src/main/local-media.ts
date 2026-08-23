@@ -590,6 +590,7 @@ export class LocalMediaService {
         ],
       };
       const records = ProjectOwnedRecordsSchema.parse({
+        analysisManifests: [],
         exportReceipts: [],
         extensions: {},
         projectRange: {

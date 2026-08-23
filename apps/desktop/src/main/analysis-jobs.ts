@@ -136,15 +136,66 @@ const AnalysisFailureSchema = z.strictObject({
   retryable: z.boolean(),
   stage: AnalysisStageOutcomeSchema.shape.stage,
 });
-const AnalysisCheckpointCandidateSchema = z.strictObject({
-  document: z.strictObject({
+const CheckpointDocumentSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
     format: z.literal("open-chords/analysis-checkpoint"),
-    kind: z.enum(["shared_features", "rhythm", "harmony", "sections"]),
-    values: z.record(
-      z.string().min(1),
-      z.union([z.boolean(), z.number().finite(), z.string().min(1).max(4096)]),
-    ),
+    frames: z
+      .array(
+        z.strictObject({
+          atSample: z.number().int().nonnegative(),
+          chroma: z.array(z.number().finite().min(0).max(1)).length(12),
+          onsetStrength: z.number().finite().min(0).max(1),
+        }),
+      )
+      .min(1)
+      .max(4096),
+    kind: z.literal("shared_features"),
   }),
+  z.strictObject({
+    beats: z
+      .array(
+        z.strictObject({
+          atSample: z.number().int().nonnegative(),
+          confidence: z.number().finite().min(0).max(1),
+          role: z.enum(["beat", "downbeat"]),
+        }),
+      )
+      .min(1)
+      .max(20_000),
+    format: z.literal("open-chords/analysis-checkpoint"),
+    kind: z.literal("rhythm"),
+  }),
+  z.strictObject({
+    format: z.literal("open-chords/analysis-checkpoint"),
+    kind: z.literal("harmony"),
+    regions: z
+      .array(
+        z.strictObject({
+          candidate: z.string().regex(/^[A-G](?:#|b)?(?::[a-z0-9()+#-]+)?$/u),
+          confidence: z.number().finite().min(0).max(1),
+          endSample: z.number().int().positive(),
+          startSample: z.number().int().nonnegative(),
+        }),
+      )
+      .min(1)
+      .max(20_000),
+  }),
+  z.strictObject({
+    boundaries: z
+      .array(
+        z.strictObject({
+          atSample: z.number().int().nonnegative(),
+          confidence: z.number().finite().min(0).max(1),
+        }),
+      )
+      .min(1)
+      .max(10_000),
+    format: z.literal("open-chords/analysis-checkpoint"),
+    kind: z.literal("sections"),
+  }),
+]);
+const AnalysisCheckpointCandidateSchema = z.strictObject({
+  document: CheckpointDocumentSchema,
   kind: z.enum(["shared_features", "rhythm", "harmony", "sections"]),
   stage: z.enum(["shared_features", ...CAPABILITY_STAGES]),
 });
@@ -210,7 +261,7 @@ const AnalysisCandidateIdentitySchema = z.strictObject({
   sourceSnapshotId: z.string().min(1),
 });
 
-const AnalysisManifestSchema = z.strictObject({
+export const AnalysisManifestSchema = z.strictObject({
   acceptedOutputHashes: z.strictObject({
     supportClaimIds: Sha256Schema,
     timeline: Sha256Schema,
@@ -280,6 +331,10 @@ type AnalysisJobRunner = {
     manifest: AnalysisManifest;
     revision: AnalysisRevision;
   }>;
+  terminateAndWait(input: {
+    attemptId: string;
+    reason: "cancelled" | "deadline" | "interrupted";
+  }): Promise<void>;
 };
 
 type AnalysisJobsOptions = {
@@ -772,6 +827,22 @@ export class AnalysisJobs {
     });
     try {
       return await Promise.race([execution, deadline, interrupted]);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const reason = normalizeTerminationReason(controller.signal.reason);
+        try {
+          await this.#runner.terminateAndWait({ attemptId: attempt.id, reason });
+        } catch {
+          throw new AnalysisRunError({
+            classification: "containment_violation",
+            message: "Analysis runner did not acknowledge termination and process cleanup",
+            nextAction: "repair_installation",
+            retryable: false,
+            stage: "preflight",
+          });
+        }
+      }
+      throw error;
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
     }
@@ -920,16 +991,17 @@ export class AnalysisJobs {
         throw new Error("Analysis Checkpoint arrived outside its active Attempt");
       }
       const createdAt = this.#now();
+      const upstreamIdentityHash = checkpointIdentity(job, parsed.data.stage);
       const checkpoint = AnalysisCheckpointSchema.parse({
         artifactHash,
         byteSize,
         createdAt: createdAt.toISOString(),
         expiresAt: new Date(createdAt.getTime() + OPERATIONAL_RETENTION_MS).toISOString(),
-        id: `checkpoint_${artifactHash.slice("sha256:".length)}`,
+        id: `checkpoint_${hashIdentity({ artifactHash, jobId, upstreamIdentityHash }).slice("sha256:".length)}`,
         jobId,
         kind: parsed.data.kind,
         stage: parsed.data.stage,
-        upstreamIdentityHash: checkpointIdentity(job, parsed.data.stage),
+        upstreamIdentityHash,
       });
       await atomicWrite(checkpointArtifactPath(this.#path, artifactHash), content);
       if (!this.#state.checkpoints.some(({ id }) => id === checkpoint.id)) {
@@ -1143,6 +1215,14 @@ function normalizeRunFailure(error: unknown): AnalysisFailure {
     retryable: false,
     stage: "preflight",
   });
+}
+
+function normalizeTerminationReason(reason: unknown): "cancelled" | "deadline" | "interrupted" {
+  if (reason instanceof AnalysisRunError) {
+    if (reason.failure.classification === "cancelled") return "cancelled";
+    if (reason.failure.classification === "deadline") return "deadline";
+  }
+  return "interrupted";
 }
 
 function checkpointIdentity(

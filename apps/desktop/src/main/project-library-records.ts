@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
+
+import { canonicalSerialize } from "@open-chords/domain";
 import { StableIdSchema } from "@open-chords/domain";
 import { z } from "zod";
+
+import { AnalysisManifestSchema } from "./analysis-jobs.ts";
 
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const TimestampSchema = z.iso.datetime({ offset: true });
@@ -132,6 +137,15 @@ export const ExportReceiptSchema = z.strictObject({
 
 export const ProjectOwnedRecordsSchema = z
   .strictObject({
+    analysisManifests: z
+      .array(
+        z.strictObject({
+          analysisRevisionId: StableIdSchema,
+          hash: Sha256Schema,
+          manifest: AnalysisManifestSchema,
+        }),
+      )
+      .default([]),
     exportReceipts: z.array(ExportReceiptSchema),
     extensions: z.record(z.string().regex(/^[a-z0-9]+(?:\.[a-z0-9-]+)+$/), z.unknown()),
     projectRange: z.strictObject({
@@ -142,6 +156,33 @@ export const ProjectOwnedRecordsSchema = z
     sources: z.array(SourceRecordSchema).min(1),
   })
   .superRefine((records, context) => {
+    requireUniqueIds(
+      records.analysisManifests.map((record) => ({ id: record.analysisRevisionId })),
+      "Analysis Manifest Revision",
+      ["analysisManifests"],
+      context,
+    );
+    const manifestHashes = new Set<string>();
+    for (const [index, record] of records.analysisManifests.entries()) {
+      const actualHash = `sha256:${createHash("sha256")
+        .update(canonicalSerialize(record.manifest))
+        .digest("hex")}`;
+      if (record.hash !== actualHash) {
+        context.addIssue({
+          code: "custom",
+          message: "Analysis Manifest hash does not match its canonical content",
+          path: ["analysisManifests", index, "hash"],
+        });
+      }
+      if (manifestHashes.has(record.hash)) {
+        context.addIssue({
+          code: "custom",
+          message: "Analysis Manifest hashes must be unique",
+          path: ["analysisManifests", index, "hash"],
+        });
+      }
+      manifestHashes.add(record.hash);
+    }
     requireUniqueIds(records.sources, "Source", ["sources"], context);
     requireUniqueIds(records.exportReceipts, "Export Receipt", ["exportReceipts"], context);
     for (const [sourceIndex, source] of records.sources.entries()) {

@@ -52,6 +52,7 @@ function goldenEnvelope() {
 
 function ownedRecords(): ProjectOwnedRecords {
   return {
+    analysisManifests: [],
     exportReceipts: [
       {
         activeViewHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -341,6 +342,19 @@ describe("ProjectLibrary", () => {
     expect((await library.readProject("project_golden")).revisions.at(-1)?.reason).toBe(
       "analysis_publication",
     );
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect((await reopened.readProject("project_golden")).records.analysisManifests).toMatchObject([
+      {
+        analysisRevisionId: firstPublication.revision.id,
+        hash: firstPublication.revision.manifestHash,
+        manifest: firstPublication.manifest,
+      },
+      {
+        analysisRevisionId: secondPublication.revision.id,
+        hash: secondPublication.revision.manifestHash,
+        manifest: secondPublication.manifest,
+      },
+    ]);
   });
 
   it("preserves Project Head when an Analysis candidate is stale or invalid", async () => {

@@ -614,10 +614,20 @@ export class ProjectLibrary {
         throw new Error("Analysis Revision identity does not match its Job candidate manifest");
       }
       const project = structuredClone(entry.revision.payload.envelope.payload);
+      const records = structuredClone(entry.revision.payload.records);
       const existing = project.analysisRevisions.find(({ id }) => id === candidate.id);
       if (existing !== undefined) {
+        const retainedManifest = records.analysisManifests.find(
+          ({ analysisRevisionId }) => analysisRevisionId === candidate.id,
+        );
         if (canonicalSerialize(existing) !== canonicalSerialize(candidate)) {
           throw new Error(`Analysis Revision ${candidate.id} conflicts with published content`);
+        }
+        if (
+          retainedManifest?.hash !== expectedManifestHash ||
+          canonicalSerialize(retainedManifest.manifest) !== canonicalSerialize(input.manifest)
+        ) {
+          throw new Error(`Analysis Revision ${candidate.id} has no matching retained Manifest`);
         }
         return { projectRevisionId: entry.revision.revision.projectRevisionId };
       }
@@ -635,6 +645,11 @@ export class ProjectLibrary {
         throw new Error("Analysis candidate Source Snapshot is not verified by Project authority");
       }
       project.analysisRevisions.push(candidate);
+      records.analysisManifests.push({
+        analysisRevisionId: candidate.id,
+        hash: expectedManifestHash,
+        manifest: input.manifest,
+      });
       if (project.activeView === null) {
         const editLayerId = `edit_${randomUUID().replaceAll("-", "")}`;
         project.editLayers.push({
@@ -658,7 +673,7 @@ export class ProjectLibrary {
           ...entry.revision.payload.envelope,
           payload: parseProjectContract(project),
         },
-        records: entry.revision.payload.records,
+        records,
       });
       const next = await this.#commitPayload(
         input.projectId,
@@ -1978,6 +1993,14 @@ function validateStoredPayload(input: unknown): StoredProjectPayload {
   if (projectMajor !== supportedMajor)
     throw new ProjectLibraryIncompatibleSchemaError(payload.envelope.payload.schemaVersion);
   parseContractEnvelope(payload.envelope);
+  for (const record of payload.records.analysisManifests) {
+    const revision = payload.envelope.payload.analysisRevisions.find(
+      ({ id }) => id === record.analysisRevisionId,
+    );
+    if (revision === undefined || revision.manifestHash !== record.hash) {
+      throw new Error("Analysis Manifest record does not match its Analysis Revision");
+    }
+  }
   const { projectRange } = payload.records;
   if (
     projectRange.endSourceSample - projectRange.startSourceSample !==

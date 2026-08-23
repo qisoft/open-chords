@@ -214,6 +214,7 @@ async function launch(userDataDirectory: string) {
 function goldenRecords(): ProjectOwnedRecords {
   const fingerprint = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
   return {
+    analysisManifests: [],
     exportReceipts: [],
     extensions: {},
     projectRange: { endSourceSample: 48_000, sourceId: "source_fixture", startSourceSample: 0 },
