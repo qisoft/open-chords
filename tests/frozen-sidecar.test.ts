@@ -172,62 +172,30 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
   const executableSuffix = process.platform === "win32" ? ".exe" : "";
   const ffmpeg = join(runtimeRoot, "tools", `ffmpeg${executableSuffix}`);
   const ffprobe = join(runtimeRoot, "tools", `ffprobe${executableSuffix}`);
-  const environment =
-    process.platform === "win32"
-      ? { SYSTEMROOT: process.env.SYSTEMROOT ?? "C:\\Windows" }
-      : { LANG: "C", LC_ALL: "C" };
+  const environment = { LANG: "C", LC_ALL: "C" } as Record<string, string>;
+  if (process.platform === "win32") {
+    environment.SYSTEMROOT = process.env.SYSTEMROOT ?? "C:\\Windows";
+  }
   const diagnosticOutput = join(workspace, "artifacts", "diagnostic.wav");
   mkdirSync(dirname(diagnosticOutput), { recursive: true });
   const probeArguments = [
     "-v",
     "error",
-    "-protocol_whitelist",
-    "file,pipe",
-    "-probesize",
-    "1048576",
-    "-analyzeduration",
-    "5000000",
     "-select_streams",
     "a:0",
     "-show_entries",
-    "stream=codec_name,codec_type,sample_rate,channels,channel_layout",
+    "stream=codec_type",
     "-of",
     "json",
     inputPath,
   ];
   const decodeArguments = [
-    "-nostdin",
-    "-hide_banner",
-    "-loglevel",
+    "-v",
     "error",
-    "-nostats",
-    "-protocol_whitelist",
-    "file,pipe",
-    "-probesize",
-    "1048576",
-    "-analyzeduration",
-    "5000000",
-    "-fflags",
-    "+bitexact",
-    "-flags:a",
-    "+bitexact",
     "-i",
     inputPath,
     "-map",
     "0:a:0",
-    "-map_metadata",
-    "-1",
-    "-vn",
-    "-sn",
-    "-dn",
-    "-threads",
-    "1",
-    "-ac",
-    "1",
-    "-ar",
-    "48000",
-    "-sample_fmt",
-    "s16",
     "-c:a",
     "pcm_s16le",
     "-f",
@@ -236,10 +204,10 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
     diagnosticOutput,
   ];
   const checks = [
-    ["ffprobe-without-whitelist", ffprobe, withoutProtocolWhitelist(probeArguments)],
-    ["ffprobe-exact", ffprobe, probeArguments],
-    ["ffmpeg-without-whitelist", ffmpeg, withoutProtocolWhitelist(decodeArguments)],
-    ["ffmpeg-exact", ffmpeg, decodeArguments],
+    ["ffprobe-basic", ffprobe, probeArguments],
+    ["ffprobe-whitelist", ffprobe, withProtocolWhitelist(probeArguments)],
+    ["ffmpeg-basic", ffmpeg, decodeArguments],
+    ["ffmpeg-whitelist", ffmpeg, withProtocolWhitelist(decodeArguments)],
   ] as const;
   return checks
     .map(([label, command, arguments_]) => {
@@ -253,7 +221,6 @@ function nativeToolDiagnostics(runtimeRoot: string, inputPath: string, workspace
     .join(",");
 }
 
-function withoutProtocolWhitelist(arguments_: string[]): string[] {
-  const option = arguments_.indexOf("-protocol_whitelist");
-  return option === -1 ? arguments_ : arguments_.toSpliced(option, 2);
+function withProtocolWhitelist(arguments_: string[]): string[] {
+  return ["-protocol_whitelist", "file,pipe", ...arguments_];
 }
