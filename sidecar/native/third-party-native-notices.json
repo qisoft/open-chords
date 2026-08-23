@@ -1,6 +1,11 @@
 {
   "notices": [
     {
+      "component": "MinGW-w64 winpthreads runtime",
+      "license": "MIT AND BSD-3-Clause-Clear",
+      "licenseTextSource": "https://github.com/mingw-w64/mingw-w64/blob/master/mingw-w64-libraries/winpthreads/COPYING"
+    },
+    {
       "component": "OpenSSL",
       "license": "Apache-2.0",
       "licenseTextSource": "https://openssl-library.org/source/license/index.html"

@@ -80,6 +80,7 @@ jobs:
             curl
             jq
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-libwinpthread
             perl
             tar
             xz

@@ -1,6 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -73,6 +81,35 @@ it.skipIf(executablePath === undefined)(
       .filter(isNativeBinary)
       .map((runtimePath) => runtimePath.slice(runtimeRoot.length + 1).replaceAll("\\", "/"));
     expect([...inventoriedNativePaths]).toEqual(expect.arrayContaining(discoveredNativePaths));
+    const windowsRuntimePath = join(runtimeRoot, "windows-runtime.json");
+    const windowsRuntimeSchema = z.object({
+      nativeFiles: z
+        .array(z.object({ file: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/u) }))
+        .min(1),
+      package: z.object({
+        name: z.literal("mingw-w64-ucrt-x86_64-libwinpthread"),
+        url: z.literal("https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-libwinpthread"),
+        version: z.string().min(1),
+      }),
+      schemaVersion: z.literal(1),
+    });
+    const windowsRuntime = existsSync(windowsRuntimePath)
+      ? windowsRuntimeSchema.parse(JSON.parse(readFileSync(windowsRuntimePath, "utf8")))
+      : undefined;
+    expect(windowsRuntime === undefined).toBe(process.platform !== "win32");
+    for (const runtimeFile of windowsRuntime?.nativeFiles ?? []) {
+      const runtimeFilePath = join(runtimeRoot, "tools", runtimeFile.file);
+      expect(createHash("sha256").update(readFileSync(runtimeFilePath)).digest("hex")).toBe(
+        runtimeFile.sha256,
+      );
+      expect(inventory.nativeFiles).toContainEqual(
+        expect.objectContaining({
+          component: "winpthreads",
+          path: `tools/${runtimeFile.file}`,
+          sha256: runtimeFile.sha256,
+        }),
+      );
+    }
     const fixture = monoPcmWav(
       Array.from({ length: 48_000 }, (_value, index) => Math.round(Math.sin(index / 13) * 4_000)),
     );

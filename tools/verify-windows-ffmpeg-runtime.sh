@@ -28,12 +28,44 @@ while IFS= read -r dependency; do
   allowed_system_dlls+=("${dependency,,}")
 done <<< "${allowed_system_dlls_output}"
 
+packaged_runtime_dlls=()
+packaged_runtime_dlls_output="$(
+  bash "${manifest_reader}" array "${build_manifest}" windowsRuntimeDlls
+)"
+while IFS= read -r dependency; do
+  if [[ ! "${dependency}" =~ ^[A-Za-z0-9._-]+\.[Dd][Ll][Ll]$ ]]; then
+    echo "invalid reviewed packaged Windows runtime DLL name" >&2
+    exit 2
+  fi
+  packaged_runtime_dlls+=("${dependency,,}")
+done <<< "${packaged_runtime_dlls_output}"
+
+array_contains() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    [[ "${needle}" == "${item}" ]] && return 0
+  done
+  return 1
+}
+
 violations=()
-for tool in ffmpeg.exe ffprobe.exe; do
+pending_files=(ffmpeg.exe ffprobe.exe)
+inspected_files=()
+imported_runtime_dlls=()
+while [[ ${#pending_files[@]} -ne 0 ]]; do
+  tool="${pending_files[0]}"
+  pending_files=("${pending_files[@]:1}")
+  tool_lower="${tool,,}"
+  if array_contains "${tool_lower}" "${inspected_files[@]}"; then
+    continue
+  fi
+  inspected_files+=("${tool_lower}")
   binary="${binary_directory}/${tool}"
   if [[ ! -f "${binary}" ]]; then
-    echo "missing Windows FFmpeg binary: ${tool}" >&2
-    exit 1
+    violations+=("missing reviewed Windows FFmpeg runtime file: ${tool}")
+    continue
   fi
   if ! pe_headers="$(objdump -p "${binary}")"; then
     echo "unable to inspect PE imports for ${tool}" >&2
@@ -52,6 +84,12 @@ for tool in ffmpeg.exe ffprobe.exe; do
       echo "${tool} has an invalid PE import name" >&2
       exit 1
     fi
+    dependency_lower="${dependency,,}"
+    if array_contains "${dependency_lower}" "${packaged_runtime_dlls[@]}"; then
+      imported_runtime_dlls+=("${dependency_lower}")
+      pending_files+=("${dependency}")
+      continue
+    fi
     mingw_dependency="$(
       find "${runtime_search_roots[@]}" -maxdepth 1 -type f -iname "${dependency}" -print -quit 2>/dev/null
     )"
@@ -61,7 +99,7 @@ for tool in ffmpeg.exe ffprobe.exe; do
     fi
     dependency_is_allowed=false
     for allowed_dependency in "${allowed_system_dlls[@]}"; do
-      if [[ "${dependency,,}" == "${allowed_dependency}" ]]; then
+      if [[ "${dependency_lower}" == "${allowed_dependency}" ]]; then
         dependency_is_allowed=true
         break
       fi
@@ -70,6 +108,12 @@ for tool in ffmpeg.exe ffprobe.exe; do
       violations+=("${tool} imports an unreviewed Windows DLL: ${dependency}")
     fi
   done
+done
+
+for dependency in "${packaged_runtime_dlls[@]}"; do
+  if ! array_contains "${dependency}" "${imported_runtime_dlls[@]}"; then
+    violations+=("reviewed packaged Windows runtime DLL is not imported: ${dependency}")
+  fi
 done
 
 if [[ ${#violations[@]} -ne 0 ]]; then

@@ -47,6 +47,44 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unclassified native runtime file"):
             native_component("_internal/unreviewed-runtime.dll", "pe")
 
+    def test_classifies_only_the_reviewed_winpthreads_runtime(self) -> None:
+        native_component = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_native_component"]
+
+        self.assertEqual(
+            native_component("tools/libwinpthread-1.dll", "pe"),
+            "winpthreads",
+        )
+        with self.assertRaisesRegex(RuntimeError, "Unclassified native runtime file"):
+            native_component("tools/unreviewed-runtime.dll", "pe")
+
+    def test_filters_platform_specific_dependency_authority(self) -> None:
+        dependencies_for_profile = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_dependencies_for_profile"]
+        dependencies = [
+            {"component": "shared"},
+            {"component": "windows", "platformProfiles": ["windows-server-2025-x64"]},
+        ]
+
+        self.assertEqual(
+            [
+                dependency["component"]
+                for dependency in dependencies_for_profile(
+                    dependencies, "windows-server-2025-x64"
+                )
+            ],
+            ["shared", "windows"],
+        )
+        self.assertEqual(
+            [
+                dependency["component"]
+                for dependency in dependencies_for_profile(dependencies, "darwin-arm64")
+            ],
+            ["shared"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

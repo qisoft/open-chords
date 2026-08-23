@@ -59,6 +59,52 @@ make install
 popd >/dev/null
 
 if [[ "${platform_profile}" == "windows-server-2025-x64" ]]; then
+  runtime_dlls_output="$(
+    bash "${manifest_reader}" array "${build_manifest}" windowsRuntimeDlls
+  )"
+  runtime_files_json='[]'
+  while IFS= read -r runtime_dll; do
+    runtime_source="/ucrt64/bin/${runtime_dll}"
+    if [[ ! -f "${runtime_source}" ]]; then
+      echo "reviewed Windows runtime DLL is unavailable: ${runtime_dll}" >&2
+      exit 1
+    fi
+    cp "${runtime_source}" "${install_root}/bin/${runtime_dll}"
+    runtime_sha256="$(shasum -a 256 "${install_root}/bin/${runtime_dll}" | awk '{print $1}')"
+    runtime_files_json="$(
+      jq -c \
+        --arg file "${runtime_dll}" \
+        --arg sha256 "${runtime_sha256}" \
+        '. + [{file: $file, sha256: $sha256}]' \
+        <<< "${runtime_files_json}"
+    )"
+  done <<< "${runtime_dlls_output}"
+
+  runtime_package="$(
+    bash "${manifest_reader}" scalar "${build_manifest}" windowsRuntimePackage
+  )"
+  runtime_package_url="$(
+    bash "${manifest_reader}" scalar "${build_manifest}" windowsRuntimePackageUrl
+  )"
+  read -r observed_package observed_version <<< "$(pacman -Q "${runtime_package}")"
+  if [[ "${observed_package}" != "${runtime_package}" || -z "${observed_version}" ]]; then
+    echo "unable to identify reviewed Windows runtime package" >&2
+    exit 1
+  fi
+  runtime_license="/ucrt64/share/licenses/libwinpthread/COPYING"
+  if [[ ! -f "${runtime_license}" ]]; then
+    echo "winpthreads license notice is unavailable" >&2
+    exit 1
+  fi
+  mkdir -p "${install_root}/licenses"
+  cp "${runtime_license}" "${install_root}/licenses/Winpthreads-Licenses.txt"
+  jq -n \
+    --arg package "${observed_package}" \
+    --arg packageUrl "${runtime_package_url}" \
+    --arg version "${observed_version}" \
+    --argjson nativeFiles "${runtime_files_json}" \
+    '{schemaVersion: 1, package: {name: $package, url: $packageUrl, version: $version}, nativeFiles: $nativeFiles}' \
+    > "${install_root}/windows-runtime.json"
   bash "${repository_root}/tools/verify-windows-ffmpeg-runtime.sh" \
     "${install_root}/bin" \
     "${build_manifest}"

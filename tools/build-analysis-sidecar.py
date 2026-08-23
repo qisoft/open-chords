@@ -30,6 +30,9 @@ def main() -> None:
     arguments = parser.parse_args()
 
     executable_suffix = ".exe" if os.name == "nt" else ""
+    ffmpeg_build = json.loads(
+        (ROOT / "sidecar/native/ffmpeg-build.json").read_text("utf-8")
+    )
     native_root = arguments.native_root.resolve(strict=True)
     output_root = arguments.output_root.resolve()
     runtime_root = output_root / "open-chords-analysis"
@@ -71,6 +74,19 @@ def main() -> None:
         for name in ("ffmpeg", "ffprobe"):
             source = native_root / "bin" / f"{name}{executable_suffix}"
             shutil.copy2(source, tools / source.name)
+        if os.name == "nt":
+            for name in ffmpeg_build["windowsRuntimeDlls"]:
+                if Path(name).name != name or not name.lower().endswith(".dll"):
+                    raise ValueError("invalid reviewed Windows runtime DLL name")
+                shutil.copy2(native_root / "bin" / name, tools / name)
+            shutil.copy2(
+                native_root / "licenses/Winpthreads-Licenses.txt",
+                licenses / "Winpthreads-Licenses.txt",
+            )
+            shutil.copy2(
+                native_root / "windows-runtime.json",
+                assembled / "windows-runtime.json",
+            )
         shutil.copy2(
             native_root / "licenses/FFmpeg-LGPL-2.1.txt",
             licenses / "FFmpeg-LGPL-2.1.txt",
@@ -106,7 +122,9 @@ def main() -> None:
         present_components = {entry["component"] for entry in native_files} | {"pyinstaller"}
         inventory["dependencies"] = [
             {**dependency, "present": dependency["component"] in present_components}
-            for dependency in inventory["dependencies"]
+            for dependency in _dependencies_for_profile(
+                inventory["dependencies"], arguments.platform_profile
+            )
         ]
         inventory["nativeFiles"] = native_files
         inventory["observed"] = {
@@ -188,6 +206,8 @@ def _native_component(relative: str, binary_format: str | None) -> str | None:
         return "open-chords-sidecar"
     if lower in {"tools/ffmpeg", "tools/ffmpeg.exe", "tools/ffprobe", "tools/ffprobe.exe"}:
         return "ffmpeg"
+    if lower == "tools/libwinpthread-1.dll" and binary_format == "pe":
+        return "winpthreads"
     if "libssl" in name or "libcrypto" in name:
         return "openssl"
     if "liblzma" in name:
@@ -224,6 +244,17 @@ def _native_component(relative: str, binary_format: str | None) -> str | None:
     if binary_format is not None or name.endswith((".dll", ".dylib", ".exe", ".pyd", ".so")):
         raise RuntimeError(f"Unclassified native runtime file: {relative}")
     return None
+
+
+def _dependencies_for_profile(
+    dependencies: list[dict[str, object]], platform_profile: str
+) -> list[dict[str, object]]:
+    return [
+        dependency
+        for dependency in dependencies
+        if "platformProfiles" not in dependency
+        or platform_profile in dependency["platformProfiles"]
+    ]
 
 
 def _native_format(path: Path) -> str | None:

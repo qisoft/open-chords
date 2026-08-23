@@ -37,6 +37,9 @@
   "sourceUrl": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
   "version": "8.1.2",
   "windowsConfigureArguments": ["--disable-pthreads", "--enable-w32threads"],
+  "windowsRuntimeDlls": ["libwinpthread-1.dll"],
+  "windowsRuntimePackage": "mingw-w64-ucrt-x86_64-libwinpthread",
+  "windowsRuntimePackageUrl": "https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-libwinpthread",
   "windowsSystemDlls": [
     "ADVAPI32.dll",
     "BCRYPT.dll",

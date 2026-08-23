@@ -34,6 +34,16 @@
       "version": "8.1.2"
     },
     {
+      "component": "winpthreads",
+      "license": "MIT AND BSD-3-Clause-Clear",
+      "licenseFile": "licenses/Winpthreads-Licenses.txt",
+      "name": "MinGW-w64 winpthreads runtime",
+      "packageRepository": "https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-libwinpthread",
+      "role": "Windows FFmpeg process runtime dependency",
+      "identity": "nativeFiles SHA-256 and windows-runtime.json MSYS2 package identity",
+      "platformProfiles": ["windows-server-2025-x64"]
+    },
+    {
       "component": "openssl",
       "license": "Apache-2.0",
       "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
