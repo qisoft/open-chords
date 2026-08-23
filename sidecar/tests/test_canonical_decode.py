@@ -185,8 +185,26 @@ class CanonicalDecodeTests(unittest.TestCase):
                 CanonicalDecodeFailureCode.PROBE_OUTPUT_LIMIT,
             ),
             (_NativeToolExitError(1), CanonicalDecodeFailureCode.PROBE_EXIT),
-            (_NativeToolExitError(0xC0000135), CanonicalDecodeFailureCode.PROBE_LOADER),
-            (_NativeToolExitError(-1073741515), CanonicalDecodeFailureCode.PROBE_LOADER),
+            (
+                _NativeToolExitError(0xC000007B),
+                CanonicalDecodeFailureCode.PROBE_LOADER_INVALID_IMAGE,
+            ),
+            (
+                _NativeToolExitError(0xC0000135),
+                CanonicalDecodeFailureCode.PROBE_LOADER_MISSING,
+            ),
+            (
+                _NativeToolExitError(-1073741515),
+                CanonicalDecodeFailureCode.PROBE_LOADER_MISSING,
+            ),
+            (
+                _NativeToolExitError(0xC0000139),
+                CanonicalDecodeFailureCode.PROBE_LOADER_SYMBOL,
+            ),
+            (
+                _NativeToolExitError(0xC0000142),
+                CanonicalDecodeFailureCode.PROBE_LOADER_INIT,
+            ),
         )
         for failure, expected in cases:
             with (

@@ -32,7 +32,10 @@ class CanonicalDecodeFailureCode(str, Enum):
     PROBE = "canonical_probe_failed"
     PROBE_EXECUTION = "canonical_probe_execution_failed"
     PROBE_EXIT = "canonical_probe_exit_failed"
-    PROBE_LOADER = "canonical_probe_loader_failed"
+    PROBE_LOADER_INIT = "canonical_probe_loader_init_failed"
+    PROBE_LOADER_INVALID_IMAGE = "canonical_probe_loader_invalid_image"
+    PROBE_LOADER_MISSING = "canonical_probe_loader_missing"
+    PROBE_LOADER_SYMBOL = "canonical_probe_loader_symbol_missing"
     PROBE_OUTPUT_LIMIT = "canonical_probe_output_limit_failed"
     PROBE_PROCESS = "canonical_probe_process_failed"
     PROBE_OUTPUT = "canonical_probe_output_failed"
@@ -299,17 +302,17 @@ def _probe_audio(
             code=CanonicalDecodeFailureCode.PROBE_OUTPUT_LIMIT,
         ) from error
     except _NativeToolExitError as error:
-        loader_statuses = {
-            0xC000007B,
-            0xC0000135,
-            0xC0000138,
-            0xC0000139,
-            0xC0000142,
+        loader_codes = {
+            0xC000007B: CanonicalDecodeFailureCode.PROBE_LOADER_INVALID_IMAGE,
+            0xC000012F: CanonicalDecodeFailureCode.PROBE_LOADER_INVALID_IMAGE,
+            0xC0000135: CanonicalDecodeFailureCode.PROBE_LOADER_MISSING,
+            0xC0000138: CanonicalDecodeFailureCode.PROBE_LOADER_SYMBOL,
+            0xC0000139: CanonicalDecodeFailureCode.PROBE_LOADER_SYMBOL,
+            0xC0000142: CanonicalDecodeFailureCode.PROBE_LOADER_INIT,
         }
-        code = (
-            CanonicalDecodeFailureCode.PROBE_LOADER
-            if (error.return_code & 0xFFFFFFFF) in loader_statuses
-            else CanonicalDecodeFailureCode.PROBE_EXIT
+        code = loader_codes.get(
+            error.return_code & 0xFFFFFFFF,
+            CanonicalDecodeFailureCode.PROBE_EXIT,
         )
         raise CanonicalDecodeError("ffprobe exited unsuccessfully", code=code) from error
     except CanonicalDecodeError as error:
