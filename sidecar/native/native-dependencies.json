@@ -1,0 +1,27 @@
+{
+  "dependencies": [
+    {
+      "license": "PSF-2.0",
+      "licenseFile": "licenses/CPython-PSF-2.0.txt",
+      "name": "CPython runtime",
+      "role": "frozen Python runtime",
+      "version": "build-observed"
+    },
+    {
+      "license": "GPL-2.0-or-later WITH Bootloader-exception",
+      "licenseFile": "licenses/PyInstaller-COPYING.txt",
+      "name": "PyInstaller",
+      "role": "one-folder freezer and bootloader",
+      "version": "6.22.0"
+    },
+    {
+      "configuration": "ffmpeg-build.json",
+      "license": "LGPL-2.1-or-later",
+      "licenseFile": "licenses/FFmpeg-LGPL-2.1.txt",
+      "name": "FFmpeg and ffprobe",
+      "role": "canonical decode and bounded probe",
+      "version": "8.1.2"
+    }
+  ],
+  "schemaVersion": 1
+}

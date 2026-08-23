@@ -115,7 +115,7 @@ test("installed artifact runs the main-owned sidecar lifecycle and reaps", async
   proof.stdout.on("data", capture);
   proof.stderr.on("data", capture);
 
-  const exit = await waitForApplicationExit(proof, 10_000);
+  const exit = await waitForApplicationExit(proof, 20_000);
   expect(exit, output).toEqual({ code: 0, signal: null });
 });
 

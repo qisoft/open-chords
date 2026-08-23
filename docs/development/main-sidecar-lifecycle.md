@@ -20,7 +20,7 @@ The Effect version earns its place narrowly: a real `Layer` supplies the launche
 
 ## Evidence
 
-`tests/sidecar-session.test.ts` runs the same scenarios against both implementations: fragmented success, manifest/nonce/sequence validation, bounded remote failure, cancellation acknowledgement and cooperative cleanup, late-result isolation across consecutive sessions, abort during acquisition, delayed-acquisition cleanup, handshake/heartbeat/session timeout, EOF, disposal, and one-MiB framing. `tests/sidecar-spawn.test.ts` sends the same protocol through real child-process pipes and verifies that the child is reaped. `tests/packaged/security.spec.ts` launches the installed Electron executable in its main-only proof mode. The packaged main forks the deterministic adapter shipped in `Resources` as an Electron utility process, sends the framed start command across the process boundary, validates framed handshake/result output through the Effect client, terminates and reaps the adapter, and only then exits successfully. The worker is built from TypeScript against the shared Zod start schema and framing codec. Using a packaged utility helper avoids relying on console-pipe behavior from the Windows GUI-subsystem Electron executable itself.
+`tests/sidecar-session.test.ts` runs the same scenarios against both implementations: fragmented success, manifest/nonce/sequence validation, bounded remote failure, cancellation acknowledgement and cooperative cleanup, late-result isolation across consecutive sessions, abort during acquisition, delayed-acquisition cleanup, handshake/heartbeat/session timeout, EOF, disposal, and one-MiB framing. `tests/sidecar-spawn.test.ts` sends the same protocol through real child-process pipes and verifies that the child is reaped. `tests/frozen-sidecar.test.ts` runs the manifest-verified PyInstaller executable twice with an empty environment and compares canonical decode manifests. `tests/packaged/security.spec.ts` extracts the Forge artifact and launches Electron in its main-only proof mode. Packaged main starts the same frozen Python executable and project-built FFmpeg shipped in `Resources`, performs a real framed decode, validates the file descriptor, terminates and reaps the sidecar, and only then exits successfully. See [Frozen analysis sidecar and canonical decode](frozen-analysis-sidecar.md).
 
 The observable traces are identical at the module seam:
 
@@ -37,7 +37,7 @@ The cross-process adapter is deliberately named `createUncontainedSpawnLauncherF
 ## Boundaries for the next slice
 
 - Replace the proof launcher with a platform containment adapter; do not silently fall back to ordinary `spawn`.
-- Add the frozen sidecar handshake capabilities and model manifest without widening `SidecarClient`.
-- Keep large inputs/results in a disposable Job Workspace and exchange only bounded descriptors and hashes.
+- Extend the frozen handshake with exact analyzer/model capabilities when those artifacts exist, without widening `SidecarClient`.
+- Keep every later large input/result in the established disposable Job Workspace and exchange only bounded descriptors and hashes.
 - Implement graceful/force termination with the platform tree primitive. Protocol acknowledgement and cooperative cleanup are already bounded above the adapter; the proof adapter demonstrates child cleanup only and does not prove hostile descendant cleanup.
 - Publish no Analysis Revision until main has independently validated artifact paths, sizes, hashes, schemas, and musical invariants.
