@@ -219,6 +219,53 @@ class ProtocolTests(unittest.TestCase):
         )
         self.assertEqual(messages[-1]["code"], "canonical_cleanup_failed")
 
+    def test_cancel_cleanup_unlinks_leaf_symlink_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-protocol-symlink-") as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            artifacts = workspace / "artifacts"
+            artifacts.mkdir(parents=True)
+            outside = root / "outside.wav"
+            outside.write_bytes(b"outside")
+            link = artifacts / "canonical.wav"
+            try:
+                link.symlink_to(outside)
+            except OSError as error:
+                self.skipTest(f"symbolic links are unavailable: {error.__class__.__name__}")
+
+            messages = self._cancelled_session_messages(workspace)
+
+            self.assertEqual(
+                [message["type"] for message in messages],
+                ["handshake", "cancel_ack", "cleanup_complete"],
+            )
+            self.assertFalse(link.exists())
+            self.assertFalse(link.is_symlink())
+            self.assertEqual(outside.read_bytes(), b"outside")
+
+    def test_cancel_cleanup_rejects_escaping_artifacts_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-protocol-parent-symlink-") as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            outside_artifact = outside / "canonical.wav"
+            outside_artifact.write_bytes(b"outside")
+            try:
+                (workspace / "artifacts").symlink_to(outside, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"symbolic links are unavailable: {error.__class__.__name__}")
+
+            messages = self._cancelled_session_messages(workspace)
+
+            self.assertEqual(
+                [message["type"] for message in messages],
+                ["handshake", "cancel_ack", "error"],
+            )
+            self.assertEqual(messages[-1]["code"], "canonical_cleanup_failed")
+            self.assertEqual(outside_artifact.read_bytes(), b"outside")
+
     def test_cancel_acknowledges_and_cleans_before_exit(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")
@@ -439,6 +486,40 @@ class ProtocolTests(unittest.TestCase):
                 [message["type"] for message in self._messages(output.getvalue())],
                 ["handshake"],
             )
+
+    def _cancelled_session_messages(self, workspace: Path) -> list[dict[str, object]]:
+        cancel = self._frame(
+            {
+                "jobId": "job-protocol",
+                "nonce": "nonce-protocol",
+                "requestId": "request-protocol",
+                "sequence": 1,
+                "type": "cancel",
+            }
+        )
+        output = io.BytesIO()
+
+        def wait_for_cancel(*args: object) -> object:
+            cancellation = args[-1]
+            while not cancellation.is_set():  # type: ignore[union-attr]
+                time.sleep(0.001)
+            raise CanonicalDecodeCancelled("cancelled by cleanup test")
+
+        with patch(
+            "sidecar.open_chords_analysis.protocol.decode_canonical",
+            side_effect=wait_for_cancel,
+        ):
+            serve_one_session(
+                io.BytesIO(self._start_frame() + cancel),
+                output,
+                workspace,
+                FrozenRuntime(
+                    manifest_hash="a" * 64,
+                    platform_profile="test",
+                    toolchain=NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
+                ),
+            )
+        return self._messages(output.getvalue())
 
     @staticmethod
     def _write_fixture(path: Path) -> None:

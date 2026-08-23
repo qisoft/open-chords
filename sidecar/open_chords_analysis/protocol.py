@@ -327,18 +327,31 @@ def _cancel_matches(cancel: _Cancel, start: _Start, sequence: int) -> bool:
 
 def _cleanup_decode_artifacts(workspace: Path) -> bool:
     cleanup_succeeded = True
+    try:
+        workspace_root = workspace.resolve(strict=True)
+    except OSError:
+        return False
     for relative in (
         "artifacts/canonical.wav.partial",
         "artifacts/canonical.wav",
         "artifacts/decode-manifest.json.partial",
         "artifacts/decode-manifest.json",
     ):
-        candidate = (workspace / relative).resolve(strict=False)
-        if candidate.is_relative_to(workspace.resolve(strict=True)):
-            try:
-                candidate.unlink(missing_ok=True)
-            except OSError:
-                cleanup_succeeded = False
+        candidate = workspace_root / relative
+        if not candidate.exists() and not candidate.is_symlink():
+            continue
+        try:
+            resolved_parent = candidate.parent.resolve(strict=True)
+        except OSError:
+            cleanup_succeeded = False
+            continue
+        if not resolved_parent.is_relative_to(workspace_root):
+            cleanup_succeeded = False
+            continue
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError:
+            cleanup_succeeded = False
     return cleanup_succeeded
 
 
