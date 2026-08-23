@@ -40,9 +40,6 @@ class NativeToolchain:
 @dataclass(frozen=True)
 class CanonicalDecodeConfig:
     platform_profile: str
-    channels: int = CANONICAL_CHANNELS
-    sample_format: str = CANONICAL_SAMPLE_FORMAT
-    sample_rate: int = CANONICAL_SAMPLE_RATE
 
 
 @dataclass(frozen=True)
@@ -71,19 +68,20 @@ def decode_canonical(
     output_path = _workspace_file(workspace, OUTPUT_PATH)
     manifest_path = _workspace_file(workspace, MANIFEST_PATH)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = output_path.with_suffix(".wav.partial")
+    temporary_manifest = manifest_path.with_suffix(".json.partial")
+    artifacts = (temporary_output, output_path, temporary_manifest, manifest_path)
+    for artifact in artifacts:
+        artifact.unlink(missing_ok=True)
     ffmpeg = _exact_executable(toolchain.ffmpeg)
     ffprobe = _exact_executable(toolchain.ffprobe)
     input_descriptor = _file_descriptor(workspace, input_path)
     cancellation = cancellation or threading.Event()
-    _raise_if_cancelled(cancellation)
-
-    probe = _probe_audio(ffprobe, input_path, cancellation)
-    if not probe.get("streams"):
-        raise CanonicalDecodeError("staged media has no decodable audio stream")
-
-    temporary_output = output_path.with_suffix(".wav.partial")
-    temporary_output.unlink(missing_ok=True)
     try:
+        _raise_if_cancelled(cancellation)
+        probe = _probe_audio(ffprobe, input_path, cancellation)
+        if not probe.get("streams"):
+            raise CanonicalDecodeError("staged media has no decodable audio stream")
         _run_tool(
             [
                 str(ffmpeg),
@@ -114,9 +112,9 @@ def decode_canonical(
                 "-threads",
                 "1",
                 "-ac",
-                str(config.channels),
+                str(CANONICAL_CHANNELS),
                 "-ar",
-                str(config.sample_rate),
+                str(CANONICAL_SAMPLE_RATE),
                 "-sample_fmt",
                 "s16",
                 "-c:a",
@@ -130,23 +128,18 @@ def decode_canonical(
         )
         _raise_if_cancelled(cancellation)
         os.replace(temporary_output, output_path)
-    finally:
-        temporary_output.unlink(missing_ok=True)
-
-    canonical_audio = _inspect_canonical_wav(output_path, config)
-    _raise_if_cancelled(cancellation, output_path)
-    if _file_descriptor(workspace, input_path) != input_descriptor:
-        output_path.unlink(missing_ok=True)
-        raise CanonicalDecodeError("staged media changed during canonical decode")
-    configuration = {
-        "audioStream": "0:a:0",
-        "channels": config.channels,
-        "platformProfile": config.platform_profile,
-        "sampleFormat": config.sample_format,
-        "sampleRate": config.sample_rate,
-        "schemaVersion": 1,
-    }
-    try:
+        canonical_audio = _inspect_canonical_wav(output_path)
+        _raise_if_cancelled(cancellation)
+        if _file_descriptor(workspace, input_path) != input_descriptor:
+            raise CanonicalDecodeError("staged media changed during canonical decode")
+        configuration = {
+            "audioStream": "0:a:0",
+            "channels": CANONICAL_CHANNELS,
+            "platformProfile": config.platform_profile,
+            "sampleFormat": CANONICAL_SAMPLE_FORMAT,
+            "sampleRate": CANONICAL_SAMPLE_RATE,
+            "schemaVersion": 1,
+        }
         manifest = {
             "artifact": _descriptor_json(_file_descriptor(workspace, output_path)),
             "canonicalAudio": canonical_audio,
@@ -161,14 +154,18 @@ def decode_canonical(
                 "ffprobe": _tool_identity(ffprobe, "-version", cancellation),
             },
         }
-    except CanonicalDecodeCancelled:
-        output_path.unlink(missing_ok=True)
+        manifest_bytes = _canonical_json(manifest)
+        _raise_if_cancelled(cancellation)
+        _write_atomic(manifest_path, manifest_bytes)
+        _raise_if_cancelled(cancellation)
+        return _file_descriptor(workspace, manifest_path)
+    except Exception:
+        for artifact in artifacts:
+            artifact.unlink(missing_ok=True)
         raise
-    manifest_bytes = _canonical_json(manifest)
-    _raise_if_cancelled(cancellation, output_path)
-    _write_atomic(manifest_path, manifest_bytes)
-    _raise_if_cancelled(cancellation, output_path, manifest_path)
-    return _file_descriptor(workspace, manifest_path)
+    finally:
+        temporary_output.unlink(missing_ok=True)
+        temporary_manifest.unlink(missing_ok=True)
 
 
 def _probe_audio(
@@ -281,13 +278,13 @@ def _tool_environment() -> dict[str, str]:
     return environment
 
 
-def _inspect_canonical_wav(path: Path, config: CanonicalDecodeConfig) -> dict[str, int | str]:
+def _inspect_canonical_wav(path: Path) -> dict[str, int | str]:
     try:
         with wave.open(str(path), "rb") as audio:
             if (
-                audio.getnchannels() != config.channels
+                audio.getnchannels() != CANONICAL_CHANNELS
                 or audio.getsampwidth() != 2
-                or audio.getframerate() != config.sample_rate
+                or audio.getframerate() != CANONICAL_SAMPLE_RATE
                 or audio.getcomptype() != "NONE"
             ):
                 raise CanonicalDecodeError("FFmpeg output violated the canonical PCM profile")
@@ -295,10 +292,10 @@ def _inspect_canonical_wav(path: Path, config: CanonicalDecodeConfig) -> dict[st
     except (EOFError, wave.Error) as error:
         raise CanonicalDecodeError("FFmpeg output is not a valid canonical WAV") from error
     return {
-        "channels": config.channels,
+        "channels": CANONICAL_CHANNELS,
         "sampleCount": sample_count,
-        "sampleFormat": config.sample_format,
-        "sampleRate": config.sample_rate,
+        "sampleFormat": CANONICAL_SAMPLE_FORMAT,
+        "sampleRate": CANONICAL_SAMPLE_RATE,
     }
 
 

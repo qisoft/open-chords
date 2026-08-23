@@ -6,11 +6,13 @@ import math
 import shutil
 import struct
 import tempfile
+import time
 import unittest
 import wave
 from pathlib import Path
+from unittest.mock import patch
 
-from sidecar.open_chords_analysis.canonical_decode import NativeToolchain
+from sidecar.open_chords_analysis.canonical_decode import CanonicalDecodeCancelled, NativeToolchain
 from sidecar.open_chords_analysis.protocol import FrozenRuntime, ProtocolError, serve_one_session
 
 
@@ -21,6 +23,20 @@ class FragmentedReader(io.BytesIO):
 
     def read(self, size: int = -1) -> bytes:
         return super().read(min(size, self.fragment_size))
+
+
+class DelayedControlReader(io.BytesIO):
+    def __init__(self, start: bytes, control: bytes, delay_seconds: float):
+        super().__init__(start + control)
+        self.start_length = len(start)
+        self.delay_seconds = delay_seconds
+        self.delayed = False
+
+    def read(self, size: int = -1) -> bytes:
+        if not self.delayed and self.tell() >= self.start_length:
+            self.delayed = True
+            time.sleep(self.delay_seconds)
+        return super().read(size)
 
 
 class ProtocolTests(unittest.TestCase):
@@ -162,6 +178,55 @@ class ProtocolTests(unittest.TestCase):
             )
             self.assertFalse((workspace / "artifacts/canonical.wav").exists())
             self.assertFalse((workspace / "artifacts/decode-manifest.json").exists())
+
+    def test_cancel_remains_valid_when_heartbeats_are_already_in_flight(self) -> None:
+        start = self._start_frame()
+        cancel = self._frame(
+            {
+                "jobId": "job-protocol",
+                "nonce": "nonce-protocol",
+                "requestId": "request-protocol",
+                "sequence": 1,
+                "type": "cancel",
+            }
+        )
+        output = io.BytesIO()
+
+        def wait_for_cancel(*args: object) -> object:
+            cancellation = args[-1]
+            while not cancellation.is_set():  # type: ignore[union-attr]
+                time.sleep(0.001)
+            raise CanonicalDecodeCancelled("cancelled by test")
+
+        with (
+            patch(
+                "sidecar.open_chords_analysis.protocol.HEARTBEAT_INTERVAL_SECONDS",
+                0.005,
+            ),
+            patch(
+                "sidecar.open_chords_analysis.protocol.decode_canonical",
+                side_effect=wait_for_cancel,
+            ),
+        ):
+            serve_one_session(
+                DelayedControlReader(start, cancel, 0.03),
+                output,
+                Path.cwd(),
+                FrozenRuntime(
+                    manifest_hash="a" * 64,
+                    platform_profile="test",
+                    toolchain=NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
+                ),
+            )
+
+        messages = self._messages(output.getvalue())
+        types = [message["type"] for message in messages]
+        self.assertGreaterEqual(types.count("heartbeat"), 1)
+        self.assertEqual(types[-2:], ["cancel_ack", "cleanup_complete"])
+        self.assertEqual(
+            [message["sequence"] for message in messages],
+            list(range(len(messages))),
+        )
 
     def test_rejects_an_oversized_input_frame(self) -> None:
         output = io.BytesIO()

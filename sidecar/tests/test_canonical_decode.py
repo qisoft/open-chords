@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest.mock import patch
 
 from sidecar.open_chords_analysis.canonical_decode import (
     CanonicalDecodeConfig,
@@ -50,6 +51,37 @@ class CanonicalDecodeTests(unittest.TestCase):
             )
             self.assertEqual(first_manifest["artifact"]["path"], "artifacts/canonical.wav")
             self.assertRegex(first_descriptor.sha256, r"^[a-f0-9]{64}$")
+
+    def test_removes_all_artifacts_when_validation_fails_after_decode(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if ffmpeg is None or ffprobe is None:
+            self.skipTest("FFmpeg development tools are unavailable")
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-decode-failure-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input" / "source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+
+            with patch(
+                "sidecar.open_chords_analysis.canonical_decode._inspect_canonical_wav",
+                side_effect=RuntimeError("fault after publication"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "fault after publication"):
+                    decode_canonical(
+                        workspace,
+                        NativeToolchain(Path(ffmpeg), Path(ffprobe)),
+                        CanonicalDecodeConfig(platform_profile="test"),
+                    )
+
+            for relative in (
+                "artifacts/canonical.wav.partial",
+                "artifacts/canonical.wav",
+                "artifacts/decode-manifest.json.partial",
+                "artifacts/decode-manifest.json",
+            ):
+                self.assertFalse((workspace / relative).exists())
 
     @staticmethod
     def _write_stereo_fixture(path: Path) -> None:

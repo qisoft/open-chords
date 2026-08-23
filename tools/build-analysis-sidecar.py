@@ -94,6 +94,10 @@ def main() -> None:
             ROOT / "sidecar/native/third-party-native-notices.json",
             licenses / "Third-Party-Native-Notices.json",
         )
+        shutil.copy2(
+            ROOT / "sidecar/native/THIRD-PARTY-NATIVE-LICENSES.txt",
+            licenses / "Third-Party-Native-Licenses.txt",
+        )
         inventory = json.loads(
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
         )
@@ -151,14 +155,22 @@ def _native_files(runtime_root: Path) -> list[dict[str, str]]:
         if path.is_symlink() or not path.is_file():
             continue
         relative = path.relative_to(runtime_root).as_posix()
-        component = _native_component(relative)
+        binary_format = _native_format(path)
+        component = _native_component(relative, binary_format)
         if component is None:
             continue
-        entries.append({"component": component, "path": relative, "sha256": _sha256(path)})
+        entries.append(
+            {
+                "component": component,
+                "format": binary_format or "native-extension",
+                "path": relative,
+                "sha256": _sha256(path),
+            }
+        )
     return entries
 
 
-def _native_component(relative: str) -> str | None:
+def _native_component(relative: str, binary_format: str | None) -> str | None:
     lower = relative.lower()
     name = Path(lower).name
     if lower in {"open-chords-analysis", "open-chords-analysis.exe"}:
@@ -183,14 +195,40 @@ def _native_component(relative: str) -> str | None:
         return "expat"
     if name.startswith(("vcruntime", "msvcp", "ucrtbase", "api-ms-win-crt")):
         return "msvc-runtime"
+    if (
+        lower.startswith("_internal/python.framework/versions/")
+        and name == "python"
+    ):
+        return "cpython"
     if lower.startswith("_internal/") and (
         name == "python"
         or name.startswith("python3") and name.endswith(".dll")
         or name.endswith((".so", ".pyd"))
     ):
         return "cpython"
-    if name.endswith((".dll", ".dylib", ".exe", ".pyd", ".so")):
+    if binary_format is not None or name.endswith((".dll", ".dylib", ".exe", ".pyd", ".so")):
         raise RuntimeError(f"Unclassified native runtime file: {relative}")
+    return None
+
+
+def _native_format(path: Path) -> str | None:
+    with path.open("rb") as file:
+        magic = file.read(4)
+    if magic[:2] == b"MZ":
+        return "pe"
+    if magic == b"\x7fELF":
+        return "elf"
+    if magic in {
+        b"\xfe\xed\xfa\xce",
+        b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf",
+        b"\xcf\xfa\xed\xfe",
+        b"\xca\xfe\xba\xbe",
+        b"\xbe\xba\xfe\xca",
+        b"\xca\xfe\xba\xbf",
+        b"\xbf\xba\xfe\xca",
+    }:
+        return "mach-o"
     return None
 
 

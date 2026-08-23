@@ -36,7 +36,7 @@
     {
       "component": "openssl",
       "license": "Apache-2.0",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "OpenSSL libssl and libcrypto",
       "role": "CPython runtime dependency",
       "version": "build-observed"
@@ -44,7 +44,7 @@
     {
       "component": "xz",
       "license": "0BSD",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "XZ Utils liblzma",
       "role": "CPython runtime dependency",
       "version": "build-observed"
@@ -52,7 +52,7 @@
     {
       "component": "zstd",
       "license": "BSD-3-Clause OR GPL-2.0-only",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "Zstandard",
       "role": "CPython runtime dependency",
       "version": "build-observed"
@@ -60,7 +60,7 @@
     {
       "component": "mpdecimal",
       "license": "BSD-2-Clause",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "mpdecimal",
       "role": "CPython runtime dependency",
       "version": "build-observed"
@@ -68,7 +68,7 @@
     {
       "component": "libffi",
       "license": "MIT",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "libffi",
       "role": "CPython runtime dependency",
       "version": "build-observed"
@@ -76,7 +76,7 @@
     {
       "component": "bzip2",
       "license": "bzip2-1.0.6",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "bzip2",
       "role": "CPython runtime dependency",
       "version": "build-observed"
@@ -84,7 +84,7 @@
     {
       "component": "zlib",
       "license": "Zlib",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "zlib",
       "role": "CPython runtime dependency",
       "version": "build-observed"
@@ -92,7 +92,7 @@
     {
       "component": "expat",
       "license": "MIT",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "Expat",
       "role": "CPython runtime dependency",
       "version": "build-observed"
@@ -100,7 +100,7 @@
     {
       "component": "msvc-runtime",
       "license": "LicenseRef-Microsoft-Visual-Cpp-Runtime",
-      "licenseFile": "licenses/Third-Party-Native-Notices.json",
+      "licenseFile": "licenses/Third-Party-Native-Licenses.txt",
       "name": "Microsoft Visual C++ runtime",
       "role": "Windows CPython runtime dependency",
       "version": "build-observed"

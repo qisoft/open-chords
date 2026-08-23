@@ -4,7 +4,7 @@ Issue [#34](https://github.com/qisoft/open-chords/issues/34) establishes the rea
 
 ## Runtime boundary
 
-Electron main starts exactly one manifest-verified executable by absolute path, with `shell: false`, an empty environment, and the Job Workspace as its working directory. A runtime-manifest SHA-256 embedded in the main bundle is the independent trust anchor: main verifies that manifest and the exact executable, FFmpeg, and FFprobe bytes before spawning anything. The sidecar has no listener, network operation, PATH lookup, user configuration, plugin loading, or shell behavior. It reads and writes only length-prefixed JSON frames on stdin/stdout. Diagnostics never enter stdout; decode failures become bounded, redacted protocol errors, and main terminates a sidecar that exceeds the 64 KiB stderr budget.
+Electron main starts exactly one manifest-verified executable by absolute path, with `shell: false`, an empty environment, and the Job Workspace as its working directory. A runtime-manifest SHA-256 embedded in the main bundle is the independent trust anchor: main verifies every declared file hash and symlink target, rejects missing and extra files, and only then spawns the exact executable. The sidecar has no listener, network operation, PATH lookup, user configuration, plugin loading, or shell behavior. It reads and writes only length-prefixed JSON frames on stdin/stdout. Diagnostics never enter stdout; decode failures become bounded, redacted protocol errors, and main terminates a sidecar that exceeds the 64 KiB stderr budget.
 
 The fixed Job Workspace layout is:
 
@@ -35,7 +35,7 @@ FFprobe is limited to the first audio stream and a small named JSON field set. B
 
 The resulting license is LGPL-2.1-or-later. `sidecar/native/ffmpeg-build.json` is the machine-readable source/configuration authority.
 
-`tools/build-analysis-sidecar.py` freezes the stdlib-only Python entry point with exact PyInstaller build dependencies, copies only the project-built `ffmpeg` and `ffprobe`, records observed versions, copies the project and primary native license texts plus the reviewed third-party notice inventory, and writes the final full-folder runtime manifest. Every native executable, shared library, and Python extension must map to a declared component; packaging fails closed on an unclassified native file. Forge copies this one-folder directory outside ASAR under `Resources/open-chords-analysis`.
+`tools/build-analysis-sidecar.py` freezes the stdlib-only Python entry point with exact PyInstaller build dependencies, copies only the project-built `ffmpeg` and `ffprobe`, records observed versions, packages the project, primary native, and third-party license texts with version-pinned provenance, and writes the final full-folder runtime manifest. Magic-byte detection plus native suffix checks require every native executable, shared library, framework binary, and Python extension to map to a declared component; packaging fails closed on an unclassified native file. Forge copies this one-folder directory outside ASAR under `Resources/open-chords-analysis`.
 
 For a local macOS arm64 package, build the native runtime before Forge:
 

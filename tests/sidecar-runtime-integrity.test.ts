@@ -17,11 +17,13 @@ it("anchors the exact packaged executable and native tools in protected build me
   const runtimeRoot = mkdtempSync(join(tmpdir(), "open-chords-runtime-integrity-"));
   temporaryRoots.push(runtimeRoot);
   mkdirSync(join(runtimeRoot, "tools"));
+  mkdirSync(join(runtimeRoot, "_internal"));
   const suffix = process.platform === "win32" ? ".exe" : "";
   const files = [
     [`open-chords-analysis${suffix}`, Buffer.from("sidecar")],
     [`tools/ffmpeg${suffix}`, Buffer.from("ffmpeg")],
     [`tools/ffprobe${suffix}`, Buffer.from("ffprobe")],
+    ["_internal/runtime.bin", Buffer.from("python runtime")],
   ] as const;
   for (const [path, content] of files) writeFileSync(join(runtimeRoot, path), content);
   const manifest = Buffer.from(
@@ -47,5 +49,17 @@ it("anchors the exact packaged executable and native tools in protected build me
   writeFileSync(join(runtimeRoot, `open-chords-analysis${suffix}`), "replacement");
   expect(() => verifyPackagedSidecarRuntime(runtimeRoot, protectedHash)).toThrow(
     "runtime hash mismatch",
+  );
+  writeFileSync(join(runtimeRoot, `open-chords-analysis${suffix}`), "sidecar");
+
+  writeFileSync(join(runtimeRoot, "_internal/runtime.bin"), "tampered python runtime");
+  expect(() => verifyPackagedSidecarRuntime(runtimeRoot, protectedHash)).toThrow(
+    "runtime hash mismatch",
+  );
+  writeFileSync(join(runtimeRoot, "_internal/runtime.bin"), "python runtime");
+
+  writeFileSync(join(runtimeRoot, "_internal/extra.pyc"), "unmanifested");
+  expect(() => verifyPackagedSidecarRuntime(runtimeRoot, protectedHash)).toThrow(
+    "unmanifested file",
   );
 });

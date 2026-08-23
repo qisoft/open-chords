@@ -293,7 +293,10 @@ def _cancel_matches(cancel: _Cancel, start: _Start, sequence: int) -> bool:
         cancel.job_id == start.job_id
         and cancel.nonce == start.nonce
         and cancel.request_id == start.request_id
-        and cancel.sequence == sequence
+        # Main sends the next sequence it has consumed. Heartbeats already
+        # written to the pipe may advance our counter before cancel arrives;
+        # main drains those frames before accepting the acknowledgement.
+        and 1 <= cancel.sequence <= sequence
     )
 
 

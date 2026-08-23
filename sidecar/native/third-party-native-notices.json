@@ -3,47 +3,56 @@
     {
       "component": "OpenSSL",
       "license": "Apache-2.0",
-      "source": "https://github.com/openssl/openssl/blob/master/LICENSE.txt"
+      "source": "https://github.com/openssl/openssl/blob/openssl-3.6.2/LICENSE.txt",
+      "sourceVersion": "openssl-3.6.2"
     },
     {
       "component": "XZ Utils liblzma",
       "license": "0BSD",
-      "source": "https://github.com/tukaani-project/xz/blob/master/COPYING.0BSD"
+      "source": "https://github.com/tukaani-project/xz/blob/v5.8.3/COPYING.0BSD",
+      "sourceVersion": "v5.8.3"
     },
     {
       "component": "Zstandard",
       "license": "BSD-3-Clause OR GPL-2.0-only",
-      "source": "https://github.com/facebook/zstd/blob/dev/LICENSE"
+      "source": "https://github.com/facebook/zstd/blob/v1.5.7/LICENSE",
+      "sourceVersion": "v1.5.7"
     },
     {
       "component": "mpdecimal",
       "license": "BSD-2-Clause",
-      "source": "https://www.bytereef.org/mpdecimal/download.html"
+      "source": "https://github.com/Safeheron/mpdecimal/blob/v4.0.1/COPYRIGHT.txt",
+      "sourceVersion": "v4.0.1"
     },
     {
       "component": "libffi",
       "license": "MIT",
-      "source": "https://github.com/libffi/libffi/blob/master/LICENSE"
+      "source": "https://github.com/libffi/libffi/blob/v3.4.8/LICENSE",
+      "sourceVersion": "v3.4.8"
     },
     {
       "component": "bzip2",
       "license": "bzip2-1.0.6",
-      "source": "https://sourceware.org/git/?p=bzip2.git;a=blob;f=LICENSE"
+      "source": "https://gitlab.com/bzip2/bzip2/-/blob/bzip2-1.0.8/LICENSE",
+      "sourceVersion": "bzip2-1.0.8"
     },
     {
       "component": "zlib",
       "license": "Zlib",
-      "source": "https://github.com/madler/zlib/blob/develop/LICENSE"
+      "source": "https://github.com/madler/zlib/blob/v1.3.1/LICENSE",
+      "sourceVersion": "v1.3.1"
     },
     {
       "component": "Expat",
       "license": "MIT",
-      "source": "https://github.com/libexpat/libexpat/blob/master/COPYING"
+      "source": "https://github.com/libexpat/libexpat/blob/R_2_7_1/COPYING",
+      "sourceVersion": "R_2_7_1"
     },
     {
       "component": "Microsoft Visual C++ runtime",
       "license": "LicenseRef-Microsoft-Visual-Cpp-Runtime",
-      "source": "https://visualstudio.microsoft.com/license-terms/"
+      "source": "https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/",
+      "sourceVersion": "Microsoft Visual C++ Runtime 2015-2022"
     }
   ],
   "schemaVersion": 1

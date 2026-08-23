@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -37,7 +37,12 @@ it.skipIf(executablePath === undefined)(
           }),
         ),
         nativeFiles: z.array(
-          z.object({ component: z.string(), path: z.string(), sha256: z.string() }),
+          z.object({
+            component: z.string(),
+            format: z.string(),
+            path: z.string(),
+            sha256: z.string(),
+          }),
         ),
       })
       .parse(JSON.parse(readFileSync(join(runtimeRoot, "native-dependencies.json"), "utf8")));
@@ -56,6 +61,11 @@ it.skipIf(executablePath === undefined)(
           .digest("hex"),
       ).toBe(nativeFile.sha256);
     }
+    const inventoriedNativePaths = new Set(inventory.nativeFiles.map((entry) => entry.path));
+    const discoveredNativePaths = allRuntimeFiles(runtimeRoot)
+      .filter(isNativeBinary)
+      .map((runtimePath) => runtimePath.slice(runtimeRoot.length + 1).replaceAll("\\", "/"));
+    expect([...inventoriedNativePaths]).toEqual(expect.arrayContaining(discoveredNativePaths));
     const fixture = monoPcmWav(
       Array.from({ length: 48_000 }, (_value, index) => Math.round(Math.sin(index / 13) * 4_000)),
     );
@@ -115,3 +125,32 @@ it.skipIf(executablePath === undefined)(
   },
   20_000,
 );
+
+function allRuntimeFiles(root: string): string[] {
+  const entries = readdirSync(root, { withFileTypes: true });
+  return entries.flatMap((entry) => {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) return allRuntimeFiles(path);
+    return entry.isFile() ? [path] : [];
+  });
+}
+
+function isNativeBinary(path: string): boolean {
+  const content = readFileSync(path);
+  const magic = content.subarray(0, 4).toString("hex");
+  return (
+    magic.startsWith("4d5a") ||
+    magic === "7f454c46" ||
+    [
+      "feedface",
+      "cefaedfe",
+      "feedfacf",
+      "cffaedfe",
+      "cafebabe",
+      "bebafeca",
+      "cafebabf",
+      "bfbafeca",
+    ].includes(magic) ||
+    /\.(?:dll|dylib|exe|pyd|so)$/iu.test(path)
+  );
+}
