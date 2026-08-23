@@ -33,7 +33,7 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
-import type { AnalysisRecipe } from "./analysis-jobs.ts";
+import type { AnalysisManifest, AnalysisRecipe } from "./analysis-jobs.ts";
 import {
   locatorMatchesSourceIdentity,
   ProjectOwnedRecordsSchema,
@@ -510,6 +510,11 @@ export class ProjectLibrary {
 
   async resolveBlockedDependencies(input: {
     canonicalAudioFingerprint: string;
+    modelStore: {
+      resolveBlockedRecipeArtifacts(
+        recipe: AnalysisRecipe,
+      ): Promise<Array<{ id: string; kind: "model" }>>;
+    };
     projectId: string;
     recipe: AnalysisRecipe;
     sourceSnapshotId: string;
@@ -525,12 +530,7 @@ export class ProjectLibrary {
     if (snapshot?.canonicalAudioFingerprint !== input.canonicalAudioFingerprint) {
       return [{ id: input.sourceSnapshotId, kind: "media" }];
     }
-    const verifiedComponents = new Set(
-      snapshot.provenance.components.map(({ hash, id, version }) => `${id}\0${version}\0${hash}`),
-    );
-    return [...input.recipe.components, input.recipe.numericalBackend]
-      .filter(({ hash, id, version }) => !verifiedComponents.has(`${id}\0${version}\0${hash}`))
-      .map(({ id }) => ({ id, kind: "model" as const }));
+    return input.modelStore.resolveBlockedRecipeArtifacts(input.recipe);
   }
 
   async commitEditTransaction(input: {
@@ -576,9 +576,11 @@ export class ProjectLibrary {
     canonicalAudioFingerprint: string;
     expectedProjectRevisionId: string;
     jobKey: string;
+    manifest: AnalysisManifest;
     projectId: string;
     recipeHash: string;
     revision: AnalysisRevision;
+    sourceIdentityKind: "canonical_audio" | "source_snapshot";
     sourceSnapshotId: string;
   }): Promise<
     { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
@@ -591,15 +593,20 @@ export class ProjectLibrary {
       if (entry.compatibility === "read_only") return { readOnly: true };
 
       const candidate = AnalysisRevisionSchema.parse(input.revision);
-      const expectedManifestHash = sha256Canonical({
-        attemptId: input.attemptId,
-        canonicalAudioFingerprint: input.canonicalAudioFingerprint,
-        jobKey: input.jobKey,
-        projectId: input.projectId,
-        recipeHash: input.recipeHash,
-        sourceSnapshotId: input.sourceSnapshotId,
-      });
+      const expectedManifestHash = sha256Canonical(input.manifest);
+      const candidateIdentity = input.manifest.candidateIdentity;
       if (
+        candidateIdentity.attemptId !== input.attemptId ||
+        candidateIdentity.canonicalAudioFingerprint !== input.canonicalAudioFingerprint ||
+        candidateIdentity.jobKey !== input.jobKey ||
+        candidateIdentity.projectId !== input.projectId ||
+        candidateIdentity.recipeHash !== input.recipeHash ||
+        candidateIdentity.sourceIdentityKind !== input.sourceIdentityKind ||
+        candidateIdentity.sourceSnapshotId !== input.sourceSnapshotId ||
+        sha256Canonical(input.manifest.recipe) !== input.recipeHash ||
+        input.manifest.acceptedOutputHashes.timeline !== sha256Canonical(candidate.timeline) ||
+        input.manifest.acceptedOutputHashes.supportClaimIds !==
+          sha256Canonical(candidate.supportClaimIds) ||
         candidate.projectId !== input.projectId ||
         candidate.manifestHash !== expectedManifestHash ||
         candidate.id !== `revision_${expectedManifestHash.slice("sha256:".length)}`
@@ -619,7 +626,11 @@ export class ProjectLibrary {
       const source = entry.revision.payload.records.sources.find(
         ({ id }) => id === entry.revision?.payload.records.projectRange.sourceId,
       );
-      const sourceSnapshot = source?.snapshots.find(({ id }) => id === input.sourceSnapshotId);
+      const sourceSnapshot = source?.snapshots.find((snapshot) =>
+        input.sourceIdentityKind === "source_snapshot"
+          ? snapshot.id === input.sourceSnapshotId
+          : snapshot.canonicalAudioFingerprint === input.canonicalAudioFingerprint,
+      );
       if (sourceSnapshot?.canonicalAudioFingerprint !== input.canonicalAudioFingerprint) {
         throw new Error("Analysis candidate Source Snapshot is not verified by Project authority");
       }

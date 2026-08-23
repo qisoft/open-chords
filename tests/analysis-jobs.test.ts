@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,27 +10,37 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   AnalysisRunError,
-  openAnalysisJobs as openProductionAnalysisJobs,
-  type AnalysisCandidateManifest,
-  type AnalysisJobRunner,
-  type AnalysisProjectAuthority,
+  AnalysisJobs,
+  type AnalysisManifest,
   type AnalysisRecipe,
 } from "../apps/desktop/src/main/analysis-jobs.ts";
 
 const temporaryRoots: string[] = [];
 
-type TestAuthority = Omit<AnalysisProjectAuthority, "resolveBlockedDependencies"> &
-  Partial<Pick<AnalysisProjectAuthority, "resolveBlockedDependencies">>;
+type ProductionOptions = Parameters<typeof AnalysisJobs.open>[0];
+type AnalysisProjectAuthority = ProductionOptions["authority"];
+type AnalysisJobRunner = ProductionOptions["runner"];
+type DependencyInput = Parameters<
+  ProductionOptions["dependencies"]["resolveBlockedDependencies"]
+>[0];
+type TestAuthority = AnalysisProjectAuthority & {
+  resolveBlockedDependencies?: (
+    input: DependencyInput,
+  ) => ReturnType<ProductionOptions["dependencies"]["resolveBlockedDependencies"]>;
+};
 type RunnerInput = Parameters<AnalysisJobRunner["run"]>[0];
 type RunnerOutput = Awaited<ReturnType<AnalysisJobRunner["run"]>>;
 type TestRunner = {
-  run(
-    input: RunnerInput,
-  ): Promise<Omit<RunnerOutput, "manifest"> & { manifest?: AnalysisCandidateManifest }>;
+  run(input: RunnerInput): Promise<{
+    manifest?: AnalysisManifest;
+    revision: RunnerOutput["revision"];
+    stageOutcomes: AnalysisManifest["stageOutcomes"];
+  }>;
 };
 
 async function openAnalysisJobs(options: {
   authority: TestAuthority;
+  attemptTimeoutMs?: number;
   idFactory?: () => string;
   now?: () => Date;
   runner: TestRunner;
@@ -39,19 +49,36 @@ async function openAnalysisJobs(options: {
   const testRunner: AnalysisJobRunner = {
     run: async (input) => {
       const result = await options.runner.run(input);
+      const outputHashes = {
+        supportClaimIds: hashCanonical(result.revision.supportClaimIds),
+        timeline: hashCanonical(result.revision.timeline),
+      };
       const manifest =
         result.manifest ??
         ({
-          attemptId: input.attemptId,
-          canonicalAudioFingerprint: input.job.canonicalAudioFingerprint,
-          jobKey: input.job.key,
-          projectId: input.job.projectId,
-          recipeHash: input.job.recipeHash,
-          sourceSnapshotId: input.job.sourceSnapshotId,
-        } satisfies AnalysisCandidateManifest);
-      const manifestHash = `sha256:${createHash("sha256")
-        .update(canonicalSerialize(manifest))
-        .digest("hex")}`;
+          acceptedOutputHashes: outputHashes,
+          candidateIdentity: {
+            attemptId: input.attemptId,
+            canonicalAudioFingerprint: input.job.canonicalAudioFingerprint,
+            jobKey: input.job.key,
+            projectId: input.job.projectId,
+            recipeHash: input.job.recipeHash,
+            sourceIdentityKind: input.job.sourceIdentityKind,
+            sourceSnapshotId: input.job.sourceSnapshotId,
+          },
+          format: "open-chords/analysis-manifest",
+          recipe: input.job.recipe,
+          reproducibilityConditions: {
+            componentHashes: input.job.recipe.components.map(({ hash }) => hash),
+            numericalBackendHash: input.job.recipe.numericalBackend.hash,
+            profileHash: input.job.recipe.profile.hash,
+            seedsHash: hashCanonical(input.job.recipe.seeds),
+            settingsHash: hashCanonical(input.job.recipe.settings),
+          },
+          stageOutcomes: result.stageOutcomes,
+          warnings: [],
+        } satisfies AnalysisManifest);
+      const manifestHash = hashCanonical(manifest);
       return {
         ...result,
         manifest,
@@ -64,14 +91,51 @@ async function openAnalysisJobs(options: {
       };
     },
   };
-  return openProductionAnalysisJobs({
+  return AnalysisJobs.open({
     ...options,
-    authority: {
-      ...options.authority,
+    authority: options.authority,
+    dependencies: {
       resolveBlockedDependencies: options.authority.resolveBlockedDependencies ?? (async () => []),
     },
     runner: testRunner,
   });
+}
+
+function hashCanonical(value: unknown): string {
+  return `sha256:${createHash("sha256").update(canonicalSerialize(value)).digest("hex")}`;
+}
+
+function manifestFor(
+  input: RunnerInput,
+  revision: RunnerOutput["revision"],
+  stageOutcomes: AnalysisManifest["stageOutcomes"],
+): AnalysisManifest {
+  return {
+    acceptedOutputHashes: {
+      supportClaimIds: hashCanonical(revision.supportClaimIds),
+      timeline: hashCanonical(revision.timeline),
+    },
+    candidateIdentity: {
+      attemptId: input.attemptId,
+      canonicalAudioFingerprint: input.job.canonicalAudioFingerprint,
+      jobKey: input.job.key,
+      projectId: input.job.projectId,
+      recipeHash: input.job.recipeHash,
+      sourceIdentityKind: input.job.sourceIdentityKind,
+      sourceSnapshotId: input.job.sourceSnapshotId,
+    },
+    format: "open-chords/analysis-manifest",
+    recipe: input.job.recipe,
+    reproducibilityConditions: {
+      componentHashes: input.job.recipe.components.map(({ hash }) => hash),
+      numericalBackendHash: input.job.recipe.numericalBackend.hash,
+      profileHash: input.job.recipe.profile.hash,
+      seedsHash: hashCanonical(input.job.recipe.seeds),
+      settingsHash: hashCanonical(input.job.recipe.settings),
+    },
+    stageOutcomes,
+    warnings: [],
+  };
 }
 
 afterEach(() => {
@@ -326,11 +390,13 @@ describe("AnalysisJobs", () => {
   it("reuses only exact non-media Checkpoints on a new Attempt", async () => {
     const stateRoot = await temporaryDirectory();
     const seenCheckpointCounts: number[] = [];
+    const seenCheckpointDocuments: unknown[] = [];
     let rejectedMediaCheckpoint = false;
     let runs = 0;
     const checkpointRunner: TestRunner = {
       run: async (input) => {
         seenCheckpointCounts.push(input.checkpoints.length);
+        seenCheckpointDocuments.push(input.checkpoints[0]?.document);
         runs += 1;
         if (runs === 1) {
           try {
@@ -346,8 +412,11 @@ describe("AnalysisJobs", () => {
             rejectedMediaCheckpoint = /non-media/iu.test(String(error));
           }
           await input.saveCheckpoint({
-            artifactHash: `sha256:${"8".repeat(64)}`,
-            byteSize: 4096,
+            document: {
+              format: "open-chords/analysis-checkpoint",
+              kind: "shared_features",
+              values: { frameCount: 120, summary: "validated chroma features" },
+            },
             kind: "shared_features",
             stage: "shared_features",
           });
@@ -407,6 +476,14 @@ describe("AnalysisJobs", () => {
     await jobs.runNext();
 
     expect(seenCheckpointCounts).toEqual([0, 1]);
+    expect(seenCheckpointDocuments).toEqual([
+      undefined,
+      {
+        format: "open-chords/analysis-checkpoint",
+        kind: "shared_features",
+        values: { frameCount: 120, summary: "validated chroma features" },
+      },
+    ]);
   });
 
   it("persists cancellation and ignores a late successful result", async () => {
@@ -706,25 +783,47 @@ describe("AnalysisJobs", () => {
         return () => ids.shift()!;
       })(),
       runner: {
-        run: async (input) => ({
-          manifest: {
-            attemptId: input.attemptId,
-            canonicalAudioFingerprint: input.job.canonicalAudioFingerprint,
-            jobKey: `sha256:${"f".repeat(64)}`,
-            projectId: input.job.projectId,
-            recipeHash: input.job.recipeHash,
-            sourceSnapshotId: input.job.sourceSnapshotId,
-          },
-          revision: structuredClone(goldenProject.analysisRevisions[0]!),
-          stageOutcomes: [
+        run: async (input) => {
+          const revision = structuredClone(goldenProject.analysisRevisions[0]!);
+          const stageOutcomes: AnalysisManifest["stageOutcomes"] = [
             { stage: "preflight", state: "completed" },
             { stage: "canonical_decode", state: "completed" },
             { stage: "shared_features", state: "completed" },
             { stage: "rhythm", state: "completed" },
             { stage: "harmony", state: "completed" },
             { stage: "assemble", state: "completed" },
-          ],
-        }),
+          ];
+          return {
+            manifest: {
+              acceptedOutputHashes: {
+                supportClaimIds: hashCanonical(revision.supportClaimIds),
+                timeline: hashCanonical(revision.timeline),
+              },
+              candidateIdentity: {
+                attemptId: input.attemptId,
+                canonicalAudioFingerprint: input.job.canonicalAudioFingerprint,
+                jobKey: `sha256:${"f".repeat(64)}`,
+                projectId: input.job.projectId,
+                recipeHash: input.job.recipeHash,
+                sourceIdentityKind: input.job.sourceIdentityKind,
+                sourceSnapshotId: input.job.sourceSnapshotId,
+              },
+              format: "open-chords/analysis-manifest",
+              recipe: input.job.recipe,
+              reproducibilityConditions: {
+                componentHashes: input.job.recipe.components.map(({ hash }) => hash),
+                numericalBackendHash: input.job.recipe.numericalBackend.hash,
+                profileHash: input.job.recipe.profile.hash,
+                seedsHash: hashCanonical(input.job.recipe.seeds),
+                settingsHash: hashCanonical(input.job.recipe.settings),
+              },
+              stageOutcomes,
+              warnings: [],
+            },
+            revision,
+            stageOutcomes,
+          };
+        },
       },
       stateRoot,
     });
@@ -738,6 +837,56 @@ describe("AnalysisJobs", () => {
     await expect(jobs.runNext()).resolves.toMatchObject({ state: "blocked" });
     expect(jobs.get("job_identity").attempts).toMatchObject([
       { failure: { classification: "integrity_violation" }, state: "failed" },
+    ]);
+    expect(publications).toBe(0);
+  });
+
+  it("rejects candidate output that does not match the accepted Analysis Manifest hashes", async () => {
+    const stateRoot = await temporaryDirectory();
+    let publications = 0;
+    const ids = ["job_output_hash", "attempt_output_hash"];
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => {
+          publications += 1;
+          return { projectRevisionId: "projectrevision_forbidden" };
+        },
+      },
+      idFactory: () => ids.shift()!,
+      runner: {
+        run: async (input) => {
+          const acceptedRevision = structuredClone(goldenProject.analysisRevisions[0]!);
+          const stageOutcomes: AnalysisManifest["stageOutcomes"] = [
+            { stage: "preflight", state: "completed" },
+            { stage: "canonical_decode", state: "completed" },
+            { stage: "shared_features", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
+            { stage: "assemble", state: "completed" },
+          ];
+          const manifest = manifestFor(input, acceptedRevision, stageOutcomes);
+          const changedRevision = structuredClone(acceptedRevision);
+          changedRevision.timeline.chordEvents[0]!.value = { kind: "no_chord" };
+          return { manifest, revision: changedRevision, stageOutcomes };
+        },
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+
+    await expect(jobs.runNext()).resolves.toMatchObject({ state: "blocked" });
+    expect(jobs.get("job_output_hash").attempts).toMatchObject([
+      { failure: { classification: "integrity_violation" } },
     ]);
     expect(publications).toBe(0);
   });
@@ -791,6 +940,190 @@ describe("AnalysisJobs", () => {
       attempts: [{ publishedProjectRevisionId: "projectrevision_committed", state: "succeeded" }],
       job: { state: "succeeded" },
     });
+  });
+
+  it("enforces a persisted main-owned Attempt deadline even when the runner hangs", async () => {
+    const stateRoot = await temporaryDirectory();
+    const ids = ["job_deadline", "attempt_deadline"];
+    const jobs = await openAnalysisJobs({
+      attemptTimeoutMs: 5,
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+      },
+      idFactory: () => ids.shift()!,
+      runner: { run: async () => new Promise(() => undefined) },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+
+    await expect(jobs.runNext()).resolves.toMatchObject({ state: "retryable" });
+    expect(jobs.get("job_deadline").attempts).toMatchObject([
+      {
+        deadlineAt: expect.any(String),
+        failure: { classification: "deadline", retryable: true },
+        state: "failed",
+      },
+    ]);
+  });
+
+  it("retries a cancelled Job without creating a duplicate Job Key", async () => {
+    const stateRoot = await temporaryDirectory();
+    const ids = ["job_cancelled_retry", "attempt_after_cancel"];
+    const request = {
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    } as const;
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_published" }),
+      },
+      idFactory: () => ids.shift()!,
+      runner: {
+        run: async () => ({
+          revision: structuredClone(goldenProject.analysisRevisions[0]!),
+          stageOutcomes: [
+            { stage: "preflight", state: "completed" },
+            { stage: "canonical_decode", state: "completed" },
+            { stage: "shared_features", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
+            { stage: "assemble", state: "completed" },
+          ],
+        }),
+      },
+      stateRoot,
+    });
+    const submitted = await jobs.submit(request);
+    await jobs.cancel(submitted.id);
+    await expect(jobs.submit(request)).resolves.toMatchObject({
+      id: submitted.id,
+      state: "cancelled",
+    });
+    expect(jobs.list()).toHaveLength(1);
+
+    await jobs.retry(submitted.id);
+    await expect(jobs.runNext()).resolves.toMatchObject({ state: "succeeded" });
+    expect(jobs.get(submitted.id).attempts).toHaveLength(1);
+  });
+
+  it("uses the selected Source Snapshot or canonical-audio identity alternative in the Job Key", async () => {
+    const snapshotJobs = await openAnalysisJobs({
+      authority,
+      runner,
+      stateRoot: await temporaryDirectory(),
+    });
+    const firstSnapshot = await snapshotJobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceIdentityKind: "source_snapshot",
+      sourceSnapshotId: "snapshot_same",
+    });
+    const sameSnapshot = await snapshotJobs.submit({
+      canonicalAudioFingerprint: `sha256:${"b".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceIdentityKind: "source_snapshot",
+      sourceSnapshotId: "snapshot_same",
+    });
+    expect(sameSnapshot.id).toBe(firstSnapshot.id);
+
+    const fingerprintJobs = await openAnalysisJobs({
+      authority,
+      runner,
+      stateRoot: await temporaryDirectory(),
+    });
+    const firstFingerprint = await fingerprintJobs.submit({
+      canonicalAudioFingerprint: `sha256:${"c".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceIdentityKind: "canonical_audio",
+      sourceSnapshotId: "snapshot_one",
+    });
+    const sameFingerprint = await fingerprintJobs.submit({
+      canonicalAudioFingerprint: `sha256:${"c".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceIdentityKind: "canonical_audio",
+      sourceSnapshotId: "snapshot_two",
+    });
+    expect(sameFingerprint.id).toBe(firstFingerprint.id);
+  });
+
+  it("rejects a tampered retained Checkpoint before runner reuse", async () => {
+    const stateRoot = await temporaryDirectory();
+    let runs = 0;
+    const ids = ["job_checkpoint_tamper", "attempt_checkpoint_one", "attempt_checkpoint_two"];
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+      },
+      idFactory: () => ids.shift()!,
+      runner: {
+        run: async (input) => {
+          runs += 1;
+          await input.saveCheckpoint({
+            document: {
+              format: "open-chords/analysis-checkpoint",
+              kind: "shared_features",
+              values: { frameCount: 64 },
+            },
+            kind: "shared_features",
+            stage: "shared_features",
+          });
+          throw new AnalysisRunError({
+            classification: "component_failure",
+            message: "Retry after checkpoint",
+            nextAction: "retry",
+            retryable: true,
+            stage: "harmony",
+          });
+        },
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+    await jobs.runNext();
+    const [checkpoint] = jobs.get("job_checkpoint_tamper").checkpoints;
+    if (checkpoint === undefined) throw new Error("Checkpoint was not stored");
+    writeFileSync(
+      join(stateRoot, "analysis-jobs/checkpoints", `${checkpoint.artifactHash.slice(7)}.json`),
+      "tampered",
+    );
+    await jobs.retry("job_checkpoint_tamper");
+
+    await expect(jobs.runNext()).resolves.toMatchObject({ state: "blocked" });
+    expect(jobs.get("job_checkpoint_tamper").attempts.at(-1)).toMatchObject({
+      failure: { classification: "integrity_violation" },
+    });
+    expect(runs).toBe(1);
   });
 
   it("persists sleep interruption before abort and requires an explicit retry", async () => {
@@ -850,8 +1183,11 @@ describe("AnalysisJobs", () => {
     const retentionRunner: TestRunner = {
       run: async (input) => {
         await input.saveCheckpoint({
-          artifactHash: `sha256:${"7".repeat(64)}`,
-          byteSize: 2048,
+          document: {
+            format: "open-chords/analysis-checkpoint",
+            kind: "shared_features",
+            values: { frameCount: 256 },
+          },
           kind: "shared_features",
           stage: "shared_features",
         });

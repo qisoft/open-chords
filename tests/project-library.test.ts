@@ -160,21 +160,78 @@ function analysisPublication(
   revision: ReturnType<typeof goldenEnvelope>["payload"]["analysisRevisions"][number],
   attemptId: string,
 ) {
+  const recipe = {
+    capabilities: ["rhythm" as const],
+    components: [
+      {
+        hash: `sha256:${"1".repeat(64)}`,
+        id: "rhythm-model",
+        version: "1.0.0",
+      },
+    ],
+    numericalBackend: {
+      hash: `sha256:${"2".repeat(64)}`,
+      id: "numpy",
+      version: "2.4.2",
+    },
+    pipeline: [
+      "preflight" as const,
+      "canonical_decode" as const,
+      "shared_features" as const,
+      "rhythm" as const,
+      "assemble" as const,
+      "main_validation" as const,
+      "publish" as const,
+    ],
+    profile: {
+      hash: `sha256:${"3".repeat(64)}`,
+      id: "balanced",
+      name: "balanced" as const,
+      version: "1.0.0",
+    },
+    seeds: { rhythm: 7 },
+    settings: { hopLength: 512 },
+  };
+  const recipeHash = hashCanonical(recipe);
   const identity = {
     attemptId,
     canonicalAudioFingerprint:
       "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     jobKey: `sha256:${"a".repeat(64)}`,
     projectId: "project_golden",
-    recipeHash: `sha256:${"b".repeat(64)}`,
+    recipeHash,
+    sourceIdentityKind: "source_snapshot" as const,
     sourceSnapshotId: "snapshot_fixture",
   };
-  const manifestHash = `sha256:${createHash("sha256")
-    .update(canonicalSerialize(identity))
-    .digest("hex")}`;
+  const manifest = {
+    acceptedOutputHashes: {
+      supportClaimIds: hashCanonical(revision.supportClaimIds),
+      timeline: hashCanonical(revision.timeline),
+    },
+    candidateIdentity: identity,
+    format: "open-chords/analysis-manifest" as const,
+    recipe,
+    reproducibilityConditions: {
+      componentHashes: recipe.components.map(({ hash }) => hash),
+      numericalBackendHash: recipe.numericalBackend.hash,
+      profileHash: recipe.profile.hash,
+      seedsHash: hashCanonical(recipe.seeds),
+      settingsHash: hashCanonical(recipe.settings),
+    },
+    stageOutcomes: [
+      { stage: "preflight" as const, state: "completed" as const },
+      { stage: "canonical_decode" as const, state: "completed" as const },
+      { stage: "shared_features" as const, state: "completed" as const },
+      { stage: "rhythm" as const, state: "completed" as const },
+      { stage: "assemble" as const, state: "completed" as const },
+    ],
+    warnings: [],
+  };
+  const manifestHash = hashCanonical(manifest);
   return {
     ...identity,
     expectedProjectRevisionId,
+    manifest,
     revision: {
       ...revision,
       id: `revision_${manifestHash.slice("sha256:".length)}`,
@@ -183,9 +240,54 @@ function analysisPublication(
   };
 }
 
+function hashCanonical(value: unknown): string {
+  return `sha256:${createHash("sha256").update(canonicalSerialize(value)).digest("hex")}`;
+}
+
 const DURABILITY_TEST_TIMEOUT_MS = 15_000;
 
 describe("ProjectLibrary", () => {
+  it("keeps Source verification separate from Model Store recipe resolution", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-analysis-dependencies-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    let modelStoreCalls = 0;
+    const modelStore = {
+      resolveBlockedRecipeArtifacts: async () => {
+        modelStoreCalls += 1;
+        return [{ id: "rhythm-model", kind: "model" as const }];
+      },
+    };
+    const validSource = await library.resolveBlockedDependencies({
+      canonicalAudioFingerprint:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      modelStore,
+      projectId: "project_golden",
+      recipe: analysisPublication(
+        "projectrevision_fixture",
+        goldenEnvelope().payload.analysisRevisions[0]!,
+        "attempt_dependencies",
+      ).manifest.recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+    expect(validSource).toEqual([{ id: "rhythm-model", kind: "model" }]);
+    expect(modelStoreCalls).toBe(1);
+
+    const invalidSource = await library.resolveBlockedDependencies({
+      canonicalAudioFingerprint: `sha256:${"f".repeat(64)}`,
+      modelStore,
+      projectId: "project_golden",
+      recipe: analysisPublication(
+        "projectrevision_fixture",
+        goldenEnvelope().payload.analysisRevisions[0]!,
+        "attempt_dependencies",
+      ).manifest.recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+    expect(invalidSource).toEqual([{ id: "snapshot_fixture", kind: "media" }]);
+    expect(modelStoreCalls).toBe(1);
+  });
+
   it("atomically publishes the first Analysis Revision and keeps later results reviewable", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-analysis-publication-");
     const library = await openProjectLibrary({ stateRoot });

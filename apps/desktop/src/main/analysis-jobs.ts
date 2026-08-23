@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -92,6 +92,7 @@ const AnalysisJobSchema = z.strictObject({
   queuePosition: z.number().int().nonnegative(),
   recipe: AnalysisRecipeSchema,
   recipeHash: Sha256Schema,
+  sourceIdentityKind: z.enum(["canonical_audio", "source_snapshot"]),
   sourceSnapshotId: z.string().min(1),
   state: z.enum([
     "awaiting_confirmation",
@@ -136,16 +137,24 @@ const AnalysisFailureSchema = z.strictObject({
   stage: AnalysisStageOutcomeSchema.shape.stage,
 });
 const AnalysisCheckpointCandidateSchema = z.strictObject({
+  document: z.strictObject({
+    format: z.literal("open-chords/analysis-checkpoint"),
+    kind: z.enum(["shared_features", "rhythm", "harmony", "sections"]),
+    values: z.record(
+      z.string().min(1),
+      z.union([z.boolean(), z.number().finite(), z.string().min(1).max(4096)]),
+    ),
+  }),
+  kind: z.enum(["shared_features", "rhythm", "harmony", "sections"]),
+  stage: z.enum(["shared_features", ...CAPABILITY_STAGES]),
+});
+const AnalysisCheckpointSchema = AnalysisCheckpointCandidateSchema.omit({ document: true }).extend({
   artifactHash: Sha256Schema,
   byteSize: z
     .number()
     .int()
     .positive()
-    .max(1024 * 1024 * 1024),
-  kind: z.enum(["shared_features", "rhythm", "harmony", "sections"]),
-  stage: z.enum(["shared_features", ...CAPABILITY_STAGES]),
-});
-const AnalysisCheckpointSchema = AnalysisCheckpointCandidateSchema.extend({
+    .max(1024 * 1024),
   createdAt: TimestampSchema,
   expiresAt: TimestampSchema,
   id: z.string().min(1),
@@ -161,6 +170,7 @@ const AnalysisAttemptSchema = z.strictObject({
   checkpointIds: z.array(z.string().min(1)),
   candidateAnalysisRevisionId: z.string().min(1).optional(),
   candidateManifestHash: Sha256Schema.optional(),
+  deadlineAt: TimestampSchema,
   expectedProjectRevisionId: z.string().min(1),
   failure: AnalysisFailureSchema.optional(),
   finishedAt: TimestampSchema.optional(),
@@ -186,17 +196,40 @@ export type AnalysisAttemptSnapshot = z.infer<typeof AnalysisAttemptSchema>;
 export type AnalysisFailure = z.infer<typeof AnalysisFailureSchema>;
 export type AnalysisCheckpoint = z.infer<typeof AnalysisCheckpointSchema>;
 export type AnalysisCheckpointCandidate = z.infer<typeof AnalysisCheckpointCandidateSchema>;
+type ReusableAnalysisCheckpoint = AnalysisCheckpoint & {
+  document: z.infer<typeof AnalysisCheckpointCandidateSchema>["document"];
+};
 
-const AnalysisCandidateManifestSchema = z.strictObject({
+const AnalysisCandidateIdentitySchema = z.strictObject({
   attemptId: z.string().min(1),
   canonicalAudioFingerprint: Sha256Schema,
   jobKey: Sha256Schema,
   projectId: z.string().min(1),
   recipeHash: Sha256Schema,
+  sourceIdentityKind: z.enum(["canonical_audio", "source_snapshot"]),
   sourceSnapshotId: z.string().min(1),
 });
 
-export type AnalysisCandidateManifest = z.infer<typeof AnalysisCandidateManifestSchema>;
+const AnalysisManifestSchema = z.strictObject({
+  acceptedOutputHashes: z.strictObject({
+    supportClaimIds: Sha256Schema,
+    timeline: Sha256Schema,
+  }),
+  candidateIdentity: AnalysisCandidateIdentitySchema,
+  format: z.literal("open-chords/analysis-manifest"),
+  recipe: AnalysisRecipeSchema,
+  reproducibilityConditions: z.strictObject({
+    componentHashes: z.array(Sha256Schema).min(1),
+    numericalBackendHash: Sha256Schema,
+    profileHash: Sha256Schema,
+    seedsHash: Sha256Schema,
+    settingsHash: Sha256Schema,
+  }),
+  stageOutcomes: z.array(RunnerStageOutcomeSchema),
+  warnings: z.array(z.string().min(1).max(512)).max(100),
+});
+
+export type AnalysisManifest = z.infer<typeof AnalysisManifestSchema>;
 
 export class AnalysisRunError extends Error {
   readonly failure: AnalysisFailure;
@@ -209,36 +242,32 @@ export class AnalysisRunError extends Error {
   }
 }
 
-export type AnalysisProjectAuthority = {
+type AnalysisProjectAuthority = {
   getSnapshot(projectId: string): Promise<{
     eventSequence: number;
     project: ProjectContract;
     projectRevisionId: string;
   } | null>;
-  resolveBlockedDependencies(input: {
-    canonicalAudioFingerprint: string;
-    projectId: string;
-    recipe: AnalysisRecipe;
-    sourceSnapshotId: string;
-  }): Promise<z.infer<typeof BlockedDependencySchema>[]>;
   publishAnalysisRevision(input: {
     attemptId: string;
     canonicalAudioFingerprint: string;
     expectedProjectRevisionId: string;
     jobKey: string;
+    manifest: AnalysisManifest;
     projectId: string;
     recipeHash: string;
     revision: AnalysisRevision;
+    sourceIdentityKind: "canonical_audio" | "source_snapshot";
     sourceSnapshotId: string;
   }): Promise<
     { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
   >;
 };
 
-export type AnalysisJobRunner = {
+type AnalysisJobRunner = {
   run(input: {
     attemptId: string;
-    checkpoints: readonly AnalysisCheckpoint[];
+    checkpoints: readonly ReusableAnalysisCheckpoint[];
     job: AnalysisJobSnapshot;
     reportProgress: (progress: {
       completedFraction: number;
@@ -248,27 +277,36 @@ export type AnalysisJobRunner = {
     saveCheckpoint: (checkpoint: AnalysisCheckpointCandidate) => Promise<void>;
     signal: AbortSignal;
   }): Promise<{
-    manifest: AnalysisCandidateManifest;
+    manifest: AnalysisManifest;
     revision: AnalysisRevision;
-    stageOutcomes: z.infer<typeof RunnerStageOutcomeSchema>[];
   }>;
 };
 
 type AnalysisJobsOptions = {
   authority: AnalysisProjectAuthority;
+  attemptTimeoutMs?: number;
+  dependencies: AnalysisDependencyAuthority;
   idFactory?: () => string;
   now?: () => Date;
   runner: AnalysisJobRunner;
   stateRoot: string;
 };
 
-export async function openAnalysisJobs(options: AnalysisJobsOptions): Promise<AnalysisJobs> {
-  return AnalysisJobs.open(options);
-}
+type AnalysisDependencyAuthority = {
+  resolveBlockedDependencies(input: {
+    canonicalAudioFingerprint: string;
+    projectId: string;
+    recipe: AnalysisRecipe;
+    sourceIdentityKind: "canonical_audio" | "source_snapshot";
+    sourceSnapshotId: string;
+  }): Promise<z.infer<typeof BlockedDependencySchema>[]>;
+};
 
 export class AnalysisJobs {
   #active: { attemptId: string; controller: AbortController; jobId: string } | undefined;
   readonly #authority: AnalysisProjectAuthority;
+  readonly #attemptTimeoutMs: number;
+  readonly #dependencies: AnalysisDependencyAuthority;
   readonly #idFactory: () => string;
   #mutationTail: Promise<void> = Promise.resolve();
   readonly #now: () => Date;
@@ -282,6 +320,11 @@ export class AnalysisJobs {
     state: z.infer<typeof AnalysisJobStateSchema>,
   ) {
     this.#authority = options.authority;
+    this.#attemptTimeoutMs = options.attemptTimeoutMs ?? 30 * 60 * 1_000;
+    if (!Number.isSafeInteger(this.#attemptTimeoutMs) || this.#attemptTimeoutMs <= 0) {
+      throw new Error("Analysis Attempt timeout must be a positive integer");
+    }
+    this.#dependencies = options.dependencies;
     this.#idFactory = options.idFactory ?? (() => `job_${randomUUID().replaceAll("-", "")}`);
     this.#now = options.now ?? (() => new Date());
     this.#path = path;
@@ -440,6 +483,9 @@ export class AnalysisJobs {
       const retainedCheckpoints = this.#state.checkpoints.filter(
         ({ expiresAt }) => Date.parse(expiresAt) > this.#now().getTime(),
       );
+      const expiredCheckpoints = this.#state.checkpoints.filter(
+        ({ expiresAt }) => Date.parse(expiresAt) <= this.#now().getTime(),
+      );
       const retainedCheckpointIds = new Set(retainedCheckpoints.map(({ id }) => id));
       for (const attempt of retainedAttempts) {
         attempt.checkpointIds = attempt.checkpointIds.filter((id) => retainedCheckpointIds.has(id));
@@ -450,6 +496,9 @@ export class AnalysisJobs {
       this.#state.attempts = retainedAttempts;
       this.#state.checkpoints = retainedCheckpoints;
       await this.#persist();
+      for (const checkpoint of expiredCheckpoints) {
+        await rm(checkpointArtifactPath(this.#path, checkpoint.artifactHash), { force: true });
+      }
     });
   }
 
@@ -457,23 +506,31 @@ export class AnalysisJobs {
     canonicalAudioFingerprint: string;
     projectId: string;
     recipe: AnalysisRecipe;
+    sourceIdentityKind?: "canonical_audio" | "source_snapshot";
     sourceSnapshotId: string;
   }): Promise<AnalysisJobSnapshot> {
     return this.#serializeMutation(async () => {
       const recipe = AnalysisRecipeSchema.parse(input.recipe);
+      const sourceIdentityKind = input.sourceIdentityKind ?? "source_snapshot";
       const recipeHash = hashIdentity(recipe);
       const key = hashIdentity({
-        canonicalAudioFingerprint: Sha256Schema.parse(input.canonicalAudioFingerprint),
         projectId: input.projectId,
         recipeHash,
-        sourceSnapshotId: input.sourceSnapshotId,
+        sourceIdentity:
+          sourceIdentityKind === "source_snapshot"
+            ? { id: input.sourceSnapshotId, kind: "source_snapshot" }
+            : {
+                fingerprint: Sha256Schema.parse(input.canonicalAudioFingerprint),
+                kind: "canonical_audio",
+              },
       });
-      const existing = this.#state.jobs.find(
-        (job) => job.key === key && !["cancelled"].includes(job.state),
-      );
+      const existing = this.#state.jobs.find((job) => job.key === key);
       if (existing !== undefined) return structuredClone(existing);
       const timestamp = this.#now().toISOString();
-      const blockedDependencies = await this.#resolveBlockedDependencies(input);
+      const blockedDependencies = await this.#resolveBlockedDependencies({
+        ...input,
+        sourceIdentityKind,
+      });
       const job = AnalysisJobSchema.parse({
         attemptIds: [],
         blockedDependencies,
@@ -486,6 +543,7 @@ export class AnalysisJobs {
         queuePosition: nextQueuePosition(this.#state.jobs),
         recipe,
         recipeHash,
+        sourceIdentityKind,
         sourceSnapshotId: input.sourceSnapshotId,
         state: blockedDependencies.length === 0 ? "queued" : "blocked",
         updatedAt: timestamp,
@@ -519,6 +577,7 @@ export class AnalysisJobs {
       const timestamp = this.#now().toISOString();
       const attempt = AnalysisAttemptSchema.parse({
         checkpointIds: [],
+        deadlineAt: new Date(this.#now().getTime() + this.#attemptTimeoutMs).toISOString(),
         expectedProjectRevisionId: project.projectRevisionId,
         id: this.#idFactory(),
         jobId: job.id,
@@ -550,15 +609,19 @@ export class AnalysisJobs {
       jobId: started.job.id,
     };
     try {
-      const result = await this.#runner.run({
-        attemptId: started.attempt.id,
-        checkpoints: this.#matchingCheckpoints(started.job),
-        job: started.job,
-        reportProgress: (progress) => this.#reportProgress(started.job.id, progress),
-        saveCheckpoint: (checkpoint) =>
-          this.#saveCheckpoint(started.job.id, started.attempt.id, checkpoint),
-        signal: controller.signal,
-      });
+      const result = await this.#runWithDeadline(
+        started.attempt,
+        controller,
+        this.#runner.run({
+          attemptId: started.attempt.id,
+          checkpoints: await this.#matchingCheckpoints(started.job),
+          job: started.job,
+          reportProgress: (progress) => this.#reportProgress(started.job.id, progress),
+          saveCheckpoint: (checkpoint) =>
+            this.#saveCheckpoint(started.job.id, started.attempt.id, checkpoint),
+          signal: controller.signal,
+        }),
+      );
       const candidate = validateAnalysisCandidate(started.job, started.attempt.id, result);
       return await this.#serializeMutation(async () => {
         await this.#assertCurrentAttempt(started.job.id, started.attempt.id, controller.signal);
@@ -573,9 +636,11 @@ export class AnalysisJobs {
           canonicalAudioFingerprint: job.canonicalAudioFingerprint,
           expectedProjectRevisionId: attempt.expectedProjectRevisionId,
           jobKey: job.key,
+          manifest: candidate.manifest,
           projectId: job.projectId,
           recipeHash: job.recipeHash,
           revision: candidate.revision,
+          sourceIdentityKind: job.sourceIdentityKind,
           sourceSnapshotId: job.sourceSnapshotId,
         });
         if (!("projectRevisionId" in publication)) {
@@ -638,7 +703,9 @@ export class AnalysisJobs {
   async retry(jobId: string): Promise<AnalysisJobSnapshot> {
     return this.#serializeMutation(async () => {
       const job = this.#requireJob(jobId);
-      if (job.state !== "retryable") throw new Error("Analysis Job is not retryable");
+      if (job.state !== "retryable" && job.state !== "cancelled") {
+        throw new Error("Analysis Job is not retryable");
+      }
       job.state = "queued";
       job.queuePosition = nextQueuePosition(this.#state.jobs);
       job.updatedAt = this.#now().toISOString();
@@ -667,14 +734,47 @@ export class AnalysisJobs {
     canonicalAudioFingerprint: string;
     projectId: string;
     recipe: AnalysisRecipe;
+    sourceIdentityKind: "canonical_audio" | "source_snapshot";
     sourceSnapshotId: string;
   }): Promise<z.infer<typeof BlockedDependencySchema>[]> {
     return z
       .array(BlockedDependencySchema)
-      .parse(await this.#authority.resolveBlockedDependencies(input))
+      .parse(await this.#dependencies.resolveBlockedDependencies(input))
       .toSorted(
         (left, right) => left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id),
       );
+  }
+
+  async #runWithDeadline<T>(
+    attempt: AnalysisAttemptSnapshot,
+    controller: AbortController,
+    execution: Promise<T>,
+  ): Promise<T> {
+    const remainingMs = Math.max(0, Date.parse(attempt.deadlineAt) - this.#now().getTime());
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        const error = new AnalysisRunError({
+          classification: "deadline",
+          message: "Analysis Attempt exceeded its main-owned deadline",
+          nextAction: "retry",
+          retryable: true,
+          stage: "preflight",
+        });
+        controller.abort(error);
+        reject(error);
+      }, remainingMs);
+    });
+    const interrupted = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
+        once: true,
+      });
+    });
+    try {
+      return await Promise.race([execution, deadline, interrupted]);
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
   }
 
   #completePublication(
@@ -724,16 +824,43 @@ export class AnalysisJobs {
     return attempt;
   }
 
-  #matchingCheckpoints(job: AnalysisJobSnapshot): AnalysisCheckpoint[] {
+  async #matchingCheckpoints(job: AnalysisJobSnapshot): Promise<ReusableAnalysisCheckpoint[]> {
     const now = this.#now().getTime();
-    return structuredClone(
-      this.#state.checkpoints.filter(
-        (checkpoint) =>
-          checkpoint.jobId === job.id &&
-          checkpoint.upstreamIdentityHash === checkpointIdentity(job, checkpoint.stage) &&
-          Date.parse(checkpoint.expiresAt) > now,
-      ),
-    );
+    const matching: ReusableAnalysisCheckpoint[] = [];
+    for (const checkpoint of this.#state.checkpoints) {
+      if (
+        checkpoint.jobId !== job.id ||
+        checkpoint.upstreamIdentityHash !== checkpointIdentity(job, checkpoint.stage) ||
+        Date.parse(checkpoint.expiresAt) <= now
+      ) {
+        continue;
+      }
+      try {
+        const content = await readFile(checkpointArtifactPath(this.#path, checkpoint.artifactHash));
+        if (
+          content.byteLength !== checkpoint.byteSize ||
+          hashBytes(content) !== checkpoint.artifactHash
+        ) {
+          throw new Error("Checkpoint bytes do not match retained metadata");
+        }
+        const document = AnalysisCheckpointCandidateSchema.shape.document.parse(
+          JSON.parse(content.toString("utf8")),
+        );
+        if (document.kind !== checkpoint.kind) {
+          throw new Error("Checkpoint document kind does not match retained metadata");
+        }
+        matching.push({ ...checkpoint, document });
+      } catch {
+        throw new AnalysisRunError({
+          classification: "integrity_violation",
+          message: "Analysis Checkpoint artifact failed main-owned integrity validation",
+          nextAction: "repair_installation",
+          retryable: false,
+          stage: checkpoint.stage,
+        });
+      }
+    }
+    return structuredClone(matching);
   }
 
   async #reportProgress(
@@ -776,6 +903,16 @@ export class AnalysisJobs {
     if (!parsed.success) {
       throw new Error("Analysis Checkpoint must be a validated non-media stage artifact");
     }
+    if (parsed.data.document.kind !== parsed.data.kind) {
+      throw new Error("Analysis Checkpoint document kind does not match its stage artifact kind");
+    }
+    if (parsed.data.stage !== parsed.data.kind) {
+      throw new Error("Analysis Checkpoint kind must match its completed pipeline stage");
+    }
+    const content = canonicalSerialize(parsed.data.document);
+    const byteSize = Buffer.byteLength(content);
+    if (byteSize > 1024 * 1024) throw new Error("Analysis Checkpoint artifact exceeds 1 MiB");
+    const artifactHash = hashBytes(Buffer.from(content, "utf8"));
     await this.#serializeMutation(async () => {
       const job = this.#requireJob(jobId);
       const attempt = this.#requireAttempt(attemptId);
@@ -784,13 +921,17 @@ export class AnalysisJobs {
       }
       const createdAt = this.#now();
       const checkpoint = AnalysisCheckpointSchema.parse({
-        ...parsed.data,
+        artifactHash,
+        byteSize,
         createdAt: createdAt.toISOString(),
         expiresAt: new Date(createdAt.getTime() + OPERATIONAL_RETENTION_MS).toISOString(),
-        id: `checkpoint_${hashIdentity(parsed.data).slice("sha256:".length)}`,
+        id: `checkpoint_${artifactHash.slice("sha256:".length)}`,
         jobId,
+        kind: parsed.data.kind,
+        stage: parsed.data.stage,
         upstreamIdentityHash: checkpointIdentity(job, parsed.data.stage),
       });
+      await atomicWrite(checkpointArtifactPath(this.#path, artifactHash), content);
       if (!this.#state.checkpoints.some(({ id }) => id === checkpoint.id)) {
         this.#state.checkpoints.push(checkpoint);
       }
@@ -883,6 +1024,18 @@ function hashIdentity(value: unknown): string {
   return `sha256:${createHash("sha256").update(canonicalSerialize(value)).digest("hex")}`;
 }
 
+function hashBytes(value: Uint8Array): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function checkpointArtifactPath(statePath: string, artifactHash: string): string {
+  return join(
+    dirname(statePath),
+    "checkpoints",
+    `${Sha256Schema.parse(artifactHash).slice(7)}.json`,
+  );
+}
+
 function isMissingPathError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
@@ -920,27 +1073,44 @@ function validateAnalysisCandidate(
   job: AnalysisJobSnapshot,
   attemptId: string,
   raw: {
-    manifest: AnalysisCandidateManifest;
+    manifest: AnalysisManifest;
     revision: AnalysisRevision;
-    stageOutcomes: z.infer<typeof RunnerStageOutcomeSchema>[];
   },
 ): {
+  manifest: AnalysisManifest;
   revision: AnalysisRevision;
   stageOutcomes: z.infer<typeof RunnerStageOutcomeSchema>[];
 } {
-  const manifest = AnalysisCandidateManifestSchema.parse(raw.manifest);
-  const expectedManifest = AnalysisCandidateManifestSchema.parse({
+  const manifest = AnalysisManifestSchema.parse(raw.manifest);
+  const revision = AnalysisRevisionSchema.parse(raw.revision);
+  const expectedIdentity = AnalysisCandidateIdentitySchema.parse({
     attemptId,
     canonicalAudioFingerprint: job.canonicalAudioFingerprint,
     jobKey: job.key,
     projectId: job.projectId,
     recipeHash: job.recipeHash,
+    sourceIdentityKind: job.sourceIdentityKind,
     sourceSnapshotId: job.sourceSnapshotId,
   });
-  if (canonicalSerialize(manifest) !== canonicalSerialize(expectedManifest)) {
+  const expectedReproducibility = {
+    componentHashes: job.recipe.components.map(({ hash }) => hash),
+    numericalBackendHash: job.recipe.numericalBackend.hash,
+    profileHash: job.recipe.profile.hash,
+    seedsHash: hashIdentity(job.recipe.seeds),
+    settingsHash: hashIdentity(job.recipe.settings),
+  };
+  const stageOutcomes = validateRunnerStageOutcomes(job, manifest.stageOutcomes);
+  if (
+    canonicalSerialize(manifest.candidateIdentity) !== canonicalSerialize(expectedIdentity) ||
+    canonicalSerialize(manifest.recipe) !== canonicalSerialize(job.recipe) ||
+    canonicalSerialize(manifest.reproducibilityConditions) !==
+      canonicalSerialize(expectedReproducibility) ||
+    manifest.acceptedOutputHashes.timeline !== hashIdentity(revision.timeline) ||
+    manifest.acceptedOutputHashes.supportClaimIds !== hashIdentity(revision.supportClaimIds)
+  ) {
     throw new AnalysisRunError({
       classification: "integrity_violation",
-      message: "Analysis candidate identity does not match its Job and Attempt",
+      message: "Analysis Manifest identity, provenance, or accepted output hashes are invalid",
       nextAction: "repair_installation",
       retryable: false,
       stage: "main_validation",
@@ -948,7 +1118,6 @@ function validateAnalysisCandidate(
   }
   const manifestHash = hashIdentity(manifest);
   const expectedRevisionId = `revision_${manifestHash.slice("sha256:".length)}`;
-  const revision = AnalysisRevisionSchema.parse(raw.revision);
   if (
     revision.projectId !== job.projectId ||
     revision.manifestHash !== manifestHash ||
@@ -962,7 +1131,7 @@ function validateAnalysisCandidate(
       stage: "main_validation",
     });
   }
-  return { revision, stageOutcomes: validateRunnerStageOutcomes(job, raw.stageOutcomes) };
+  return { manifest, revision, stageOutcomes };
 }
 
 function normalizeRunFailure(error: unknown): AnalysisFailure {
