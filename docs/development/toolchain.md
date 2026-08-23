@@ -6,7 +6,7 @@ Issue [#31](https://github.com/qisoft/open-chords/issues/31) owns this repositor
 
 - `apps/desktop/src/renderer` is the React 19 renderer boundary. Base UI, Tailwind CSS 4, Lucide, and scoped Zustand stores belong here.
 - `apps/desktop/src/preload` is an empty sandboxed capability boundary until the typed IPC issue owns its public API. Zod may later validate wire data here; UI packages and Effect are lint-blocked.
-- `apps/desktop/src/main` is the Electron authority boundary. Stable Effect v3 is reserved for later orchestration slices; React, Base UI, Lucide, and Zustand are lint-blocked.
+- `apps/desktop/src/main` is the Electron authority boundary. Stable Effect v3 is limited to the sidecar lifecycle seam described in [main-sidecar-lifecycle.md](main-sidecar-lifecycle.md); React, Base UI, Lucide, and Zustand are lint-blocked.
 - Zod is the shared runtime wire-schema dependency. This issue does not define a wire contract.
 
 ## Build and package
