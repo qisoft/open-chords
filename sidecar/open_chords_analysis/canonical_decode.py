@@ -31,11 +31,15 @@ class CanonicalDecodeFailureCode(str, Enum):
     PREPARE = "canonical_prepare_failed"
     PROBE = "canonical_probe_failed"
     PROBE_EXECUTION = "canonical_probe_execution_failed"
+    PROBE_EXIT = "canonical_probe_exit_failed"
+    PROBE_LOADER = "canonical_probe_loader_failed"
+    PROBE_OUTPUT_LIMIT = "canonical_probe_output_limit_failed"
     PROBE_PROCESS = "canonical_probe_process_failed"
     PROBE_OUTPUT = "canonical_probe_output_failed"
     PROBE_RUNTIME = "canonical_probe_runtime_failed"
     PROBE_SPAWN = "canonical_probe_spawn_failed"
     PROBE_STREAM = "canonical_probe_stream_missing"
+    PROBE_TIMEOUT = "canonical_probe_timeout_failed"
     TRANSCODE = "canonical_transcode_failed"
     ARTIFACT_VALIDATION = "canonical_artifact_validation_failed"
     TOOL_IDENTITY = "canonical_tool_identity_failed"
@@ -66,6 +70,22 @@ class _NativeToolRuntimeError(RuntimeError):
 
 class _NativeToolSpawnError(RuntimeError):
     """The operating system rejected a native tool spawn."""
+
+
+class _NativeToolExitError(RuntimeError):
+    """A native tool returned a nonzero process status."""
+
+    def __init__(self, return_code: int) -> None:
+        super().__init__("native media tool returned a nonzero process status")
+        self.return_code = return_code
+
+
+class _NativeToolOutputLimitError(RuntimeError):
+    """A native tool exceeded the bounded capture budget."""
+
+
+class _NativeToolTimeoutError(RuntimeError):
+    """A native tool exceeded its process deadline."""
 
 
 @dataclass(frozen=True)
@@ -268,6 +288,30 @@ def _probe_audio(
             "ffprobe process spawn failed",
             code=CanonicalDecodeFailureCode.PROBE_SPAWN,
         ) from error
+    except _NativeToolTimeoutError as error:
+        raise CanonicalDecodeError(
+            "ffprobe process timed out",
+            code=CanonicalDecodeFailureCode.PROBE_TIMEOUT,
+        ) from error
+    except _NativeToolOutputLimitError as error:
+        raise CanonicalDecodeError(
+            "ffprobe output exceeded its bound",
+            code=CanonicalDecodeFailureCode.PROBE_OUTPUT_LIMIT,
+        ) from error
+    except _NativeToolExitError as error:
+        loader_statuses = {
+            0xC000007B,
+            0xC0000135,
+            0xC0000138,
+            0xC0000139,
+            0xC0000142,
+        }
+        code = (
+            CanonicalDecodeFailureCode.PROBE_LOADER
+            if (error.return_code & 0xFFFFFFFF) in loader_statuses
+            else CanonicalDecodeFailureCode.PROBE_EXIT
+        )
+        raise CanonicalDecodeError("ffprobe exited unsuccessfully", code=code) from error
     except CanonicalDecodeError as error:
         raise CanonicalDecodeError(
             "ffprobe process failed",
@@ -384,11 +428,11 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
     if cancelled:
         raise CanonicalDecodeCancelled("canonical decode was cancelled")
     if timed_out:
-        raise CanonicalDecodeError("native media tool exceeded its deadline")
+        raise _NativeToolTimeoutError("native media tool exceeded its deadline")
     if exceeded.is_set():
-        raise CanonicalDecodeError("native media tool exceeded its output budget")
+        raise _NativeToolOutputLimitError("native media tool exceeded its output budget")
     if return_code != 0:
-        raise CanonicalDecodeError(f"native media tool failed with exit code {return_code}")
+        raise _NativeToolExitError(return_code)
     return _ToolResult(bytes(stdout), bytes(stderr))
 
 

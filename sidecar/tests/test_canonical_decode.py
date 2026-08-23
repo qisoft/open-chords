@@ -18,6 +18,9 @@ from sidecar.open_chords_analysis.canonical_decode import (
     CanonicalDecodeError,
     CanonicalDecodeFailureCode,
     NativeToolchain,
+    _NativeToolExitError,
+    _NativeToolOutputLimitError,
+    _NativeToolTimeoutError,
     _probe_audio,
     _sanitize_external_tool_runtime,
     decode_canonical,
@@ -134,6 +137,33 @@ class CanonicalDecodeTests(unittest.TestCase):
             _probe_audio(Path("/tools/ffprobe"), Path("/workspace/input/source-media"), threading.Event())
 
         self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_PROCESS)
+
+    def test_classifies_probe_process_outcomes(self) -> None:
+        cases = (
+            (_NativeToolTimeoutError("injected timeout"), CanonicalDecodeFailureCode.PROBE_TIMEOUT),
+            (
+                _NativeToolOutputLimitError("injected output limit"),
+                CanonicalDecodeFailureCode.PROBE_OUTPUT_LIMIT,
+            ),
+            (_NativeToolExitError(1), CanonicalDecodeFailureCode.PROBE_EXIT),
+            (_NativeToolExitError(0xC0000135), CanonicalDecodeFailureCode.PROBE_LOADER),
+            (_NativeToolExitError(-1073741515), CanonicalDecodeFailureCode.PROBE_LOADER),
+        )
+        for failure, expected in cases:
+            with (
+                self.subTest(failure=failure),
+                patch(
+                    "sidecar.open_chords_analysis.canonical_decode._run_tool",
+                    side_effect=failure,
+                ),
+                self.assertRaises(CanonicalDecodeError) as raised,
+            ):
+                _probe_audio(
+                    Path("/tools/ffprobe"),
+                    Path("/workspace/input/source-media"),
+                    threading.Event(),
+                )
+            self.assertEqual(raised.exception.code, expected)
 
     def test_classifies_invalid_probe_output(self) -> None:
         with (
