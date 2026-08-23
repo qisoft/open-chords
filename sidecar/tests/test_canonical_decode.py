@@ -32,6 +32,63 @@ from sidecar.open_chords_analysis.canonical_decode import (
 
 
 class CanonicalDecodeTests(unittest.TestCase):
+    def test_cancellation_survives_kill_race_after_successful_reap(self) -> None:
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(side_effect=ProcessLookupError("already exited")),
+            stderr=io.BytesIO(),
+            stdout=io.BytesIO(),
+            wait=unittest.mock.Mock(return_value=0),
+        )
+        cancellation = unittest.mock.Mock()
+        cancellation.is_set.side_effect = [False, True]
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.subprocess.Popen", return_value=process),
+            self.assertRaises(CanonicalDecodeCancelled),
+        ):
+            _run_tool([sys.executable, "-V"], cancellation)
+
+        process.wait.assert_called_once_with(timeout=1)
+
+    def test_timeout_survives_kill_race_after_successful_reap(self) -> None:
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(side_effect=ProcessLookupError("already exited")),
+            stderr=io.BytesIO(),
+            stdout=io.BytesIO(),
+            wait=unittest.mock.Mock(return_value=0),
+        )
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.subprocess.Popen", return_value=process),
+            patch("sidecar.open_chords_analysis.canonical_decode.time.monotonic", side_effect=[0, 31]),
+            self.assertRaises(_NativeToolTimeoutError),
+        ):
+            _run_tool([sys.executable, "-V"], threading.Event())
+
+        process.wait.assert_called_once_with(timeout=1)
+
+    def test_reaps_native_process_when_reader_construction_fails(self) -> None:
+        stdout = io.BytesIO()
+        stderr = io.BytesIO()
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(),
+            stderr=stderr,
+            stdout=stdout,
+            wait=unittest.mock.Mock(return_value=0),
+        )
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.subprocess.Popen", return_value=process),
+            patch(
+                "sidecar.open_chords_analysis.canonical_decode.threading.Thread",
+                side_effect=RuntimeError("injected reader construction failure"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            _run_tool([sys.executable, "-V"], threading.Event())
+
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=1)
+        self.assertTrue(stdout.closed)
+        self.assertTrue(stderr.closed)
+
     def test_cancellation_uses_only_bounded_reap_attempts(self) -> None:
         process = SimpleNamespace(
             kill=unittest.mock.Mock(),

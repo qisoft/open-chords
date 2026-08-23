@@ -391,30 +391,30 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
         )
     except Exception as error:
         raise _NativeToolSpawnError("native tool process spawn failed") from error
-    stdout = bytearray()
-    stderr = bytearray()
-    exceeded = threading.Event()
-
-    def capture(stream: BinaryIO, target: bytearray) -> None:
-        while chunk := stream.read(4096):
-            remaining = MAX_TOOL_OUTPUT_BYTES - len(target)
-            if remaining > 0:
-                target.extend(chunk[:remaining])
-            if len(chunk) > remaining:
-                exceeded.set()
-                process.kill()
-                return
-
-    readers = [
-        threading.Thread(target=capture, args=(process.stdout, stdout), daemon=True),
-        threading.Thread(target=capture, args=(process.stderr, stderr), daemon=True),
-    ]
     started_readers: list[threading.Thread] = []
-    cancelled = False
-    timed_out = False
-    return_code: int | None = None
     reaped = False
     try:
+        stdout = bytearray()
+        stderr = bytearray()
+        exceeded = threading.Event()
+
+        def capture(stream: BinaryIO, target: bytearray) -> None:
+            while chunk := stream.read(4096):
+                remaining = MAX_TOOL_OUTPUT_BYTES - len(target)
+                if remaining > 0:
+                    target.extend(chunk[:remaining])
+                if len(chunk) > remaining:
+                    exceeded.set()
+                    process.kill()
+                    return
+
+        readers = [
+            threading.Thread(target=capture, args=(process.stdout, stdout), daemon=True),
+            threading.Thread(target=capture, args=(process.stderr, stderr), daemon=True),
+        ]
+        cancelled = False
+        timed_out = False
+        return_code: int | None = None
         for reader in readers:
             reader.start()
             started_readers.append(reader)
@@ -465,7 +465,7 @@ def _cleanup_native_process(
             try:
                 process.kill()
             except Exception:
-                cleanup_failed = True
+                pass
             try:
                 process.wait(timeout=1)
                 reaped = True
