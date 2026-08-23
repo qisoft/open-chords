@@ -574,6 +574,24 @@ export class AnalysisJobs {
       const rawProjectRange = await this.#authority.getProjectRange(input.projectId);
       if (rawProjectRange === null) throw new Error(`Project ${input.projectId} was not found`);
       const projectRange = AnalysisProjectRangeSchema.parse(rawProjectRange);
+      const existingProjectJob = this.#state.jobs.find(
+        ({ projectId }) => projectId === input.projectId,
+      );
+      if (
+        existingProjectJob !== undefined &&
+        canonicalSerialize(existingProjectJob.projectRange) !== canonicalSerialize(projectRange)
+      ) {
+        const failure = projectRangeIntegrityFailure();
+        const timestamp = this.#now().toISOString();
+        existingProjectJob.state = "blocked";
+        existingProjectJob.updatedAt = timestamp;
+        this.#state.circuitBreaker = {
+          classification: "integrity_violation",
+          openedAt: timestamp,
+        };
+        await this.#persist();
+        throw failure;
+      }
       const key = hashIdentity({
         projectId: input.projectId,
         projectRange,
@@ -629,7 +647,22 @@ export class AnalysisJobs {
         .filter(({ state }) => state === "queued")
         .toSorted((left, right) => left.queuePosition - right.queuePosition)[0];
       if (job === undefined) return null;
-      const blockedDependencies = await this.#resolveBlockedDependencies(job);
+      let blockedDependencies: z.infer<typeof BlockedDependencySchema>[];
+      try {
+        blockedDependencies = await this.#resolveBlockedDependencies(job);
+      } catch (error) {
+        if (error instanceof AnalysisRunError && isCircuitBreakerFailure(error.failure)) {
+          const timestamp = this.#now().toISOString();
+          job.state = "blocked";
+          job.updatedAt = timestamp;
+          this.#state.circuitBreaker = {
+            classification: error.failure.classification,
+            openedAt: timestamp,
+          };
+          await this.#persist();
+        }
+        throw error;
+      }
       if (blockedDependencies.length > 0) {
         job.blockedDependencies = blockedDependencies;
         job.state = "blocked";
@@ -832,12 +865,13 @@ export class AnalysisJobs {
   }): Promise<z.infer<typeof BlockedDependencySchema>[]> {
     const currentRange = await this.#authority.getProjectRange(input.projectId);
     if (
-      currentRange === null ||
+      currentRange !== null &&
       canonicalSerialize(AnalysisProjectRangeSchema.parse(currentRange)) !==
         canonicalSerialize(input.projectRange)
     ) {
-      return [{ id: input.sourceSnapshotId, kind: "media" }];
+      throw projectRangeIntegrityFailure();
     }
+    if (currentRange === null) return [{ id: input.sourceSnapshotId, kind: "media" }];
     return z
       .array(BlockedDependencySchema)
       .parse(await this.#dependencies.resolveBlockedDependencies(input))
@@ -1330,6 +1364,16 @@ function checkpointIntegrityFailure(
     nextAction: "repair_installation",
     retryable: false,
     stage,
+  });
+}
+
+function projectRangeIntegrityFailure(): AnalysisRunError {
+  return new AnalysisRunError({
+    classification: "integrity_violation",
+    message: "Project Range authority changed for an existing Project",
+    nextAction: "repair_installation",
+    retryable: false,
+    stage: "preflight",
   });
 }
 

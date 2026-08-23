@@ -1279,7 +1279,7 @@ describe("AnalysisJobs", () => {
     expect(sameFingerprint.id).toBe(firstFingerprint.id);
   });
 
-  it("creates a new Job identity and blocks old work when the Project Range changes", async () => {
+  it("rejects Project Range drift because another interval requires another Project", async () => {
     let startSourceSample = 0;
     const rangeAuthority: TestAuthority = {
       getProjectRange: async () => ({
@@ -1294,7 +1294,7 @@ describe("AnalysisJobs", () => {
       }),
       publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
     };
-    const ids = ["job_range_old", "job_range_new"];
+    const ids = ["job_range_old"];
     const jobs = await openAnalysisJobs({
       authority: rangeAuthority,
       idFactory: () => ids.shift()!,
@@ -1309,14 +1309,11 @@ describe("AnalysisJobs", () => {
     } as const;
     const oldRange = await jobs.submit(request);
     startSourceSample = 1_000;
-    const newRange = await jobs.submit(request);
-
-    expect(newRange.id).not.toBe(oldRange.id);
-    await expect(jobs.runNext()).resolves.toMatchObject({
-      blockedDependencies: [{ id: "snapshot_fixture", kind: "media" }],
-      id: "job_range_old",
-      state: "blocked",
+    await expect(jobs.submit(request)).rejects.toMatchObject({
+      failure: { classification: "integrity_violation", retryable: false },
     });
+    expect(jobs.list()).toMatchObject([{ id: oldRange.id, state: "blocked" }]);
+    expect(jobs.circuitBreaker()).toMatchObject({ classification: "integrity_violation" });
   });
 
   it("rejects a tampered retained Checkpoint before runner reuse", async () => {

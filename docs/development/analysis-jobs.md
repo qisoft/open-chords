@@ -17,9 +17,9 @@ converts any other in-flight Attempt to `interrupted`, and requires explicit con
 previously queued work.
 The Job Key explicitly selects either Source Snapshot identity or canonical-audio fingerprint
 identity, then hashes that alternative with Project, the exact Project Range, and Recipe. A range
-change creates a different Job and blocks stale queued work during the pre-Attempt recheck.
-Cancellation does not release the key: resubmission returns the same Job, and explicit retry creates
-a new immutable Attempt.
+change for the same Project is rejected as an integrity failure because Project Range is immutable;
+choosing another interval creates another Project. Cancellation does not release the key:
+resubmission returns the same Job, and explicit retry creates a new immutable Attempt.
 
 ## Adapter seams
 
