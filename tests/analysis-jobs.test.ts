@@ -1312,8 +1312,158 @@ describe("AnalysisJobs", () => {
     await expect(jobs.submit(request)).rejects.toMatchObject({
       failure: { classification: "integrity_violation", retryable: false },
     });
-    expect(jobs.list()).toMatchObject([{ id: oldRange.id, state: "blocked" }]);
+    expect(jobs.list()).toMatchObject([{ id: oldRange.id, state: "queued" }]);
     expect(jobs.circuitBreaker()).toMatchObject({ classification: "integrity_violation" });
+  });
+
+  it("persists the integrity circuit when dependency refresh observes Project Range drift", async () => {
+    let startSourceSample = 0;
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getProjectRange: async () => ({
+          endSourceSample: startSourceSample + goldenProject.durationSamples,
+          sourceId: "source_fixture",
+          startSourceSample,
+        }),
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+        resolveBlockedDependencies: async () => [{ id: "model_missing", kind: "model" }],
+      },
+      idFactory: () => "job_refresh_range",
+      runner,
+      stateRoot: await temporaryDirectory(),
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+    startSourceSample = 1_000;
+
+    await expect(jobs.refreshBlockedDependencies("job_refresh_range")).rejects.toMatchObject({
+      failure: { classification: "integrity_violation" },
+    });
+    expect(jobs.get("job_refresh_range").job.state).toBe("blocked");
+    expect(jobs.circuitBreaker()).toMatchObject({ classification: "integrity_violation" });
+  });
+
+  it("durably fails and terminates an active Attempt when submission observes range drift", async () => {
+    let startSourceSample = 0;
+    let reportStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    const terminations: Array<{ attemptId: string; reason: string }> = [];
+    const authorityWithRange: TestAuthority = {
+      getProjectRange: async () => ({
+        endSourceSample: startSourceSample + goldenProject.durationSamples,
+        sourceId: "source_fixture",
+        startSourceSample,
+      }),
+      getSnapshot: async () => ({
+        eventSequence: 1,
+        project: structuredClone(goldenProject),
+        projectRevisionId: "projectrevision_current",
+      }),
+      publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+    };
+    const jobs = await openAnalysisJobs({
+      authority: authorityWithRange,
+      idFactory: (() => {
+        const ids = ["job_active_range", "attempt_active_range"];
+        return () => ids.shift()!;
+      })(),
+      runner: {
+        run: async ({ signal }) => {
+          reportStarted();
+          await new Promise<void>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+          throw new Error("unreachable");
+        },
+        terminateAndWait: async (input) => {
+          terminations.push(input);
+        },
+      },
+      stateRoot: await temporaryDirectory(),
+    });
+    const request = {
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    } as const;
+    await jobs.submit(request);
+    const running = jobs.runNext();
+    await started;
+    startSourceSample = 1_000;
+
+    await expect(jobs.submit(request)).rejects.toMatchObject({
+      failure: { classification: "integrity_violation" },
+    });
+    await expect(running).resolves.toMatchObject({ state: "blocked" });
+    expect(jobs.get("job_active_range")).toMatchObject({
+      attempts: [{ failure: { classification: "integrity_violation" }, state: "failed" }],
+      job: { state: "blocked" },
+    });
+    expect(terminations).toEqual([{ attemptId: "attempt_active_range", reason: "interrupted" }]);
+  });
+
+  it("preserves a succeeded Job when later authority state reports range drift", async () => {
+    let startSourceSample = 0;
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getProjectRange: async () => ({
+          endSourceSample: startSourceSample + goldenProject.durationSamples,
+          sourceId: "source_fixture",
+          startSourceSample,
+        }),
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_published" }),
+      },
+      idFactory: (() => {
+        const ids = ["job_succeeded_range", "attempt_succeeded_range"];
+        return () => ids.shift()!;
+      })(),
+      runner: {
+        run: async () => ({
+          revision: structuredClone(goldenProject.analysisRevisions[0]!),
+          stageOutcomes: [
+            { stage: "preflight", state: "completed" },
+            { stage: "canonical_decode", state: "completed" },
+            { stage: "shared_features", state: "completed" },
+            { stage: "rhythm", state: "completed" },
+            { stage: "harmony", state: "completed" },
+            { stage: "assemble", state: "completed" },
+          ],
+        }),
+      },
+      stateRoot: await temporaryDirectory(),
+    });
+    const request = {
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    } as const;
+    await jobs.submit(request);
+    await jobs.runNext();
+    const succeeded = jobs.get("job_succeeded_range").job;
+    startSourceSample = 1_000;
+
+    await expect(jobs.submit(request)).rejects.toMatchObject({
+      failure: { classification: "integrity_violation" },
+    });
+    expect(jobs.get("job_succeeded_range").job).toEqual(succeeded);
   });
 
   it("rejects a tampered retained Checkpoint before runner reuse", async () => {

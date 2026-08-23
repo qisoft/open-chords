@@ -355,6 +355,7 @@ export class AnalysisJobs {
   readonly #path: string;
   readonly #runner: AnalysisJobRunner;
   #state: z.infer<typeof AnalysisJobStateSchema>;
+  readonly #terminationPromises = new Map<string, Promise<void>>();
 
   private constructor(
     options: AnalysisJobsOptions,
@@ -581,16 +582,7 @@ export class AnalysisJobs {
         existingProjectJob !== undefined &&
         canonicalSerialize(existingProjectJob.projectRange) !== canonicalSerialize(projectRange)
       ) {
-        const failure = projectRangeIntegrityFailure();
-        const timestamp = this.#now().toISOString();
-        existingProjectJob.state = "blocked";
-        existingProjectJob.updatedAt = timestamp;
-        this.#state.circuitBreaker = {
-          classification: "integrity_violation",
-          openedAt: timestamp,
-        };
-        await this.#persist();
-        throw failure;
+        return this.#rejectSubmitRangeIntegrity(existingProjectJob, projectRangeIntegrityFailure());
       }
       const key = hashIdentity({
         projectId: input.projectId,
@@ -647,22 +639,7 @@ export class AnalysisJobs {
         .filter(({ state }) => state === "queued")
         .toSorted((left, right) => left.queuePosition - right.queuePosition)[0];
       if (job === undefined) return null;
-      let blockedDependencies: z.infer<typeof BlockedDependencySchema>[];
-      try {
-        blockedDependencies = await this.#resolveBlockedDependencies(job);
-      } catch (error) {
-        if (error instanceof AnalysisRunError && isCircuitBreakerFailure(error.failure)) {
-          const timestamp = this.#now().toISOString();
-          job.state = "blocked";
-          job.updatedAt = timestamp;
-          this.#state.circuitBreaker = {
-            classification: error.failure.classification,
-            openedAt: timestamp,
-          };
-          await this.#persist();
-        }
-        throw error;
-      }
+      const blockedDependencies = await this.#resolveJobBlockedDependencies(job);
       if (blockedDependencies.length > 0) {
         job.blockedDependencies = blockedDependencies;
         job.state = "blocked";
@@ -843,7 +820,7 @@ export class AnalysisJobs {
     return this.#serializeMutation(async () => {
       const job = this.#requireJob(jobId);
       if (job.state !== "blocked") throw new Error("Analysis Job is not blocked");
-      const blockedDependencies = await this.#resolveBlockedDependencies(job);
+      const blockedDependencies = await this.#resolveJobBlockedDependencies(job);
       job.blockedDependencies = blockedDependencies;
       if (blockedDependencies.length === 0) {
         job.state = "queued";
@@ -880,6 +857,82 @@ export class AnalysisJobs {
       );
   }
 
+  async #resolveJobBlockedDependencies(
+    job: AnalysisJobSnapshot,
+  ): Promise<z.infer<typeof BlockedDependencySchema>[]> {
+    try {
+      return await this.#resolveBlockedDependencies(job);
+    } catch (error) {
+      if (error instanceof AnalysisRunError && isCircuitBreakerFailure(error.failure)) {
+        return this.#blockJobForIntegrity(job, error);
+      }
+      throw error;
+    }
+  }
+
+  async #blockJobForIntegrity(job: AnalysisJobSnapshot, error: AnalysisRunError): Promise<never> {
+    const timestamp = this.#now().toISOString();
+    job.state = "blocked";
+    job.updatedAt = timestamp;
+    this.#state.circuitBreaker = {
+      classification: "integrity_violation",
+      openedAt: timestamp,
+    };
+    await this.#persist();
+    throw error;
+  }
+
+  async #rejectSubmitRangeIntegrity(
+    job: AnalysisJobSnapshot,
+    error: AnalysisRunError,
+  ): Promise<never> {
+    const timestamp = this.#now().toISOString();
+    this.#state.circuitBreaker = {
+      classification: "integrity_violation",
+      openedAt: timestamp,
+    };
+    const active = this.#active?.jobId === job.id ? this.#active : undefined;
+    const attempt =
+      active === undefined
+        ? undefined
+        : this.#state.attempts.find(({ id }) => id === active.attemptId);
+    if (active !== undefined && attempt !== undefined) {
+      attempt.failure = error.failure;
+      attempt.finishedAt = timestamp;
+      attempt.state = "failed";
+      job.state = "blocked";
+      job.updatedAt = timestamp;
+    }
+    await this.#persist();
+    if (active !== undefined && attempt !== undefined) {
+      active.controller.abort(error);
+      try {
+        await this.#terminateRunner(attempt.id, "interrupted");
+      } catch {
+        const containment = runnerContainmentFailure();
+        attempt.failure = containment.failure;
+        this.#state.circuitBreaker = {
+          classification: "containment_violation",
+          openedAt: this.#now().toISOString(),
+        };
+        await this.#persist();
+        throw containment;
+      }
+    }
+    throw error;
+  }
+
+  #terminateRunner(
+    attemptId: string,
+    reason: "cancelled" | "deadline" | "interrupted",
+  ): Promise<void> {
+    const existing = this.#terminationPromises.get(attemptId);
+    if (existing !== undefined) return existing;
+    const termination = this.#runner.terminateAndWait({ attemptId, reason });
+    this.#terminationPromises.set(attemptId, termination);
+    return termination;
+  }
+
   async #runWithDeadline<T>(
     attempt: AnalysisAttemptSnapshot,
     controller: AbortController,
@@ -911,15 +964,9 @@ export class AnalysisJobs {
       if (controller.signal.aborted) {
         const reason = normalizeTerminationReason(controller.signal.reason);
         try {
-          await this.#runner.terminateAndWait({ attemptId: attempt.id, reason });
+          await this.#terminateRunner(attempt.id, reason);
         } catch {
-          throw new AnalysisRunError({
-            classification: "containment_violation",
-            message: "Analysis runner did not acknowledge termination and process cleanup",
-            nextAction: "repair_installation",
-            retryable: false,
-            stage: "preflight",
-          });
+          throw runnerContainmentFailure();
         }
       }
       throw error;
@@ -1371,6 +1418,16 @@ function projectRangeIntegrityFailure(): AnalysisRunError {
   return new AnalysisRunError({
     classification: "integrity_violation",
     message: "Project Range authority changed for an existing Project",
+    nextAction: "repair_installation",
+    retryable: false,
+    stage: "preflight",
+  });
+}
+
+function runnerContainmentFailure(): AnalysisRunError {
+  return new AnalysisRunError({
+    classification: "containment_violation",
+    message: "Analysis runner did not acknowledge termination and process cleanup",
     nextAction: "repair_installation",
     retryable: false,
     stage: "preflight",
