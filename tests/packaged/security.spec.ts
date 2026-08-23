@@ -270,6 +270,9 @@ async function stopApplication(application: ReturnType<typeof spawn>): Promise<v
         stdio: "ignore",
       });
       terminator.once("error", () => application.kill());
+      terminator.once("exit", (code) => {
+        if (code !== 0) application.kill();
+      });
       return;
     }
     if (!application.kill()) {

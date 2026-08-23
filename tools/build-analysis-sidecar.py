@@ -9,6 +9,7 @@ import importlib.metadata
 import json
 import os
 import posixpath
+import re
 import shutil
 import subprocess
 import sys
@@ -347,11 +348,10 @@ def _macho_load_commands(path: Path) -> tuple[str | None, list[str], list[str]]:
     )
     dependencies = [
         line.strip().split(" (", 1)[0]
-        for line in dependencies_result.stdout.splitlines()[1:]
-        if line.strip()
+        for line in _otool_payload_lines(dependencies_result.stdout)
     ]
-    identity_lines = identity_result.stdout.splitlines()[1:]
-    identity = identity_lines[0].strip() if identity_lines else None
+    identity_lines = _otool_payload_lines(identity_result.stdout)
+    identity = identity_lines[0] if identity_lines else None
     command_lines = commands_result.stdout.splitlines()
     rpaths = [
         command_lines[index + 2].strip().split(" (offset", 1)[0].removeprefix("path ")
@@ -359,6 +359,15 @@ def _macho_load_commands(path: Path) -> tuple[str | None, list[str], list[str]]:
         if line.strip() == "cmd LC_RPATH"
     ]
     return identity, dependencies, rpaths
+
+
+def _otool_payload_lines(output: str) -> list[str]:
+    architecture_header = re.compile(r"\(architecture [^)]+\):$")
+    return [
+        line.strip()
+        for line in output.splitlines()[1:]
+        if line.strip() and not architecture_header.search(line.strip())
+    ]
 
 
 def _validate_macho_dependency(

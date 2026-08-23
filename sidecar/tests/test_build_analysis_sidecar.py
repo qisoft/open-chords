@@ -264,6 +264,28 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
                 "D:/runner-temp/msys64/ucrt64/bin/objdump.exe",
             )
 
+    def test_filters_universal_macho_architecture_headers(self) -> None:
+        otool_payload_lines = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_otool_payload_lines"]
+
+        self.assertEqual(
+            otool_payload_lines(
+                "\n".join(
+                    [
+                        "/tmp/Python (architecture arm64):",
+                        "    @rpath/Python (compatibility version 3.13.0)",
+                        "/tmp/Python (architecture x86_64):",
+                        "    @rpath/Python (compatibility version 3.13.0)",
+                    ]
+                )
+            ),
+            [
+                "@rpath/Python (compatibility version 3.13.0)",
+                "@rpath/Python (compatibility version 3.13.0)",
+            ],
+        )
+
     def test_keeps_ffmpeg_and_frozen_runtime_system_authorities_separate(self) -> None:
         manifest = json.loads(
             (Path(__file__).resolve().parents[1] / "native/ffmpeg-build.json").read_text("utf-8")
