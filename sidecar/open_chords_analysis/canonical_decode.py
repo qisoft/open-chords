@@ -393,6 +393,7 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
         raise _NativeToolSpawnError("native tool process spawn failed") from error
     started_readers: list[threading.Thread] = []
     reaped = False
+    primary_error: BaseException | None = None
     try:
         stdout = bytearray()
         stderr = bytearray()
@@ -433,12 +434,17 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
                 break
             except subprocess.TimeoutExpired:
                 continue
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
         if cleanup_error := _cleanup_native_process(
             process,
             started_readers,
             reaped=reaped,
         ):
+            if primary_error is not None:
+                raise primary_error from cleanup_error
             raise cleanup_error
     if cancelled:
         raise CanonicalDecodeCancelled("canonical decode was cancelled")
@@ -609,11 +615,9 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _raise_if_cancelled(cancellation: threading.Event, *artifacts: Path) -> None:
+def _raise_if_cancelled(cancellation: threading.Event) -> None:
     if not cancellation.is_set():
         return
-    for artifact in artifacts:
-        artifact.unlink(missing_ok=True)
     raise CanonicalDecodeCancelled("canonical decode was cancelled")
 
 

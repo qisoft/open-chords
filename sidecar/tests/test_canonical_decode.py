@@ -148,10 +148,11 @@ class CanonicalDecodeTests(unittest.TestCase):
                 "sidecar.open_chords_analysis.canonical_decode.threading.Thread.start",
                 side_effect=RuntimeError("injected reader start failure"),
             ),
-            self.assertRaises(_NativeToolCleanupError),
+            self.assertRaisesRegex(RuntimeError, "reader start failure") as raised,
         ):
             _run_tool([sys.executable, "-V"], threading.Event())
 
+        self.assertIsInstance(raised.exception.__cause__, _NativeToolCleanupError)
         self.assertEqual(process.kill.call_count, 2)
         self.assertEqual(process.wait.call_count, 2)
         stdout.close.assert_called_once_with()
@@ -262,7 +263,7 @@ class CanonicalDecodeTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), "failed to restore the Windows DLL search path")
 
     def test_probe_arguments_match_frozen_diagnostic_fixture(self) -> None:
-        fixture_path = Path("tests/fixtures/canonical-probe-arguments.json")
+        fixture_path = Path(__file__).resolve().parents[2] / "tests/fixtures/canonical-probe-arguments.json"
         expected_arguments = json.loads(fixture_path.read_text("utf-8"))["arguments"]
         ffprobe = Path("/tools/ffprobe")
         input_path = Path("/workspace/input/source-media")

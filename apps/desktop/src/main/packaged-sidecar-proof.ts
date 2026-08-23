@@ -61,8 +61,11 @@ export async function runPackagedSidecarProof(): Promise<void> {
       throw new Error("Packaged sidecar lifecycle proof returned unexpected evidence");
     }
   } finally {
-    await client.dispose();
-    rmSync(workspace, { force: true, recursive: true });
+    try {
+      await client.dispose();
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+    }
   }
 }
 

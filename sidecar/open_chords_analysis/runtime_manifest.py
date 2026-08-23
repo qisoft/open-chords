@@ -35,7 +35,7 @@ def write_runtime_manifest(
         relative = path.relative_to(runtime_root).as_posix()
         if path.is_symlink():
             target = os.readlink(path)
-            if not path.resolve(strict=True).is_relative_to(runtime_root):
+            if not _resolve_runtime_path(path).is_relative_to(runtime_root):
                 raise RuntimeManifestError("frozen runtime symbolic link escaped its package")
             files.append({"path": relative, "target": target, "type": "symlink"})
             continue
@@ -67,9 +67,9 @@ def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
 
     runtime_root = runtime_root.resolve(strict=True)
     manifest_path = runtime_root / MANIFEST_NAME
-    content = manifest_path.read_bytes()
-    if len(content) > MAX_MANIFEST_BYTES:
+    if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
         raise RuntimeManifestError("frozen runtime manifest exceeds four MiB")
+    content = manifest_path.read_bytes()
     try:
         manifest = json.loads(content)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
@@ -109,27 +109,38 @@ def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
         if entry["type"] == "symlink":
             if set(entry) != {"path", "target", "type"} or not candidate.is_symlink():
                 raise RuntimeManifestError("frozen runtime symbolic link is invalid")
-            if os.readlink(candidate) != entry["target"] or not candidate.resolve(strict=True).is_relative_to(runtime_root):
+            if os.readlink(candidate) != entry["target"] or not _resolve_runtime_path(candidate).is_relative_to(runtime_root):
                 raise RuntimeManifestError("frozen runtime symbolic link escaped its package")
             expected_paths.add(relative)
             continue
         if set(entry) != {"byteSize", "path", "sha256", "type"}:
             raise RuntimeManifestError("frozen runtime file entry is invalid")
-        resolved = candidate.resolve(strict=True)
+        resolved = _resolve_runtime_path(candidate)
         if not resolved.is_relative_to(runtime_root) or not candidate.is_file() or candidate.is_symlink():
             raise RuntimeManifestError("frozen runtime file escaped its package")
         if candidate.stat().st_size != entry["byteSize"] or _sha256_file(candidate) != entry["sha256"]:
             raise RuntimeManifestError(f"frozen runtime hash mismatch for {relative}")
         expected_paths.add(relative)
     actual_paths = {
-        path.relative_to(runtime_root).as_posix()
-        for path in runtime_root.rglob("*")
-        if (path.is_file() or path.is_symlink()) and path.name != MANIFEST_NAME
+        relative
+        for relative in (
+            path.relative_to(runtime_root).as_posix()
+            for path in runtime_root.rglob("*")
+            if path.is_file() or path.is_symlink()
+        )
+        if relative != MANIFEST_NAME
     }
     if actual_paths != expected_paths:
         raise RuntimeManifestError("frozen runtime contains an unmanifested file")
     executable_suffix = ".exe" if os.name == "nt" else ""
     tools = runtime_root / "tools"
+    required_paths = {
+        f"open-chords-analysis{executable_suffix}",
+        f"tools/ffmpeg{executable_suffix}",
+        f"tools/ffprobe{executable_suffix}",
+    }
+    if not required_paths <= expected_paths:
+        raise RuntimeManifestError("frozen runtime manifest misses a required executable")
     return FrozenRuntime(
         manifest_hash=hashlib.sha256(content).hexdigest(),
         platform_profile=platform_profile,
@@ -142,6 +153,13 @@ def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
 
 def _canonical_json(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode()
+
+
+def _resolve_runtime_path(path: Path) -> Path:
+    try:
+        return path.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise RuntimeManifestError("frozen runtime path could not be resolved") from error
 
 
 def _write_atomic(path: Path, content: bytes) -> None:

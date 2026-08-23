@@ -58,7 +58,7 @@ while [[ ${#pending_files[@]} -ne 0 ]]; do
   tool="${pending_files[0]}"
   pending_files=("${pending_files[@]:1}")
   tool_lower="${tool,,}"
-  if array_contains "${tool_lower}" "${inspected_files[@]}"; then
+  if array_contains "${tool_lower}" ${inspected_files[@]+"${inspected_files[@]}"}; then
     continue
   fi
   inspected_files+=("${tool_lower}")
@@ -85,7 +85,7 @@ while [[ ${#pending_files[@]} -ne 0 ]]; do
       exit 1
     fi
     dependency_lower="${dependency,,}"
-    if array_contains "${dependency_lower}" "${packaged_runtime_dlls[@]}"; then
+    if array_contains "${dependency_lower}" ${packaged_runtime_dlls[@]+"${packaged_runtime_dlls[@]}"}; then
       imported_runtime_dlls+=("${dependency_lower}")
       pending_files+=("${dependency}")
       continue
@@ -111,7 +111,7 @@ while [[ ${#pending_files[@]} -ne 0 ]]; do
 done
 
 for dependency in "${packaged_runtime_dlls[@]}"; do
-  if ! array_contains "${dependency}" "${imported_runtime_dlls[@]}"; then
+  if ! array_contains "${dependency}" ${imported_runtime_dlls[@]+"${imported_runtime_dlls[@]}"}; then
     violations+=("reviewed packaged Windows runtime DLL is not imported: ${dependency}")
   fi
 done

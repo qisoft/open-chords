@@ -94,11 +94,7 @@ def main() -> None:
         shutil.copy2(_python_license(), licenses / "CPython-PSF-2.0.txt")
         shutil.copy2(ROOT / "LICENSE", licenses / "Open-Chords-AGPL-3.0.txt")
         pyinstaller_distribution = importlib.metadata.distribution("pyinstaller")
-        pyinstaller_license = next(
-            file
-            for file in pyinstaller_distribution.files or []
-            if file.name == "COPYING.txt" and "licenses" in file.parts
-        )
+        pyinstaller_license = _pyinstaller_license(pyinstaller_distribution)
         shutil.copy2(
             pyinstaller_distribution.locate_file(pyinstaller_license),
             licenses / "PyInstaller-COPYING.txt",
@@ -164,6 +160,20 @@ def _python_license() -> Path:
         Path(sys.executable).resolve(),
         Path(sysconfig.get_path("stdlib")),
     )
+
+
+def _pyinstaller_license(distribution: importlib.metadata.Distribution) -> Path:
+    license_file = next(
+        (
+            file
+            for file in distribution.files or []
+            if file.name == "COPYING.txt" and "licenses" in file.parts
+        ),
+        None,
+    )
+    if license_file is None:
+        raise FileNotFoundError("PyInstaller COPYING.txt was not found in distribution metadata")
+    return license_file
 
 
 def _find_python_license(executable: Path, stdlib: Path) -> Path:
@@ -237,7 +247,7 @@ def _native_component(relative: str, binary_format: str | None) -> str | None:
         return "cpython"
     if lower.startswith("_internal/") and (
         name == "python"
-        or name.startswith("python3") and name.endswith(".dll")
+        or (name.startswith("python3") and name.endswith(".dll"))
         or name.endswith((".so", ".pyd"))
     ):
         return "cpython"

@@ -25,6 +25,7 @@ MAX_FRAME_BYTES: Final = 1024 * 1024
 MAX_ID_BYTES: Final = 256
 PROTOCOL_VERSION: Final = 1
 HEARTBEAT_INTERVAL_SECONDS: Final = 5
+TERMINAL_CONTROL_ARBITRATION_SECONDS: Final = 0.1
 SHA256_PATTERN: Final = re.compile(r"^[a-f0-9]{64}$")
 
 
@@ -117,7 +118,8 @@ def serve_one_session(
         else:
             events.put(("result", artifact))
 
-    threading.Thread(target=read_control, daemon=True).start()
+    control_thread = threading.Thread(target=read_control, daemon=True)
+    control_thread.start()
     decode_thread = threading.Thread(target=run_decode, daemon=True)
     decode_thread.start()
     sequence = 1
@@ -157,6 +159,11 @@ def serve_one_session(
             continue
         if event == "result":
             decode_finished = True
+            if not cancel_received:
+                control_thread.join(timeout=TERMINAL_CONTROL_ARBITRATION_SECONDS)
+                if cancellation.is_set():
+                    events.put(("result", payload))
+                    continue
             if cancel_received:
                 _write_cleanup_terminal(stdout, start, sequence, workspace)
                 return

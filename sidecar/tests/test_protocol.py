@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from sidecar.open_chords_analysis import protocol
 from sidecar.open_chords_analysis.canonical_decode import (
+    ArtifactDescriptor,
     CanonicalDecodeCancelled,
     CanonicalDecodeError,
     CanonicalDecodeFailureCode,
@@ -45,6 +46,22 @@ class GatedControlReader(io.BytesIO):
             self.waited = True
             if not self.gate.wait(timeout=1):
                 raise TimeoutError("heartbeat was not written before cancel input was released")
+        return super().read(size)
+
+
+class DecodeFinishedControlReader(io.BytesIO):
+    def __init__(self, start: bytes, control: bytes, decode_finished: threading.Event):
+        super().__init__(start + control)
+        self.start_length = len(start)
+        self.decode_finished = decode_finished
+        self.waited = False
+
+    def read(self, size: int = -1) -> bytes:
+        if not self.waited and self.tell() >= self.start_length:
+            self.waited = True
+            if not self.decode_finished.wait(timeout=1):
+                raise TimeoutError("decode did not finish before terminal cancel arbitration")
+            time.sleep(0.02)
         return super().read(size)
 
 
@@ -325,6 +342,57 @@ class ProtocolTests(unittest.TestCase):
                 ["handshake", "cancel_ack", "cleanup_complete"],
             )
             self.assertFalse((workspace / "artifacts/canonical.wav").exists())
+            self.assertFalse((workspace / "artifacts/decode-manifest.json").exists())
+
+    def test_pending_cancel_takes_precedence_over_a_completed_result(self) -> None:
+        decode_finished = threading.Event()
+        cancel = self._frame(
+            {
+                "jobId": "job-protocol",
+                "nonce": "nonce-protocol",
+                "requestId": "request-protocol",
+                "sequence": 1,
+                "type": "cancel",
+            }
+        )
+
+        def finish_before_control_read(*args: object) -> ArtifactDescriptor:
+            workspace = args[0]
+            assert isinstance(workspace, Path)
+            artifact = workspace / "artifacts/decode-manifest.json"
+            artifact.parent.mkdir()
+            artifact.write_bytes(b"result")
+            decode_finished.set()
+            return ArtifactDescriptor(
+                path="artifacts/decode-manifest.json",
+                byte_size=6,
+                sha256="a" * 64,
+            )
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-protocol-terminal-cancel-") as temporary:
+            workspace = Path(temporary)
+            output = io.BytesIO()
+            with patch(
+                "sidecar.open_chords_analysis.protocol.decode_canonical",
+                side_effect=finish_before_control_read,
+            ):
+                serve_one_session(
+                    DecodeFinishedControlReader(self._start_frame(), cancel, decode_finished),
+                    output,
+                    workspace,
+                    FrozenRuntime(
+                        manifest_hash="a" * 64,
+                        platform_profile="test",
+                        toolchain=NativeToolchain(
+                            Path("/unused/ffmpeg"), Path("/unused/ffprobe")
+                        ),
+                    ),
+                )
+
+            self.assertEqual(
+                [message["type"] for message in self._messages(output.getvalue())],
+                ["handshake", "cancel_ack", "cleanup_complete"],
+            )
             self.assertFalse((workspace / "artifacts/decode-manifest.json").exists())
 
     def test_cancel_remains_valid_when_heartbeats_are_already_in_flight(self) -> None:

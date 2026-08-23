@@ -34,10 +34,12 @@ export function verifyPackagedSidecarRuntime(
   expectedManifestHash: string,
 ): VerifiedSidecarRuntime {
   const expectedHash = Sha256Schema.parse(expectedManifestHash);
-  const manifestBytes = readFileSync(resolve(runtimeRoot, "runtime-manifest.json"));
-  if (manifestBytes.byteLength > MAX_MANIFEST_BYTES) {
+  const manifestPath = resolve(runtimeRoot, "runtime-manifest.json");
+  const manifestStat = lstatSync(manifestPath);
+  if (!manifestStat.isFile() || manifestStat.size > MAX_MANIFEST_BYTES) {
     throw new Error("Packaged sidecar manifest exceeds four MiB");
   }
+  const manifestBytes = readFileSync(manifestPath);
   const actualManifestHash = sha256(manifestBytes);
   if (actualManifestHash !== expectedHash) {
     throw new Error("Packaged sidecar manifest did not match protected build metadata");

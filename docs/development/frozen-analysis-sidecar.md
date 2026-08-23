@@ -44,7 +44,7 @@ For a local macOS arm64 package, build the native runtime before Forge:
 ```sh
 tools/build-ffmpeg.sh darwin-arm64 build/native
 python3 -m venv .venv
-.venv/bin/python -m pip install -r sidecar/requirements-build.txt
+.venv/bin/python -m pip install --require-hashes --only-binary=:all: -r sidecar/requirements-build.txt
 .venv/bin/python tools/build-analysis-sidecar.py \
   --build-id local \
   --native-root build/native/darwin-arm64 \

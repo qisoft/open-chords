@@ -19,6 +19,7 @@
     "playwright.config.ts",
     "tests/**/*.ts",
     "tools/**/*.ts",
+    "vite.main.config.ts",
     "vitest.config.ts"
   ]
 }

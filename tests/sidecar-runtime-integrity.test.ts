@@ -63,3 +63,13 @@ it("anchors the exact packaged executable and native tools in protected build me
     "unmanifested file",
   );
 });
+
+it("rejects an oversized manifest before reading its content", () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "open-chords-runtime-large-manifest-"));
+  temporaryRoots.push(runtimeRoot);
+  writeFileSync(join(runtimeRoot, "runtime-manifest.json"), Buffer.alloc(4 * 1024 * 1024 + 1));
+
+  expect(() => verifyPackagedSidecarRuntime(runtimeRoot, "0".repeat(64))).toThrow(
+    "manifest exceeds four MiB",
+  );
+});

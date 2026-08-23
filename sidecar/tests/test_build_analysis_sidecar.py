@@ -4,9 +4,18 @@ import runpy
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 class BuildAnalysisSidecarTests(unittest.TestCase):
+    def test_reports_missing_pyinstaller_license_with_context(self) -> None:
+        pyinstaller_license = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_pyinstaller_license"]
+
+        with self.assertRaisesRegex(FileNotFoundError, "PyInstaller COPYING.txt"):
+            pyinstaller_license(SimpleNamespace(files=[]))
+
     def test_finds_setup_python_and_ancestor_license_layouts(self) -> None:
         find_python_license = runpy.run_path(
             Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
