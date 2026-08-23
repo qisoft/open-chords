@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import runpy
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -95,6 +96,7 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
             ["shared"],
         )
 
+    @unittest.skipUnless(sys.platform == "darwin", "Mach-O paths require macOS semantics")
     def test_rejects_unpackaged_macho_dependencies(self) -> None:
         validate_dependency = runpy.run_path(
             Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
@@ -176,6 +178,7 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
                     {"_internal/python3.13/lib-dynload/_ssl.so"},
                 )
 
+    @unittest.skipUnless(sys.platform == "darwin", "Mach-O symlinks require macOS semantics")
     def test_indexes_only_native_files_and_symlinks_to_native_files(self) -> None:
         module = runpy.run_path(
             Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
