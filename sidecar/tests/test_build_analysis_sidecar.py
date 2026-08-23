@@ -143,6 +143,60 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
                     [],
                     {"_internal/python3.13/lib-dynload/_ssl.so"},
                 )
+            with self.assertRaisesRegex(RuntimeError, "Unreviewed Mach-O dependency"):
+                validate_dependency(
+                    runtime_root,
+                    owner,
+                    "/usr/lib/../../opt/host/libevil.dylib",
+                    [],
+                    {"_internal/python3.13/lib-dynload/_ssl.so"},
+                )
+
+    def test_indexes_only_native_files_and_symlinks_to_native_files(self) -> None:
+        module = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )
+        packaged_native_paths = module["_packaged_native_paths"]
+        validate_dependency = module["_validate_macho_dependency"]
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-native-index-") as temporary:
+            runtime_root = Path(temporary).resolve()
+            internal = runtime_root / "_internal"
+            internal.mkdir()
+            native = internal / "Python.framework/Versions/3.13/Python"
+            native.parent.mkdir(parents=True)
+            native.write_bytes(b"native")
+            data = internal / "not-a-native-library"
+            data.write_text("data", "utf-8")
+            link = internal / "Python"
+            try:
+                link.symlink_to("Python.framework/Versions/3.13/Python")
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"symbolic links are unavailable: {error}")
+
+            indexed = packaged_native_paths(
+                runtime_root,
+                [
+                    {
+                        "component": "cpython",
+                        "format": "mach-o",
+                        "path": native.relative_to(runtime_root).as_posix(),
+                        "sha256": "0" * 64,
+                    }
+                ],
+            )
+
+            self.assertIn("_internal/python", indexed)
+            self.assertIn("_internal/python.framework/versions/3.13/python", indexed)
+            self.assertNotIn("_internal/not-a-native-library", indexed)
+            with self.assertRaisesRegex(RuntimeError, "Unresolvable Mach-O dependency"):
+                validate_dependency(
+                    runtime_root,
+                    native,
+                    "@rpath/not-a-native-library",
+                    ["@loader_path/../../.."],
+                    indexed,
+                )
 
     def test_rejects_unpackaged_pe_dependencies(self) -> None:
         validate_dependencies = runpy.run_path(

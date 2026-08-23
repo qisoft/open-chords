@@ -8,6 +8,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -262,11 +263,7 @@ def _validate_native_closure(
     native_files: list[dict[str, str]],
     ffmpeg_build: dict[str, object],
 ) -> None:
-    packaged_paths = {
-        path.relative_to(runtime_root).as_posix().lower()
-        for path in runtime_root.rglob("*")
-        if path.is_file() or path.is_symlink()
-    }
+    packaged_native_paths = _packaged_native_paths(runtime_root, native_files)
     if sys.platform == "darwin":
         for entry in native_files:
             if entry["format"] != "mach-o":
@@ -280,7 +277,7 @@ def _validate_native_closure(
                         owner,
                         dependency,
                         rpaths,
-                        packaged_paths,
+                        packaged_native_paths,
                     )
         return
     if os.name == "nt":
@@ -295,9 +292,29 @@ def _validate_native_closure(
             if entry["format"] != "pe":
                 continue
             dependencies = _pe_dependencies(runtime_root / entry["path"], inspector)
-            _validate_pe_dependencies(entry["path"], dependencies, packaged_paths, allowed_system)
+            _validate_pe_dependencies(
+                entry["path"], dependencies, packaged_native_paths, allowed_system
+            )
         return
     raise RuntimeError("frozen native closure validation has no declared platform profile")
+
+
+def _packaged_native_paths(
+    runtime_root: Path,
+    native_files: list[dict[str, str]],
+) -> set[str]:
+    runtime_root = runtime_root.resolve(strict=True)
+    native_paths = {entry["path"].lower() for entry in native_files}
+    for path in runtime_root.rglob("*"):
+        if not path.is_symlink():
+            continue
+        resolved = path.resolve(strict=True)
+        if not resolved.is_relative_to(runtime_root):
+            continue
+        resolved_relative = resolved.relative_to(runtime_root).as_posix().lower()
+        if resolved_relative in native_paths:
+            native_paths.add(path.relative_to(runtime_root).as_posix().lower())
+    return native_paths
 
 
 def _macho_load_commands(path: Path) -> tuple[str | None, list[str], list[str]]:
@@ -345,8 +362,14 @@ def _validate_macho_dependency(
     rpaths: list[str],
     packaged_paths: set[str],
 ) -> None:
-    if dependency.startswith(("/System/Library/", "/usr/lib/")):
-        return
+    if dependency.startswith("/"):
+        normalized = posixpath.normpath(dependency)
+        if any(
+            normalized == root or normalized.startswith(f"{root}/")
+            for root in ("/System/Library", "/usr/lib")
+        ):
+            return
+        raise RuntimeError(f"Unreviewed Mach-O dependency for {owner.name}: {dependency}")
     if dependency.startswith("@rpath/"):
         suffix = dependency.removeprefix("@rpath/")
         matches = {
