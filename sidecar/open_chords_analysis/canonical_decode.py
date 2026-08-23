@@ -37,6 +37,7 @@ class CanonicalDecodeFailureCode(str, Enum):
     PROBE_LOADER_MISSING = "canonical_probe_loader_missing"
     PROBE_LOADER_SYMBOL = "canonical_probe_loader_symbol_missing"
     PROBE_OUTPUT_LIMIT = "canonical_probe_output_limit_failed"
+    PROBE_PROCESS_CLEANUP = "canonical_probe_process_cleanup_failed"
     PROBE_PROCESS = "canonical_probe_process_failed"
     PROBE_OUTPUT = "canonical_probe_output_failed"
     PROBE_RUNTIME = "canonical_probe_runtime_failed"
@@ -89,6 +90,10 @@ class _NativeToolOutputLimitError(RuntimeError):
 
 class _NativeToolTimeoutError(RuntimeError):
     """A native tool exceeded its process deadline."""
+
+
+class _NativeToolCleanupError(RuntimeError):
+    """A native tool process could not be fully reaped and closed."""
 
 
 @dataclass(frozen=True)
@@ -301,6 +306,11 @@ def _probe_audio(
             "ffprobe output exceeded its bound",
             code=CanonicalDecodeFailureCode.PROBE_OUTPUT_LIMIT,
         ) from error
+    except _NativeToolCleanupError as error:
+        raise CanonicalDecodeError(
+            "ffprobe process cleanup failed",
+            code=CanonicalDecodeFailureCode.PROBE_PROCESS_CLEANUP,
+        ) from error
     except _NativeToolExitError as error:
         loader_codes = {
             0xC000007B: CanonicalDecodeFailureCode.PROBE_LOADER_INVALID_IMAGE,
@@ -412,12 +422,10 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
         while True:
             if cancellation.is_set():
                 cancelled = True
-                process.kill()
                 break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 timed_out = True
-                process.kill()
                 break
             try:
                 return_code = process.wait(timeout=min(0.05, remaining))
@@ -425,22 +433,19 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
                 break
             except subprocess.TimeoutExpired:
                 continue
-        if cancelled or timed_out:
-            return_code = process.wait()
-            reaped = True
     finally:
-        if not reaped:
-            _terminate_and_reap(process)
-        for reader in started_readers:
-            reader.join(timeout=1)
-        process.stdout.close()
-        process.stderr.close()
-    if return_code is None:
-        raise RuntimeError("native media tool ended without a process status")
+        if cleanup_error := _cleanup_native_process(
+            process,
+            started_readers,
+            reaped=reaped,
+        ):
+            raise cleanup_error
     if cancelled:
         raise CanonicalDecodeCancelled("canonical decode was cancelled")
     if timed_out:
         raise _NativeToolTimeoutError("native media tool exceeded its deadline")
+    if return_code is None:
+        raise RuntimeError("native media tool ended without a process status")
     if exceeded.is_set():
         raise _NativeToolOutputLimitError("native media tool exceeded its output budget")
     if return_code != 0:
@@ -448,13 +453,40 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
     return _ToolResult(bytes(stdout), bytes(stderr))
 
 
-def _terminate_and_reap(process: subprocess.Popen[bytes]) -> None:
-    process.kill()
-    try:
-        process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=1)
+def _cleanup_native_process(
+    process: subprocess.Popen[bytes],
+    readers: list[threading.Thread],
+    *,
+    reaped: bool,
+) -> _NativeToolCleanupError | None:
+    cleanup_failed = False
+    if not reaped:
+        for _attempt in range(2):
+            try:
+                process.kill()
+            except Exception:
+                cleanup_failed = True
+            try:
+                process.wait(timeout=1)
+                reaped = True
+                break
+            except Exception:
+                continue
+        if not reaped:
+            cleanup_failed = True
+    for reader in readers:
+        try:
+            reader.join(timeout=1)
+            if reader.is_alive():
+                cleanup_failed = True
+        except Exception:
+            cleanup_failed = True
+    for pipe in (process.stdout, process.stderr):
+        try:
+            pipe.close()
+        except Exception:
+            cleanup_failed = True
+    return _NativeToolCleanupError("native media tool cleanup failed") if cleanup_failed else None
 
 
 def _sanitize_external_tool_runtime() -> None:
