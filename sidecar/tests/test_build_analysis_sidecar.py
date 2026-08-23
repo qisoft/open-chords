@@ -39,6 +39,11 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
             native_component("_internal/api-ms-win-crt-runtime-l1-1-0.dll", "pe"),
             "msvc-runtime",
         )
+        self.assertIsNone(
+            native_component("_internal/api-ms-win-not-a-dll.txt", None),
+        )
+        with self.assertRaisesRegex(RuntimeError, "Unclassified native runtime file"):
+            native_component("_internal/api-ms-win-not-actually-pe.dll", None)
         with self.assertRaisesRegex(RuntimeError, "Unclassified native runtime file"):
             native_component("_internal/unreviewed-runtime.dll", "pe")
 
