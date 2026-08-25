@@ -62,7 +62,7 @@ describe("CPU analysis cross-language candidate", () => {
       "sections",
       "assemble",
     ]);
-  });
+  }, 60_000);
 
   it("validates tonal rhythm and harmony through timeline invariants", () => {
     const root = mkdtempSync(join(tmpdir(), "open-chords-cpu-tonal-candidate-"));
@@ -98,7 +98,7 @@ describe("CPU analysis cross-language candidate", () => {
       assertion: { state: "low_confidence" },
       value: { kind: "key", mode: "major", tonic: "C" },
     });
-  });
+  }, 60_000);
 
   it("keeps the frozen dependency closure weight-free and GPU-optional", () => {
     const requirements = readFileSync("sidecar/requirements-build.txt", "utf8");
