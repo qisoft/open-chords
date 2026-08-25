@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -746,6 +746,98 @@ describe("AnalysisJobs", () => {
     releaseResult();
     await expect(running).resolves.toMatchObject({ state: "cancelled" });
     expect(publications).toBe(0);
+  });
+
+  it("aborts and contains an Attempt cancelled as its running state becomes durable", async () => {
+    const stateRoot = await temporaryDirectory();
+    let runnerObservedAbort = false;
+    const terminations: { attemptId: string; reason: string }[] = [];
+    const ids = ["job_immediate_cancel", "attempt_immediate_cancel"];
+    const jobs = await openAnalysisJobs({
+      authority: {
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: structuredClone(goldenProject),
+          projectRevisionId: "projectrevision_current",
+        }),
+        publishAnalysisRevision: async () => ({ projectRevisionId: "projectrevision_forbidden" }),
+      },
+      idFactory: () => ids.shift()!,
+      runner: {
+        run: async ({ signal }) => {
+          runnerObservedAbort = signal.aborted;
+          if (!signal.aborted) {
+            await new Promise<void>((resolve) => {
+              signal.addEventListener(
+                "abort",
+                () => {
+                  runnerObservedAbort = true;
+                  resolve();
+                },
+                { once: true },
+              );
+            });
+          }
+          return {
+            revision: structuredClone(goldenProject.analysisRevisions[0]!),
+            stageOutcomes: [
+              { stage: "preflight", state: "completed" },
+              { stage: "canonical_decode", state: "completed" },
+              { stage: "shared_features", state: "completed" },
+              { stage: "rhythm", state: "completed" },
+              { stage: "harmony", state: "completed" },
+              { stage: "assemble", state: "completed" },
+            ],
+          };
+        },
+        terminateAndWait: async (input) => {
+          terminations.push(input);
+        },
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+
+    const running = jobs.runNext();
+    await jobs.cancel("job_immediate_cancel");
+
+    await expect(running).resolves.toMatchObject({ state: "cancelled" });
+    expect(runnerObservedAbort).toBe(true);
+    expect(terminations).toEqual([{ attemptId: "attempt_immediate_cancel", reason: "cancelled" }]);
+    expect(jobs.get("job_immediate_cancel")).toMatchObject({
+      attempts: [{ state: "cancelled" }],
+      job: { state: "cancelled" },
+    });
+  });
+
+  it("removes its temporary state file when an atomic replace fails", async () => {
+    const stateRoot = await temporaryDirectory();
+    const jobs = await openAnalysisJobs({
+      authority,
+      runner,
+      stateRoot,
+    });
+    const analysisStateDirectory = join(stateRoot, "analysis-jobs");
+    rmSync(join(analysisStateDirectory, "state.json"), { force: true });
+    await mkdir(join(analysisStateDirectory, "state.json"), { recursive: true });
+
+    await expect(
+      jobs.submit({
+        canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+        projectId: "project_golden",
+        recipe,
+        sourceSnapshotId: "snapshot_fixture",
+      }),
+    ).rejects.toThrow(/EISDIR|EEXIST|ENOTEMPTY|EPERM/u);
+
+    expect(
+      (await readdir(analysisStateDirectory)).filter((entry) => entry.endsWith(".tmp")),
+    ).toEqual([]);
   });
 
   it("recovers a running Attempt as interrupted and rejects its late result after restart", async () => {

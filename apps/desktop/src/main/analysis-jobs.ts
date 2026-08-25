@@ -450,19 +450,19 @@ export class AnalysisJobs {
       }
       job.updatedAt = timestamp;
       await this.#persist();
+      if (this.#active?.jobId === jobId) {
+        this.#active.controller.abort(
+          new AnalysisRunError({
+            classification: "cancelled",
+            message: "Analysis Attempt was cancelled",
+            nextAction: "retry",
+            retryable: true,
+            stage: job.progress?.stage ?? "preflight",
+          }),
+        );
+      }
       return structuredClone(job);
     });
-    if (this.#active?.jobId === jobId) {
-      this.#active.controller.abort(
-        new AnalysisRunError({
-          classification: "cancelled",
-          message: "Analysis Attempt was cancelled",
-          nextAction: "retry",
-          retryable: true,
-          stage: cancelled.progress?.stage ?? "preflight",
-        }),
-      );
-    }
     return cancelled;
   }
 
@@ -633,6 +633,7 @@ export class AnalysisJobs {
   }
 
   async runNext(): Promise<AnalysisJobSnapshot | null> {
+    const controller = new AbortController();
     const started = await this.#serializeMutation(async () => {
       if (this.#active !== undefined) return null;
       if (this.#state.circuitBreaker !== null) return null;
@@ -676,6 +677,11 @@ export class AnalysisJobs {
       job.updatedAt = timestamp;
       this.#state.attempts.push(attempt);
       await this.#persist();
+      this.#active = {
+        attemptId: attempt.id,
+        controller,
+        jobId: job.id,
+      };
       return {
         attempt: structuredClone(attempt),
         job: structuredClone(job),
@@ -685,12 +691,6 @@ export class AnalysisJobs {
     if (started === null) return null;
     if ("blockedJob" in started) return started.blockedJob;
 
-    const controller = new AbortController();
-    this.#active = {
-      attemptId: started.attempt.id,
-      controller,
-      jobId: started.job.id,
-    };
     try {
       const reusableCheckpoints = await this.#matchingCheckpoints(
         started.job,
@@ -944,6 +944,17 @@ export class AnalysisJobs {
     controller: AbortController,
     execution: Promise<T>,
   ): Promise<T> {
+    if (controller.signal.aborted) {
+      try {
+        await this.#terminateRunner(
+          attempt.id,
+          normalizeTerminationReason(controller.signal.reason),
+        );
+      } catch {
+        throw runnerContainmentFailure();
+      }
+      throw controller.signal.reason;
+    }
     const remainingMs = Math.max(0, Date.parse(attempt.deadlineAt) - this.#now().getTime());
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
@@ -1272,15 +1283,24 @@ async function atomicWrite(path: string, content: string): Promise<void> {
   const parent = dirname(path);
   await mkdir(parent, { recursive: true });
   const temporary = join(parent, `.state-${randomUUID()}.tmp`);
-  const file = await open(temporary, "wx");
   try {
-    await file.writeFile(content, "utf8");
-    await file.sync();
-  } finally {
-    await file.close();
+    const file = await open(temporary, "wx");
+    try {
+      await file.writeFile(content, "utf8");
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    await rename(temporary, path);
+    await syncDirectory(parent);
+  } catch (error) {
+    try {
+      await rm(temporary, { force: true });
+    } catch {
+      // Preserve the durable-write failure when best-effort cleanup also fails.
+    }
+    throw error;
   }
-  await rename(temporary, path);
-  await syncDirectory(parent);
 }
 
 function hashIdentity(value: unknown): string {
