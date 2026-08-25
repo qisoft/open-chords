@@ -24,20 +24,36 @@ export { materializeEffectiveTimeline, type EffectiveTimeline } from "./projecti
 export {
   AnalysisRevisionSchema,
   EditTransactionSchema,
+  MusicalTimelineSchema,
   ProjectContractSchema,
   StableIdSchema,
   type AnalysisRevision,
   type EditTransaction,
   type LyricsAlignment,
+  type MusicalTimeline,
   type ProjectContract,
 } from "./schema.ts";
 
-import { validateProjectInvariants } from "./invariants.ts";
+import { validateProjectInvariants, validateTimelineInvariants } from "./invariants.ts";
 import {
   materializeEffectiveTimeline,
   validateCommittedEditLayerProjections,
 } from "./projection.ts";
-import { ProjectContractSchema, type ProjectContract } from "./schema.ts";
+import {
+  MusicalTimelineSchema,
+  ProjectContractSchema,
+  type MusicalTimeline,
+  type ProjectContract,
+} from "./schema.ts";
+
+export function parseAnalysisTimeline(input: unknown, durationSamples: number): MusicalTimeline {
+  if (!Number.isSafeInteger(durationSamples) || durationSamples <= 0) {
+    throw new Error("Analysis Timeline duration must be a positive safe integer");
+  }
+  const timeline = MusicalTimelineSchema.parse(input);
+  validateTimelineInvariants(timeline, durationSamples);
+  return timeline;
+}
 
 export function parseProjectContract(input: unknown): ProjectContract {
   const project = ProjectContractSchema.parse(input);

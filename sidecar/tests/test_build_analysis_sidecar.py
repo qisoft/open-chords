@@ -71,6 +71,57 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unclassified native runtime file"):
             native_component("tools/unreviewed-runtime.dll", "pe")
 
+    def test_classifies_cpu_analysis_native_extensions_by_distribution(self) -> None:
+        native_component = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_native_component"]
+
+        self.assertEqual(
+            native_component(
+                "_internal/numpy/_core/_multiarray_umath.cpython-313-darwin.so",
+                "mach-o",
+            ),
+            "numpy",
+        )
+        self.assertEqual(
+            native_component("_internal/scipy/signal/_sigtools.cp313-win_amd64.pyd", "pe"),
+            "scipy",
+        )
+        self.assertEqual(
+            native_component("_internal/numpy.libs/libopenblas.dll", "pe"),
+            "numpy",
+        )
+        self.assertEqual(
+            native_component("_internal/scipy.libs/libopenblas.dll", "pe"),
+            "scipy",
+        )
+        self.assertEqual(
+            native_component("_internal/llvmlite/binding/libllvmlite.dylib", "mach-o"),
+            "llvmlite",
+        )
+        self.assertEqual(
+            native_component("_internal/_cffi_backend.cp313-win_amd64.pyd", "pe"),
+            "cffi",
+        )
+        self.assertEqual(
+            native_component("_internal/_soundfile_data/libsndfile_x64.dll", "pe"),
+            "soundfile",
+        )
+
+    def test_collects_exact_analysis_dependency_licenses(self) -> None:
+        module = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-analysis-licenses-") as temporary:
+            output = Path(temporary) / "licenses.txt"
+            versions = module["_write_python_analysis_licenses"](output)
+
+            self.assertEqual(versions["librosa"], "0.11.0")
+            self.assertIn("===== librosa 0.11.0 =====", output.read_text("utf-8"))
+            self.assertIn("===== numpy ", output.read_text("utf-8"))
+            self.assertGreater(output.stat().st_size, 1_000)
+
     def test_filters_platform_specific_dependency_authority(self) -> None:
         dependencies_for_profile = runpy.run_path(
             Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"

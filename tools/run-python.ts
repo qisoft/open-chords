@@ -3,16 +3,19 @@ import { spawnSync } from "node:child_process";
 const scriptArguments = process.argv.slice(2);
 if (scriptArguments.length === 0) throw new Error("A Python script path is required");
 
+const override = process.env.OPEN_CHORDS_PYTHON;
 const candidates =
-  process.platform === "win32"
-    ? [
-        { arguments: ["-3"], command: "py" },
-        { arguments: [], command: "python" },
-      ]
-    : [
-        { arguments: [], command: "python3" },
-        { arguments: [], command: "python" },
-      ];
+  override !== undefined
+    ? [{ arguments: [], command: override }]
+    : process.platform === "win32"
+      ? [
+          { arguments: ["-3"], command: "py" },
+          { arguments: [], command: "python" },
+        ]
+      : [
+          { arguments: [], command: "python3" },
+          { arguments: [], command: "python" },
+        ];
 
 const interpreter = candidates.find(({ arguments: candidateArguments, command }) => {
   const probe = spawnSync(

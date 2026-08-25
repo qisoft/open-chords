@@ -20,6 +20,7 @@ from .canonical_decode import (
     NativeToolchain,
     decode_canonical,
 )
+from .analysis_profiles import PROFILE_SETTINGS
 
 MAX_FRAME_BYTES: Final = 1024 * 1024
 MAX_ID_BYTES: Final = 256
@@ -72,7 +73,12 @@ def serve_one_session(
     _write_frame(
         stdout,
         {
-            "capabilities": ["analysis", "canonical_decode"],
+            "capabilities": [
+                "analysis",
+                "canonical_decode",
+                "cpu_analysis",
+                *[f"profile:{profile}" for profile in sorted(PROFILE_SETTINGS)],
+            ],
             "manifestHash": runtime.manifest_hash,
             "nonce": start.nonce,
             "protocolVersion": PROTOCOL_VERSION,

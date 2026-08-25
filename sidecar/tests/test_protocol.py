@@ -128,7 +128,14 @@ class ProtocolTests(unittest.TestCase):
             self._messages(output.getvalue()),
             [
                 {
-                    "capabilities": ["analysis", "canonical_decode"],
+                    "capabilities": [
+                        "analysis",
+                        "canonical_decode",
+                        "cpu_analysis",
+                        "profile:balanced",
+                        "profile:eco",
+                        "profile:fast",
+                    ],
                     "manifestHash": "b" * 64,
                     "nonce": "nonce-protocol",
                     "protocolVersion": 1,
