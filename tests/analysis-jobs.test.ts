@@ -1280,6 +1280,78 @@ describe("AnalysisJobs", () => {
     expect(terminations).toEqual([{ attemptId: "attempt_deadline", reason: "deadline" }]);
   });
 
+  it("does not start or publish a runner after checkpoint preparation exhausts its deadline", async () => {
+    const stateRoot = await temporaryDirectory();
+    const startedAt = new Date("2026-08-25T12:00:00.000Z");
+    const expiredAt = new Date("2026-08-25T12:00:00.006Z");
+    let clockCallsAfterSnapshot = 0;
+    let publications = 0;
+    let runnerStarts = 0;
+    const terminations: Array<{ attemptId: string; reason: string }> = [];
+    const ids = ["job_expired_before_runner", "attempt_expired_before_runner"];
+    const jobs = await openAnalysisJobs({
+      attemptTimeoutMs: 5,
+      authority: {
+        getProjectRange: async () => ({
+          endSourceSample: goldenProject.durationSamples,
+          sourceId: "source_fixture",
+          startSourceSample: 0,
+        }),
+        getSnapshot: async () => {
+          clockCallsAfterSnapshot = 0;
+          return {
+            eventSequence: 1,
+            project: structuredClone(goldenProject),
+            projectRevisionId: "projectrevision_current",
+          };
+        },
+        publishAnalysisRevision: async () => {
+          publications += 1;
+          return { projectRevisionId: "projectrevision_forbidden" };
+        },
+      },
+      idFactory: () => ids.shift()!,
+      now: () => (clockCallsAfterSnapshot++ < 2 ? startedAt : expiredAt),
+      runner: {
+        run: async () => {
+          runnerStarts += 1;
+          return {
+            revision: structuredClone(goldenProject.analysisRevisions[0]!),
+            stageOutcomes: [
+              { stage: "preflight", state: "completed" },
+              { stage: "canonical_decode", state: "completed" },
+              { stage: "shared_features", state: "completed" },
+              { stage: "rhythm", state: "completed" },
+              { stage: "harmony", state: "completed" },
+              { stage: "assemble", state: "completed" },
+            ],
+          };
+        },
+        terminateAndWait: async (termination) => {
+          terminations.push(termination);
+        },
+      },
+      stateRoot,
+    });
+    await jobs.submit({
+      canonicalAudioFingerprint: `sha256:${"a".repeat(64)}`,
+      projectId: "project_golden",
+      recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+
+    await expect(jobs.runNext()).resolves.toMatchObject({ state: "retryable" });
+    expect(runnerStarts).toBe(0);
+    expect(publications).toBe(0);
+    expect(terminations).toEqual([
+      { attemptId: "attempt_expired_before_runner", reason: "deadline" },
+    ]);
+    expect(jobs.get("job_expired_before_runner")).toMatchObject({
+      attempts: [{ failure: { classification: "deadline" }, state: "failed" }],
+      job: { state: "retryable" },
+    });
+  });
+
   it("retries a cancelled Job without creating a duplicate Job Key", async () => {
     const stateRoot = await temporaryDirectory();
     const ids = ["job_cancelled_retry", "attempt_after_cancel"];

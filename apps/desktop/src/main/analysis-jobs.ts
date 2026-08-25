@@ -707,9 +707,7 @@ export class AnalysisJobs {
         AnalysisCheckpointCandidate["stage"],
         AnalysisCheckpoint
       >(reusableCheckpoints.map((checkpoint) => [checkpoint.stage, checkpoint]));
-      const result = await this.#runWithDeadline(
-        started.attempt,
-        controller,
+      const result = await this.#runWithDeadline(started.attempt, controller, () =>
         this.#runner.run({
           attemptId: started.attempt.id,
           checkpoints: reusableCheckpoints,
@@ -942,7 +940,7 @@ export class AnalysisJobs {
   async #runWithDeadline<T>(
     attempt: AnalysisAttemptSnapshot,
     controller: AbortController,
-    execution: Promise<T>,
+    execution: () => Promise<T>,
   ): Promise<T> {
     if (controller.signal.aborted) {
       try {
@@ -956,16 +954,20 @@ export class AnalysisJobs {
       throw controller.signal.reason;
     }
     const remainingMs = Math.max(0, Date.parse(attempt.deadlineAt) - this.#now().getTime());
+    if (remainingMs === 0) {
+      const error = attemptDeadlineFailure();
+      controller.abort(error);
+      try {
+        await this.#terminateRunner(attempt.id, "deadline");
+      } catch {
+        throw runnerContainmentFailure();
+      }
+      throw error;
+    }
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
-        const error = new AnalysisRunError({
-          classification: "deadline",
-          message: "Analysis Attempt exceeded its main-owned deadline",
-          nextAction: "retry",
-          retryable: true,
-          stage: "preflight",
-        });
+        const error = attemptDeadlineFailure();
         controller.abort(error);
         reject(error);
       }, remainingMs);
@@ -976,7 +978,7 @@ export class AnalysisJobs {
       });
     });
     try {
-      return await Promise.race([execution, deadline, interrupted]);
+      return await Promise.race([execution(), deadline, interrupted]);
     } catch (error) {
       if (controller.signal.aborted) {
         const reason = normalizeTerminationReason(controller.signal.reason);
@@ -1432,6 +1434,16 @@ function checkpointIntegrityFailure(
     nextAction: "repair_installation",
     retryable: false,
     stage,
+  });
+}
+
+function attemptDeadlineFailure(): AnalysisRunError {
+  return new AnalysisRunError({
+    classification: "deadline",
+    message: "Analysis Attempt exceeded its main-owned deadline",
+    nextAction: "retry",
+    retryable: true,
+    stage: "preflight",
   });
 }
 
