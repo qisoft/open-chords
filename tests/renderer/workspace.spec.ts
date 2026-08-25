@@ -214,8 +214,10 @@ async function launch(userDataDirectory: string) {
 function goldenRecords(): ProjectOwnedRecords {
   const fingerprint = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
   return {
+    analysisManifests: [],
     exportReceipts: [],
     extensions: {},
+    legacyManifestlessAnalysisRevisionIds: ["revision_original", "revision_reviewable"],
     projectRange: { endSourceSample: 48_000, sourceId: "source_fixture", startSourceSample: 0 },
     sources: [
       {

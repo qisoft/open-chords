@@ -1,4 +1,10 @@
-import { StableIdSchema } from "@open-chords/domain";
+import { createHash } from "node:crypto";
+
+import {
+  AnalysisManifestSchema,
+  canonicalAnalysisManifestContent,
+  StableIdSchema,
+} from "@open-chords/domain";
 import { z } from "zod";
 
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -132,8 +138,16 @@ export const ExportReceiptSchema = z.strictObject({
 
 export const ProjectOwnedRecordsSchema = z
   .strictObject({
+    analysisManifests: z.array(
+      z.strictObject({
+        analysisRevisionId: StableIdSchema,
+        hash: Sha256Schema,
+        manifest: AnalysisManifestSchema,
+      }),
+    ),
     exportReceipts: z.array(ExportReceiptSchema),
     extensions: z.record(z.string().regex(/^[a-z0-9]+(?:\.[a-z0-9-]+)+$/), z.unknown()),
+    legacyManifestlessAnalysisRevisionIds: z.array(StableIdSchema),
     projectRange: z.strictObject({
       endSourceSample: z.number().int().positive(),
       sourceId: StableIdSchema,
@@ -142,6 +156,43 @@ export const ProjectOwnedRecordsSchema = z
     sources: z.array(SourceRecordSchema).min(1),
   })
   .superRefine((records, context) => {
+    requireUniqueIds(
+      records.analysisManifests.map((record) => ({ id: record.analysisRevisionId })),
+      "Analysis Manifest Revision",
+      ["analysisManifests"],
+      context,
+    );
+    if (
+      new Set(records.legacyManifestlessAnalysisRevisionIds).size !==
+      records.legacyManifestlessAnalysisRevisionIds.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Legacy manifestless Analysis Revision IDs must be unique",
+        path: ["legacyManifestlessAnalysisRevisionIds"],
+      });
+    }
+    const manifestHashes = new Set<string>();
+    for (const [index, record] of records.analysisManifests.entries()) {
+      const actualHash = `sha256:${createHash("sha256")
+        .update(canonicalAnalysisManifestContent(record.manifest))
+        .digest("hex")}`;
+      if (record.hash !== actualHash) {
+        context.addIssue({
+          code: "custom",
+          message: "Analysis Manifest hash does not match its canonical content",
+          path: ["analysisManifests", index, "hash"],
+        });
+      }
+      if (manifestHashes.has(record.hash)) {
+        context.addIssue({
+          code: "custom",
+          message: "Analysis Manifest hashes must be unique",
+          path: ["analysisManifests", index, "hash"],
+        });
+      }
+      manifestHashes.add(record.hash);
+    }
     requireUniqueIds(records.sources, "Source", ["sources"], context);
     requireUniqueIds(records.exportReceipts, "Export Receipt", ["exportReceipts"], context);
     for (const [sourceIndex, source] of records.sources.entries()) {

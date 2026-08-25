@@ -26,11 +26,16 @@ import {
   EditTransactionSchema,
   parseProjectContract,
   StableIdSchema,
+  validateAnalysisManifestProvenance,
   type EditTransaction,
+  type AnalysisRevision,
+  type AnalysisManifest,
+  type AnalysisRecipe,
   type ProjectContract,
 } from "@open-chords/domain";
 import { z } from "zod";
 
+import { syncDirectory } from "./filesystem-durability.ts";
 import {
   locatorMatchesSourceIdentity,
   ProjectOwnedRecordsSchema,
@@ -64,7 +69,14 @@ const ProjectRevisionRecordSchema = z.strictObject({
   payloadObjectHash: HashSchema,
   projectId: StableIdSchema,
   projectRevisionId: ProjectRevisionIdSchema,
-  reason: z.enum(["created", "edit_transaction", "migration", "restored", "rollback"]),
+  reason: z.enum([
+    "analysis_publication",
+    "created",
+    "edit_transaction",
+    "migration",
+    "restored",
+    "rollback",
+  ]),
   schemaVersion: z.literal("1.0"),
 });
 const RevisionPointerSchema = z.strictObject({
@@ -498,6 +510,39 @@ export class ProjectLibrary {
     };
   }
 
+  async getProjectRange(projectId: string): Promise<ProjectOwnedRecords["projectRange"] | null> {
+    const entry = this.#entries.get(projectId);
+    if (entry === undefined || entry.location === "trashed" || entry.revision === undefined) {
+      return null;
+    }
+    return structuredClone(entry.revision.payload.records.projectRange);
+  }
+
+  async resolveBlockedDependencies(input: {
+    canonicalAudioFingerprint: string;
+    modelStore: {
+      resolveBlockedRecipeArtifacts(
+        recipe: AnalysisRecipe,
+      ): Promise<Array<{ id: string; kind: "model" }>>;
+    };
+    projectId: string;
+    recipe: AnalysisRecipe;
+    sourceSnapshotId: string;
+  }): Promise<Array<{ id: string; kind: "media" | "model" }>> {
+    const entry = this.#entries.get(input.projectId);
+    if (entry === undefined || entry.location === "trashed" || entry.revision === undefined) {
+      return [{ id: input.sourceSnapshotId, kind: "media" }];
+    }
+    const source = entry.revision.payload.records.sources.find(
+      ({ id }) => id === entry.revision?.payload.records.projectRange.sourceId,
+    );
+    const snapshot = source?.snapshots.find(({ id }) => id === input.sourceSnapshotId);
+    if (snapshot?.canonicalAudioFingerprint !== input.canonicalAudioFingerprint) {
+      return [{ id: input.sourceSnapshotId, kind: "media" }];
+    }
+    return input.modelStore.resolveBlockedRecipeArtifacts(input.recipe);
+  }
+
   async commitEditTransaction(input: {
     expectedProjectRevisionId: string;
     projectId: string;
@@ -531,6 +576,113 @@ export class ProjectLibrary {
         entry.revision.revision.projectRevisionId,
         entry.revision.pointer.sequence + 1,
         "edit_transaction",
+      );
+      return { projectRevisionId: next.revision.projectRevisionId };
+    });
+  }
+
+  async publishAnalysisRevision(input: {
+    attemptId: string;
+    canonicalAudioFingerprint: string;
+    expectedProjectRevisionId: string;
+    jobKey: string;
+    manifest: AnalysisManifest;
+    projectId: string;
+    recipeHash: string;
+    revision: AnalysisRevision;
+    sourceIdentityKind: "canonical_audio" | "source_snapshot";
+    sourceSnapshotId: string;
+  }): Promise<
+    { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
+  > {
+    return this.#serializeMutation(async () => {
+      const entry = this.#entries.get(input.projectId);
+      if (entry === undefined || entry.location === "trashed") return { notFound: true };
+      if (entry.status === "damaged" || entry.revision === undefined)
+        throw new ProjectLibraryDamagedError(input.projectId);
+      if (entry.compatibility === "read_only") return { readOnly: true };
+
+      let verifiedCandidate;
+      try {
+        verifiedCandidate = validateAnalysisManifestProvenance({
+          digest: hashContent,
+          expectedCandidateIdentity: {
+            attemptId: input.attemptId,
+            canonicalAudioFingerprint: input.canonicalAudioFingerprint,
+            jobKey: input.jobKey,
+            projectId: input.projectId,
+            recipeHash: input.recipeHash,
+            sourceIdentityKind: input.sourceIdentityKind,
+            sourceSnapshotId: input.sourceSnapshotId,
+          },
+          manifest: input.manifest,
+          revision: input.revision,
+        });
+      } catch {
+        throw new Error("Analysis Revision identity does not match its Job candidate manifest");
+      }
+      const candidate = verifiedCandidate.revision;
+      const expectedManifestHash = verifiedCandidate.manifestHash;
+      const project = structuredClone(entry.revision.payload.envelope.payload);
+      const records = structuredClone(entry.revision.payload.records);
+      const existing = project.analysisRevisions.find(({ id }) => id === candidate.id);
+      if (existing !== undefined) {
+        const retainedManifest = records.analysisManifests.find(
+          ({ analysisRevisionId }) => analysisRevisionId === candidate.id,
+        );
+        if (canonicalSerialize(existing) !== canonicalSerialize(candidate)) {
+          throw new Error(`Analysis Revision ${candidate.id} conflicts with published content`);
+        }
+        if (
+          retainedManifest?.hash !== expectedManifestHash ||
+          canonicalSerialize(retainedManifest.manifest) !== canonicalSerialize(input.manifest)
+        ) {
+          throw new Error(`Analysis Revision ${candidate.id} has no matching retained Manifest`);
+        }
+        return { projectRevisionId: entry.revision.revision.projectRevisionId };
+      }
+      if (entry.revision.revision.projectRevisionId !== input.expectedProjectRevisionId)
+        return { stale: true };
+      if (!analysisManifestSourceIsVerified(entry.revision.payload.records, input.manifest)) {
+        throw new Error("Analysis candidate Source Snapshot is not verified by Project authority");
+      }
+      project.analysisRevisions.push(candidate);
+      records.analysisManifests.push({
+        analysisRevisionId: candidate.id,
+        hash: expectedManifestHash,
+        manifest: input.manifest,
+      });
+      if (project.activeView === null) {
+        const editLayerId = `edit_${randomUUID().replaceAll("-", "")}`;
+        project.editLayers.push({
+          analysisRevisionId: candidate.id,
+          id: editLayerId,
+          transactions: [],
+        });
+        project.activeView = {
+          analysisRevisionId: candidate.id,
+          editHistoryPosition: 0,
+          editLayerId,
+          presentation: {
+            beginnerView: false,
+            enharmonicPreference: "contextual",
+            transposeSemitones: 0,
+          },
+        };
+      }
+      const payload = buildStoredPayload({
+        envelope: {
+          ...entry.revision.payload.envelope,
+          payload: parseProjectContract(project),
+        },
+        records,
+      });
+      const next = await this.#commitPayload(
+        input.projectId,
+        payload,
+        entry.revision.revision.projectRevisionId,
+        entry.revision.pointer.sequence + 1,
+        "analysis_publication",
       );
       return { projectRevisionId: next.revision.projectRevisionId };
     });
@@ -1312,7 +1464,7 @@ export class ProjectLibrary {
       );
     }
     try {
-      return StoredProjectPayloadSchema.parse(raw);
+      return StoredProjectPayloadSchema.parse(migrateStoredPayloadV1AnalysisProvenance(raw));
     } catch (error) {
       if (compatibility.futureMinor)
         throw new ProjectLibraryIncompatibleSchemaError(
@@ -1833,6 +1985,38 @@ export class ProjectLibrary {
   }
 }
 
+function migrateStoredPayloadV1AnalysisProvenance(input: unknown): unknown {
+  const legacy = z
+    .object({
+      envelope: z
+        .object({
+          payload: z
+            .object({ analysisRevisions: z.array(z.object({ id: StableIdSchema }).loose()) })
+            .loose(),
+        })
+        .loose(),
+      format: z.literal("open-chords/project-library-payload"),
+      records: z.object({}).loose(),
+      schemaVersion: z.literal("1.0"),
+    })
+    .loose()
+    .safeParse(input);
+  if (!legacy.success) return input;
+  const hasManifests = Object.hasOwn(legacy.data.records, "analysisManifests");
+  const hasLegacyIds = Object.hasOwn(legacy.data.records, "legacyManifestlessAnalysisRevisionIds");
+  if (hasManifests || hasLegacyIds) return input;
+  return {
+    ...legacy.data,
+    records: {
+      ...legacy.data.records,
+      analysisManifests: [],
+      legacyManifestlessAnalysisRevisionIds: legacy.data.envelope.payload.analysisRevisions.map(
+        ({ id }) => id,
+      ),
+    },
+  };
+}
+
 function validateStoredPayload(input: unknown): StoredProjectPayload {
   const payload = StoredProjectPayloadSchema.parse(input);
   const supportedMajor = parseSchemaVersion(CONTRACT_VERSION).major;
@@ -1843,6 +2027,34 @@ function validateStoredPayload(input: unknown): StoredProjectPayload {
   if (projectMajor !== supportedMajor)
     throw new ProjectLibraryIncompatibleSchemaError(payload.envelope.payload.schemaVersion);
   parseContractEnvelope(payload.envelope);
+  const manifestsByRevision = new Map(
+    payload.records.analysisManifests.map((record) => [record.analysisRevisionId, record]),
+  );
+  const legacyManifestless = new Set(payload.records.legacyManifestlessAnalysisRevisionIds);
+  for (const revision of payload.envelope.payload.analysisRevisions) {
+    const record = manifestsByRevision.get(revision.id);
+    if ((record === undefined) === !legacyManifestless.has(revision.id)) {
+      throw new Error("Analysis Revision must have exactly one Manifest or explicit legacy state");
+    }
+    if (record !== undefined && revision.manifestHash !== record.hash) {
+      throw new Error("Analysis Manifest record does not match its Analysis Revision");
+    }
+    if (record !== undefined) {
+      validateAnalysisManifestProvenance({
+        digest: hashContent,
+        manifest: record.manifest,
+        revision,
+      });
+      if (!analysisManifestSourceIsVerified(payload.records, record.manifest)) {
+        throw new Error("Analysis Manifest Source identity is not retained by Project authority");
+      }
+    }
+  }
+  for (const revisionId of [...manifestsByRevision.keys(), ...legacyManifestless]) {
+    if (!payload.envelope.payload.analysisRevisions.some(({ id }) => id === revisionId)) {
+      throw new Error("Analysis Manifest provenance references an unknown Analysis Revision");
+    }
+  }
   const { projectRange } = payload.records;
   if (
     projectRange.endSourceSample - projectRange.startSourceSample !==
@@ -1891,6 +2103,20 @@ function buildStoredPayload(input: {
     records: input.records,
     schemaVersion: "1.0",
   });
+}
+
+function analysisManifestSourceIsVerified(
+  records: ProjectOwnedRecords,
+  manifest: AnalysisManifest,
+): boolean {
+  const identity = manifest.candidateIdentity;
+  const source = records.sources.find(({ id }) => id === records.projectRange.sourceId);
+  const snapshot = source?.snapshots.find((candidate) =>
+    identity.sourceIdentityKind === "source_snapshot"
+      ? candidate.id === identity.sourceSnapshotId
+      : candidate.canonicalAudioFingerprint === identity.canonicalAudioFingerprint,
+  );
+  return snapshot?.canonicalAudioFingerprint === identity.canonicalAudioFingerprint;
 }
 
 function validateLibrarySourceAuthority(entries: ReadonlyMap<string, LibraryEntry>): void {
@@ -2253,27 +2479,6 @@ async function syncFile(path: string): Promise<void> {
     await handle.sync();
   } finally {
     await handle.close();
-  }
-}
-
-async function syncDirectory(path: string): Promise<void> {
-  try {
-    const handle = await open(path, "r");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  } catch (error) {
-    if (
-      process.platform === "win32" &&
-      isNodeError(error) &&
-      error.code !== undefined &&
-      ["EISDIR", "EINVAL", "ENOTSUP", "EPERM"].includes(error.code)
-    ) {
-      return;
-    }
-    throw error;
   }
 }
 

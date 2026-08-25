@@ -1,9 +1,32 @@
 export { canonicalSerialize } from "./canonical.ts";
+export {
+  ANALYSIS_CAPABILITY_STAGES,
+  ANALYSIS_MAIN_STAGES,
+  ANALYSIS_PIPELINE_STAGES,
+  ANALYSIS_RUNNER_PREFIX_STAGES,
+  ANALYSIS_RUNNER_SUFFIX_STAGES,
+  AnalysisCandidateIdentitySchema,
+  AnalysisManifestSchema,
+  AnalysisPipelineStageSchema,
+  AnalysisRecipeSchema,
+  AnalysisStageOutcomeSchema,
+  analysisPipelineForCapabilities,
+  analysisRunnerPipelineForCapabilities,
+  canonicalAnalysisManifestContent,
+  canonicalAnalysisOutputContents,
+  canonicalAnalysisRecipeContent,
+  validateAnalysisManifestProvenance,
+  type AnalysisCandidateIdentity,
+  type AnalysisManifest,
+  type AnalysisRecipe,
+} from "./analysis.ts";
 export { materializeEffectiveTimeline, type EffectiveTimeline } from "./projection.ts";
 export {
+  AnalysisRevisionSchema,
   EditTransactionSchema,
   ProjectContractSchema,
   StableIdSchema,
+  type AnalysisRevision,
   type EditTransaction,
   type LyricsAlignment,
   type ProjectContract,

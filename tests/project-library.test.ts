@@ -52,6 +52,7 @@ function goldenEnvelope() {
 
 function ownedRecords(): ProjectOwnedRecords {
   return {
+    analysisManifests: [],
     exportReceipts: [
       {
         activeViewHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -65,6 +66,7 @@ function ownedRecords(): ProjectOwnedRecords {
       },
     ],
     extensions: {},
+    legacyManifestlessAnalysisRevisionIds: ["revision_original", "revision_reviewable"],
     projectRange: {
       endSourceSample: 58_000,
       sourceId: "source_fixture",
@@ -155,9 +157,372 @@ function envelopeForProject(projectId: string) {
   return envelope;
 }
 
+function analysisPublication(
+  expectedProjectRevisionId: string,
+  revision: ReturnType<typeof goldenEnvelope>["payload"]["analysisRevisions"][number],
+  attemptId: string,
+) {
+  const recipe = {
+    capabilities: ["rhythm" as const],
+    components: [
+      {
+        hash: `sha256:${"1".repeat(64)}`,
+        id: "rhythm-model",
+        version: "1.0.0",
+      },
+    ],
+    numericalBackend: {
+      hash: `sha256:${"2".repeat(64)}`,
+      id: "numpy",
+      version: "2.4.2",
+    },
+    pipeline: [
+      "preflight" as const,
+      "canonical_decode" as const,
+      "shared_features" as const,
+      "rhythm" as const,
+      "assemble" as const,
+      "main_validation" as const,
+      "publish" as const,
+    ],
+    profile: {
+      hash: `sha256:${"3".repeat(64)}`,
+      id: "balanced",
+      name: "balanced" as const,
+      version: "1.0.0",
+    },
+    seeds: { rhythm: 7 },
+    settings: { hopLength: 512 },
+  };
+  const recipeHash = hashCanonical(recipe);
+  const identity = {
+    attemptId,
+    canonicalAudioFingerprint:
+      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    jobKey: `sha256:${"a".repeat(64)}`,
+    projectId: "project_golden",
+    recipeHash,
+    sourceIdentityKind: "source_snapshot" as const,
+    sourceSnapshotId: "snapshot_fixture",
+  };
+  const manifest = {
+    acceptedOutputHashes: {
+      supportClaimIds: hashCanonical(revision.supportClaimIds),
+      timeline: hashCanonical(revision.timeline),
+    },
+    candidateIdentity: identity,
+    format: "open-chords/analysis-manifest" as const,
+    recipe,
+    reproducibilityConditions: {
+      componentHashes: recipe.components.map(({ hash }) => hash),
+      numericalBackendHash: recipe.numericalBackend.hash,
+      profileHash: recipe.profile.hash,
+      seedsHash: hashCanonical(recipe.seeds),
+      settingsHash: hashCanonical(recipe.settings),
+    },
+    stageOutcomes: [
+      { stage: "preflight" as const, state: "completed" as const },
+      { stage: "canonical_decode" as const, state: "completed" as const },
+      { stage: "shared_features" as const, state: "completed" as const },
+      { stage: "rhythm" as const, state: "completed" as const },
+      { stage: "assemble" as const, state: "completed" as const },
+    ],
+    warnings: [],
+  };
+  const manifestHash = hashCanonical(manifest);
+  return {
+    ...identity,
+    expectedProjectRevisionId,
+    manifest,
+    revision: {
+      ...revision,
+      id: `revision_${manifestHash.slice("sha256:".length)}`,
+      manifestHash,
+    },
+  };
+}
+
+function hashCanonical(value: unknown): string {
+  return `sha256:${createHash("sha256").update(canonicalSerialize(value)).digest("hex")}`;
+}
+
 const DURABILITY_TEST_TIMEOUT_MS = 15_000;
 
 describe("ProjectLibrary", () => {
+  it("rejects Analysis Revisions without a Manifest or explicit legacy provenance", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-provenance-");
+    const library = await openProjectLibrary({ stateRoot });
+
+    await expect(
+      library.createProject({
+        envelope: goldenEnvelope(),
+        records: { ...ownedRecords(), legacyManifestlessAnalysisRevisionIds: [] },
+      }),
+    ).rejects.toThrow("Analysis Revision must have exactly one Manifest or explicit legacy state");
+  });
+
+  it("does not reopen a stored Analysis Revision after its provenance is removed", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-reopen-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
+      removeAnalysisProvenance: true,
+      version: "1.0",
+    });
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect(reopened.listProjects()).toEqual([
+      expect.objectContaining({ projectId: "project_golden", status: "damaged" }),
+    ]);
+    await expect(reopened.getSnapshot("project_golden")).rejects.toThrow(
+      ProjectLibraryDamagedError,
+    );
+  });
+
+  it("migrates a v1 Project payload written before explicit Analysis provenance fields", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-migration-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
+      omitAnalysisProvenanceFields: true,
+      version: "1.0",
+    });
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    const snapshot = await reopened.getSnapshot("project_golden");
+    expect(snapshot?.project.analysisRevisions.map(({ id }) => id)).toEqual([
+      "revision_original",
+      "revision_reviewable",
+    ]);
+    expect(reopened.listProjects()).toEqual([
+      expect.objectContaining({ projectId: "project_golden", status: "active" }),
+    ]);
+  });
+
+  it("rejects a stored non-legacy Analysis Revision whose output no longer matches its Manifest", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-output-");
+    const library = await openProjectLibrary({ stateRoot });
+    const envelope = goldenEnvelope();
+    const candidate = structuredClone(envelope.payload.analysisRevisions[0]!);
+    candidate.id = "revision_manifest_output";
+    candidate.supportClaimIds = [];
+    envelope.payload.activeView = null;
+    envelope.payload.analysisRevisions = [];
+    envelope.payload.editLayers = [];
+    envelope.payload.lyricsAlignments = [];
+    envelope.payload.lyricsDocuments = [];
+    envelope.payload.supportClaims = [];
+    const created = await library.createProject({
+      envelope,
+      records: { ...ownedRecords(), legacyManifestlessAnalysisRevisionIds: [] },
+    });
+    const published = await library.publishAnalysisRevision(
+      analysisPublication(created.projectRevisionId, candidate, "attempt_manifest_output"),
+    );
+    if (!("projectRevisionId" in published)) throw new Error("Fixture publication failed");
+    rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
+      tamperLastAnalysisOutput: true,
+      version: "1.0",
+    });
+
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect((await reopened.getSnapshot("project_golden"))?.project.analysisRevisions).toEqual([]);
+    expect(reopened.listProjects()[0]?.recoveryReport?.lostProjectRevisionId).toBe(
+      published.projectRevisionId,
+    );
+  });
+
+  it("rejects self-consistent Manifest provenance for a Source Snapshot the Project does not retain", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-manifest-source-");
+    const library = await openProjectLibrary({ stateRoot });
+    const envelope = goldenEnvelope();
+    const candidate = structuredClone(envelope.payload.analysisRevisions[0]!);
+    candidate.supportClaimIds = [];
+    const publication = analysisPublication(
+      "projectrevision_fixture",
+      candidate,
+      "attempt_unknown_source",
+    );
+    publication.manifest.candidateIdentity.sourceSnapshotId = "snapshot_not_retained";
+    const manifestHash = hashCanonical(publication.manifest);
+    publication.revision.id = `revision_${manifestHash.slice("sha256:".length)}`;
+    publication.revision.manifestHash = manifestHash;
+    envelope.payload.activeView = {
+      analysisRevisionId: publication.revision.id,
+      editHistoryPosition: 0,
+      editLayerId: "edit_unknown_source",
+      presentation: {
+        beginnerView: false,
+        enharmonicPreference: "contextual",
+        transposeSemitones: 0,
+      },
+    };
+    envelope.payload.analysisRevisions = [publication.revision];
+    envelope.payload.editLayers = [
+      {
+        analysisRevisionId: publication.revision.id,
+        id: "edit_unknown_source",
+        transactions: [],
+      },
+    ];
+    envelope.payload.lyricsAlignments = [];
+    envelope.payload.lyricsDocuments = [];
+    envelope.payload.supportClaims = [];
+
+    await expect(
+      library.createProject({
+        envelope,
+        records: {
+          ...ownedRecords(),
+          analysisManifests: [
+            {
+              analysisRevisionId: publication.revision.id,
+              hash: manifestHash,
+              manifest: publication.manifest,
+            },
+          ],
+          legacyManifestlessAnalysisRevisionIds: [],
+        },
+      }),
+    ).rejects.toThrow("Source identity is not retained");
+  });
+
+  it("keeps Source verification separate from Model Store recipe resolution", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-analysis-dependencies-");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    let modelStoreCalls = 0;
+    const modelStore = {
+      resolveBlockedRecipeArtifacts: async () => {
+        modelStoreCalls += 1;
+        return [{ id: "rhythm-model", kind: "model" as const }];
+      },
+    };
+    const validSource = await library.resolveBlockedDependencies({
+      canonicalAudioFingerprint:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      modelStore,
+      projectId: "project_golden",
+      recipe: analysisPublication(
+        "projectrevision_fixture",
+        goldenEnvelope().payload.analysisRevisions[0]!,
+        "attempt_dependencies",
+      ).manifest.recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+    expect(validSource).toEqual([{ id: "rhythm-model", kind: "model" }]);
+    expect(modelStoreCalls).toBe(1);
+
+    const invalidSource = await library.resolveBlockedDependencies({
+      canonicalAudioFingerprint: `sha256:${"f".repeat(64)}`,
+      modelStore,
+      projectId: "project_golden",
+      recipe: analysisPublication(
+        "projectrevision_fixture",
+        goldenEnvelope().payload.analysisRevisions[0]!,
+        "attempt_dependencies",
+      ).manifest.recipe,
+      sourceSnapshotId: "snapshot_fixture",
+    });
+    expect(invalidSource).toEqual([{ id: "snapshot_fixture", kind: "media" }]);
+    expect(modelStoreCalls).toBe(1);
+  });
+
+  it("atomically publishes the first Analysis Revision and keeps later results reviewable", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-analysis-publication-");
+    const library = await openProjectLibrary({ stateRoot });
+    const emptyEnvelope = goldenEnvelope();
+    const firstCandidate = structuredClone(emptyEnvelope.payload.analysisRevisions[0]!);
+    firstCandidate.id = "revision_first_analysis";
+    firstCandidate.supportClaimIds = [];
+    emptyEnvelope.payload.activeView = null;
+    emptyEnvelope.payload.analysisRevisions = [];
+    emptyEnvelope.payload.editLayers = [];
+    emptyEnvelope.payload.lyricsAlignments = [];
+    emptyEnvelope.payload.lyricsDocuments = [];
+    emptyEnvelope.payload.supportClaims = [];
+    const created = await library.createProject({
+      envelope: emptyEnvelope,
+      records: { ...ownedRecords(), legacyManifestlessAnalysisRevisionIds: [] },
+    });
+
+    const firstPublication = analysisPublication(
+      created.projectRevisionId,
+      firstCandidate,
+      "attempt_first",
+    );
+    const first = await library.publishAnalysisRevision(firstPublication);
+    expect(first).toHaveProperty("projectRevisionId");
+    if (!("projectRevisionId" in first)) throw new Error("First analysis was not published");
+    const afterFirst = await library.getSnapshot("project_golden");
+    expect(afterFirst?.project.activeView).toMatchObject({
+      analysisRevisionId: firstPublication.revision.id,
+      editHistoryPosition: 0,
+    });
+    expect(afterFirst?.project.editLayers).toMatchObject([
+      { analysisRevisionId: firstPublication.revision.id, transactions: [] },
+    ]);
+
+    const secondCandidate = structuredClone(firstCandidate);
+    secondCandidate.id = "revision_reviewable_analysis";
+    const secondPublication = analysisPublication(
+      first.projectRevisionId,
+      secondCandidate,
+      "attempt_second",
+    );
+    const second = await library.publishAnalysisRevision(secondPublication);
+    expect(second).toHaveProperty("projectRevisionId");
+    const afterSecond = await library.getSnapshot("project_golden");
+    expect(afterSecond?.project.analysisRevisions.map(({ id }) => id)).toEqual([
+      firstPublication.revision.id,
+      secondPublication.revision.id,
+    ]);
+    expect(afterSecond?.project.activeView?.analysisRevisionId).toBe(firstPublication.revision.id);
+    expect((await library.readProject("project_golden")).revisions.at(-1)?.reason).toBe(
+      "analysis_publication",
+    );
+    const reopened = await openProjectLibrary({ stateRoot });
+    expect((await reopened.readProject("project_golden")).records.analysisManifests).toMatchObject([
+      {
+        analysisRevisionId: firstPublication.revision.id,
+        hash: firstPublication.revision.manifestHash,
+        manifest: firstPublication.manifest,
+      },
+      {
+        analysisRevisionId: secondPublication.revision.id,
+        hash: secondPublication.revision.manifestHash,
+        manifest: secondPublication.manifest,
+      },
+    ]);
+  });
+
+  it("preserves Project Head when an Analysis candidate is stale or invalid", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-library-analysis-rejection-");
+    const library = await openProjectLibrary({ stateRoot });
+    const created = await library.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const candidate = structuredClone(goldenEnvelope().payload.analysisRevisions[0]!);
+    candidate.id = "revision_rejected";
+
+    await expect(
+      library.publishAnalysisRevision(
+        analysisPublication("projectrevision_stale", candidate, "attempt_stale"),
+      ),
+    ).resolves.toEqual({ stale: true });
+    const invalid = structuredClone(candidate);
+    invalid.timeline.chordEvents[0]!.endSample += 1;
+    await expect(
+      library.publishAnalysisRevision(
+        analysisPublication(created.projectRevisionId, invalid, "attempt_invalid"),
+      ),
+    ).rejects.toThrow(/invariants|timeline|contiguous/iu);
+    expect((await library.getSnapshot("project_golden"))?.projectRevisionId).toBe(
+      created.projectRevisionId,
+    );
+  });
+
   it(
     "publishes immutable revisions, commits through the ProjectAuthority seam, and reopens",
     async () => {
@@ -2030,7 +2395,13 @@ function objectPath(activeRoot: string, hash: string): string {
 function rewriteStoredProjectEnvelope(
   activeRoot: string,
   projectId: string,
-  options: { addFutureCoreField?: boolean; version: string },
+  options: {
+    addFutureCoreField?: boolean;
+    omitAnalysisProvenanceFields?: boolean;
+    removeAnalysisProvenance?: boolean;
+    tamperLastAnalysisOutput?: boolean;
+    version: string;
+  },
 ): void {
   const projectDirectory = join(activeRoot, "projects", projectId);
   const headPath = join(projectDirectory, "HEAD.json");
@@ -2046,8 +2417,39 @@ function rewriteStoredProjectEnvelope(
     .object({
       envelope: z
         .object({
-          payload: z.object({ schemaVersion: z.string() }).loose(),
+          payload: z
+            .object({
+              analysisRevisions: z.array(
+                z
+                  .object({
+                    timeline: z
+                      .object({
+                        chordEvents: z.array(
+                          z
+                            .object({
+                              assertion: z
+                                .object({
+                                  evidence: z.array(z.object({ value: z.number() }).loose()),
+                                })
+                                .loose(),
+                            })
+                            .loose(),
+                        ),
+                      })
+                      .loose(),
+                  })
+                  .loose(),
+              ),
+              schemaVersion: z.string(),
+            })
+            .loose(),
           schemaVersion: z.string(),
+        })
+        .loose(),
+      records: z
+        .object({
+          analysisManifests: z.array(z.unknown()).optional(),
+          legacyManifestlessAnalysisRevisionIds: z.array(z.string()).optional(),
         })
         .loose(),
     })
@@ -2056,6 +2458,21 @@ function rewriteStoredProjectEnvelope(
   payload.envelope.schemaVersion = options.version;
   payload.envelope.payload.schemaVersion = options.version;
   if (options.addFutureCoreField === true) payload.envelope.futureCoreField = "unsupported";
+  if (options.removeAnalysisProvenance === true) {
+    payload.records.analysisManifests = [];
+    payload.records.legacyManifestlessAnalysisRevisionIds = [];
+  }
+  if (options.omitAnalysisProvenanceFields === true) {
+    delete payload.records.analysisManifests;
+    delete payload.records.legacyManifestlessAnalysisRevisionIds;
+  }
+  if (options.tamperLastAnalysisOutput === true) {
+    const evidence = payload.envelope.payload.analysisRevisions
+      .at(-1)
+      ?.timeline.chordEvents.flatMap(({ assertion }) => assertion.evidence)[0];
+    if (evidence === undefined) throw new Error("Analysis output fixture is missing");
+    evidence.value = evidence.value === 0.5 ? 0.6 : 0.5;
+  }
   const payloadContent = canonicalSerialize(payload);
   const payloadHash = hashFixtureContent(payloadContent);
   writeFileSync(objectPath(activeRoot, payloadHash), payloadContent);
@@ -2063,7 +2480,13 @@ function rewriteStoredProjectEnvelope(
   const revisionContent = canonicalSerialize({ ...revision, payloadObjectHash: payloadHash });
   const revisionHash = hashFixtureContent(revisionContent);
   writeFileSync(objectPath(activeRoot, revisionHash), revisionContent);
-  const pointerFile = readdirSync(join(projectDirectory, "revisions"))[0];
+  const pointerFile = readdirSync(join(projectDirectory, "revisions")).find((file) => {
+    const candidate = z
+      .object({ projectRevisionId: z.string() })
+      .loose()
+      .parse(JSON.parse(readFileSync(join(projectDirectory, "revisions", file), "utf8")));
+    return candidate.projectRevisionId === head.projectRevisionId;
+  });
   if (pointerFile === undefined) throw new Error("Revision pointer fixture is missing");
   const pointerPath = join(projectDirectory, "revisions", pointerFile);
   const pointer = z
