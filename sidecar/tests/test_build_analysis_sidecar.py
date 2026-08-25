@@ -108,6 +108,16 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
             "soundfile",
         )
 
+    def test_excludes_terminal_modules_from_the_headless_runtime(self) -> None:
+        excluded_modules = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["PYINSTALLER_EXCLUDED_MODULES"]
+
+        self.assertGreaterEqual(
+            set(excluded_modules),
+            {"_curses", "_curses_panel", "curses", "readline"},
+        )
+
     def test_collects_exact_analysis_dependency_licenses(self) -> None:
         module = runpy.run_path(
             Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"

@@ -52,6 +52,16 @@ PYTHON_ANALYSIS_DISTRIBUTIONS = {
     "typing-extensions": "PSF-2.0",
     "urllib3": "MIT",
 }
+PYINSTALLER_EXCLUDED_MODULES = (
+    "_curses",
+    "_curses_panel",
+    "curses",
+    "numba.cuda",
+    "numba.np.ufunc.omppool",
+    "numba.np.ufunc.tbbpool",
+    "readline",
+    "sklearn",
+)
 
 
 def main() -> None:
@@ -85,14 +95,11 @@ def main() -> None:
                 "numba._devicearray",
                 "--hidden-import",
                 "sidecar.open_chords_analysis.cpu_analysis",
-                "--exclude-module",
-                "numba.cuda",
-                "--exclude-module",
-                "numba.np.ufunc.omppool",
-                "--exclude-module",
-                "numba.np.ufunc.tbbpool",
-                "--exclude-module",
-                "sklearn",
+                *[
+                    argument
+                    for module in PYINSTALLER_EXCLUDED_MODULES
+                    for argument in ("--exclude-module", module)
+                ],
                 "--distpath",
                 str(temporary_root / "dist"),
                 "--workpath",
