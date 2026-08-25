@@ -51,6 +51,7 @@
     "PROPSYS.dll",
     "RPCRT4.dll",
     "SHELL32.dll",
+    "SHLWAPI.dll",
     "USER32.dll",
     "VERSION.dll",
     "WINMM.dll",
