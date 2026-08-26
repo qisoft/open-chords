@@ -306,7 +306,7 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
                 {"kernel32.dll"},
             )
 
-    def test_allows_reviewed_windows_soundfile_system_dependencies(self) -> None:
+    def test_allows_reviewed_windows_analysis_system_dependencies(self) -> None:
         module = runpy.run_path(
             Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
         )
@@ -321,6 +321,15 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
             "_internal/_soundfile_data/libsndfile_x64.dll",
             ["SHLWAPI.dll"],
             {"_internal/_soundfile_data/libsndfile_x64.dll"},
+            {
+                name.lower()
+                for name in manifest["windowsFrozenRuntimeSystemDlls"]
+            },
+        )
+        module["_validate_pe_dependencies"](
+            "_internal/llvmlite/binding/llvmlite.dll",
+            ["ntdll.dll"],
+            {"_internal/llvmlite/binding/llvmlite.dll"},
             {
                 name.lower()
                 for name in manifest["windowsFrozenRuntimeSystemDlls"]

@@ -46,6 +46,7 @@
     "IPHLPAPI.dll",
     "KERNEL32.dll",
     "MSVCRT.dll",
+    "NTDLL.dll",
     "OLE32.dll",
     "OLEAUT32.dll",
     "PROPSYS.dll",
