@@ -39,6 +39,21 @@ it.skipIf(executablePath === undefined)(
   "runs the same canonical decode deterministically without PATH or system runtimes",
   async () => {
     const runtimeRoot = dirname(executablePath!);
+    const importWorkspace = mkdtempSync(join(tmpdir(), "open-chords-frozen-import-"));
+    temporaryRoots.push(importWorkspace);
+    const analysisImport = spawnSync(executablePath!, ["--cpu-analysis-import-check"], {
+      cwd: importWorkspace,
+      encoding: "utf8",
+      env: {},
+      timeout: 90_000,
+    });
+    if (analysisImport.status !== 0) throw new Error(analysisImport.stderr);
+    expect(JSON.parse(analysisImport.stdout)).toEqual({
+      capability: "cpu_analysis",
+      durationSamples: 48_000,
+      profiles: ["balanced", "eco", "fast"],
+      stageOutcomes: ["shared_features", "harmony", "assemble"],
+    });
     const manifestBytes = readFileSync(join(runtimeRoot, "runtime-manifest.json"));
     const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
     const inventory = z
@@ -181,7 +196,7 @@ it.skipIf(executablePath === undefined)(
       },
     });
   },
-  20_000,
+  180_000,
 );
 
 function allRuntimeFiles(root: string): string[] {

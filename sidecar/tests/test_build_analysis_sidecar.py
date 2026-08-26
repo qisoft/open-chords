@@ -71,6 +71,67 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unclassified native runtime file"):
             native_component("tools/unreviewed-runtime.dll", "pe")
 
+    def test_classifies_cpu_analysis_native_extensions_by_distribution(self) -> None:
+        native_component = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_native_component"]
+
+        self.assertEqual(
+            native_component(
+                "_internal/numpy/_core/_multiarray_umath.cpython-313-darwin.so",
+                "mach-o",
+            ),
+            "numpy",
+        )
+        self.assertEqual(
+            native_component("_internal/scipy/signal/_sigtools.cp313-win_amd64.pyd", "pe"),
+            "scipy",
+        )
+        self.assertEqual(
+            native_component("_internal/numpy.libs/libopenblas.dll", "pe"),
+            "numpy",
+        )
+        self.assertEqual(
+            native_component("_internal/scipy.libs/libopenblas.dll", "pe"),
+            "scipy",
+        )
+        self.assertEqual(
+            native_component("_internal/llvmlite/binding/libllvmlite.dylib", "mach-o"),
+            "llvmlite",
+        )
+        self.assertEqual(
+            native_component("_internal/_cffi_backend.cp313-win_amd64.pyd", "pe"),
+            "cffi",
+        )
+        self.assertEqual(
+            native_component("_internal/_soundfile_data/libsndfile_x64.dll", "pe"),
+            "soundfile",
+        )
+
+    def test_excludes_terminal_modules_from_the_headless_runtime(self) -> None:
+        excluded_modules = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["PYINSTALLER_EXCLUDED_MODULES"]
+
+        self.assertGreaterEqual(
+            set(excluded_modules),
+            {"_curses", "_curses_panel", "curses", "readline"},
+        )
+
+    def test_collects_exact_analysis_dependency_licenses(self) -> None:
+        module = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-analysis-licenses-") as temporary:
+            output = Path(temporary) / "licenses.txt"
+            versions = module["_write_python_analysis_licenses"](output)
+
+            self.assertEqual(versions["librosa"], "0.11.0")
+            self.assertIn("===== librosa 0.11.0 =====", output.read_text("utf-8"))
+            self.assertIn("===== numpy ", output.read_text("utf-8"))
+            self.assertGreater(output.stat().st_size, 1_000)
+
     def test_filters_platform_specific_dependency_authority(self) -> None:
         dependencies_for_profile = runpy.run_path(
             Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
@@ -237,6 +298,15 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
             {"open-chords-analysis.exe", "_internal/python313.dll"},
             {"kernel32.dll"},
         )
+        validate_dependencies(
+            "_internal/llvmlite/binding/llvmlite.dll",
+            ["msvcp140-reviewed.dll"],
+            {
+                "_internal/llvmlite/binding/llvmlite.dll",
+                "_internal/llvmlite.libs/msvcp140-reviewed.dll",
+            },
+            set(),
+        )
         with self.assertRaisesRegex(RuntimeError, "Unpackaged PE dependency"):
             validate_dependencies(
                 "tools/ffmpeg.exe",
@@ -244,6 +314,36 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
                 {"tools/ffmpeg.exe", "unrelated/python313.dll"},
                 {"kernel32.dll"},
             )
+
+    def test_allows_reviewed_windows_analysis_system_dependencies(self) -> None:
+        module = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )
+        manifest = json.loads(
+            (
+                Path(__file__).resolve().parents[1]
+                / "native/ffmpeg-build.json"
+            ).read_text("utf-8")
+        )
+
+        module["_validate_pe_dependencies"](
+            "_internal/_soundfile_data/libsndfile_x64.dll",
+            ["SHLWAPI.dll"],
+            {"_internal/_soundfile_data/libsndfile_x64.dll"},
+            {
+                name.lower()
+                for name in manifest["windowsFrozenRuntimeSystemDlls"]
+            },
+        )
+        module["_validate_pe_dependencies"](
+            "_internal/llvmlite/binding/llvmlite.dll",
+            ["ntdll.dll"],
+            {"_internal/llvmlite/binding/llvmlite.dll"},
+            {
+                name.lower()
+                for name in manifest["windowsFrozenRuntimeSystemDlls"]
+            },
+        )
 
     def test_resolves_windows_objdump_only_from_path(self) -> None:
         module = runpy.run_path(

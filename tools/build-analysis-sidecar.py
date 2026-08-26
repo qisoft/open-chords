@@ -22,6 +22,47 @@ sys.path.insert(0, str(ROOT))
 
 from sidecar.open_chords_analysis.runtime_manifest import load_frozen_runtime, write_runtime_manifest
 
+PYTHON_ANALYSIS_DISTRIBUTIONS = {
+    "audioop-lts": "PSF-2.0",
+    "audioread": "MIT",
+    "certifi": "MPL-2.0",
+    "cffi": "MIT",
+    "charset-normalizer": "MIT",
+    "decorator": "BSD-2-Clause",
+    "idna": "BSD-3-Clause",
+    "joblib": "BSD-3-Clause",
+    "lazy-loader": "BSD-3-Clause",
+    "librosa": "ISC",
+    "llvmlite": "BSD-2-Clause",
+    "msgpack": "Apache-2.0",
+    "numba": "BSD-2-Clause",
+    "numpy": "BSD-3-Clause",
+    "packaging": "Apache-2.0 OR BSD-2-Clause",
+    "platformdirs": "MIT",
+    "pooch": "BSD-3-Clause",
+    "pycparser": "BSD-3-Clause",
+    "requests": "Apache-2.0",
+    "scipy": "BSD-3-Clause",
+    "setuptools": "MIT",
+    "soundfile": "BSD-3-Clause",
+    "soxr": "LGPL-2.1-or-later",
+    "standard-aifc": "PSF-2.0",
+    "standard-chunk": "PSF-2.0",
+    "standard-sunau": "PSF-2.0",
+    "typing-extensions": "PSF-2.0",
+    "urllib3": "MIT",
+}
+PYINSTALLER_EXCLUDED_MODULES = (
+    "_curses",
+    "_curses_panel",
+    "curses",
+    "numba.cuda",
+    "numba.np.ufunc.omppool",
+    "numba.np.ufunc.tbbpool",
+    "readline",
+    "sklearn",
+)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -50,6 +91,15 @@ def main() -> None:
                 "--onedir",
                 "--name",
                 "open-chords-analysis",
+                "--hidden-import",
+                "numba._devicearray",
+                "--hidden-import",
+                "sidecar.open_chords_analysis.cpu_analysis",
+                *[
+                    argument
+                    for module in PYINSTALLER_EXCLUDED_MODULES
+                    for argument in ("--exclude-module", module)
+                ],
                 "--distpath",
                 str(temporary_root / "dist"),
                 "--workpath",
@@ -113,12 +163,26 @@ def main() -> None:
             ROOT / "sidecar/native/THIRD-PARTY-NATIVE-LICENSES.txt",
             licenses / "Third-Party-Native-Licenses.txt",
         )
+        analysis_license_file = licenses / "Python-Analysis-Dependencies.txt"
+        analysis_versions = _write_python_analysis_licenses(analysis_license_file)
         inventory = json.loads(
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
         )
         native_files = _native_files(assembled)
         _validate_native_closure(assembled, native_files, ffmpeg_build)
         present_components = {entry["component"] for entry in native_files} | {"pyinstaller"}
+        inventory["dependencies"].extend(
+            {
+                "component": name,
+                "license": PYTHON_ANALYSIS_DISTRIBUTIONS[name],
+                "licenseFile": "licenses/Python-Analysis-Dependencies.txt",
+                "name": name,
+                "role": "CPU analysis runtime dependency",
+                "version": analysis_versions[name],
+            }
+            for name in sorted(PYTHON_ANALYSIS_DISTRIBUTIONS)
+        )
+        present_components.update(PYTHON_ANALYSIS_DISTRIBUTIONS)
         inventory["dependencies"] = [
             {**dependency, "present": dependency["component"] in present_components}
             for dependency in _dependencies_for_profile(
@@ -179,6 +243,28 @@ def _pyinstaller_license(distribution: importlib.metadata.Distribution) -> Path:
     return license_file
 
 
+def _write_python_analysis_licenses(output: Path) -> dict[str, str]:
+    sections: list[str] = []
+    versions: dict[str, str] = {}
+    for name in sorted(PYTHON_ANALYSIS_DISTRIBUTIONS):
+        distribution = importlib.metadata.distribution(name)
+        versions[name] = distribution.version
+        license_files = [
+            file
+            for file in distribution.files or []
+            if file.name.lower().startswith(("copying", "license", "notice"))
+        ]
+        if not license_files:
+            raise FileNotFoundError(f"License metadata was not found for {name}")
+        sections.append(f"===== {name} {distribution.version} =====")
+        for license_file in sorted(license_files, key=lambda file: str(file)):
+            path = distribution.locate_file(license_file)
+            sections.append(f"--- {license_file} ---")
+            sections.append(path.read_text("utf-8", errors="replace").rstrip())
+    output.write_text("\n\n".join(sections) + "\n", "utf-8")
+    return versions
+
+
 def _find_python_license(executable: Path, stdlib: Path) -> Path:
     stdlib_license = stdlib / "LICENSE.txt"
     if stdlib_license.is_file():
@@ -221,6 +307,23 @@ def _native_component(relative: str, binary_format: str | None) -> str | None:
         return "ffmpeg"
     if lower == "tools/libwinpthread-1.dll" and binary_format == "pe":
         return "winpthreads"
+    package_components = {
+        "_internal/charset_normalizer/": "charset-normalizer",
+        "_internal/llvmlite/": "llvmlite",
+        "_internal/msgpack/": "msgpack",
+        "_internal/numba/": "numba",
+        "_internal/numpy/": "numpy",
+        "_internal/numpy.libs/": "numpy",
+        "_internal/scipy/": "scipy",
+        "_internal/scipy.libs/": "scipy",
+        "_internal/soxr/": "soxr",
+        "_internal/_soundfile_data/": "soundfile",
+    }
+    for prefix, component in package_components.items():
+        if lower.startswith(prefix):
+            return component
+    if lower.startswith("_internal/_cffi_backend"):
+        return "cffi"
     if "libssl" in name or "libcrypto" in name:
         return "openssl"
     if "liblzma" in name:
@@ -460,6 +563,8 @@ def _validate_pe_dependencies(
         if owner_path.parts[0].lower() == "tools"
         else {"", "_internal", owner_path.parent.as_posix()}
     )
+    if len(owner_path.parts) >= 3 and owner_path.parts[0].lower() == "_internal":
+        loader_roots.add(f"_internal/{owner_path.parts[1]}.libs")
     for dependency in dependencies:
         dependency_lower = dependency.lower()
         if dependency_lower in allowed_system:
