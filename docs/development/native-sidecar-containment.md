@@ -42,4 +42,4 @@ pnpm make
 pnpm test:packaged
 ```
 
-The native GitHub matrix builds the macOS XPC service and Windows AppContainer launcher before Forge packaging. The final installed proof, rather than a source-only unit test, is the acceptance seam for platform entitlement/token, path, network, handle, helper, and process-domain behavior.
+The native GitHub matrix builds the macOS XPC service and Windows AppContainer launcher before Forge packaging. Windows also retains the direct frozen-runtime smoke. A macOS helper signed for App Sandbox inheritance must not be executed outside its sandbox parent, so its decode acceptance runs only through the installed XPC proof. The final installed proof, rather than a source-only unit test, is the acceptance seam for platform entitlement/token, path, network, handle, helper, and process-domain behavior.

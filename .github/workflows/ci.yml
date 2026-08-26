@@ -129,7 +129,8 @@ jobs:
           --native-root build/native/${{ matrix.profile }}
           --output-root dist/analysis-sidecar
           --platform-profile ${{ matrix.profile }}
-      - name: Run frozen sidecar decode smoke
+      - name: Run frozen sidecar decode smoke outside sandbox
+        if: runner.os == 'Windows'
         run: pnpm test:frozen-sidecar
       - name: Build native containment broker
         run: python tools/build-native-containment.py --output-root dist/containment
