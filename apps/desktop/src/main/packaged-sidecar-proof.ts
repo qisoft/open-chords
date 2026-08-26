@@ -79,7 +79,6 @@ export async function runPackagedSidecarProof(): Promise<void> {
         createExecutableNativeContainmentBroker({
           args,
           containment,
-          diagnosticStderr: (chunk) => process.stderr.write(chunk),
           executablePath: containedRuntime.executablePath,
           platform,
           runtimeRoot: containedRuntime.runtimeRoot,
