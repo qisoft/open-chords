@@ -71,6 +71,18 @@ static void write_utf8_stdout(const std::wstring& value) {
   }
 }
 
+static std::wstring windows_directory() {
+  std::vector<wchar_t> buffer(MAX_PATH);
+  UINT size = GetWindowsDirectoryW(buffer.data(), static_cast<UINT>(buffer.size()));
+  if (size == 0) throw std::runtime_error("windows directory");
+  if (size >= buffer.size()) {
+    buffer.resize(static_cast<size_t>(size) + 1);
+    size = GetWindowsDirectoryW(buffer.data(), static_cast<UINT>(buffer.size()));
+    if (size == 0 || size >= buffer.size()) throw std::runtime_error("windows directory");
+  }
+  return std::wstring(buffer.data(), size);
+}
+
 static std::wstring value_after(const std::wstring& value, const wchar_t* prefix) {
   std::wstring expected(prefix);
   return value.rfind(expected, 0) == 0 ? value.substr(expected.size()) : L"";
@@ -292,7 +304,9 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     environment.push_back(L'\0');
   };
   append_variable(L"HOME=" + workspace);
+  append_variable(L"LOCALAPPDATA=" + root.wstring());
   append_variable(L"PATH=");
+  append_variable(L"SystemRoot=" + windows_directory());
   append_variable(L"TEMP=" + workspace);
   append_variable(L"TMP=" + workspace);
   environment.push_back(L'\0');

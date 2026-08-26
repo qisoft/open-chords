@@ -27,6 +27,15 @@ it("assigns the Windows containment job atomically during process creation", () 
   expect(source).not.toContain("AssignProcessToJobObject(");
 });
 
+it("supplies the minimal sorted Windows and AppContainer environment", () => {
+  const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
+  const entries = ["HOME=", "LOCALAPPDATA=", "PATH=", "SystemRoot=", "TEMP=", "TMP="];
+  const positions = entries.map((entry) => source.indexOf(`append_variable(L"${entry}`));
+
+  expect(positions.every((position) => position >= 0)).toBe(true);
+  expect(positions).toEqual([...positions].sort((left, right) => left - right));
+});
+
 it("accepts recursive cleanup only for a canonical AppContainer AC root", () => {
   const packagesRoot = String.raw`C:\Users\Alice\AppData\Local\Packages`;
 
