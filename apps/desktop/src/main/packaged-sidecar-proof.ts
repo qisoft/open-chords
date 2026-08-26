@@ -435,7 +435,15 @@ function prepareWorkspace(
     env: {},
     windowsHide: true,
   }).trim();
-  if (!isAbsolute(profileRoot)) throw new Error("AppContainer profile returned an invalid path");
+  if (!isAbsolute(profileRoot)) {
+    const cause = new Error("AppContainer profile returned an invalid path");
+    throwCombinedFailures(
+      "AppContainer profile validation and cleanup failed",
+      { cause },
+      destroyWindowsProfile(helperPath, profile),
+    );
+    throw cause;
+  }
   const runtimeRoot = join(profileRoot, "runtime");
   const workspace = join(profileRoot, "jobs", identifier);
   try {
@@ -467,17 +475,22 @@ function cleanupWindowsProfile(
   profile: string,
   profileRoot: string,
 ): unknown[] {
+  const failures = destroyWindowsProfile(helperPath, profile);
+  try {
+    rmSync(profileRoot, { force: true, recursive: true });
+  } catch (cause) {
+    failures.push(cause);
+  }
+  return failures;
+}
+
+function destroyWindowsProfile(helperPath: string, profile: string): unknown[] {
   const failures: unknown[] = [];
   try {
     execFileSync(helperPath, [`--destroy=${profile}`], {
       env: {},
       windowsHide: true,
     });
-  } catch (cause) {
-    failures.push(cause);
-  }
-  try {
-    rmSync(profileRoot, { force: true, recursive: true });
   } catch (cause) {
     failures.push(cause);
   }
