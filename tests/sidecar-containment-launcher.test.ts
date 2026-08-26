@@ -37,6 +37,13 @@ it("accepts recursive cleanup only for a canonical AppContainer AC root", () => 
     ),
   ).toBe(true);
   expect(isExpectedWindowsProfileRoot(packagesRoot, packagesRoot)).toBe(false);
+  expect(isExpectedWindowsProfileRoot(String.raw`D:\AC`, packagesRoot)).toBe(false);
+  expect(isExpectedWindowsProfileRoot(String.raw`\\server\share\profile\AC`, packagesRoot)).toBe(
+    false,
+  );
+  expect(
+    isExpectedWindowsProfileRoot(String.raw`C:\Users\Alice\AppData\Local\AC`, packagesRoot),
+  ).toBe(false);
   expect(isExpectedWindowsProfileRoot(String.raw`C:\Users\Alice\Documents\AC`, packagesRoot)).toBe(
     false,
   );
