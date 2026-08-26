@@ -442,24 +442,46 @@ function prepareWorkspace(
     cpSync(packagedRuntimeRoot, runtimeRoot, { recursive: true });
     mkdirSync(workspace, { recursive: true });
   } catch (cause) {
-    execFileSync(helperPath, [`--destroy=${profile}`], {
-      env: {},
-      windowsHide: true,
-    });
-    throw cause;
+    throwCombinedFailures(
+      "AppContainer workspace setup and cleanup failed",
+      { cause },
+      cleanupWindowsProfile(helperPath, profile, profileRoot),
+    );
   }
   return {
     cleanup() {
-      execFileSync(helperPath, [`--destroy=${profile}`], {
-        env: {},
-        windowsHide: true,
-      });
-      rmSync(profileRoot, { force: true, recursive: true });
+      throwCombinedFailures(
+        "AppContainer profile cleanup failed",
+        undefined,
+        cleanupWindowsProfile(helperPath, profile, profileRoot),
+      );
     },
     runtimeRoot,
     windowsProfile: profile,
     workspace,
   };
+}
+
+function cleanupWindowsProfile(
+  helperPath: string,
+  profile: string,
+  profileRoot: string,
+): unknown[] {
+  const failures: unknown[] = [];
+  try {
+    execFileSync(helperPath, [`--destroy=${profile}`], {
+      env: {},
+      windowsHide: true,
+    });
+  } catch (cause) {
+    failures.push(cause);
+  }
+  try {
+    rmSync(profileRoot, { force: true, recursive: true });
+  } catch (cause) {
+    failures.push(cause);
+  }
+  return failures;
 }
 
 function canonicalWavFixture(): Buffer {

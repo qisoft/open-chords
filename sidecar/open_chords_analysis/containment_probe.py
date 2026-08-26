@@ -32,7 +32,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     path_access_blocked = {
         name: not _can_read(path) for name, path in sensitive_paths.items()
     }
-    link_access_blocked = {
+    link_access_blocked: dict[str, bool | None] = {
         name: _link_cannot_read(workspace, name, path)
         for name, path in sensitive_paths.items()
     }
@@ -69,7 +69,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     return {
         "controlHandleClosed": not _descriptor_is_control_channel(3),
         "environmentIsolated": environment_isolated,
-        "linkEscapeBlocked": all(link_access_blocked.values()),
+        "linkEscapeBlocked": all(value is True for value in link_access_blocked.values()),
         "networkBlocked": network_blocked,
         "packagedHelperRan": packaged_helper_ran,
         "pathBlocked": all(path_access_blocked.values()),
@@ -134,13 +134,13 @@ def _can_read(path: Path) -> bool:
         return False
 
 
-def _link_cannot_read(workspace: Path, name: str, target: Path) -> bool:
+def _link_cannot_read(workspace: Path, name: str, target: Path) -> bool | None:
     link = workspace / f"containment-link-probe-{name}"
     try:
         link.symlink_to(target)
         return not _can_read(link)
     except OSError:
-        return True
+        return None
     finally:
         link.unlink(missing_ok=True)
 
