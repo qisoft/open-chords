@@ -167,6 +167,11 @@ def main() -> None:
         )
         analysis_license_file = licenses / "Python-Analysis-Dependencies.txt"
         analysis_versions = _write_python_analysis_licenses(analysis_license_file)
+        observed = {
+            "python": sys.version.split()[0],
+            "pyinstaller": _tool_version([sys.executable, "-m", "PyInstaller", "--version"]),
+            "ffmpeg": _tool_version([str(tools / f"ffmpeg{executable_suffix}"), "-version"]),
+        }
         inventory = json.loads(
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
         )
@@ -202,11 +207,7 @@ def main() -> None:
             )
         ]
         inventory["nativeFiles"] = native_files
-        inventory["observed"] = {
-            "python": sys.version.split()[0],
-            "pyinstaller": _tool_version([sys.executable, "-m", "PyInstaller", "--version"]),
-            "ffmpeg": _tool_version([str(tools / f"ffmpeg{executable_suffix}"), "-version"]),
-        }
+        inventory["observed"] = observed
         (assembled / "native-dependencies.json").write_text(
             json.dumps(inventory, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
             "utf-8",

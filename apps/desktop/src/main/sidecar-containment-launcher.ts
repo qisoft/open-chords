@@ -86,6 +86,7 @@ function evidenceSatisfiesPlatform(
   }
   return (
     evidence.backend === "linux-landlock-seccomp" &&
+    evidence.cgroupDelegated &&
     evidence.landlockAbi >= 3 &&
     evidence.noNewPrivileges &&
     evidence.seccompFilter

@@ -53,7 +53,8 @@ int main(int argc, char **argv) {
       exit(70);
     }
     if (xpc_get_type(event) != XPC_TYPE_DICTIONARY) return;
-    if (strcmp(xpc_dictionary_get_string(event, "operation"), "exit") == 0) {
+    const char *operation = xpc_dictionary_get_string(event, "operation");
+    if (operation != NULL && strcmp(operation, "exit") == 0) {
       exit((int)xpc_dictionary_get_int64(event, "code"));
     }
   });

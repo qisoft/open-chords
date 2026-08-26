@@ -30,66 +30,66 @@ export async function runPackagedSidecarProof(): Promise<void> {
     platform,
   );
   const prepared = prepareWorkspace(platform, containment.helperPath, verifiedRuntime.runtimeRoot);
-  const containedRuntime = verifyPackagedSidecarRuntime(
-    prepared.runtimeRoot,
-    EXPECTED_SIDECAR_MANIFEST_SHA256,
-  );
-  const workspace = prepared.workspace;
-  const inputPath = join(workspace, "input", "source-media");
-  mkdirSync(dirname(inputPath), { recursive: true });
-  writeFileSync(inputPath, canonicalWavFixture());
-  const createLauncher = (args: readonly string[]) =>
-    createNativeContainmentLauncher(
-      createExecutableNativeContainmentBroker({
-        args,
-        containment,
-        executablePath: containedRuntime.executablePath,
-        platform,
-        runtimeRoot: containedRuntime.runtimeRoot,
-        ...(prepared.windowsProfile === undefined
-          ? {}
-          : { windowsProfile: prepared.windowsProfile }),
-        workspace,
-      }),
-      platform,
-    );
-  await runAdversarialContainmentProbe(createLauncher, workspace);
-  const client = createEffectSidecarClient(createLauncher([]));
-  const request = parseSidecarSessionRequest({
-    jobId: "job-packaged-proof",
-    manifestHash: containedRuntime.manifestHash,
-    nonce: "nonce-packaged-proof",
-    requestId: "request-packaged-proof",
-    timeoutMs: 15_000,
-  });
   try {
-    const result = await client.runSession(request);
-    if (
-      result.artifact.path !== "artifacts/decode-manifest.json" ||
-      result.jobId !== request.jobId ||
-      result.requestId !== request.requestId
-    ) {
-      throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
-    }
-    const decodeManifestBytes = readFileSync(join(workspace, result.artifact.path));
-    if (
-      decodeManifestBytes.byteLength !== result.artifact.byteSize ||
-      createHash("sha256").update(decodeManifestBytes).digest("hex") !== result.artifact.sha256
-    ) {
-      throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
-    }
-    const decodeManifest = z
-      .object({ canonicalAudio: z.object({ sampleCount: z.literal(4_800) }) })
-      .parse(JSON.parse(decodeManifestBytes.toString("utf8")));
-    if (decodeManifest.canonicalAudio.sampleCount !== 4_800) {
-      throw new Error("Packaged sidecar lifecycle proof returned unexpected evidence");
+    const containedRuntime = verifyPackagedSidecarRuntime(
+      prepared.runtimeRoot,
+      EXPECTED_SIDECAR_MANIFEST_SHA256,
+    );
+    const workspace = prepared.workspace;
+    const inputPath = join(workspace, "input", "source-media");
+    mkdirSync(dirname(inputPath), { recursive: true });
+    writeFileSync(inputPath, canonicalWavFixture());
+    const createLauncher = (args: readonly string[]) =>
+      createNativeContainmentLauncher(
+        createExecutableNativeContainmentBroker({
+          args,
+          containment,
+          executablePath: containedRuntime.executablePath,
+          platform,
+          runtimeRoot: containedRuntime.runtimeRoot,
+          ...(prepared.windowsProfile === undefined
+            ? {}
+            : { windowsProfile: prepared.windowsProfile }),
+          workspace,
+        }),
+        platform,
+      );
+    await runAdversarialContainmentProbe(createLauncher, workspace);
+    const client = createEffectSidecarClient(createLauncher([]));
+    const request = parseSidecarSessionRequest({
+      jobId: "job-packaged-proof",
+      manifestHash: containedRuntime.manifestHash,
+      nonce: "nonce-packaged-proof",
+      requestId: "request-packaged-proof",
+      timeoutMs: 15_000,
+    });
+    try {
+      const result = await client.runSession(request);
+      if (
+        result.artifact.path !== "artifacts/decode-manifest.json" ||
+        result.jobId !== request.jobId ||
+        result.requestId !== request.requestId
+      ) {
+        throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
+      }
+      const decodeManifestBytes = readFileSync(join(workspace, result.artifact.path));
+      if (
+        decodeManifestBytes.byteLength !== result.artifact.byteSize ||
+        createHash("sha256").update(decodeManifestBytes).digest("hex") !== result.artifact.sha256
+      ) {
+        throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
+      }
+      const decodeManifest = z
+        .object({ canonicalAudio: z.object({ sampleCount: z.literal(4_800) }) })
+        .parse(JSON.parse(decodeManifestBytes.toString("utf8")));
+      if (decodeManifest.canonicalAudio.sampleCount !== 4_800) {
+        throw new Error("Packaged sidecar lifecycle proof returned unexpected evidence");
+      }
+    } finally {
+      await client.dispose();
     }
   } finally {
-    try {
-      await client.dispose();
-    } finally {
-      prepared.cleanup();
-    }
+    prepared.cleanup();
   }
 }
 

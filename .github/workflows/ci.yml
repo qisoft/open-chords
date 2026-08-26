@@ -10,6 +10,31 @@ permissions:
   contents: read
 
 jobs:
+  linux-preview-containment:
+    name: Ubuntu 24.04 containment preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.13.11
+      - name: Build Landlock, seccomp, and cgroup launcher
+        run: python tools/build-native-containment.py --output-root dist/containment
+      - name: Verify the launcher fails closed outside its delegated scope
+        shell: bash
+        run: |
+          set +e
+          output="$(dist/containment/open-chords-containment-launcher \
+            --expected-unit=not-the-current.scope \
+            --workspace="$RUNNER_TEMP" \
+            --runtime-root="$GITHUB_WORKSPACE" \
+            -- /bin/true 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 70
+          test "$output" = 'OC_CONTAINMENT_V1 {"error":"cgroup_scope_unverified"}'
+
   native:
     name: ${{ matrix.name }}
     strategy:

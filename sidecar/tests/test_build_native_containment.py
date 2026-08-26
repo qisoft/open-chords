@@ -95,5 +95,26 @@ class WindowsNativeContainmentBuildTests(unittest.TestCase):
             self.assertEqual(manifest["backend"], "windows-appcontainer-job")
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux native broker build")
+class LinuxNativeContainmentBuildTests(unittest.TestCase):
+    def test_builds_landlock_seccomp_launcher(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-containment-test-") as temporary:
+            output = Path(temporary) / "containment"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools/build-native-containment.py"),
+                    "--output-root",
+                    str(output),
+                ],
+                check=True,
+                cwd=ROOT,
+            )
+            executable = output / "open-chords-containment-launcher"
+            self.assertEqual(executable.read_bytes()[:4], b"\x7fELF")
+            manifest = json.loads((output / "containment-manifest.json").read_text("utf-8"))
+            self.assertEqual(manifest["backend"], "linux-landlock-seccomp")
+
+
 if __name__ == "__main__":
     unittest.main()

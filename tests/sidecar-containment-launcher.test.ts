@@ -58,6 +58,23 @@ it("does not invoke an uncontained fallback when native setup fails", async () =
   expect(fallbackLaunches).toBe(0);
 });
 
+it("rejects Linux evidence when the delegated cgroup was not verified", async () => {
+  const launcher = createNativeContainmentLauncher(
+    brokerThatReturns({
+      backend: "linux-landlock-seccomp",
+      cgroupDelegated: false,
+      landlockAbi: 3,
+      noNewPrivileges: true,
+      seccompFilter: true,
+    }),
+    "linux",
+  );
+
+  await expect(launcher.launch(request(), new AbortController().signal)).rejects.toMatchObject({
+    code: "launch_failure",
+  });
+});
+
 function request() {
   return parseSidecarSessionRequest({
     jobId: "job-contained",

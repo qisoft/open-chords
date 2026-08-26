@@ -25,6 +25,21 @@ static void fail(const char* reason) {
   if (length > 0) _write(3, message, static_cast<unsigned int>(length));
 }
 
+static void write_utf8_stdout(const std::wstring& value) {
+  int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.c_str(),
+      static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+  if (size <= 0) throw std::runtime_error("profile path encoding");
+  std::string encoded(static_cast<size_t>(size), '\0');
+  if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.c_str(),
+          static_cast<int>(value.size()), encoded.data(), size, nullptr, nullptr) != size) {
+    throw std::runtime_error("profile path encoding");
+  }
+  encoded.push_back('\n');
+  if (_write(STDOUT_FILENO, encoded.data(), static_cast<unsigned int>(encoded.size())) < 0) {
+    throw std::runtime_error("profile path output");
+  }
+}
+
 static std::wstring value_after(const std::wstring& value, const wchar_t* prefix) {
   std::wstring expected(prefix);
   return value.rfind(expected, 0) == 0 ? value.substr(expected.size()) : L"";
@@ -110,9 +125,17 @@ static int prepare(const std::wstring& profile) {
   PSID sid = nullptr;
   HRESULT result = CreateAppContainerProfile(
       profile.c_str(), L"Open Chords Analysis", L"Ephemeral offline analysis", nullptr, 0, &sid);
-  if (result == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)) sid = derive_profile(profile);
-  else if (FAILED(result)) throw std::runtime_error("create profile");
-  std::wcout << profile_root(sid) << std::endl;
+  if (result == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)) {
+    throw std::runtime_error("profile already exists");
+  }
+  if (FAILED(result)) throw std::runtime_error("create profile");
+  try {
+    write_utf8_stdout(profile_root(sid));
+  } catch (...) {
+    FreeSid(sid);
+    DeleteAppContainerProfile(profile.c_str());
+    throw;
+  }
   FreeSid(sid);
   return 0;
 }
@@ -221,7 +244,15 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
       "{\"appContainer\":true,\"backend\":\"windows-appcontainer-job\","
       "\"breakawayDisabled\":true,\"jobObject\":true,\"networkCapabilityCount\":0}\n";
   _write(3, evidence, sizeof(evidence) - 1);
-  ResumeThread(process.hThread);
+  if (ResumeThread(process.hThread) == static_cast<DWORD>(-1)) {
+    TerminateJobObject(job, 1);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    CloseHandle(job);
+    active_job = nullptr;
+    FreeSid(sid);
+    throw std::runtime_error("resume contained process");
+  }
   CloseHandle(process.hThread);
   WaitForSingleObject(process.hProcess, INFINITE);
   DWORD exit_code = 1;

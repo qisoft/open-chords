@@ -33,6 +33,7 @@ export {
   type NativeContainmentEvidence,
   type NativeContainmentPlatform,
 } from "./sidecar-containment-launcher.ts";
+export { createLinuxSystemdContainmentBroker } from "./sidecar-linux-systemd-broker.ts";
 
 export interface SidecarClient {
   runSession(request: SidecarSessionRequest): Promise<SidecarSessionResult>;

@@ -41,8 +41,7 @@ type NativeBrokerOptions = {
   args: readonly string[];
   containment: VerifiedContainmentRuntime;
   executablePath: string;
-  linuxCgroup?: string;
-  platform: NativeContainmentPlatform;
+  platform: Exclude<NativeContainmentPlatform, "linux">;
   runtimeRoot: string;
   windowsProfile?: string;
   workspace: string;
@@ -61,14 +60,10 @@ export function createExecutableNativeContainmentBroker(
   if (options.platform === "win32" && options.windowsProfile === undefined) {
     throw new SidecarSessionError("launch_failure", "Windows AppContainer profile is required");
   }
-  if (options.platform === "linux" && options.linuxCgroup === undefined) {
-    throw new SidecarSessionError("launch_failure", "Delegated Linux cgroup is required");
-  }
   return {
     async launchAndVerify(_request, signal) {
       const helperArguments = [
         ...(options.platform === "win32" ? [`--profile=${options.windowsProfile!}`] : []),
-        ...(options.platform === "linux" ? [`--cgroup=${options.linuxCgroup!}`] : []),
         `--workspace=${workspace}`,
         `--runtime-root=${runtimeRoot}`,
         "--",
@@ -176,10 +171,14 @@ async function readEvidence(child: ChildProcess): Promise<NativeContainmentEvide
     }),
   ]).finally(() => clearTimeout(timer!));
   try {
-    return EvidenceSchema.parse(JSON.parse(bytes.toString("utf8")));
+    return parseNativeContainmentEvidence(bytes.toString("utf8"));
   } catch (cause) {
     throw new SidecarSessionError("launch_failure", "Containment evidence is invalid", { cause });
   }
+}
+
+export function parseNativeContainmentEvidence(value: string): NativeContainmentEvidence {
+  return EvidenceSchema.parse(JSON.parse(value));
 }
 
 async function waitForSpawn(child: ChildProcess): Promise<void> {

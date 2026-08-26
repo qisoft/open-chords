@@ -88,9 +88,10 @@ def _descriptor_is_open(descriptor: int) -> bool:
 
 
 def _shell_cannot_read(path: Path) -> bool:
+    windows = os.name == "nt"
     command = (
         [os.environ.get("COMSPEC", "C:\\Windows\\System32\\cmd.exe"), "/d", "/c", "type", str(path)]
-        if os.name == "nt"
+        if windows
         else ["/bin/sh", "-c", 'test ! -r "$1"', "open-chords-probe", str(path)]
     )
     try:
@@ -104,4 +105,5 @@ def _shell_cannot_read(path: Path) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return True
-    return result.returncode == 0
+    # The POSIX command asserts unreadability, while cmd.exe `type` attempts the read.
+    return result.returncode != 0 if windows else result.returncode == 0

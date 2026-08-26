@@ -94,27 +94,55 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
   if (input < 0 || output < 0 || error_output < 0 || control < 0 || workspace == NULL ||
       runtime_root == NULL || executable == NULL || xpc_get_type(arguments) != XPC_TYPE_ARRAY) {
     fail(control, "invalid_launch_plan");
+    if (input >= 0) close(input);
+    if (output >= 0) close(output);
+    if (error_output >= 0) close(error_output);
+    if (control >= 0) close(control);
+    return;
+  }
+  if (xpc_connection_get_context(peer) != NULL) {
+    fail(control, "session_already_active");
+    close(input);
+    close(output);
+    close(error_output);
+    close(control);
     return;
   }
   const char *container = getenv("HOME");
   if (container == NULL || !canonical_child_of(container, workspace) ||
       !canonical_child_of(runtime_root, executable)) {
     fail(control, "path_boundary_failed");
+    close(input);
+    close(output);
+    close(error_output);
+    close(control);
     return;
   }
   if (!self_has_required_entitlements() || !helper_has_required_signature(executable)) {
     fail(control, "entitlement_chain_failed");
+    close(input);
+    close(output);
+    close(error_output);
+    close(control);
     return;
   }
 
   size_t count = xpc_array_get_count(arguments);
   if (count == 0 || count > 64) {
     fail(control, "invalid_arguments");
+    close(input);
+    close(output);
+    close(error_output);
+    close(control);
     return;
   }
   char **argv = calloc(count + 1, sizeof(char *));
   if (argv == NULL) {
     fail(control, "allocation_failed");
+    close(input);
+    close(output);
+    close(error_output);
+    close(control);
     return;
   }
   for (size_t index = 0; index < count; index += 1) {
@@ -122,6 +150,10 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
     if (value == NULL) {
       free(argv);
       fail(control, "invalid_arguments");
+      close(input);
+      close(output);
+      close(error_output);
+      close(control);
       return;
     }
     argv[index] = (char *)value;
@@ -149,13 +181,24 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
   int result = posix_spawn(&child, executable, &actions, &attributes, argv, environment);
   posix_spawnattr_destroy(&attributes);
   posix_spawn_file_actions_destroy(&actions);
+  close(input);
+  close(output);
+  close(error_output);
   free(argv);
   if (result != 0) {
     fail(control, "contained_spawn_failed");
+    close(control);
     return;
   }
 
   session_t *session = calloc(1, sizeof(session_t));
+  if (session == NULL) {
+    kill(-child, SIGKILL);
+    while (waitpid(child, NULL, 0) < 0 && errno == EINTR) {}
+    fail(control, "allocation_failed");
+    close(control);
+    return;
+  }
   session->child = child;
   session->peer = xpc_retain(peer);
   xpc_connection_set_context(peer, session);
@@ -166,13 +209,18 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
     int status = 0;
     while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
-    xpc_object_t reply = xpc_dictionary_create(NULL, NULL, 0);
-    xpc_dictionary_set_string(reply, "operation", "exit");
-    xpc_dictionary_set_int64(reply, "code", WIFEXITED(status) ? WEXITSTATUS(status) : 128);
-    xpc_connection_send_message(session->peer, reply);
-    xpc_release(reply);
-    xpc_release(session->peer);
-    free(session);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (xpc_connection_get_context(session->peer) == session) {
+        xpc_connection_set_context(session->peer, NULL);
+        xpc_object_t reply = xpc_dictionary_create(NULL, NULL, 0);
+        xpc_dictionary_set_string(reply, "operation", "exit");
+        xpc_dictionary_set_int64(reply, "code", WIFEXITED(status) ? WEXITSTATUS(status) : 128);
+        xpc_connection_send_message(session->peer, reply);
+        xpc_release(reply);
+      }
+      xpc_release(session->peer);
+      free(session);
+    });
   });
 }
 

@@ -26,8 +26,10 @@ def main() -> None:
         build_macos(output_root)
     elif sys.platform == "win32":
         build_windows(output_root)
+    elif sys.platform.startswith("linux"):
+        build_linux(output_root)
     else:
-        raise RuntimeError("Linux Preview containment broker is not available in this slice")
+        raise RuntimeError(f"Unsupported containment platform: {sys.platform}")
 
 
 def build_macos(output_root: Path) -> None:
@@ -123,10 +125,33 @@ def build_windows(output_root: Path) -> None:
         ],
         check=True,
     )
+    write_single_file_manifest(output_root, "windows-appcontainer-job", executable)
+
+
+def build_linux(output_root: Path) -> None:
+    executable = output_root / "open-chords-containment-launcher"
+    subprocess.run(
+        [
+            "cc",
+            "-std=c17",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            str(ROOT / "native/linux/containment-launcher.c"),
+            "-o",
+            str(executable),
+        ],
+        check=True,
+    )
+    write_single_file_manifest(output_root, "linux-landlock-seccomp", executable)
+
+
+def write_single_file_manifest(output_root: Path, backend: str, executable: Path) -> None:
     (output_root / "containment-manifest.json").write_text(
         json.dumps(
             {
-                "backend": "windows-appcontainer-job",
+                "backend": backend,
                 "files": [
                     {
                         "path": executable.name,
