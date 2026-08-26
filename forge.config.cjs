@@ -1,4 +1,6 @@
 const { spawn } = require("node:child_process");
+const { cpSync, mkdirSync } = require("node:fs");
+const { join, resolve: resolvePath } = require("node:path");
 
 const { MakerZIP } = require("@electron-forge/maker-zip");
 const { FusesPlugin } = require("@electron-forge/plugin-fuses");
@@ -28,12 +30,23 @@ function buildApplication() {
 module.exports = {
   packagerConfig: {
     asar: true,
-    extraResource: ["dist/analysis-sidecar/open-chords-analysis"],
+    extraResource: ["dist/analysis-sidecar/open-chords-analysis", "dist/containment"],
   },
   rebuildConfig: {},
   makers: [new MakerZIP({}, ["darwin", "win32"])],
   hooks: {
     generateAssets: buildApplication,
+    packageAfterCopy: async (buildPath, _electronVersion, platform) => {
+      if (platform !== "darwin") return;
+      const contents = resolvePath(buildPath, "..", "..");
+      const destination = join(contents, "XPCServices");
+      mkdirSync(destination, { recursive: true });
+      cpSync(
+        join(__dirname, "dist", "containment", "OpenChordsAnalysisService.xpc"),
+        join(destination, "OpenChordsAnalysisService.xpc"),
+        { recursive: true },
+      );
+    },
   },
   plugins: [
     new FusesPlugin({

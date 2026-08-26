@@ -8,6 +8,7 @@ import { defineConfig } from "vite";
 const sidecarManifestPath = resolve(
   "dist/analysis-sidecar/open-chords-analysis/runtime-manifest.json",
 );
+const containmentManifestPath = resolve("dist/containment/containment-manifest.json");
 
 export function readSidecarManifestHash(manifestPath: string, required: boolean): string {
   if (!existsSync(manifestPath)) {
@@ -19,8 +20,13 @@ export function readSidecarManifestHash(manifestPath: string, required: boolean)
 
 export default defineConfig(({ mode }) => {
   const sidecarManifestHash = readSidecarManifestHash(sidecarManifestPath, mode === "packaged");
+  const containmentManifestHash = readSidecarManifestHash(
+    containmentManifestPath,
+    mode === "packaged",
+  );
   return {
     define: {
+      OPEN_CHORDS_EMBEDDED_CONTAINMENT_MANIFEST_SHA256: JSON.stringify(containmentManifestHash),
       OPEN_CHORDS_EMBEDDED_SIDECAR_MANIFEST_SHA256: JSON.stringify(sidecarManifestHash),
     },
     build: {

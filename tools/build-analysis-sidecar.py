@@ -95,6 +95,8 @@ def main() -> None:
                 "numba._devicearray",
                 "--hidden-import",
                 "sidecar.open_chords_analysis.cpu_analysis",
+                "--hidden-import",
+                "sidecar.open_chords_analysis.containment_probe",
                 *[
                     argument
                     for module in PYINSTALLER_EXCLUDED_MODULES
@@ -168,6 +170,16 @@ def main() -> None:
         inventory = json.loads(
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
         )
+        if sys.platform == "darwin":
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools/sign-macos-analysis-runtime.py"),
+                    "--runtime-root",
+                    str(assembled),
+                ],
+                check=True,
+            )
         native_files = _native_files(assembled)
         _validate_native_closure(assembled, native_files, ffmpeg_build)
         present_components = {entry["component"] for entry in native_files} | {"pyinstaller"}

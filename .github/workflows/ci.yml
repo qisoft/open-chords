@@ -106,6 +106,8 @@ jobs:
           --platform-profile ${{ matrix.profile }}
       - name: Run frozen sidecar decode smoke
         run: pnpm test:frozen-sidecar
+      - name: Build native containment broker
+        run: python tools/build-native-containment.py --output-root dist/containment
       - name: Build installable Forge artifact
         run: pnpm make -- --arch=${{ matrix.arch }}
       - name: Verify installed trust boundary

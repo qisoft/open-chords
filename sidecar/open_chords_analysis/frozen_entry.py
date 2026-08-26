@@ -16,6 +16,12 @@ from sidecar.open_chords_analysis.__main__ import main
 
 
 def frozen_main() -> None:
+    if len(sys.argv) == 2 and sys.argv[1].startswith("--containment-probe="):
+        from sidecar.open_chords_analysis.containment_probe import run_probe
+
+        plan = Path(sys.argv[1].split("=", 1)[1])
+        print(json.dumps(run_probe(plan), separators=(",", ":"), sort_keys=True))
+        return
     if sys.argv[1:] == ["--cpu-analysis-import-check"]:
         from sidecar.open_chords_analysis.runtime_manifest import load_frozen_runtime
 
