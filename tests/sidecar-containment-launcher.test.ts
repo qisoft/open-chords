@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { expect, it } from "vitest";
@@ -17,6 +18,13 @@ import {
 } from "../apps/desktop/src/main/sidecar-session.ts";
 
 const fixtureRoot = resolve("tests/fixtures");
+
+it("assigns the Windows containment job atomically during process creation", () => {
+  const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
+
+  expect(source).toContain("PROC_THREAD_ATTRIBUTE_JOB_LIST");
+  expect(source).not.toContain("AssignProcessToJobObject(");
+});
 
 it("surfaces bounded native containment failure reasons", () => {
   expect(parseNativeContainmentFailure('{"error":"helper_signature_create_failed"}')).toBe(

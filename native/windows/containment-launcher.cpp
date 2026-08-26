@@ -44,9 +44,16 @@ static void fail(const char* reason) {
 static void fail_setup(const std::exception& error) {
   std::string reason = "containment_setup_failed_";
   for (const char character : std::string(error.what()).substr(0, 96)) {
-    reason += character >= 'a' && character <= 'z' ? character : '_';
+    reason += (character >= 'a' && character <= 'z') ||
+            (character >= '0' && character <= '9') || character == '-'
+        ? character
+        : '_';
   }
   fail(reason.c_str());
+}
+
+[[noreturn]] static void throw_last_error(const char* stage, DWORD error) {
+  throw std::runtime_error(std::string(stage) + "-" + std::to_string(error));
 }
 
 static void write_utf8_stdout(const std::wstring& value) {
@@ -220,11 +227,11 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   SECURITY_CAPABILITIES capabilities{};
   capabilities.AppContainerSid = sid;
   SIZE_T attribute_size = 0;
-  InitializeProcThreadAttributeList(nullptr, 2, 0, &attribute_size);
+  InitializeProcThreadAttributeList(nullptr, 3, 0, &attribute_size);
   auto attributes = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
       HeapAlloc(GetProcessHeap(), 0, attribute_size));
   if (attributes == nullptr ||
-      !InitializeProcThreadAttributeList(attributes, 2, 0, &attribute_size) ||
+      !InitializeProcThreadAttributeList(attributes, 3, 0, &attribute_size) ||
       !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
           &capabilities, sizeof(capabilities), nullptr, nullptr)) {
     close_job(job); FreeSid(sid); throw std::runtime_error("security capabilities");
@@ -262,6 +269,16 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     FreeSid(sid);
     throw std::runtime_error("handle allowlist");
   }
+  HANDLE job_list[] = {job};
+  if (!UpdateProcThreadAttribute(
+          attributes, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, job_list,
+          sizeof(job_list), nullptr, nullptr)) {
+    DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
+    close_job(job);
+    FreeSid(sid);
+    throw std::runtime_error("job allowlist");
+  }
   std::wstring command;
   for (int index = separator + 1; index < argc; index += 1) {
     if (!command.empty()) command += L" ";
@@ -284,11 +301,13 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
       CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT |
           EXTENDED_STARTUPINFO_PRESENT,
       environment.data(), workspace.c_str(), &startup.StartupInfo, &process);
+  DWORD create_error = created ? ERROR_SUCCESS : GetLastError();
   DeleteProcThreadAttributeList(attributes);
   HeapFree(GetProcessHeap(), 0, attributes);
-  if (!created || !AssignProcessToJobObject(job, process.hProcess)) {
-    if (created) TerminateProcess(process.hProcess, 1);
-    close_job(job); FreeSid(sid); throw std::runtime_error("contained process");
+  if (!created) {
+    close_job(job);
+    FreeSid(sid);
+    throw_last_error("create contained process", create_error);
   }
   BOOL in_job = FALSE;
   if (!IsProcessInJob(process.hProcess, job, &in_job) || !in_job ||
