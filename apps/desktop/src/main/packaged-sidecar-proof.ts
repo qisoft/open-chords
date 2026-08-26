@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
@@ -14,6 +14,14 @@ import { createNativeContainmentLauncher } from "./sidecar-containment-launcher.
 import { createExecutableNativeContainmentBroker } from "./sidecar-native-broker.ts";
 import { verifyPackagedSidecarRuntime } from "./sidecar-runtime-integrity.ts";
 import { createEffectSidecarClient, parseSidecarSessionRequest } from "./sidecar-session.ts";
+
+const SensitiveSurfacesSchema = z.object({
+  browserState: z.literal(true),
+  credentials: z.literal(true),
+  modelStore: z.literal(true),
+  projectLibrary: z.literal(true),
+  source: z.literal(true),
+});
 
 export async function runPackagedSidecarProof(): Promise<void> {
   if (process.platform !== "darwin" && process.platform !== "win32") {
@@ -46,6 +54,7 @@ export async function runPackagedSidecarProof(): Promise<void> {
       : undefined,
   );
   const prepared = prepareWorkspace(platform, containment.helperPath, verifiedRuntime.runtimeRoot);
+  let proofFailure: { cause: unknown } | undefined;
   try {
     const containedRuntime = verifyPackagedSidecarRuntime(
       prepared.runtimeRoot,
@@ -71,7 +80,9 @@ export async function runPackagedSidecarProof(): Promise<void> {
         }),
         platform,
       );
-    await runAdversarialContainmentProbe(createLauncher, workspace);
+    await runAdversarialContainmentProbe(createLauncher, workspace, platform);
+    await runLifecycleContainmentProbe(createLauncher, workspace, "cancel");
+    await runLifecycleContainmentProbe(createLauncher, workspace, "crash");
     const client = createEffectSidecarClient(createLauncher([]));
     const request = parseSidecarSessionRequest({
       jobId: "job-packaged-proof",
@@ -105,18 +116,25 @@ export async function runPackagedSidecarProof(): Promise<void> {
     } finally {
       await client.dispose();
     }
-  } finally {
-    prepared.cleanup();
+  } catch (cause) {
+    proofFailure = { cause };
   }
+  let cleanupFailure: { cause: unknown } | undefined;
+  try {
+    prepared.cleanup();
+  } catch (cause) {
+    cleanupFailure = { cause };
+  }
+  if (proofFailure !== undefined) throw proofFailure.cause;
+  if (cleanupFailure !== undefined) throw cleanupFailure.cause;
 }
 
 async function runAdversarialContainmentProbe(
   createLauncher: (args: readonly string[]) => ReturnType<typeof createNativeContainmentLauncher>,
   workspace: string,
+  platform: "darwin" | "win32",
 ): Promise<void> {
-  const sentinelRoot = mkdtempSync(join(homedir(), ".open-chords-containment-proof-"));
-  const sentinel = join(sentinelRoot, "canonical-private-data");
-  writeFileSync(sentinel, "private");
+  const sentinels = createSensitiveSentinels(platform);
   const server = createServer((socket) => socket.destroy());
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
@@ -126,7 +144,13 @@ async function runAdversarialContainmentProbe(
   if (address === null || typeof address === "string")
     throw new Error("Loopback probe did not bind");
   const plan = join(workspace, "containment-probe.json");
-  writeFileSync(plan, JSON.stringify({ loopbackPort: address.port, sentinelPath: sentinel }));
+  writeFileSync(
+    plan,
+    JSON.stringify({
+      loopbackPort: address.port,
+      sensitivePaths: sentinels.paths,
+    }),
+  );
   const request = parseSidecarSessionRequest({
     jobId: "job-containment-probe",
     manifestHash: "0".repeat(64),
@@ -135,6 +159,7 @@ async function runAdversarialContainmentProbe(
     timeoutMs: 15_000,
   });
   let process: Awaited<ReturnType<ReturnType<typeof createLauncher>["launch"]>> | undefined;
+  let proofFailure: { cause: unknown } | undefined;
   try {
     process = await createLauncher([`--containment-probe=${plan}`]).launch(
       request,
@@ -152,20 +177,209 @@ async function runAdversarialContainmentProbe(
       networkBlocked: z.literal(true),
       packagedHelperRan: z.literal(true),
       pathBlocked: z.literal(true),
+      processEscapeBlocked: z.literal(true),
+      sensitiveLinkEscapesBlocked: SensitiveSurfacesSchema,
+      sensitivePathsBlocked: SensitiveSurfacesSchema,
+      sensitiveShellEscapesBlocked: SensitiveSurfacesSchema,
       shellEscapeBlocked: z.literal(true),
     }).parse(JSON.parse(output.toString("utf8")));
-  } finally {
-    await process?.stop("completed");
-    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-    rmSync(sentinelRoot, { force: true, recursive: true });
+  } catch (cause) {
+    proofFailure = { cause };
   }
+  const cleanupErrors: unknown[] = [];
+  try {
+    await process?.stop("completed");
+  } catch (cause) {
+    cleanupErrors.push(cause);
+  }
+  try {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  } catch (cause) {
+    cleanupErrors.push(cause);
+  }
+  try {
+    sentinels.cleanup();
+  } catch (cause) {
+    cleanupErrors.push(cause);
+  }
+  if (proofFailure !== undefined) throw proofFailure.cause;
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Packaged containment proof cleanup failed");
+  }
+}
+
+const LifecycleEvidenceSchema = z.object({
+  descendantPid: z.number().int().positive(),
+  parentPid: z.number().int().positive(),
+  partialPath: z.string(),
+});
+
+async function runLifecycleContainmentProbe(
+  createLauncher: (args: readonly string[]) => ReturnType<typeof createNativeContainmentLauncher>,
+  workspace: string,
+  mode: "cancel" | "crash",
+): Promise<void> {
+  const partialPath = join(workspace, "artifacts", `${mode}.json.partial`);
+  const publishablePath = join(workspace, "artifacts", `${mode}.json`);
+  const plan = join(workspace, `containment-lifecycle-${mode}.json`);
+  writeFileSync(plan, JSON.stringify({ mode, partialPath }));
+  const request = parseSidecarSessionRequest({
+    jobId: `job-containment-${mode}`,
+    manifestHash: "0".repeat(64),
+    nonce: `nonce-containment-${mode}`,
+    requestId: `request-containment-${mode}`,
+    timeoutMs: 15_000,
+  });
+  const process = await createLauncher([`--containment-lifecycle-probe=${plan}`]).launch(
+    request,
+    AbortSignal.timeout(15_000),
+  );
+  let primaryFailure: { cause: unknown } | undefined;
+  let evidence: z.infer<typeof LifecycleEvidenceSchema> | undefined;
+  const iterator = process.stdout[Symbol.asyncIterator]();
+  try {
+    evidence = LifecycleEvidenceSchema.parse(JSON.parse(await readBoundedLine(iterator)));
+    if (evidence.partialPath !== partialPath || !existsSync(partialPath)) {
+      throw new Error(`Contained ${mode} probe did not stage its partial output`);
+    }
+    if (mode === "crash") await drainOutput(iterator);
+  } catch (cause) {
+    primaryFailure = { cause };
+  }
+  let cleanupFailure: { cause: unknown } | undefined;
+  try {
+    await process.stop(mode === "cancel" ? "cancelled" : "completed");
+  } catch (cause) {
+    cleanupFailure = { cause };
+  }
+  if (primaryFailure !== undefined) throw primaryFailure.cause;
+  if (cleanupFailure !== undefined) throw cleanupFailure.cause;
+  if (evidence === undefined) {
+    throw new Error(`Contained ${mode} probe returned no evidence`);
+  }
+  await assertProcessesExited([evidence.parentPid, evidence.descendantPid]);
+  if (existsSync(publishablePath)) {
+    throw new Error(`Contained ${mode} probe left publishable output`);
+  }
+  rmSync(partialPath, { force: true });
+}
+
+async function readBoundedLine(iterator: AsyncIterator<Uint8Array>): Promise<string> {
+  let buffered = Buffer.alloc(0);
+  while (true) {
+    const next = await withTimeout(
+      iterator.next(),
+      5_000,
+      "Containment lifecycle evidence timed out",
+    );
+    if (next.done) throw new Error("Containment lifecycle evidence is missing");
+    buffered = Buffer.concat([buffered, Buffer.from(next.value)]);
+    if (buffered.byteLength > 4 * 1024) {
+      throw new Error("Containment lifecycle evidence is oversized");
+    }
+    const newline = buffered.indexOf(0x0a);
+    if (newline >= 0) return buffered.subarray(0, newline).toString("utf8");
+  }
+}
+
+async function drainOutput(iterator: AsyncIterator<Uint8Array>): Promise<void> {
+  while (true) {
+    const next = await withTimeout(iterator.next(), 10_000, "Contained crash probe did not exit");
+    if (next.done) return;
+  }
+}
+
+async function withTimeout<T>(
+  promise: PromiseLike<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
+async function assertProcessesExited(processIds: readonly number[]): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (processIds.some(isProcessAlive)) {
+    if (Date.now() >= deadline) {
+      throw new Error("Contained process domain left a survivor");
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+}
+
+function isProcessAlive(processId: number): boolean {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (cause) {
+    return !(cause instanceof Error && Reflect.get(cause, "code") === "ESRCH");
+  }
+}
+
+function createSensitiveSentinels(platform: "darwin" | "win32"): {
+  cleanup(): void;
+  paths: Record<keyof z.infer<typeof SensitiveSurfacesSchema>, string>;
+} {
+  const home = homedir();
+  const applicationSupport =
+    platform === "win32"
+      ? join(home, "AppData", "Roaming")
+      : join(home, "Library", "Application Support");
+  const browserSupport =
+    platform === "win32"
+      ? join(home, "AppData", "Local")
+      : join(home, "Library", "Application Support");
+  const identifier = randomUUID();
+  const roots = {
+    browserState: join(browserSupport, "Google", "Chrome", "User Data", "Default", identifier),
+    credentials: join(home, ".config", "open-chords", identifier),
+    modelStore: join(applicationSupport, "Open Chords", "Model Store", identifier),
+    projectLibrary: join(applicationSupport, "Open Chords", "Project Library", identifier),
+    source: join(home, "Music", "Open Chords Containment Proof", identifier),
+  };
+  const createSentinel = (root: string) => {
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    const path = join(root, "canonical-private-data");
+    writeFileSync(path, "private");
+    return path;
+  };
+  const paths = {
+    browserState: createSentinel(roots.browserState),
+    credentials: createSentinel(roots.credentials),
+    modelStore: createSentinel(roots.modelStore),
+    projectLibrary: createSentinel(roots.projectLibrary),
+    source: createSentinel(roots.source),
+  };
+  return {
+    cleanup() {
+      for (const root of Object.values(roots)) {
+        rmSync(root, { force: true, recursive: true });
+      }
+    },
+    paths,
+  };
 }
 
 function prepareWorkspace(
   platform: "darwin" | "win32",
   helperPath: string,
   packagedRuntimeRoot: string,
-): { cleanup(): void; runtimeRoot: string; windowsProfile?: string; workspace: string } {
+): {
+  cleanup(): void;
+  runtimeRoot: string;
+  windowsProfile?: string;
+  workspace: string;
+} {
   const identifier = randomUUID();
   if (platform === "darwin") {
     const workspace = join(
@@ -197,12 +411,18 @@ function prepareWorkspace(
     cpSync(packagedRuntimeRoot, runtimeRoot, { recursive: true });
     mkdirSync(workspace, { recursive: true });
   } catch (cause) {
-    execFileSync(helperPath, [`--destroy=${profile}`], { env: {}, windowsHide: true });
+    execFileSync(helperPath, [`--destroy=${profile}`], {
+      env: {},
+      windowsHide: true,
+    });
     throw cause;
   }
   return {
     cleanup() {
-      execFileSync(helperPath, [`--destroy=${profile}`], { env: {}, windowsHide: true });
+      execFileSync(helperPath, [`--destroy=${profile}`], {
+        env: {},
+        windowsHide: true,
+      });
       rmSync(profileRoot, { force: true, recursive: true });
     },
     runtimeRoot,

@@ -55,9 +55,10 @@ it("runs the protocol only after the native broker verifies the expected backend
 });
 
 it("does not invoke an uncontained fallback when native setup fails", async () => {
-  let fallbackLaunches = 0;
+  let brokerCalls = 0;
   const broker: NativeContainmentBroker = {
     async launchAndVerify() {
+      brokerCalls += 1;
       throw new SidecarSessionError("launch_failure", "Native setup failed");
     },
   };
@@ -66,7 +67,7 @@ it("does not invoke an uncontained fallback when native setup fails", async () =
   await expect(launcher.launch(request(), new AbortController().signal)).rejects.toMatchObject({
     code: "launch_failure",
   });
-  expect(fallbackLaunches).toBe(0);
+  expect(brokerCalls).toBe(1);
 });
 
 it("rejects Linux evidence when the delegated cgroup was not verified", async () => {

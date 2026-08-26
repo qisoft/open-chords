@@ -22,6 +22,22 @@ def frozen_main() -> None:
         plan = Path(sys.argv[1].split("=", 1)[1])
         print(json.dumps(run_probe(plan), separators=(",", ":"), sort_keys=True))
         return
+    if len(sys.argv) == 2 and sys.argv[1].startswith("--containment-descendant-probe="):
+        from sidecar.open_chords_analysis.containment_probe import run_descendant_probe
+
+        plan = Path(sys.argv[1].split("=", 1)[1])
+        raise SystemExit(run_descendant_probe(plan))
+    if len(sys.argv) == 2 and sys.argv[1].startswith("--containment-lifecycle-probe="):
+        from sidecar.open_chords_analysis.containment_probe import run_lifecycle_probe
+
+        plan = Path(sys.argv[1].split("=", 1)[1])
+        run_lifecycle_probe(plan)
+        return
+    if sys.argv[1:] == ["--containment-descendant-wait"]:
+        from sidecar.open_chords_analysis.containment_probe import wait_as_descendant
+
+        wait_as_descendant()
+        return
     if sys.argv[1:] == ["--cpu-analysis-import-check"]:
         from sidecar.open_chords_analysis.runtime_manifest import load_frozen_runtime
 

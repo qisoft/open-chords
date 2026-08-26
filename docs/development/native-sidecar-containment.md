@@ -8,7 +8,9 @@ Issue [#49](https://github.com/qisoft/open-chords/issues/49) replaces the protoc
 
 Every broker receives an exact executable, argument array, verified runtime root, and disposable workspace. It uses no shell or `PATH` lookup and passes only protocol stdin/stdout/stderr. Setup evidence is accepted only from the manifest-authorized native broker after its platform checks complete.
 
-The installed-artifact proof stages sentinel data outside the analysis domain and verifies that direct reads, symlink reads, loopback TCP, inherited control handles, sensitive environment variables, and shell-mediated reads are unavailable. It also verifies that the packaged `ffprobe` helper can still execute. The same probe detects those escapes when run without containment, preventing a vacuous test.
+The installed-artifact proof stages separate sentinel data at representative Project Library, Source, Model Store, credential, and browser-state locations outside the analysis domain. It verifies that direct reads, symlink reads, loopback TCP, inherited control handles, sensitive environment variables, shell-mediated reads, and a process-session or Job breakaway attempt cannot reach host data. It also verifies that the packaged `ffprobe` helper can still execute. The same probe detects those escapes when run without containment, preventing a vacuous test.
+
+The proof then runs cancellation and crash modes that each create an unpublished partial file and a descendant process. It requires the native process domain to reap both the primary process and descendant and rejects any publishable result left by either terminal path before running the successful protocol lifecycle.
 
 ## macOS 13+
 
@@ -22,7 +24,7 @@ The service private container remains broader than one job directory. macOS stil
 
 Main creates a fresh AppContainer profile per attempt. The verified sidecar runtime and staged inputs are copied into that profile directory; the launcher refuses runtime, executable, or workspace paths that resolve outside it and rejects reparse points. It never grants or mutates ACLs on the installed runtime, Source, Project Library, Model Store, or arbitrary host paths.
 
-The launcher creates the sidecar suspended with an empty capability set, assigns it to a Job Object with kill-on-close, no breakaway flags, process and memory limits, and an exact inherited-handle allowlist. It inspects the child token for the expected AppContainer SID and verifies Job membership before resuming the first untrusted instruction. Profile deletion occurs only after the process domain has terminated and main has inspected the output.
+The launcher creates the sidecar suspended with an empty capability set, assigns it to a Job Object with kill-on-close, no breakaway flags, process and memory limits, and an exact inherited-handle allowlist. It inspects the child token for the expected AppContainer SID and verifies Job membership before resuming the first untrusted instruction. After the primary exits, the launcher terminates the Job and waits for its active-process count to reach zero before reporting completion. Profile deletion occurs only after the process domain has terminated and main has inspected the output.
 
 ## Ubuntu Preview
 

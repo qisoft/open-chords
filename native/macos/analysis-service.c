@@ -102,7 +102,8 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
   const char *executable = xpc_dictionary_get_string(message, "executable");
   xpc_object_t arguments = xpc_dictionary_get_value(message, "arguments");
   if (input < 0 || output < 0 || error_output < 0 || control < 0 || workspace == NULL ||
-      runtime_root == NULL || executable == NULL || xpc_get_type(arguments) != XPC_TYPE_ARRAY) {
+      runtime_root == NULL || executable == NULL || arguments == NULL ||
+      xpc_get_type(arguments) != XPC_TYPE_ARRAY) {
     fail(control, "invalid_launch_plan");
     if (input >= 0) close(input);
     if (output >= 0) close(output);
@@ -238,6 +239,7 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
     int status = 0;
     while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    kill(-child, SIGKILL);
     dispatch_async(dispatch_get_main_queue(), ^{
       if (xpc_connection_get_context(session->peer) == session) {
         xpc_connection_set_context(session->peer, NULL);
@@ -267,6 +269,7 @@ static void handle_message(xpc_connection_t peer, xpc_object_t message) {
 }
 
 static void accept_peer(xpc_connection_t peer) {
+  xpc_connection_set_target_queue(peer, dispatch_get_main_queue());
   xpc_connection_set_event_handler(peer, ^(xpc_object_t event) {
     if (xpc_get_type(event) == XPC_TYPE_DICTIONARY) handle_message(peer, event);
     else if (event == XPC_ERROR_CONNECTION_INVALID) {

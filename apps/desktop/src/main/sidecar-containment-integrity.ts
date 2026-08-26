@@ -47,10 +47,19 @@ export function verifyContainmentRuntime(
   platform: NativeContainmentPlatform,
   helperPathOverride?: string,
 ): VerifiedContainmentRuntime {
-  const root = realpathSync(resolve(runtimeRoot));
+  const root = attempt("Containment runtime root is unavailable", () =>
+    realpathSync(resolve(runtimeRoot)),
+  );
   const manifestPath = join(root, "containment-manifest.json");
-  const manifestBytes = readFileSync(manifestPath);
-  if (manifestBytes.byteLength > 1024 * 1024) fail("Containment manifest is oversized");
+  const manifestStat = attempt("Containment manifest is unavailable", () =>
+    lstatSync(manifestPath),
+  );
+  if (!manifestStat.isFile() || manifestStat.size > 1024 * 1024) {
+    fail("Containment manifest is missing or oversized");
+  }
+  const manifestBytes = attempt("Containment manifest is unreadable", () =>
+    readFileSync(manifestPath),
+  );
   const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
   if (manifestHash !== expectedManifestHash) fail("Containment manifest hash mismatch");
   const manifest = ManifestSchema.parse(JSON.parse(manifestBytes.toString("utf8")));
@@ -128,4 +137,12 @@ function listFiles(root: string): string[] {
 
 function fail(message: string): never {
   throw new SidecarSessionError("launch_failure", message);
+}
+
+function attempt<T>(message: string, action: () => T): T {
+  try {
+    return action();
+  } catch (cause) {
+    throw new SidecarSessionError("launch_failure", message, { cause });
+  }
 }

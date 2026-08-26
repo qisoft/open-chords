@@ -33,7 +33,9 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
 
             self.assertFalse(alias.is_symlink())
             self.assertEqual(alias.read_bytes(), b"signed-python")
+            self.assertFalse(current.is_symlink())
             self.assertFalse(current.exists())
+            self.assertFalse(framework_alias.is_symlink())
             self.assertFalse(framework_alias.exists())
 
     def test_reports_missing_pyinstaller_license_with_context(self) -> None:

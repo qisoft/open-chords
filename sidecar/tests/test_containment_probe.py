@@ -30,7 +30,18 @@ class ContainmentProbeTests(unittest.TestCase):
             sentinel.write_text("private", "utf-8")
             plan = root / "plan.json"
             plan.write_text(
-                json.dumps({"loopbackPort": 9, "sentinelPath": str(sentinel)}),
+                json.dumps(
+                    {
+                        "loopbackPort": 9,
+                        "sensitivePaths": {
+                            "browserState": str(sentinel),
+                            "credentials": str(sentinel),
+                            "modelStore": str(sentinel),
+                            "projectLibrary": str(sentinel),
+                            "source": str(sentinel),
+                        },
+                    }
+                ),
                 "utf-8",
             )
             previous = Path.cwd()
@@ -49,6 +60,9 @@ class ContainmentProbeTests(unittest.TestCase):
             self.assertIs(result["networkBlocked"], False)
             self.assertIs(result["linkEscapeBlocked"], False)
             self.assertIs(result["shellEscapeBlocked"], False)
+            self.assertTrue(
+                all(value is False for value in result["sensitivePathsBlocked"].values())
+            )
 
 
 if __name__ == "__main__":

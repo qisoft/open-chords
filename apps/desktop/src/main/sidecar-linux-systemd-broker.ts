@@ -71,6 +71,9 @@ export function createLinuxSystemdContainmentBroker(
           stdio: ["pipe", "pipe", "pipe"],
         },
       );
+      const onChildError = () => undefined;
+      child.on("error", onChildError);
+      child.once("close", () => child.off("error", onChildError));
       try {
         const evidence = await readSystemdEvidence(child);
         if (child.stdin === null || child.stdout === null) {
@@ -134,6 +137,7 @@ async function readSystemdEvidence(child: ChildProcess) {
     const timer = setTimeout(() => finish(new Error("Linux containment setup timed out")), 5_000);
     const finish = (error?: Error, value?: string) => {
       clearTimeout(timer);
+      child.off("error", onChildError);
       stderr.off("data", onData);
       stderr.off("end", onEnd);
       stderr.off("error", onError);
@@ -141,6 +145,7 @@ async function readSystemdEvidence(child: ChildProcess) {
       else reject(error ?? new Error("Linux containment evidence is missing"));
     };
     const onEnd = () => finish(new Error("Linux containment evidence is missing"));
+    const onChildError = (error: Error) => finish(error);
     const onError = (error: Error) => finish(error);
     const onData = (chunk: Buffer) => {
       buffered = Buffer.concat([buffered, chunk]);
@@ -154,6 +159,7 @@ async function readSystemdEvidence(child: ChildProcess) {
       drainBoundedStderr(child, stderr, trailingBytes);
       finish(undefined, buffered.subarray(0, newline).toString("utf8"));
     };
+    child.once("error", onChildError);
     stderr.on("data", onData);
     stderr.once("end", onEnd);
     stderr.once("error", onError);

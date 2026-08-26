@@ -13,10 +13,26 @@
 
 namespace fs = std::filesystem;
 static HANDLE active_job = nullptr;
+static SRWLOCK active_job_lock = SRWLOCK_INIT;
 
 static BOOL WINAPI control_handler(DWORD) {
+  AcquireSRWLockShared(&active_job_lock);
   if (active_job != nullptr) TerminateJobObject(active_job, 1);
+  ReleaseSRWLockShared(&active_job_lock);
   return TRUE;
+}
+
+static void set_active_job(HANDLE job) {
+  AcquireSRWLockExclusive(&active_job_lock);
+  active_job = job;
+  ReleaseSRWLockExclusive(&active_job_lock);
+}
+
+static void close_job(HANDLE job) {
+  AcquireSRWLockExclusive(&active_job_lock);
+  if (active_job == job) active_job = nullptr;
+  CloseHandle(job);
+  ReleaseSRWLockExclusive(&active_job_lock);
 }
 
 static void fail(const char* reason) {
@@ -129,6 +145,21 @@ static bool verify_token(HANDLE process, PSID expected) {
   return valid;
 }
 
+static bool terminate_and_wait_for_empty_job(HANDLE job) {
+  if (!TerminateJobObject(job, 1)) return false;
+  ULONGLONG deadline = GetTickCount64() + 5000;
+  while (true) {
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+    if (!QueryInformationJobObject(
+            job, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), nullptr)) {
+      return false;
+    }
+    if (accounting.ActiveProcesses == 0) return true;
+    if (GetTickCount64() >= deadline) return false;
+    Sleep(10);
+  }
+}
+
 static int prepare(const std::wstring& profile) {
   PSID sid = nullptr;
   HRESULT result = CreateAppContainerProfile(
@@ -173,7 +204,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
 
   HANDLE job = CreateJobObjectW(nullptr, nullptr);
   if (job == nullptr) throw std::runtime_error("create job");
-  active_job = job;
+  set_active_job(job);
   SetConsoleCtrlHandler(control_handler, TRUE);
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
   limits.BasicLimitInformation.LimitFlags =
@@ -183,7 +214,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   limits.ProcessMemoryLimit = 2ULL * 1024 * 1024 * 1024;
   limits.JobMemoryLimit = 3ULL * 1024 * 1024 * 1024;
   if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
-    CloseHandle(job); FreeSid(sid); throw std::runtime_error("job limits");
+    close_job(job); FreeSid(sid); throw std::runtime_error("job limits");
   }
 
   SECURITY_CAPABILITIES capabilities{};
@@ -196,7 +227,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
       !InitializeProcThreadAttributeList(attributes, 2, 0, &attribute_size) ||
       !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
           &capabilities, sizeof(capabilities), nullptr, nullptr)) {
-    CloseHandle(job); FreeSid(sid); throw std::runtime_error("security capabilities");
+    close_job(job); FreeSid(sid); throw std::runtime_error("security capabilities");
   }
   STARTUPINFOEXW startup{};
   startup.StartupInfo.cb = sizeof(startup);
@@ -213,7 +244,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
           startup.StartupInfo.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)) {
     DeleteProcThreadAttributeList(attributes);
     HeapFree(GetProcessHeap(), 0, attributes);
-    CloseHandle(job);
+    close_job(job);
     FreeSid(sid);
     throw std::runtime_error("protocol handle inheritance");
   }
@@ -227,7 +258,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
           sizeof(inherited_handles), nullptr, nullptr)) {
     DeleteProcThreadAttributeList(attributes);
     HeapFree(GetProcessHeap(), 0, attributes);
-    CloseHandle(job);
+    close_job(job);
     FreeSid(sid);
     throw std::runtime_error("handle allowlist");
   }
@@ -238,8 +269,16 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   }
   std::vector<wchar_t> mutable_command(command.begin(), command.end());
   mutable_command.push_back(L'\0');
-  std::wstring environment = L"HOME=" + workspace + L"\0PATH=\0TEMP=" + workspace +
-      L"\0TMP=" + workspace + L"\0\0";
+  std::wstring environment;
+  const auto append_variable = [&environment](const std::wstring& entry) {
+    environment.append(entry);
+    environment.push_back(L'\0');
+  };
+  append_variable(L"HOME=" + workspace);
+  append_variable(L"PATH=");
+  append_variable(L"TEMP=" + workspace);
+  append_variable(L"TMP=" + workspace);
+  environment.push_back(L'\0');
   PROCESS_INFORMATION process{};
   bool created = CreateProcessW(executable.c_str(), mutable_command.data(), nullptr, nullptr, TRUE,
       CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT |
@@ -249,20 +288,19 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   HeapFree(GetProcessHeap(), 0, attributes);
   if (!created || !AssignProcessToJobObject(job, process.hProcess)) {
     if (created) TerminateProcess(process.hProcess, 1);
-    CloseHandle(job); FreeSid(sid); throw std::runtime_error("contained process");
+    close_job(job); FreeSid(sid); throw std::runtime_error("contained process");
   }
   BOOL in_job = FALSE;
   if (!IsProcessInJob(process.hProcess, job, &in_job) || !in_job ||
       !verify_token(process.hProcess, sid)) {
-    TerminateJobObject(job, 1); CloseHandle(job); FreeSid(sid);
+    TerminateJobObject(job, 1); close_job(job); FreeSid(sid);
     throw std::runtime_error("verify process domain");
   }
   if (ResumeThread(process.hThread) == static_cast<DWORD>(-1)) {
     TerminateJobObject(job, 1);
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
-    CloseHandle(job);
-    active_job = nullptr;
+    close_job(job);
     FreeSid(sid);
     throw std::runtime_error("resume contained process");
   }
@@ -273,8 +311,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     TerminateJobObject(job, 1);
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
-    CloseHandle(job);
-    active_job = nullptr;
+    close_job(job);
     FreeSid(sid);
     throw std::runtime_error("containment evidence output");
   }
@@ -282,10 +319,11 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   WaitForSingleObject(process.hProcess, INFINITE);
   DWORD exit_code = 1;
   GetExitCodeProcess(process.hProcess, &exit_code);
+  bool job_drained = terminate_and_wait_for_empty_job(job);
   CloseHandle(process.hProcess);
-  CloseHandle(job);
-  active_job = nullptr;
+  close_job(job);
   FreeSid(sid);
+  if (!job_drained) throw std::runtime_error("job did not drain");
   return static_cast<int>(exit_code);
 }
 

@@ -154,29 +154,38 @@ async function readEvidence(child: ChildProcess): Promise<NativeContainmentEvide
   ) {
     throw new SidecarSessionError("launch_failure", "Containment evidence pipe is missing");
   }
-  let timer: ReturnType<typeof setTimeout>;
-  const bytes = await Promise.race([
-    new Promise<Buffer>((resolveLine, reject) => {
-      let buffered = Buffer.alloc(0);
-      control.on("data", (chunk: Buffer) => {
-        buffered = Buffer.concat([buffered, chunk]);
-        if (buffered.byteLength > MAX_ATTESTATION_BYTES) {
-          reject(new SidecarSessionError("launch_failure", "Containment evidence is oversized"));
-          return;
-        }
-        const newline = buffered.indexOf(0x0a);
-        if (newline >= 0) resolveLine(buffered.subarray(0, newline));
-      });
-      control.once("end", () => reject(new Error("containment evidence pipe closed")));
-      control.once("error", reject);
-    }),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new SidecarSessionError("launch_failure", "Containment setup timed out")),
-        5_000,
-      );
-    }),
-  ]).finally(() => clearTimeout(timer!));
+  const bytes = await new Promise<Buffer>((resolveLine, reject) => {
+    let buffered = Buffer.alloc(0);
+    let settled = false;
+    const finish = (error?: Error, value?: Buffer) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      control.off("data", onData);
+      control.off("end", onEnd);
+      control.off("error", onError);
+      if (error === undefined && value !== undefined) resolveLine(value);
+      else reject(error ?? new Error("containment evidence is missing"));
+    };
+    const onData = (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      if (buffered.byteLength > MAX_ATTESTATION_BYTES) {
+        finish(new SidecarSessionError("launch_failure", "Containment evidence is oversized"));
+        return;
+      }
+      const newline = buffered.indexOf(0x0a);
+      if (newline >= 0) finish(undefined, buffered.subarray(0, newline));
+    };
+    const onEnd = () => finish(new Error("containment evidence pipe closed"));
+    const onError = (error: Error) => finish(error);
+    const timer = setTimeout(
+      () => finish(new SidecarSessionError("launch_failure", "Containment setup timed out")),
+      5_000,
+    );
+    control.on("data", onData);
+    control.once("end", onEnd);
+    control.once("error", onError);
+  });
   try {
     return parseNativeContainmentEvidence(bytes.toString("utf8"));
   } catch (cause) {
