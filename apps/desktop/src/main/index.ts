@@ -28,9 +28,8 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
     .then(runPackagedSidecarProof)
     .then(
       () => app.exit(0),
-      (cause: unknown) => {
-        const diagnostic = cause instanceof Error ? (cause.stack ?? cause.message) : String(cause);
-        process.stderr.write(`Packaged sidecar proof failed: ${diagnostic}\n`);
+      () => {
+        process.stderr.write("Packaged sidecar proof failed: proof_failed\n");
         app.exit(1);
       },
     );

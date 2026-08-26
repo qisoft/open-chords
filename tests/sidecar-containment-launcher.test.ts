@@ -90,6 +90,16 @@ it("surfaces bounded native containment failure reasons", () => {
   expect(parseNativeContainmentFailure('{"error":"invalid reason"}')).toBeNull();
 });
 
+it("does not log raw packaged-proof errors or paths", () => {
+  const source = readFileSync("apps/desktop/src/main/index.ts", "utf8");
+
+  expect(source).toContain(
+    'process.stderr.write("Packaged sidecar proof failed: proof_failed\\n")',
+  );
+  expect(source).not.toContain("cause.stack");
+  expect(source).not.toContain("cause.message");
+});
+
 it("refuses to launch when the native broker cannot prove containment", async () => {
   const launcher = createNativeContainmentLauncher(
     brokerThatReturns({ backend: "uncontained" }),
