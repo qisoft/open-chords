@@ -66,12 +66,16 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     environment_isolated = all(
         key not in os.environ for key in sensitive_environment if key != "HOME"
     ) and Path(os.environ.get("HOME", workspace)).resolve() == workspace
-    redirected_environment = {
-        "APPDATA": workspace,
-        "HOME": workspace,
-        "LOCALAPPDATA": workspace.parents[1],
-        "USERPROFILE": workspace,
-    }
+    redirected_environment = (
+        {
+            "APPDATA": workspace,
+            "HOME": workspace,
+            "LOCALAPPDATA": workspace.parents[1],
+            "USERPROFILE": workspace,
+        }
+        if os.name == "nt"
+        else {"HOME": workspace, "TMPDIR": workspace / "tmp"}
+    )
     environment_redirected = all(
         (value := os.environ.get(name)) is not None
         and Path(value).resolve() == expected
