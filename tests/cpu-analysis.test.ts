@@ -89,7 +89,15 @@ describe("CPU analysis cross-language candidate", () => {
     const document = emitCandidate(input, recipePath);
     const timeline = parseAnalysisTimeline(document.timeline, document.durationSamples);
 
-    expect(timeline.bars.length).toBeGreaterThan(0);
+    expect(timeline.bars).toEqual([]);
+    expect(timeline.unmeteredRegions).toEqual([
+      {
+        endSample: 8 * sampleRate,
+        id: "unmetered_0000",
+        reasonCode: "meter_insufficient_evidence",
+        startSample: 0,
+      },
+    ]);
     expect(timeline.chordEvents[0]).toMatchObject({
       assertion: { state: "low_confidence" },
       value: { kind: "chord", quality: "major", root: "C" },

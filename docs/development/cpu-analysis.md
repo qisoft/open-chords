@@ -12,8 +12,8 @@ Issue [#53](https://github.com/qisoft/open-chords/issues/53) establishes the wei
 
 The shared feature pass uses librosa 0.11.0 onset strength, chroma STFT, frame RMS, and beat tracking. Project-owned deterministic decoders then produce:
 
-- conservative 4/4 Bars with ordered Beats and downbeats only when a stable beat sequence exists;
-- `UnmeteredRegion` coverage when meter evidence is insufficient;
+- tempo-stability analysis without treating stable beats as meter or downbeat evidence;
+- `UnmeteredRegion` coverage until a dedicated decoder establishes meter and downbeat phase;
 - major/minor Key Regions from fixed key profiles;
 - structured major, minor, diminished, augmented, suspended, and seventh Chord Events plus musical `N`;
 - generic neutral Section Regions from energy transitions and chroma novelty.
@@ -22,7 +22,7 @@ Feature windows, FFT size, and hop length come only from the selected versioned 
 
 ## Confidence and claims
 
-This baseline is intentionally uncalibrated. Tonal and rhythmic candidates remain `low_confidence`; silence, missing capabilities, and insufficient evidence produce explicit abstention or unmetered coverage. Evidence uses named raw scales and deterministic rounded values. The module emits no automatic Support Claim IDs. Calibration, sealed corpus results, semantic section labels, rich-chord claims, meter claims, and platform/profile performance claims belong to the benchmark and release-evidence phases.
+This baseline is intentionally uncalibrated. Tonal candidates remain `low_confidence`; rhythm and meter remain explicit unmetered coverage because beat stability alone cannot establish a meter or downbeat phase. Silence, missing capabilities, and insufficient evidence produce explicit abstention or unmetered coverage. Evidence uses named raw scales and deterministic rounded values. The module emits no automatic Support Claim IDs. Calibration, sealed corpus results, semantic section labels, rich-chord claims, meter claims, and platform/profile performance claims belong to the benchmark and release-evidence phases.
 
 The default runtime requires no downloadable model and no GPU framework. `sidecar/requirements-build.in` is the reviewable dependency authority; `sidecar/requirements-build.txt` is its universal Python 3.13 hash-pinned lock. Librosa's module import closure includes alternate audio I/O, resampling, resource-registry, and HTTP client packages, but this module invokes none of those entry points: canonical input is read only by the standard-library WAV reader. The frozen build excludes sklearn and GPU modules. It inventories native extensions by owning distribution and packages the exact installed license texts.
 

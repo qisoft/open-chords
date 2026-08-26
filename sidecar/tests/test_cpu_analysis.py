@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import math
 import tempfile
 import unittest
 import wave
-import math
 from pathlib import Path
+from unittest.mock import patch
+
+from librosa import onset as librosa_onset
 
 from sidecar.open_chords_analysis.cpu_analysis import (
     PROFILE_SETTINGS,
     AnalysisConfig,
     AnalysisProfile,
     VersionedComponent,
+    _append_or_extend,
     analyze_canonical,
 )
 
@@ -80,7 +84,18 @@ class CpuAnalysisTests(unittest.TestCase):
 
             self.assertEqual(first, second)
             self.assertEqual(first.support_claim_ids, ())
-            self.assertTrue(first.timeline["bars"])
+            self.assertEqual(first.timeline["bars"], [])
+            self.assertEqual(
+                first.timeline["unmeteredRegions"],
+                [
+                    {
+                        "endSample": 8 * 48_000,
+                        "id": "unmetered_0000",
+                        "reasonCode": "meter_insufficient_evidence",
+                        "startSample": 0,
+                    }
+                ],
+            )
             self.assertEqual(first.timeline["keyRegions"][0]["value"], {
                 "kind": "key",
                 "mode": "major",
@@ -178,6 +193,66 @@ class CpuAnalysisTests(unittest.TestCase):
                         first.timeline["sectionRegions"][0]["assertion"]["reasonCodes"],
                         ["capability_not_requested"],
                     )
+                    self.assertEqual(first.timeline["bars"], [])
+                    self.assertEqual(
+                        first.timeline["unmeteredRegions"][0]["reasonCode"],
+                        "meter_capability_not_requested",
+                    )
+
+    def test_onset_extraction_uses_the_recipe_fft_size(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-cpu-analysis-onset-") as temporary:
+            canonical = Path(temporary) / "canonical.wav"
+            self._write_mono_fixture(canonical, self._c_major_click_fixture(2 * 48_000))
+            config = self._config(("rhythm", "meter"))
+
+            with patch(
+                "sidecar.open_chords_analysis.cpu_analysis.onset.onset_strength",
+                wraps=librosa_onset.onset_strength,
+            ) as onset_strength:
+                analyze_canonical(canonical, config)
+
+            self.assertEqual(onset_strength.call_args.kwargs["n_fft"], config.n_fft)
+
+    def test_three_four_clicks_abstain_from_inventing_four_four_bars(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-cpu-analysis-three-four-") as temporary:
+            canonical = Path(temporary) / "canonical.wav"
+            self._write_mono_fixture(canonical, self._three_four_click_fixture(9 * 48_000))
+
+            result = analyze_canonical(canonical, self._config(("rhythm", "meter")))
+
+            self.assertEqual(result.timeline["bars"], [])
+            self.assertEqual(
+                result.timeline["unmeteredRegions"],
+                [
+                    {
+                        "endSample": 9 * 48_000,
+                        "id": "unmetered_0000",
+                        "reasonCode": "meter_insufficient_evidence",
+                        "startSample": 0,
+                    }
+                ],
+            )
+
+    def test_interval_merge_preserves_different_assertion_evidence(self) -> None:
+        track: list[dict[str, object]] = []
+        value = {"kind": "key", "mode": "major", "tonic": "C"}
+        first_assertion = {
+            "evidence": [{"name": "key_margin", "scale": "unit_interval", "value": 0.1}],
+            "reasonCodes": ["uncalibrated_key_profile"],
+            "state": "low_confidence",
+        }
+        second_assertion = {
+            "evidence": [{"name": "key_margin", "scale": "unit_interval", "value": 0.2}],
+            "reasonCodes": ["uncalibrated_key_profile"],
+            "state": "low_confidence",
+        }
+
+        _append_or_extend(track, "key", 0, 48_000, value, first_assertion)
+        _append_or_extend(track, "key", 48_000, 96_000, value, second_assertion)
+
+        self.assertEqual(len(track), 2)
+        self.assertEqual(track[0]["assertion"], first_assertion)
+        self.assertEqual(track[1]["assertion"], second_assertion)
 
     def test_rejects_recipe_runtime_and_canonical_input_mismatches(self) -> None:
         config = self._config(("chords",))
@@ -246,6 +321,20 @@ class CpuAnalysisTests(unittest.TestCase):
             click = 1.0 - within_beat / 240 if within_beat < 240 else 0.0
             value = max(-1.0, min(1.0, tonal + click * 0.65))
             samples.append(round(value * 30_000))
+        return samples
+
+    @staticmethod
+    def _three_four_click_fixture(duration_samples: int) -> list[int]:
+        sample_rate = 48_000
+        samples: list[int] = []
+        for index in range(duration_samples):
+            within_beat = index % (sample_rate // 2)
+            beat_index = index // (sample_rate // 2)
+            click_amplitude = 0.8 if beat_index % 3 == 0 else 0.45
+            click = (
+                click_amplitude * (1.0 - within_beat / 240) if within_beat < 240 else 0.0
+            )
+            samples.append(round(click * 30_000))
         return samples
 
     @staticmethod

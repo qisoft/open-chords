@@ -238,6 +238,7 @@ def analyze_canonical(path: Path, config: AnalysisConfig) -> AnalysisResult:
     onset_envelope = onset.onset_strength(
         y=feature_samples,
         sr=sample_rate,
+        n_fft=config.n_fft,
         hop_length=config.hop_length,
         center=False,
     )
@@ -265,7 +266,14 @@ def analyze_canonical(path: Path, config: AnalysisConfig) -> AnalysisResult:
             onset_envelope, sample_rate, duration_samples, config.hop_length
         )
     else:
-        bars, unmetered_regions = [], [_unmetered(0, duration_samples, 0)]
+        bars, unmetered_regions = [], [
+            _unmetered(
+                0,
+                duration_samples,
+                0,
+                reason_code="meter_capability_not_requested",
+            )
+        ]
     windows = _analysis_windows(
         chroma.shape[1], duration_samples, config.hop_length, config.analysis_window_samples
     )
@@ -417,49 +425,22 @@ def _decode_rhythm(
     if median_interval <= 0 or float(np.std(intervals) / median_interval) > 0.15:
         return [], [_unmetered(0, duration_samples, 0)]
 
-    bars: list[dict[str, object]] = []
-    unmetered: list[dict[str, object]] = []
-    if beat_samples[0] > 0:
-        unmetered.append(_unmetered(0, beat_samples[0], len(unmetered)))
-    for bar_index, start_index in enumerate(range(0, len(beat_samples), 4)):
-        bar_beats = beat_samples[start_index : start_index + 4]
-        if not bar_beats:
-            continue
-        end_sample = (
-            beat_samples[start_index + 4]
-            if start_index + 4 < len(beat_samples)
-            else duration_samples
-        )
-        if end_sample <= bar_beats[0]:
-            continue
-        bars.append(
-            {
-                "beats": [
-                    {
-                        "atSample": sample,
-                        "id": f"beat_{start_index + beat_index:04d}",
-                        "role": "downbeat" if beat_index == 0 else "beat",
-                    }
-                    for beat_index, sample in enumerate(bar_beats)
-                    if sample < end_sample
-                ],
-                "endSample": end_sample,
-                "id": f"bar_{bar_index:04d}",
-                "meter": {"denominator": 4, "numerator": 4},
-                "startSample": bar_beats[0],
-                "status": "complete" if len(bar_beats) == 4 else "truncated",
-            }
-        )
-    if bars and bars[-1]["endSample"] < duration_samples:
-        unmetered.append(_unmetered(int(bars[-1]["endSample"]), duration_samples, len(unmetered)))
-    return bars, unmetered
+    # Stable beat spacing establishes tempo, not meter or downbeat phase. Until a
+    # dedicated meter decoder provides both, publishing Bars would fabricate 4/4.
+    return [], [_unmetered(0, duration_samples, 0)]
 
 
-def _unmetered(start_sample: int, end_sample: int, index: int) -> dict[str, object]:
+def _unmetered(
+    start_sample: int,
+    end_sample: int,
+    index: int,
+    *,
+    reason_code: str = "meter_insufficient_evidence",
+) -> dict[str, object]:
     return {
         "endSample": end_sample,
         "id": f"unmetered_{index:04d}",
-        "reasonCode": "meter_insufficient_evidence",
+        "reasonCode": reason_code,
         "startSample": start_sample,
     }
 
@@ -688,7 +669,7 @@ def _append_or_extend(
     value: dict[str, object],
     assertion: dict[str, object],
 ) -> None:
-    if track and track[-1]["value"] == value:
+    if track and track[-1]["value"] == value and track[-1]["assertion"] == assertion:
         track[-1]["endSample"] = end_sample
         return
     track.append(
