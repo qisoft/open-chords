@@ -25,6 +25,14 @@ static void fail(const char* reason) {
   if (length > 0) _write(3, message, static_cast<unsigned int>(length));
 }
 
+static void fail_setup(const std::exception& error) {
+  std::string reason = "containment_setup_failed_";
+  for (const char character : std::string(error.what()).substr(0, 96)) {
+    reason += character >= 'a' && character <= 'z' ? character : '_';
+  }
+  fail(reason.c_str());
+}
+
 static void write_utf8_stdout(const std::wstring& value) {
   int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.c_str(),
       static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
@@ -295,8 +303,11 @@ int wmain(int argc, wchar_t** argv) {
     if (destroy) return SUCCEEDED(DeleteAppContainerProfile(profile.c_str())) ? 0 : 1;
     if (profile.empty()) throw std::runtime_error("profile missing");
     return launch(argc, argv, profile);
+  } catch (const std::exception& error) {
+    fail_setup(error);
+    return 70;
   } catch (...) {
-    fail("containment_setup_failed");
+    fail("containment_setup_failed_unknown");
     return 70;
   }
 }
