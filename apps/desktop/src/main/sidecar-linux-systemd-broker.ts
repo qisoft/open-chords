@@ -48,8 +48,6 @@ export function createLinuxSystemdContainmentBroker(
           "--user",
           "--scope",
           "--quiet",
-          "--wait",
-          "--pipe",
           "--collect",
           `--unit=${unit}`,
           "--property=TasksMax=8",
@@ -87,8 +85,14 @@ export function createLinuxSystemdContainmentBroker(
             async stop() {
               if (stopped) return;
               stopped = true;
-              await stopUnit(`${unit}.scope`, managerEnvironment);
+              if (child.exitCode !== null || child.signalCode !== null) return;
+              const stoppedUnit = await stopUnit(`${unit}.scope`, managerEnvironment)
+                .then(() => true)
+                .catch(() => false);
               if (await waitForExit(child, 5_000)) return;
+              if (!stoppedUnit) {
+                await killUnit(`${unit}.scope`, managerEnvironment).catch(() => undefined);
+              }
               child.kill("SIGKILL");
               if (!(await waitForExit(child, 5_000))) {
                 throw new SidecarSessionError(
@@ -108,7 +112,10 @@ export function createLinuxSystemdContainmentBroker(
           },
         };
       } catch (cause) {
-        await stopUnit(`${unit}.scope`, managerEnvironment).catch(() => undefined);
+        const stopped = await stopUnit(`${unit}.scope`, managerEnvironment)
+          .then(() => true)
+          .catch(() => false);
+        if (!stopped) await killUnit(`${unit}.scope`, managerEnvironment).catch(() => undefined);
         child.kill("SIGKILL");
         await waitForExit(child, 5_000).catch(() => false);
         throw new SidecarSessionError("launch_failure", "Linux containment setup failed", {
@@ -169,11 +176,19 @@ function drainBoundedStderr(
 }
 
 function stopUnit(unit: string, environment: NodeJS.ProcessEnv): Promise<void> {
+  return systemctl(["--user", "stop", unit], environment);
+}
+
+function killUnit(unit: string, environment: NodeJS.ProcessEnv): Promise<void> {
+  return systemctl(["--user", "kill", "--kill-whom=all", "--signal=SIGKILL", unit], environment);
+}
+
+function systemctl(arguments_: readonly string[], environment: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((resolveStop, reject) => {
     execFile(
       "/usr/bin/systemctl",
-      ["--user", "stop", unit],
-      { env: environment, windowsHide: true },
+      arguments_,
+      { env: environment, timeout: 5_000, windowsHide: true },
       (error) => (error === null ? resolveStop() : reject(error)),
     );
   });
