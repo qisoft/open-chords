@@ -161,26 +161,35 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
 
   posix_spawn_file_actions_t actions;
   posix_spawnattr_t attributes;
-  posix_spawn_file_actions_init(&actions);
-  posix_spawn_file_actions_adddup2(&actions, input, STDIN_FILENO);
-  posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO);
-  posix_spawn_file_actions_adddup2(&actions, error_output, STDERR_FILENO);
+  bool actions_ready = posix_spawn_file_actions_init(&actions) == 0;
+  bool attributes_ready = posix_spawnattr_init(&attributes) == 0;
+  int setup_result = actions_ready && attributes_ready ? 0 : EINVAL;
+  if (setup_result == 0) setup_result = posix_spawn_file_actions_adddup2(&actions, input, STDIN_FILENO);
+  if (setup_result == 0) setup_result = posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO);
+  if (setup_result == 0) setup_result = posix_spawn_file_actions_adddup2(&actions, error_output, STDERR_FILENO);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  posix_spawn_file_actions_addchdir_np(&actions, workspace);
+  if (setup_result == 0) setup_result = posix_spawn_file_actions_addchdir_np(&actions, workspace);
 #pragma clang diagnostic pop
-  posix_spawnattr_init(&attributes);
-  posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT);
-  posix_spawnattr_setpgroup(&attributes, 0);
+  if (setup_result == 0) {
+    setup_result = posix_spawnattr_setflags(
+        &attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT);
+  }
+  if (setup_result == 0) setup_result = posix_spawnattr_setpgroup(&attributes, 0);
   char home[PATH_MAX + 6];
-  char temporary[PATH_MAX + 9];
-  snprintf(home, sizeof(home), "HOME=%s", workspace);
-  snprintf(temporary, sizeof(temporary), "TMPDIR=%s/tmp", workspace);
+  char temporary[PATH_MAX + 16];
+  if (snprintf(home, sizeof(home), "HOME=%s", workspace) >= (int)sizeof(home) ||
+      snprintf(temporary, sizeof(temporary), "TMPDIR=%s/tmp", workspace) >=
+          (int)sizeof(temporary)) {
+    setup_result = ENAMETOOLONG;
+  }
   char *environment[] = {home, temporary, "PATH=", "PYTHONNOUSERSITE=1", NULL};
   pid_t child = 0;
-  int result = posix_spawn(&child, executable, &actions, &attributes, argv, environment);
-  posix_spawnattr_destroy(&attributes);
-  posix_spawn_file_actions_destroy(&actions);
+  int result = setup_result == 0
+      ? posix_spawn(&child, executable, &actions, &attributes, argv, environment)
+      : setup_result;
+  if (attributes_ready) posix_spawnattr_destroy(&attributes);
+  if (actions_ready) posix_spawn_file_actions_destroy(&actions);
   close(input);
   close(output);
   close(error_output);
@@ -233,7 +242,7 @@ static void handle_message(xpc_connection_t peer, xpc_object_t message) {
   }
   if (strcmp(operation, "cancel") == 0) {
     session_t *session = xpc_connection_get_context(peer);
-    if (session != NULL && session->child > 0) kill(-session->child, SIGTERM);
+    if (session != NULL && session->child > 0) kill(-session->child, SIGKILL);
   }
 }
 

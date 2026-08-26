@@ -197,9 +197,18 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   startup.StartupInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
   startup.StartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
   startup.lpAttributeList = attributes;
-  SetHandleInformation(startup.StartupInfo.hStdInput, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-  SetHandleInformation(startup.StartupInfo.hStdOutput, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-  SetHandleInformation(startup.StartupInfo.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+  if (!SetHandleInformation(
+          startup.StartupInfo.hStdInput, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) ||
+      !SetHandleInformation(
+          startup.StartupInfo.hStdOutput, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) ||
+      !SetHandleInformation(
+          startup.StartupInfo.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)) {
+    DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
+    CloseHandle(job);
+    FreeSid(sid);
+    throw std::runtime_error("protocol handle inheritance");
+  }
   HANDLE inherited_handles[] = {
       startup.StartupInfo.hStdInput,
       startup.StartupInfo.hStdOutput,
@@ -240,10 +249,6 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     TerminateJobObject(job, 1); CloseHandle(job); FreeSid(sid);
     throw std::runtime_error("verify process domain");
   }
-  static constexpr char evidence[] =
-      "{\"appContainer\":true,\"backend\":\"windows-appcontainer-job\","
-      "\"breakawayDisabled\":true,\"jobObject\":true,\"networkCapabilityCount\":0}\n";
-  _write(3, evidence, sizeof(evidence) - 1);
   if (ResumeThread(process.hThread) == static_cast<DWORD>(-1)) {
     TerminateJobObject(job, 1);
     CloseHandle(process.hThread);
@@ -252,6 +257,18 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     active_job = nullptr;
     FreeSid(sid);
     throw std::runtime_error("resume contained process");
+  }
+  static constexpr char evidence[] =
+      "{\"appContainer\":true,\"backend\":\"windows-appcontainer-job\","
+      "\"breakawayDisabled\":true,\"jobObject\":true,\"networkCapabilityCount\":0}\n";
+  if (_write(3, evidence, sizeof(evidence) - 1) != sizeof(evidence) - 1) {
+    TerminateJobObject(job, 1);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    CloseHandle(job);
+    active_job = nullptr;
+    FreeSid(sid);
+    throw std::runtime_error("containment evidence output");
   }
   CloseHandle(process.hThread);
   WaitForSingleObject(process.hProcess, INFINITE);

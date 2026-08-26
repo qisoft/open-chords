@@ -36,6 +36,7 @@ export async function runPackagedSidecarProof(): Promise<void> {
       EXPECTED_SIDECAR_MANIFEST_SHA256,
     );
     const workspace = prepared.workspace;
+    mkdirSync(join(workspace, "tmp"), { recursive: true, mode: 0o700 });
     const inputPath = join(workspace, "input", "source-media");
     mkdirSync(dirname(inputPath), { recursive: true });
     writeFileSync(inputPath, canonicalWavFixture());
