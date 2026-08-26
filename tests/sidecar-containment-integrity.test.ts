@@ -35,6 +35,21 @@ it("rejects changed and extra containment files", () => {
   );
 });
 
+it("verifies an external packaged helper against the manifested helper", () => {
+  const fixture = containmentFixture();
+  const external = `${fixture.root}-packaged-containment-helper.exe`;
+  roots.push(external);
+  writeFileSync(external, "fixture-helper");
+
+  expect(
+    verifyContainmentRuntime(fixture.root, fixture.manifestHash, "win32", external),
+  ).toMatchObject({ helperPath: realpathSync(external) });
+  writeFileSync(external, "changed");
+  expect(() =>
+    verifyContainmentRuntime(fixture.root, fixture.manifestHash, "win32", external),
+  ).toThrow("External containment helper hash mismatch");
+});
+
 function containmentFixture() {
   const root = mkdtempSync(join(tmpdir(), "open-chords-containment-integrity-"));
   roots.push(root);

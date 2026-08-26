@@ -11,6 +11,31 @@ from unittest.mock import patch
 
 
 class BuildAnalysisSidecarTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "macOS codesign bundle semantics")
+    def test_materializes_pyinstaller_symlinks_for_nested_bundle_signing(self) -> None:
+        materialize = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_materialize_macos_runtime_symlinks"]
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-python-alias-") as temporary:
+            runtime = Path(temporary)
+            target = runtime / "_internal/Python.framework/Versions/3.13/Python"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"signed-python")
+            alias = runtime / "_internal/Python"
+            alias.symlink_to("Python.framework/Versions/3.13/Python")
+            current = runtime / "_internal/Python.framework/Versions/Current"
+            current.symlink_to("3.13", target_is_directory=True)
+            framework_alias = runtime / "_internal/Python.framework/Python"
+            framework_alias.symlink_to("Versions/Current/Python")
+
+            materialize(runtime)
+
+            self.assertFalse(alias.is_symlink())
+            self.assertEqual(alias.read_bytes(), b"signed-python")
+            self.assertFalse(current.exists())
+            self.assertFalse(framework_alias.exists())
+
     def test_reports_missing_pyinstaller_license_with_context(self) -> None:
         pyinstaller_license = runpy.run_path(
             Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"

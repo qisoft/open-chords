@@ -41,8 +41,8 @@ int main(int argc, char **argv) {
     return 64;
   }
 
-  connection = xpc_connection_create_mach_service(
-      "io.github.qisoft.open-chords.analysis-service", dispatch_get_main_queue(), 0);
+  connection = xpc_connection_create(
+      "io.github.qisoft.open-chords.analysis-service", dispatch_get_main_queue());
   if (connection == NULL) {
     dprintf(3, "{\"error\":\"xpc_service_unavailable\"}\n");
     return 70;

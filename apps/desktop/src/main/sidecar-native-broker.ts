@@ -36,6 +36,13 @@ const EvidenceSchema = z.discriminatedUnion("backend", [
     seccompFilter: z.literal(true),
   }),
 ]);
+const FailureSchema = z.object({
+  error: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[a-z0-9_]+(?:-[0-9]+)?$/),
+});
 
 type NativeBrokerOptions = {
   args: readonly string[];
@@ -173,12 +180,29 @@ async function readEvidence(child: ChildProcess): Promise<NativeContainmentEvide
   try {
     return parseNativeContainmentEvidence(bytes.toString("utf8"));
   } catch (cause) {
+    const failure = parseNativeContainmentFailure(bytes.toString("utf8"));
+    if (failure !== null) {
+      throw new SidecarSessionError(
+        "launch_failure",
+        `Native containment rejected launch: ${failure}`,
+        { cause },
+      );
+    }
     throw new SidecarSessionError("launch_failure", "Containment evidence is invalid", { cause });
   }
 }
 
 export function parseNativeContainmentEvidence(value: string): NativeContainmentEvidence {
   return EvidenceSchema.parse(JSON.parse(value));
+}
+
+export function parseNativeContainmentFailure(value: string): string | null {
+  try {
+    const parsed = FailureSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data.error : null;
+  } catch {
+    return null;
+  }
 }
 
 async function waitForSpawn(child: ChildProcess): Promise<void> {

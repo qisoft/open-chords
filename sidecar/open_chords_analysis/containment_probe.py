@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import stat
 import subprocess
 import sys
 
@@ -52,7 +53,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         key not in os.environ for key in sensitive_environment if key != "HOME"
     ) and Path(os.environ.get("HOME", workspace)).resolve() == workspace
     return {
-        "controlHandleClosed": not _descriptor_is_open(3),
+        "controlHandleClosed": not _descriptor_is_control_channel(3),
         "environmentIsolated": environment_isolated,
         "linkEscapeBlocked": link_escape_blocked,
         "networkBlocked": network_blocked,
@@ -79,10 +80,10 @@ def _can_connect_loopback(port: int) -> bool:
         return False
 
 
-def _descriptor_is_open(descriptor: int) -> bool:
+def _descriptor_is_control_channel(descriptor: int) -> bool:
     try:
-        os.fstat(descriptor)
-        return True
+        mode = os.fstat(descriptor).st_mode
+        return stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode)
     except OSError:
         return False
 

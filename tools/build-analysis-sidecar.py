@@ -176,6 +176,7 @@ def main() -> None:
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
         )
         if sys.platform == "darwin":
+            _materialize_macos_runtime_symlinks(assembled)
             subprocess.run(
                 [
                     sys.executable,
@@ -222,6 +223,21 @@ def main() -> None:
         output_root.mkdir(parents=True, exist_ok=True)
         shutil.move(assembled, runtime_root)
         load_frozen_runtime(runtime_root)
+
+
+def _materialize_macos_runtime_symlinks(runtime_root: Path) -> None:
+    resolved_root = runtime_root.resolve()
+    links = [path for path in runtime_root.rglob("*") if path.is_symlink()]
+    if not links:
+        raise FileNotFoundError("PyInstaller macOS runtime symlinks are missing")
+    resolved_links = [(link, link.resolve(strict=True)) for link in links]
+    for link, target in resolved_links:
+        if resolved_root not in target.parents:
+            raise ValueError("PyInstaller macOS runtime symlink escaped the runtime")
+    for link, target in resolved_links:
+        link.unlink()
+        if link == runtime_root / "_internal/Python":
+            shutil.copy2(target, link)
 
 
 def _tool_version(command: list[str]) -> str:

@@ -45,6 +45,7 @@ export function verifyContainmentRuntime(
   runtimeRoot: string,
   expectedManifestHash: string,
   platform: NativeContainmentPlatform,
+  helperPathOverride?: string,
 ): VerifiedContainmentRuntime {
   const root = realpathSync(resolve(runtimeRoot));
   const manifestPath = join(root, "containment-manifest.json");
@@ -74,12 +75,28 @@ export function verifyContainmentRuntime(
   }
   const helperRelative = HELPER_BY_PLATFORM[platform];
   if (!declared.has(helperRelative)) fail("Containment manifest misses its native helper");
+  const helperPath =
+    helperPathOverride === undefined
+      ? join(root, helperRelative)
+      : verifyExternalHelper(helperPathOverride, join(root, helperRelative));
   return Object.freeze({
     backend: BACKEND_BY_PLATFORM[platform],
-    helperPath: join(root, helperRelative),
+    helperPath,
     root,
     [verifiedRuntime]: true as const,
   });
+}
+
+function verifyExternalHelper(candidate: string, manifestedHelper: string): string {
+  const path = realpathSync(resolve(candidate));
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    fail("External containment helper is not a direct regular file");
+  }
+  const expected = createHash("sha256").update(readFileSync(manifestedHelper)).digest("hex");
+  const observed = createHash("sha256").update(readFileSync(path)).digest("hex");
+  if (observed !== expected) fail("External containment helper hash mismatch");
+  return path;
 }
 
 function safeManifestPath(root: string, manifestPath: string): string {

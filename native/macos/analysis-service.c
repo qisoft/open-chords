@@ -20,12 +20,6 @@ typedef struct {
   xpc_connection_t peer;
 } session_t;
 
-static bool entitlement_is_true(CFDictionaryRef entitlements, CFStringRef key) {
-  if (entitlements == NULL) return false;
-  CFTypeRef value = CFDictionaryGetValue(entitlements, key);
-  return value == kCFBooleanTrue;
-}
-
 static bool self_has_required_entitlements(void) {
   SecTaskRef task = SecTaskCreateFromSelf(kCFAllocatorDefault);
   if (task == NULL) return false;
@@ -43,30 +37,18 @@ static bool self_has_required_entitlements(void) {
   return valid;
 }
 
-static bool helper_has_required_signature(const char *path) {
-  CFURLRef url = CFURLCreateFromFileSystemRepresentation(
-      kCFAllocatorDefault, (const UInt8 *)path, strlen(path), false);
-  if (url == NULL) return false;
-  SecStaticCodeRef code = NULL;
-  OSStatus status = SecStaticCodeCreateWithPath(url, kSecCSDefaultFlags, &code);
-  CFRelease(url);
-  if (status != errSecSuccess || code == NULL) return false;
-  status = SecStaticCodeCheckValidity(code, kSecCSStrictValidate, NULL);
-  CFDictionaryRef information = NULL;
-  if (status == errSecSuccess) {
-    status = SecCodeCopySigningInformation(code, kSecCSSigningInformation, &information);
-  }
-  CFDictionaryRef entitlements = information == NULL
-      ? NULL
-      : CFDictionaryGetValue(information, kSecCodeInfoEntitlementsDict);
-  bool valid = status == errSecSuccess &&
-      entitlement_is_true(entitlements, CFSTR("com.apple.security.app-sandbox")) &&
-      entitlement_is_true(entitlements, CFSTR("com.apple.security.inherit")) &&
-      !entitlement_is_true(entitlements, CFSTR("com.apple.security.network.client")) &&
-      !entitlement_is_true(entitlements, CFSTR("com.apple.security.network.server"));
-  if (information != NULL) CFRelease(information);
+static OSStatus self_bundle_validation_status(void) {
+  SecCodeRef code = NULL;
+  OSStatus status = SecCodeCopySelf(kSecCSDefaultFlags, &code);
+  if (status != errSecSuccess || code == NULL) return status;
+  SecStaticCodeRef static_code = NULL;
+  status = SecCodeCopyStaticCode(code, kSecCSDefaultFlags, &static_code);
   CFRelease(code);
-  return valid;
+  if (status != errSecSuccess || static_code == NULL) return status;
+  status = SecStaticCodeCheckValidity(
+      static_code, kSecCSStrictValidate | kSecCSCheckNestedCode, NULL);
+  CFRelease(static_code);
+  return status;
 }
 
 static bool canonical_child_of(const char *root, const char *candidate) {
@@ -76,6 +58,34 @@ static bool canonical_child_of(const char *root, const char *candidate) {
   size_t root_length = strlen(real_root);
   return strncmp(real_root, real_candidate, root_length) == 0 &&
       (real_candidate[root_length] == '/' || real_candidate[root_length] == '\0');
+}
+
+static bool matches_embedded_runtime(const char *runtime_root, const char *executable) {
+  CFBundleRef bundle = CFBundleGetMainBundle();
+  if (bundle == NULL) return false;
+  CFURLRef resources = CFBundleCopyResourcesDirectoryURL(bundle);
+  if (resources == NULL) return false;
+  UInt8 resource_path[PATH_MAX];
+  bool converted = CFURLGetFileSystemRepresentation(
+      resources, true, resource_path, sizeof(resource_path));
+  CFRelease(resources);
+  if (!converted) return false;
+  char expected_runtime[PATH_MAX];
+  char expected_executable[PATH_MAX];
+  if (snprintf(expected_runtime, sizeof(expected_runtime), "%s/open-chords-analysis",
+          resource_path) >= (int)sizeof(expected_runtime) ||
+      snprintf(expected_executable, sizeof(expected_executable), "%s/open-chords-analysis",
+          expected_runtime) >= (int)sizeof(expected_executable)) return false;
+  char canonical_expected_runtime[PATH_MAX];
+  char canonical_expected_executable[PATH_MAX];
+  char canonical_runtime[PATH_MAX];
+  char canonical_executable[PATH_MAX];
+  return realpath(expected_runtime, canonical_expected_runtime) != NULL &&
+      realpath(expected_executable, canonical_expected_executable) != NULL &&
+      realpath(runtime_root, canonical_runtime) != NULL &&
+      realpath(executable, canonical_executable) != NULL &&
+      strcmp(canonical_expected_runtime, canonical_runtime) == 0 &&
+      strcmp(canonical_expected_executable, canonical_executable) == 0;
 }
 
 static void fail(int control, const char *reason) {
@@ -110,7 +120,7 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
   }
   const char *container = getenv("HOME");
   if (container == NULL || !canonical_child_of(container, workspace) ||
-      !canonical_child_of(runtime_root, executable)) {
+      !matches_embedded_runtime(runtime_root, executable)) {
     fail(control, "path_boundary_failed");
     close(input);
     close(output);
@@ -118,15 +128,24 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
     close(control);
     return;
   }
-  if (!self_has_required_entitlements() || !helper_has_required_signature(executable)) {
-    fail(control, "entitlement_chain_failed");
+  if (!self_has_required_entitlements()) {
+    fail(control, "service_entitlement_failed");
     close(input);
     close(output);
     close(error_output);
     close(control);
     return;
   }
-
+  OSStatus bundle_status = self_bundle_validation_status();
+  if (bundle_status != errSecSuccess) {
+    dprintf(control, "{\"error\":\"service_bundle_validation_failed_%d\"}\n",
+        (int)bundle_status);
+    close(input);
+    close(output);
+    close(error_output);
+    close(control);
+    return;
+  }
   size_t count = xpc_array_get_count(arguments);
   if (count == 0 || count > 64) {
     fail(control, "invalid_arguments");
@@ -167,6 +186,7 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
   if (setup_result == 0) setup_result = posix_spawn_file_actions_adddup2(&actions, input, STDIN_FILENO);
   if (setup_result == 0) setup_result = posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO);
   if (setup_result == 0) setup_result = posix_spawn_file_actions_adddup2(&actions, error_output, STDERR_FILENO);
+  if (setup_result == 0) setup_result = posix_spawn_file_actions_addclose(&actions, control);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
   if (setup_result == 0) setup_result = posix_spawn_file_actions_addchdir_np(&actions, workspace);
@@ -195,7 +215,7 @@ static void launch(xpc_connection_t peer, xpc_object_t message) {
   close(error_output);
   free(argv);
   if (result != 0) {
-    fail(control, "contained_spawn_failed");
+    dprintf(control, "{\"error\":\"contained_spawn_failed_%d\"}\n", result);
     close(control);
     return;
   }

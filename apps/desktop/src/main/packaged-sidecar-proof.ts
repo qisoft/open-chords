@@ -21,13 +21,29 @@ export async function runPackagedSidecarProof(): Promise<void> {
   }
   const platform = process.platform;
   const verifiedRuntime = verifyPackagedSidecarRuntime(
-    join(process.resourcesPath, "open-chords-analysis"),
+    platform === "darwin"
+      ? join(
+          process.resourcesPath,
+          "..",
+          "XPCServices",
+          "OpenChordsAnalysisService.xpc",
+          "Contents",
+          "Resources",
+          "open-chords-analysis",
+        )
+      : join(process.resourcesPath, "open-chords-analysis"),
     EXPECTED_SIDECAR_MANIFEST_SHA256,
   );
   const containment = verifyContainmentRuntime(
-    join(process.resourcesPath, "containment"),
+    join(
+      process.resourcesPath,
+      platform === "darwin" ? join("..", "MacOS", "containment") : "containment",
+    ),
     EXPECTED_CONTAINMENT_MANIFEST_SHA256,
     platform,
+    platform === "darwin"
+      ? join(process.resourcesPath, "..", "MacOS", "open-chords-containment-bridge")
+      : undefined,
   );
   const prepared = prepareWorkspace(platform, containment.helperPath, verifiedRuntime.runtimeRoot);
   try {

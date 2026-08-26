@@ -8,6 +8,7 @@ import {
   type NativeContainmentEvidence,
   type NativeContainmentPlatform,
 } from "../apps/desktop/src/main/sidecar-containment-launcher.ts";
+import { parseNativeContainmentFailure } from "../apps/desktop/src/main/sidecar-native-broker.ts";
 import {
   createPromiseSidecarClient,
   createUncontainedSpawnLauncherForProof,
@@ -16,6 +17,16 @@ import {
 } from "../apps/desktop/src/main/sidecar-session.ts";
 
 const fixtureRoot = resolve("tests/fixtures");
+
+it("surfaces bounded native containment failure reasons", () => {
+  expect(parseNativeContainmentFailure('{"error":"helper_signature_create_failed"}')).toBe(
+    "helper_signature_create_failed",
+  );
+  expect(parseNativeContainmentFailure('{"error":"service_bundle_validation_failed_-67030"}')).toBe(
+    "service_bundle_validation_failed_-67030",
+  );
+  expect(parseNativeContainmentFailure('{"error":"invalid reason"}')).toBeNull();
+});
 
 it("refuses to launch when the native broker cannot prove containment", async () => {
   const launcher = createNativeContainmentLauncher(
