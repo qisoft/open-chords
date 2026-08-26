@@ -162,8 +162,10 @@ def _process_escape_cannot_reach_host(plan_path: Path) -> bool:
             timeout=10,
             **options,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return True
+    except subprocess.TimeoutExpired:
+        return False
+    except OSError as error:
+        return os.name == "nt" and getattr(error, "winerror", None) == 5
     try:
         evidence = json.loads(result.stdout.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):

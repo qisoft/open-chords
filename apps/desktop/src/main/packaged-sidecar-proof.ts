@@ -119,14 +119,17 @@ export async function runPackagedSidecarProof(): Promise<void> {
   } catch (cause) {
     proofFailure = { cause };
   }
-  let cleanupFailure: { cause: unknown } | undefined;
+  const cleanupFailures: unknown[] = [];
   try {
     prepared.cleanup();
   } catch (cause) {
-    cleanupFailure = { cause };
+    cleanupFailures.push(cause);
   }
-  if (proofFailure !== undefined) throw proofFailure.cause;
-  if (cleanupFailure !== undefined) throw cleanupFailure.cause;
+  throwCombinedFailures(
+    "Packaged containment proof and cleanup failed",
+    proofFailure,
+    cleanupFailures,
+  );
 }
 
 async function runAdversarialContainmentProbe(
@@ -136,31 +139,32 @@ async function runAdversarialContainmentProbe(
 ): Promise<void> {
   const sentinels = createSensitiveSentinels(platform);
   const server = createServer((socket) => socket.destroy());
-  await new Promise<void>((resolveListen, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolveListen);
-  });
-  const address = server.address();
-  if (address === null || typeof address === "string")
-    throw new Error("Loopback probe did not bind");
-  const plan = join(workspace, "containment-probe.json");
-  writeFileSync(
-    plan,
-    JSON.stringify({
-      loopbackPort: address.port,
-      sensitivePaths: sentinels.paths,
-    }),
-  );
-  const request = parseSidecarSessionRequest({
-    jobId: "job-containment-probe",
-    manifestHash: "0".repeat(64),
-    nonce: "nonce-containment-probe",
-    requestId: "request-containment-probe",
-    timeoutMs: 15_000,
-  });
   let process: Awaited<ReturnType<ReturnType<typeof createLauncher>["launch"]>> | undefined;
   let proofFailure: { cause: unknown } | undefined;
   try {
+    await new Promise<void>((resolveListen, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolveListen);
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Loopback probe did not bind");
+    }
+    const plan = join(workspace, "containment-probe.json");
+    writeFileSync(
+      plan,
+      JSON.stringify({
+        loopbackPort: address.port,
+        sensitivePaths: sentinels.paths,
+      }),
+    );
+    const request = parseSidecarSessionRequest({
+      jobId: "job-containment-probe",
+      manifestHash: "0".repeat(64),
+      nonce: "nonce-containment-probe",
+      requestId: "request-containment-probe",
+      timeoutMs: 15_000,
+    });
     process = await createLauncher([`--containment-probe=${plan}`]).launch(
       request,
       AbortSignal.timeout(15_000),
@@ -192,20 +196,23 @@ async function runAdversarialContainmentProbe(
   } catch (cause) {
     cleanupErrors.push(cause);
   }
-  try {
-    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-  } catch (cause) {
-    cleanupErrors.push(cause);
+  if (server.listening) {
+    try {
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    } catch (cause) {
+      cleanupErrors.push(cause);
+    }
   }
   try {
     sentinels.cleanup();
   } catch (cause) {
     cleanupErrors.push(cause);
   }
-  if (proofFailure !== undefined) throw proofFailure.cause;
-  if (cleanupErrors.length > 0) {
-    throw new AggregateError(cleanupErrors, "Packaged containment proof cleanup failed");
-  }
+  throwCombinedFailures(
+    "Packaged containment proof and cleanup failed",
+    proofFailure,
+    cleanupErrors,
+  );
 }
 
 const LifecycleEvidenceSchema = z.object({
@@ -246,14 +253,17 @@ async function runLifecycleContainmentProbe(
   } catch (cause) {
     primaryFailure = { cause };
   }
-  let cleanupFailure: { cause: unknown } | undefined;
+  const cleanupFailures: unknown[] = [];
   try {
     await process.stop(mode === "cancel" ? "cancelled" : "completed");
   } catch (cause) {
-    cleanupFailure = { cause };
+    cleanupFailures.push(cause);
   }
-  if (primaryFailure !== undefined) throw primaryFailure.cause;
-  if (cleanupFailure !== undefined) throw cleanupFailure.cause;
+  throwCombinedFailures(
+    `Contained ${mode} proof and cleanup failed`,
+    primaryFailure,
+    cleanupFailures,
+  );
   if (evidence === undefined) {
     throw new Error(`Contained ${mode} probe returned no evidence`);
   }
@@ -353,13 +363,21 @@ function createSensitiveSentinels(platform: "darwin" | "win32"): {
     writeFileSync(path, "private");
     return path;
   };
-  const paths = {
-    browserState: createSentinel(roots.browserState),
-    credentials: createSentinel(roots.credentials),
-    modelStore: createSentinel(roots.modelStore),
-    projectLibrary: createSentinel(roots.projectLibrary),
-    source: createSentinel(roots.source),
-  };
+  let paths: Record<keyof typeof roots, string>;
+  try {
+    paths = {
+      browserState: createSentinel(roots.browserState),
+      credentials: createSentinel(roots.credentials),
+      modelStore: createSentinel(roots.modelStore),
+      projectLibrary: createSentinel(roots.projectLibrary),
+      source: createSentinel(roots.source),
+    };
+  } catch (cause) {
+    for (const root of Object.values(roots)) {
+      rmSync(root, { force: true, recursive: true });
+    }
+    throw cause;
+  }
   return {
     cleanup() {
       for (const root of Object.values(roots)) {
@@ -368,6 +386,19 @@ function createSensitiveSentinels(platform: "darwin" | "win32"): {
     },
     paths,
   };
+}
+
+function throwCombinedFailures(
+  message: string,
+  primaryFailure: { cause: unknown } | undefined,
+  cleanupFailures: readonly unknown[],
+): void {
+  const failures = [
+    ...(primaryFailure === undefined ? [] : [primaryFailure.cause]),
+    ...cleanupFailures,
+  ];
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, message);
 }
 
 function prepareWorkspace(
