@@ -563,6 +563,8 @@ def _validate_pe_dependencies(
         if owner_path.parts[0].lower() == "tools"
         else {"", "_internal", owner_path.parent.as_posix()}
     )
+    if len(owner_path.parts) >= 3 and owner_path.parts[0].lower() == "_internal":
+        loader_roots.add(f"_internal/{owner_path.parts[1]}.libs")
     for dependency in dependencies:
         dependency_lower = dependency.lower()
         if dependency_lower in allowed_system:

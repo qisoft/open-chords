@@ -298,6 +298,15 @@ class BuildAnalysisSidecarTests(unittest.TestCase):
             {"open-chords-analysis.exe", "_internal/python313.dll"},
             {"kernel32.dll"},
         )
+        validate_dependencies(
+            "_internal/llvmlite/binding/llvmlite.dll",
+            ["msvcp140-reviewed.dll"],
+            {
+                "_internal/llvmlite/binding/llvmlite.dll",
+                "_internal/llvmlite.libs/msvcp140-reviewed.dll",
+            },
+            set(),
+        )
         with self.assertRaisesRegex(RuntimeError, "Unpackaged PE dependency"):
             validate_dependencies(
                 "tools/ffmpeg.exe",
