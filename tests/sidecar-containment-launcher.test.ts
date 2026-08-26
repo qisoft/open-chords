@@ -16,6 +16,7 @@ import {
   parseSidecarSessionRequest,
   SidecarSessionError,
 } from "../apps/desktop/src/main/sidecar-session.ts";
+import { isExpectedWindowsProfileRoot } from "../apps/desktop/src/main/windows-app-container-path.ts";
 
 const fixtureRoot = resolve("tests/fixtures");
 
@@ -24,6 +25,34 @@ it("assigns the Windows containment job atomically during process creation", () 
 
   expect(source).toContain("PROC_THREAD_ATTRIBUTE_JOB_LIST");
   expect(source).not.toContain("AssignProcessToJobObject(");
+});
+
+it("accepts recursive cleanup only for a canonical AppContainer AC root", () => {
+  const packagesRoot = String.raw`C:\Users\Alice\AppData\Local\Packages`;
+
+  expect(
+    isExpectedWindowsProfileRoot(
+      String.raw`C:\Users\Alice\AppData\Local\Packages\OpenChords.Analysis_hash\AC`,
+      packagesRoot,
+    ),
+  ).toBe(true);
+  expect(isExpectedWindowsProfileRoot(packagesRoot, packagesRoot)).toBe(false);
+  expect(isExpectedWindowsProfileRoot(String.raw`C:\Users\Alice\Documents\AC`, packagesRoot)).toBe(
+    false,
+  );
+  expect(
+    isExpectedWindowsProfileRoot(
+      String.raw`C:\Users\Alice\AppData\Local\Packages\profile\AC\nested`,
+      packagesRoot,
+    ),
+  ).toBe(false);
+  expect(
+    isExpectedWindowsProfileRoot(
+      String.raw`C:\Users\Alice\AppData\Local\Packages\profile\..\..\Documents\AC`,
+      packagesRoot,
+    ),
+  ).toBe(false);
+  expect(isExpectedWindowsProfileRoot("relative\\profile\\AC", packagesRoot)).toBe(false);
 });
 
 it("surfaces bounded native containment failure reasons", () => {

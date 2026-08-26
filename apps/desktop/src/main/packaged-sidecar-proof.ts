@@ -1,9 +1,17 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { z } from "zod";
 
@@ -14,6 +22,7 @@ import { createNativeContainmentLauncher } from "./sidecar-containment-launcher.
 import { createExecutableNativeContainmentBroker } from "./sidecar-native-broker.ts";
 import { verifyPackagedSidecarRuntime } from "./sidecar-runtime-integrity.ts";
 import { createEffectSidecarClient, parseSidecarSessionRequest } from "./sidecar-session.ts";
+import { isExpectedWindowsProfileRoot } from "./windows-app-container-path.ts";
 
 const SensitiveSurfacesSchema = z.object({
   browserState: z.literal(true),
@@ -430,12 +439,13 @@ function prepareWorkspace(
     };
   }
   const profile = `OpenChords.Analysis.${identifier}`;
-  const profileRoot = execFileSync(helperPath, [`--prepare=${profile}`], {
+  const reportedProfileRoot = execFileSync(helperPath, [`--prepare=${profile}`], {
     encoding: "utf8",
     env: {},
     windowsHide: true,
   }).trim();
-  if (!isAbsolute(profileRoot)) {
+  const profileRoot = canonicalWindowsProfileRoot(reportedProfileRoot);
+  if (profileRoot === null) {
     const cause = new Error("AppContainer profile returned an invalid path");
     throwCombinedFailures(
       "AppContainer profile validation and cleanup failed",
@@ -468,6 +478,16 @@ function prepareWorkspace(
     windowsProfile: profile,
     workspace,
   };
+}
+
+function canonicalWindowsProfileRoot(reportedRoot: string): string | null {
+  try {
+    const packagesRoot = realpathSync(join(homedir(), "AppData", "Local", "Packages"));
+    const profileRoot = realpathSync(reportedRoot);
+    return isExpectedWindowsProfileRoot(profileRoot, packagesRoot) ? profileRoot : null;
+  } catch {
+    return null;
+  }
 }
 
 function cleanupWindowsProfile(
