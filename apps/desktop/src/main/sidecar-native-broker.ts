@@ -47,6 +47,7 @@ const FailureSchema = z.object({
 type NativeBrokerOptions = {
   args: readonly string[];
   containment: VerifiedContainmentRuntime;
+  diagnosticStderr?: (chunk: Buffer) => void;
   executablePath: string;
   platform: Exclude<NativeContainmentPlatform, "linux">;
   runtimeRoot: string;
@@ -101,7 +102,8 @@ export function createExecutableNativeContainmentBroker(
         let stderrBytes = 0;
         child.stderr?.on("data", (chunk: Buffer) => {
           stderrBytes += chunk.byteLength;
-          if (stderrBytes > MAX_STDERR_BYTES && child.exitCode === null) child.kill("SIGKILL");
+          if (stderrBytes <= MAX_STDERR_BYTES) options.diagnosticStderr?.(chunk);
+          else if (child.exitCode === null) child.kill("SIGKILL");
         });
         let stopped = false;
         return {
