@@ -187,6 +187,7 @@ async function runAdversarialContainmentProbe(
     z.object({
       controlHandleClosed: z.literal(true),
       environmentIsolated: z.literal(true),
+      environmentRedirected: z.literal(true),
       linkEscapeBlocked: z.literal(true),
       networkBlocked: z.literal(true),
       packagedHelperRan: z.literal(true),

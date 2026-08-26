@@ -303,12 +303,14 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     environment.append(entry);
     environment.push_back(L'\0');
   };
+  append_variable(L"APPDATA=" + workspace);
   append_variable(L"HOME=" + workspace);
   append_variable(L"LOCALAPPDATA=" + root.wstring());
   append_variable(L"PATH=");
   append_variable(L"SystemRoot=" + windows_directory());
   append_variable(L"TEMP=" + workspace);
   append_variable(L"TMP=" + workspace);
+  append_variable(L"USERPROFILE=" + workspace);
   environment.push_back(L'\0');
   PROCESS_INFORMATION process{};
   bool created = CreateProcessW(executable.c_str(), mutable_command.data(), nullptr, nullptr, TRUE,

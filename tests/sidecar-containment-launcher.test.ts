@@ -29,7 +29,16 @@ it("assigns the Windows containment job atomically during process creation", () 
 
 it("supplies the minimal sorted Windows and AppContainer environment", () => {
   const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
-  const entries = ["HOME=", "LOCALAPPDATA=", "PATH=", "SystemRoot=", "TEMP=", "TMP="];
+  const entries = [
+    "APPDATA=",
+    "HOME=",
+    "LOCALAPPDATA=",
+    "PATH=",
+    "SystemRoot=",
+    "TEMP=",
+    "TMP=",
+    "USERPROFILE=",
+  ];
   const positions = entries.map((entry) => source.indexOf(`append_variable(L"${entry}`));
 
   expect(positions.every((position) => position >= 0)).toBe(true);

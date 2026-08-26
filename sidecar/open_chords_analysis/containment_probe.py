@@ -66,9 +66,21 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     environment_isolated = all(
         key not in os.environ for key in sensitive_environment if key != "HOME"
     ) and Path(os.environ.get("HOME", workspace)).resolve() == workspace
+    redirected_environment = {
+        "APPDATA": workspace,
+        "HOME": workspace,
+        "LOCALAPPDATA": workspace.parents[1],
+        "USERPROFILE": workspace,
+    }
+    environment_redirected = all(
+        (value := os.environ.get(name)) is not None
+        and Path(value).resolve() == expected
+        for name, expected in redirected_environment.items()
+    )
     return {
         "controlHandleClosed": not _descriptor_is_control_channel(3),
         "environmentIsolated": environment_isolated,
+        "environmentRedirected": environment_redirected,
         "linkEscapeBlocked": all(value is True for value in link_access_blocked.values()),
         "networkBlocked": network_blocked,
         "packagedHelperRan": packaged_helper_ran,
