@@ -149,6 +149,19 @@ class ContainmentProbeTests(unittest.TestCase):
         ):
             self.assertTrue(_process_escape_cannot_reach_host(plan))
 
+        escaped_run = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout=b'{"hostAccessBlocked": true}', stderr=b""
+            )
+        )
+        with mock.patch(
+            "sidecar.open_chords_analysis.containment_probe.subprocess.run", escaped_run
+        ):
+            self.assertTrue(_process_escape_cannot_reach_host(plan))
+        self.assertIs(escaped_run.call_args.kwargs["stdin"], subprocess.PIPE)
+        self.assertIs(escaped_run.call_args.kwargs["stdout"], subprocess.PIPE)
+        self.assertIs(escaped_run.call_args.kwargs["stderr"], subprocess.PIPE)
+
     def test_distinguishes_a_control_channel_from_a_reused_regular_fd(self) -> None:
         with mock.patch(
             "sidecar.open_chords_analysis.containment_probe.os.fstat"

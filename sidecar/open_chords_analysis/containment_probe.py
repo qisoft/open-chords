@@ -250,9 +250,9 @@ def run_lifecycle_probe(plan_path: Path) -> None:
     partial_path.write_text("unpublished", "utf-8")
     descendant = subprocess.Popen(
         [sys.executable, "--containment-descendant-wait"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
     print(
         json.dumps(
@@ -297,9 +297,9 @@ def _process_escape_cannot_reach_host(plan_path: Path) -> bool:
         result = subprocess.run(
             arguments,
             check=False,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             timeout=10,
             **options,
         )
@@ -341,9 +341,9 @@ def _shell_cannot_read(path: Path) -> bool:
         result = subprocess.run(
             command,
             check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired):
