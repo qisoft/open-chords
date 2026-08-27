@@ -40,7 +40,8 @@ const SensitiveSurfacesSchema = z.object({
 
 const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_probe_failed",
-  "adversarial_environment_failed",
+  "adversarial_environment_isolation_failed",
+  "adversarial_environment_redirect_failed",
   "adversarial_helper_failed",
   "adversarial_link_failed",
   "adversarial_network_failed",
@@ -343,10 +344,8 @@ async function runAdversarialContainmentProbe(
       })
       .parse(rawEvidence);
     requireAdversarial(evidence.controlHandleClosed, "adversarial_protocol_failed");
-    requireAdversarial(
-      evidence.environmentIsolated && evidence.environmentRedirected,
-      "adversarial_environment_failed",
-    );
+    requireAdversarial(evidence.environmentIsolated, "adversarial_environment_isolation_failed");
+    requireAdversarial(evidence.environmentRedirected, "adversarial_environment_redirect_failed");
     requireAdversarial(evidence.packagedHelperRan, "adversarial_helper_failed");
     requireAdversarial(evidence.networkBlocked, "adversarial_network_failed");
     requireAdversarial(evidence.processEscapeBlocked, "adversarial_process_failed");
