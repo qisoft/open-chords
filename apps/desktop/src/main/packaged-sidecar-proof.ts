@@ -80,6 +80,10 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "proof_and_cleanup_failed",
   "session_probe_failed",
   "setup_failed",
+  "setup_prepare_failed",
+  "setup_response_failed",
+  "setup_validation_failed",
+  "setup_workspace_failed",
 ] as const;
 type PackagedProofFailureCode = (typeof PACKAGED_PROOF_FAILURE_CODES)[number];
 
@@ -698,18 +702,18 @@ function prepareWorkspace(
   } catch {
     throwCombinedFailures(
       "AppContainer profile preparation and cleanup failed",
-      { cause: new PackagedProofFailure("setup_failed") },
+      { cause: new PackagedProofFailure("setup_prepare_failed") },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
     );
-    throw new PackagedProofFailure("setup_failed");
+    throw new PackagedProofFailure("setup_prepare_failed");
   }
   if (reportedRoots.length !== 2) {
     throwCombinedFailures(
       "AppContainer profile response and cleanup failed",
-      { cause: new PackagedProofFailure("setup_failed") },
+      { cause: new PackagedProofFailure("setup_response_failed") },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
     );
-    throw new PackagedProofFailure("setup_failed");
+    throw new PackagedProofFailure("setup_response_failed");
   }
   const reportedProfileRoot = reportedRoots[0]!;
   const reportedRuntimeRoot = reportedRoots[1]!;
@@ -718,10 +722,10 @@ function prepareWorkspace(
   if (profileRoot === null || runtimeRoot === null) {
     throwCombinedFailures(
       "AppContainer profile validation and cleanup failed",
-      { cause: new PackagedProofFailure("setup_failed") },
+      { cause: new PackagedProofFailure("setup_validation_failed") },
       privateCleanupFailures(cleanupWindowsProfile(helperPath, profile)),
     );
-    throw new PackagedProofFailure("setup_failed");
+    throw new PackagedProofFailure("setup_validation_failed");
   }
   const workspace = join(profileRoot, "jobs", identifier);
   try {
@@ -730,7 +734,7 @@ function prepareWorkspace(
   } catch {
     throwCombinedFailures(
       "AppContainer workspace setup and cleanup failed",
-      { cause: new PackagedProofFailure("setup_failed") },
+      { cause: new PackagedProofFailure("setup_workspace_failed") },
       privateCleanupFailures(cleanupWindowsProfile(helperPath, profile)),
     );
   }
