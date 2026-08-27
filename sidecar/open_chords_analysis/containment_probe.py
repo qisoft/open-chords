@@ -167,11 +167,13 @@ def _windows_helper_permission_denial(helper: Path) -> str:
 def _windows_child_process_restricted() -> bool | None:
     try:
         import ctypes
+        from ctypes import wintypes
 
         class ChildProcessPolicy(ctypes.Structure):
             _fields_ = [("flags", ctypes.c_uint32)]
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetCurrentProcess.argtypes = []
         kernel32.GetCurrentProcess.restype = ctypes.c_void_p
         kernel32.GetProcessMitigationPolicy.argtypes = [
             ctypes.c_void_p,
@@ -179,7 +181,7 @@ def _windows_child_process_restricted() -> bool | None:
             ctypes.c_void_p,
             ctypes.c_size_t,
         ]
-        kernel32.GetProcessMitigationPolicy.restype = ctypes.c_bool
+        kernel32.GetProcessMitigationPolicy.restype = wintypes.BOOL
         policy = ChildProcessPolicy()
         if not kernel32.GetProcessMitigationPolicy(
             kernel32.GetCurrentProcess(), 13, ctypes.byref(policy), ctypes.sizeof(policy)
