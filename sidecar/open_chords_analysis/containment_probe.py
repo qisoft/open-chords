@@ -59,9 +59,9 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         helper_result = subprocess.run(
             [str(helper), "-version"],
             check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=10,
         )
         packaged_helper_status = "ran" if helper_result.returncode == 0 else "nonzero"
@@ -147,9 +147,9 @@ def _windows_helper_permission_denial(helper: Path) -> str:
         child = subprocess.run(
             [sys.executable, "--containment-child-smoke"],
             check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=10,
         )
     except PermissionError:

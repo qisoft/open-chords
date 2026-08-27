@@ -62,18 +62,22 @@ class ContainmentProbeTests(unittest.TestCase):
             self.assertEqual(
                 _windows_helper_permission_denial(helper), "permission_denied_child_image"
             )
+        child_run = mock.Mock(return_value=subprocess.CompletedProcess([], 0))
         with (
             mock.patch(
                 "sidecar.open_chords_analysis.containment_probe._can_read", return_value=True
             ),
             mock.patch(
                 "sidecar.open_chords_analysis.containment_probe.subprocess.run",
-                return_value=subprocess.CompletedProcess([], 0),
+                child_run,
             ),
         ):
             self.assertEqual(
                 _windows_helper_permission_denial(helper), "permission_denied_image"
             )
+        self.assertIs(child_run.call_args.kwargs["stdin"], subprocess.PIPE)
+        self.assertIs(child_run.call_args.kwargs["stdout"], subprocess.PIPE)
+        self.assertIs(child_run.call_args.kwargs["stderr"], subprocess.PIPE)
 
     def test_disabled_runtime_mutation_probe_leaves_installed_runtime_unchanged(self) -> None:
         with tempfile.TemporaryDirectory(prefix="open-chords-runtime-probe-test-") as temporary:
