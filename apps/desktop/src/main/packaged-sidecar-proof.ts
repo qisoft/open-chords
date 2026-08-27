@@ -355,9 +355,9 @@ async function runAdversarialContainmentProbe(
         ]),
         pathBlocked: z.boolean(),
         processEscapeBlocked: z.boolean(),
-        runtimeCreateBlocked: z.boolean(),
-        runtimeDeleteBlocked: z.boolean(),
-        runtimeModifyBlocked: z.boolean(),
+        runtimeCreateBlocked: z.boolean().optional(),
+        runtimeDeleteBlocked: z.boolean().optional(),
+        runtimeModifyBlocked: z.boolean().optional(),
         sensitiveLinkEscapesBlocked: SensitiveSurfacesSchema,
         sensitivePathsBlocked: SensitiveSurfacesSchema,
         sensitiveShellEscapesBlocked: SensitiveSurfacesSchema,
@@ -385,12 +385,14 @@ async function runAdversarialContainmentProbe(
     if (evidence.packagedHelperStatus !== "ran") {
       throw new PackagedProofFailure(`adversarial_helper_${evidence.packagedHelperStatus}`);
     }
-    requireAdversarial(
-      evidence.runtimeCreateBlocked &&
-        evidence.runtimeModifyBlocked &&
-        evidence.runtimeDeleteBlocked,
-      "adversarial_runtime_mutation_failed",
-    );
+    if (platform === "win32") {
+      requireAdversarial(
+        evidence.runtimeCreateBlocked === true &&
+          evidence.runtimeModifyBlocked === true &&
+          evidence.runtimeDeleteBlocked === true,
+        "adversarial_runtime_mutation_failed",
+      );
+    }
     requireAdversarial(evidence.networkBlocked, "adversarial_network_failed");
     requireAdversarial(evidence.processEscapeBlocked, "adversarial_process_failed");
     requireAdversarial(

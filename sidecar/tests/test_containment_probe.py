@@ -12,12 +12,23 @@ from sidecar.open_chords_analysis.containment_probe import (
     _environment_redirect_matches,
     _normalized_path_is_within,
     _process_escape_cannot_reach_host,
+    _runtime_mutation_evidence,
     _runtime_mutation_blocked,
     run_probe,
 )
 
 
 class ContainmentProbeTests(unittest.TestCase):
+    def test_disabled_runtime_mutation_probe_leaves_installed_runtime_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-runtime-probe-test-") as temporary:
+            runtime_root = Path(temporary)
+            manifest = runtime_root / "runtime-manifest.json"
+            manifest.write_bytes(b"signed-runtime")
+
+            self.assertEqual(_runtime_mutation_evidence(runtime_root, enabled=False), {})
+            self.assertEqual(manifest.read_bytes(), b"signed-runtime")
+            self.assertFalse((runtime_root / ".containment-write-probe").exists())
+
     def test_runtime_mutation_requires_an_access_denial(self) -> None:
         self.assertTrue(
             _runtime_mutation_blocked(
