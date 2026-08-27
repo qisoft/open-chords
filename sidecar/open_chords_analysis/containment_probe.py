@@ -153,10 +153,41 @@ def _windows_helper_permission_denial(helper: Path) -> str:
             timeout=10,
         )
     except PermissionError:
+        child_process_restricted = _windows_child_process_restricted()
+        if child_process_restricted is True:
+            return "permission_denied_child_policy"
+        if child_process_restricted is False:
+            return "permission_denied_child_image"
         return "permission_denied_child"
     except (OSError, subprocess.TimeoutExpired):
         return "permission_denied_probe"
     return "permission_denied_image" if child.returncode == 0 else "permission_denied_probe"
+
+
+def _windows_child_process_restricted() -> bool | None:
+    try:
+        import ctypes
+
+        class ChildProcessPolicy(ctypes.Structure):
+            _fields_ = [("flags", ctypes.c_uint32)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.GetProcessMitigationPolicy.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+        ]
+        kernel32.GetProcessMitigationPolicy.restype = ctypes.c_bool
+        policy = ChildProcessPolicy()
+        if not kernel32.GetProcessMitigationPolicy(
+            kernel32.GetCurrentProcess(), 13, ctypes.byref(policy), ctypes.sizeof(policy)
+        ):
+            return None
+        return bool(policy.flags & 1)
+    except (AttributeError, OSError):
+        return None
 
 
 def _runtime_mutation_blocked(operation: Callable[[], object]) -> bool:

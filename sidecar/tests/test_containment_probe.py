@@ -37,9 +37,30 @@ class ContainmentProbeTests(unittest.TestCase):
                 "sidecar.open_chords_analysis.containment_probe.subprocess.run",
                 side_effect=PermissionError,
             ),
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe._windows_child_process_restricted",
+                return_value=True,
+            ),
         ):
             self.assertEqual(
-                _windows_helper_permission_denial(helper), "permission_denied_child"
+                _windows_helper_permission_denial(helper),
+                "permission_denied_child_policy",
+            )
+        with (
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe._can_read", return_value=True
+            ),
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe.subprocess.run",
+                side_effect=PermissionError,
+            ),
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe._windows_child_process_restricted",
+                return_value=False,
+            ),
+        ):
+            self.assertEqual(
+                _windows_helper_permission_denial(helper), "permission_denied_child_image"
             )
         with (
             mock.patch(
