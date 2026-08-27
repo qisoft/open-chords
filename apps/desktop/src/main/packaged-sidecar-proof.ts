@@ -707,7 +707,7 @@ function prepareWorkspace(
     );
     throw new PackagedProofFailure("setup_prepare_failed");
   }
-  if (reportedRoots.length !== 2) {
+  if (reportedRoots.length !== 3) {
     throwCombinedFailures(
       "AppContainer profile response and cleanup failed",
       { cause: new PackagedProofFailure("setup_response_failed") },
@@ -716,9 +716,11 @@ function prepareWorkspace(
     throw new PackagedProofFailure("setup_response_failed");
   }
   const reportedProfileRoot = reportedRoots[0]!;
-  const reportedRuntimeRoot = reportedRoots[1]!;
-  const profileRoot = canonicalWindowsProfileRoot(reportedProfileRoot);
-  const runtimeRoot = canonicalWindowsRuntimeRoot(reportedRuntimeRoot, profile);
+  const reportedLocalAppDataRoot = reportedRoots[1]!;
+  const reportedRuntimeRoot = reportedRoots[2]!;
+  const localAppDataRoot = canonicalWindowsLocalAppDataRoot(reportedLocalAppDataRoot);
+  const profileRoot = canonicalWindowsProfileRoot(reportedProfileRoot, localAppDataRoot);
+  const runtimeRoot = canonicalWindowsRuntimeRoot(reportedRuntimeRoot, localAppDataRoot, profile);
   if (profileRoot === null || runtimeRoot === null) {
     throwCombinedFailures(
       "AppContainer profile validation and cleanup failed",
@@ -752,9 +754,21 @@ function prepareWorkspace(
   };
 }
 
-function canonicalWindowsProfileRoot(reportedRoot: string): string | null {
+function canonicalWindowsLocalAppDataRoot(reportedRoot: string): string | null {
   try {
-    const packagesRoot = realpathSync(join(homedir(), "AppData", "Local", "Packages"));
+    return realpathSync(reportedRoot);
+  } catch {
+    return null;
+  }
+}
+
+function canonicalWindowsProfileRoot(
+  reportedRoot: string,
+  localAppDataRoot: string | null,
+): string | null {
+  if (localAppDataRoot === null) return null;
+  try {
+    const packagesRoot = realpathSync(join(localAppDataRoot, "Packages"));
     const profileRoot = realpathSync(reportedRoot);
     return isExpectedWindowsProfileRoot(profileRoot, packagesRoot) ? profileRoot : null;
   } catch {
@@ -762,9 +776,13 @@ function canonicalWindowsProfileRoot(reportedRoot: string): string | null {
   }
 }
 
-function canonicalWindowsRuntimeRoot(reportedRoot: string, profile: string): string | null {
+function canonicalWindowsRuntimeRoot(
+  reportedRoot: string,
+  localAppDataRoot: string | null,
+  profile: string,
+): string | null {
+  if (localAppDataRoot === null) return null;
   try {
-    const localAppDataRoot = realpathSync(join(homedir(), "AppData", "Local"));
     const runtimeRoot = realpathSync(reportedRoot);
     return isExpectedWindowsRuntimeRoot(runtimeRoot, localAppDataRoot, profile)
       ? runtimeRoot

@@ -91,15 +91,19 @@ static bool valid_profile_name(const std::wstring& profile) {
   return true;
 }
 
-static fs::path runtime_staging_path(const std::wstring& profile) {
-  if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
+static fs::path local_app_data_root() {
   PWSTR local_app_data = nullptr;
   HRESULT result = SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr,
       &local_app_data);
   if (FAILED(result) || local_app_data == nullptr) throw std::runtime_error("local app data");
   fs::path root(local_app_data);
   CoTaskMemFree(local_app_data);
-  return fs::canonical(root) / L"OpenChords" / L"ContainmentRuntime" / profile;
+  return fs::canonical(root);
+}
+
+static fs::path runtime_staging_path(const std::wstring& profile) {
+  if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
+  return local_app_data_root() / L"OpenChords" / L"ContainmentRuntime" / profile;
 }
 
 static fs::path create_runtime_staging_root(const std::wstring& profile) {
@@ -304,6 +308,7 @@ static int prepare(const std::wstring& profile) {
   try {
     runtime_root = create_runtime_staging_root(profile);
     write_utf8_stdout(profile_root(sid));
+    write_utf8_stdout(local_app_data_root().wstring());
     write_utf8_stdout(runtime_root.wstring());
   } catch (...) {
     const std::exception_ptr failure = std::current_exception();
