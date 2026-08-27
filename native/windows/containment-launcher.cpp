@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <cstdio>
+#include <exception>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -90,7 +91,7 @@ static bool valid_profile_name(const std::wstring& profile) {
   return true;
 }
 
-static fs::path runtime_staging_root(const std::wstring& profile) {
+static fs::path runtime_staging_path(const std::wstring& profile) {
   if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
   PWSTR local_app_data = nullptr;
   HRESULT result = SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr,
@@ -98,6 +99,12 @@ static fs::path runtime_staging_root(const std::wstring& profile) {
   if (FAILED(result) || local_app_data == nullptr) throw std::runtime_error("local app data");
   fs::path root(local_app_data);
   CoTaskMemFree(local_app_data);
+  return root / L"OpenChords" / L"ContainmentRuntime" / profile;
+}
+
+static fs::path create_runtime_staging_root(const std::wstring& profile) {
+  const fs::path target = runtime_staging_path(profile);
+  fs::path root = target.parent_path().parent_path().parent_path();
   for (const fs::path& component : {fs::path(L"OpenChords"),
            fs::path(L"ContainmentRuntime"), fs::path(profile)}) {
     root /= component;
@@ -161,6 +168,27 @@ static void reject_reparse_points(const fs::path& root) {
         (GetFileAttributesW(entry.path().c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
       throw std::runtime_error("reparse entry");
     }
+  }
+}
+
+static fs::path existing_runtime_staging_root(const std::wstring& profile) {
+  const fs::path root = runtime_staging_path(profile);
+  reject_reparse_points(root);
+  return fs::canonical(root);
+}
+
+static bool remove_runtime_staging_root(const std::wstring& profile) noexcept {
+  try {
+    const fs::path root = runtime_staging_path(profile);
+    std::error_code status_error;
+    const fs::file_status status = fs::symlink_status(root, status_error);
+    if (status_error || fs::is_symlink(status)) return false;
+    if (status.type() == fs::file_type::not_found) return true;
+    reject_reparse_points(root);
+    fs::remove_all(root);
+    return fs::symlink_status(root).type() == fs::file_type::not_found;
+  } catch (...) {
+    return false;
   }
 }
 
@@ -244,6 +272,7 @@ static bool terminate_and_wait_for_empty_job(HANDLE job) {
 }
 
 static int prepare(const std::wstring& profile) {
+  if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
   PSID sid = nullptr;
   HRESULT result = CreateAppContainerProfile(
       profile.c_str(), L"Open Chords Analysis", L"Ephemeral offline analysis", nullptr, 0, &sid);
@@ -253,20 +282,26 @@ static int prepare(const std::wstring& profile) {
   if (FAILED(result)) throw std::runtime_error("create profile");
   fs::path runtime_root;
   try {
-    runtime_root = runtime_staging_root(profile);
+    runtime_root = create_runtime_staging_root(profile);
     write_utf8_stdout(profile_root(sid));
     write_utf8_stdout(runtime_root.wstring());
   } catch (...) {
-    if (!runtime_root.empty()) fs::remove_all(runtime_root);
+    const std::exception_ptr failure = std::current_exception();
     FreeSid(sid);
-    DeleteAppContainerProfile(profile.c_str());
-    throw;
+    const HRESULT delete_result = DeleteAppContainerProfile(profile.c_str());
+    const bool profile_removed = SUCCEEDED(delete_result) ||
+        delete_result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) ||
+        delete_result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    const bool runtime_removed = remove_runtime_staging_root(profile);
+    if (!profile_removed || !runtime_removed) throw std::runtime_error("prepare cleanup");
+    std::rethrow_exception(failure);
   }
   FreeSid(sid);
   return 0;
 }
 
 static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
+  if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
   std::wstring workspace;
   std::wstring runtime_root;
   int separator = -1;
@@ -280,7 +315,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   }
   PSID sid = derive_profile(profile);
   fs::path root = profile_root(sid);
-  fs::path expected_runtime_root = runtime_staging_root(profile);
+  fs::path expected_runtime_root = existing_runtime_staging_root(profile);
   fs::path executable = fs::canonical(argv[separator + 1]);
   if (!is_strict_child(root, workspace) ||
       fs::canonical(runtime_root) != expected_runtime_root ||
@@ -452,13 +487,13 @@ int wmain(int argc, wchar_t** argv) {
       if (auto value = value_after(argv[index], L"--profile="); !value.empty()) profile = value;
     }
     if (destroy) {
+      if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
       HRESULT result = DeleteAppContainerProfile(profile.c_str());
-      if (!(SUCCEEDED(result) || result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) ||
-              result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND))) return 1;
-      fs::path runtime_root = runtime_staging_root(profile);
-      reject_reparse_points(runtime_root);
-      fs::remove_all(runtime_root);
-      return 0;
+      const bool profile_removed = SUCCEEDED(result) ||
+          result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) ||
+          result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+      const bool runtime_removed = remove_runtime_staging_root(profile);
+      return profile_removed && runtime_removed ? 0 : 1;
     }
     if (profile.empty()) throw std::runtime_error("profile missing");
     return launch(argc, argv, profile);

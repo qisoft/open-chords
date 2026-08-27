@@ -84,7 +84,8 @@ it("makes Windows AppContainer profile destruction idempotent", () => {
 
   expect(source).toContain("HRESULT_FROM_WIN32(ERROR_NOT_FOUND)");
   expect(source).toContain("HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)");
-  expect(source).toContain("fs::remove_all(runtime_root);");
+  expect(source).toContain("remove_runtime_staging_root(profile)");
+  expect(source).toContain("reject_reparse_points(root);");
 });
 
 it("supplies the minimal sorted Windows and AppContainer environment", () => {

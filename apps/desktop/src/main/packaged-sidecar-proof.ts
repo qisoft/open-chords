@@ -719,7 +719,7 @@ function prepareWorkspace(
     throwCombinedFailures(
       "AppContainer profile validation and cleanup failed",
       { cause: new PackagedProofFailure("setup_failed") },
-      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile, profileRoot, runtimeRoot)),
+      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile)),
     );
     throw new PackagedProofFailure("setup_failed");
   }
@@ -731,7 +731,7 @@ function prepareWorkspace(
     throwCombinedFailures(
       "AppContainer workspace setup and cleanup failed",
       { cause: new PackagedProofFailure("setup_failed") },
-      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile, profileRoot, runtimeRoot)),
+      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile)),
     );
   }
   return {
@@ -739,7 +739,7 @@ function prepareWorkspace(
       throwCombinedFailures(
         "AppContainer profile cleanup failed",
         undefined,
-        cleanupWindowsProfile(helperPath, profile, profileRoot, runtimeRoot),
+        cleanupWindowsProfile(helperPath, profile),
       );
     },
     runtimeRoot,
@@ -772,23 +772,8 @@ function canonicalWindowsRuntimeRoot(reportedRoot: string, profile: string): str
   }
 }
 
-function cleanupWindowsProfile(
-  helperPath: string,
-  profile: string,
-  profileRoot: string | null,
-  runtimeRoot: string | null,
-): unknown[] {
-  const failures = destroyWindowsProfile(helperPath, profile);
-  for (const root of [profileRoot, runtimeRoot]) {
-    if (root !== null) {
-      try {
-        rmSync(root, { force: true, recursive: true });
-      } catch (cause) {
-        failures.push(cause);
-      }
-    }
-  }
-  return failures;
+function cleanupWindowsProfile(helperPath: string, profile: string): unknown[] {
+  return destroyWindowsProfile(helperPath, profile);
 }
 
 function privateCleanupFailures(failures: readonly unknown[]): PackagedProofFailure[] {
