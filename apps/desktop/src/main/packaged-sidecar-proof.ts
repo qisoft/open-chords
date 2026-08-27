@@ -764,9 +764,7 @@ function canonicalWindowsProfileRoot(reportedRoot: string): string | null {
 
 function canonicalWindowsRuntimeRoot(reportedRoot: string, profile: string): string | null {
   try {
-    const localAppData = process.env.LOCALAPPDATA;
-    if (localAppData === undefined) return null;
-    const localAppDataRoot = realpathSync(localAppData);
+    const localAppDataRoot = realpathSync(join(homedir(), "AppData", "Local"));
     const runtimeRoot = realpathSync(reportedRoot);
     return isExpectedWindowsRuntimeRoot(runtimeRoot, localAppDataRoot, profile)
       ? runtimeRoot
