@@ -267,11 +267,11 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   SECURITY_CAPABILITIES capabilities{};
   capabilities.AppContainerSid = sid;
   SIZE_T attribute_size = 0;
-  InitializeProcThreadAttributeList(nullptr, 3, 0, &attribute_size);
+  InitializeProcThreadAttributeList(nullptr, 4, 0, &attribute_size);
   auto attributes = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
       HeapAlloc(GetProcessHeap(), 0, attribute_size));
   if (attributes == nullptr ||
-      !InitializeProcThreadAttributeList(attributes, 3, 0, &attribute_size) ||
+      !InitializeProcThreadAttributeList(attributes, 4, 0, &attribute_size) ||
       !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
           &capabilities, sizeof(capabilities), nullptr, nullptr)) {
     close_job(job); FreeSid(sid); throw std::runtime_error("security capabilities");
@@ -308,6 +308,15 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     close_job(job);
     FreeSid(sid);
     throw std::runtime_error("handle allowlist");
+  }
+  DWORD child_process_policy = PROCESS_CREATION_CHILD_PROCESS_OVERRIDE;
+  if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY,
+          &child_process_policy, sizeof(child_process_policy), nullptr, nullptr)) {
+    DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
+    close_job(job);
+    FreeSid(sid);
+    throw std::runtime_error("child process policy");
   }
   HANDLE job_list[] = {job};
   if (!UpdateProcThreadAttribute(

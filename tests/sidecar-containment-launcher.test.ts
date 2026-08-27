@@ -27,6 +27,17 @@ it("assigns the Windows containment job atomically during process creation", () 
   expect(source).not.toContain("AssignProcessToJobObject(");
 });
 
+it("allows required helpers only inside the inherited AppContainer and job", () => {
+  const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
+
+  expect(source).toContain("PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY");
+  expect(source).toContain("PROCESS_CREATION_CHILD_PROCESS_OVERRIDE");
+  expect(source).toContain("PROC_THREAD_ATTRIBUTE_JOB_LIST");
+  expect(source).toContain("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE");
+  expect(source).toContain("JOB_OBJECT_LIMIT_ACTIVE_PROCESS");
+  expect(source).not.toContain("CREATE_BREAKAWAY_FROM_JOB");
+});
+
 it("makes Windows AppContainer profile destruction idempotent", () => {
   const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
 
