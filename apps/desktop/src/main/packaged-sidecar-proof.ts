@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -212,6 +213,12 @@ async function runAdversarialContainmentProbe(
   platform: "darwin" | "win32",
 ): Promise<void> {
   const sentinels = createSensitiveSentinels(platform);
+  const sensitiveLinkPaths = Object.fromEntries(
+    Object.keys(sentinels.paths).map((name) => [
+      name,
+      join(workspace, `containment-link-probe-${name}`),
+    ]),
+  );
   const server = createServer((socket) => socket.destroy());
   let process: Awaited<ReturnType<ReturnType<typeof createLauncher>["launch"]>> | undefined;
   let proofFailure: { cause: unknown } | undefined;
@@ -225,10 +232,14 @@ async function runAdversarialContainmentProbe(
       throw new Error("Loopback probe did not bind");
     }
     const plan = join(workspace, "containment-probe.json");
+    for (const [name, target] of Object.entries(sentinels.paths)) {
+      linkSync(target, sensitiveLinkPaths[name]!);
+    }
     writeFileSync(
       plan,
       JSON.stringify({
         loopbackPort: address.port,
+        sensitiveLinkPaths,
         sensitivePaths: sentinels.paths,
       }),
     );
@@ -316,6 +327,11 @@ async function runAdversarialContainmentProbe(
     } catch (cause) {
       cleanupErrors.push(cause);
     }
+  }
+  try {
+    for (const path of Object.values(sensitiveLinkPaths)) rmSync(path, { force: true });
+  } catch (cause) {
+    cleanupErrors.push(cause);
   }
   try {
     sentinels.cleanup();

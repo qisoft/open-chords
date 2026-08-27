@@ -8,19 +8,12 @@ from unittest import mock
 
 from sidecar.open_chords_analysis.containment_probe import (
     _descriptor_is_control_channel,
-    _link_cannot_read,
     _process_escape_cannot_reach_host,
     run_probe,
 )
 
 
 class ContainmentProbeTests(unittest.TestCase):
-    def test_link_probe_does_not_treat_setup_failure_as_blocked(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="open-chords-link-probe-") as temporary:
-            workspace = Path(temporary)
-            with mock.patch.object(Path, "symlink_to", side_effect=OSError("not measured")):
-                self.assertIsNone(_link_cannot_read(workspace, "source", workspace / "target"))
-
     def test_process_escape_requires_specific_non_breakaway_evidence(self) -> None:
         plan = Path("unused-plan.json")
         with mock.patch(
@@ -66,6 +59,16 @@ class ContainmentProbeTests(unittest.TestCase):
                 json.dumps(
                     {
                         "loopbackPort": 9,
+                        "sensitiveLinkPaths": {
+                            name: str(sentinel)
+                            for name in (
+                                "browserState",
+                                "credentials",
+                                "modelStore",
+                                "projectLibrary",
+                                "source",
+                            )
+                        },
                         "sensitivePaths": {
                             "browserState": str(sentinel),
                             "credentials": str(sentinel),

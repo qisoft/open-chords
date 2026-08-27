@@ -32,9 +32,13 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     path_access_blocked = {
         name: not _can_read(path) for name, path in sensitive_paths.items()
     }
-    link_access_blocked: dict[str, bool | None] = {
-        name: _link_cannot_read(workspace, name, path)
-        for name, path in sensitive_paths.items()
+    sensitive_link_paths = {
+        name: Path(value) for name, value in plan["sensitiveLinkPaths"].items()
+    }
+    if set(sensitive_link_paths) != SENSITIVE_SURFACES:
+        raise ValueError("containment link probe plan has unexpected sensitive surfaces")
+    link_access_blocked = {
+        name: not _can_read(path) for name, path in sensitive_link_paths.items()
     }
     shell_access_blocked = {
         name: _shell_cannot_read(path) for name, path in sensitive_paths.items()
@@ -152,17 +156,6 @@ def _can_read(path: Path) -> bool:
         return True
     except OSError:
         return False
-
-
-def _link_cannot_read(workspace: Path, name: str, target: Path) -> bool | None:
-    link = workspace / f"containment-link-probe-{name}"
-    try:
-        link.symlink_to(target)
-        return not _can_read(link)
-    except OSError:
-        return None
-    finally:
-        link.unlink(missing_ok=True)
 
 
 def _process_escape_cannot_reach_host(plan_path: Path) -> bool:
