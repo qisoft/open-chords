@@ -181,6 +181,16 @@ it("surfaces only allowlisted bounded sidecar crash reasons", () => {
   expect(
     parseSidecarProcessFailure("Open Chords analysis sidecar failed safely: sidecar_secret_path\n"),
   ).toBeNull();
+  expect(
+    parseSidecarProcessFailure(
+      "Open Chords analysis sidecar failed safely: sidecar_runtime_permission_denied\n",
+    ),
+  ).toBe("sidecar_runtime_permission_denied");
+  expect(
+    parseSidecarProcessFailure(
+      "Open Chords analysis sidecar failed safely: sidecar_session_permission_denied\n",
+    ),
+  ).toBe("sidecar_session_permission_denied");
 });
 
 it("caps sidecar stderr and rejects markers after overflow even when kill does not finish", () => {

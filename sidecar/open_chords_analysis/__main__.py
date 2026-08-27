@@ -18,11 +18,18 @@ def main() -> None:
         if not getattr(sys, "frozen", False):
             raise RuntimeError("source entry point is disabled")
         runtime_root = Path(sys.executable).resolve().parent
-        runtime = load_frozen_runtime(runtime_root)
+        try:
+            runtime = load_frozen_runtime(runtime_root)
+        except PermissionError:
+            sys.stderr.write(
+                "Open Chords analysis sidecar failed safely: "
+                "sidecar_runtime_permission_denied\n"
+            )
+            raise SystemExit(2) from None
         serve_one_session(sys.stdin.buffer, sys.stdout.buffer, Path.cwd(), runtime)
     except Exception as error:
         if isinstance(error, PermissionError):
-            failure_code = "sidecar_permission_denied"
+            failure_code = "sidecar_session_permission_denied"
         elif isinstance(error, FileNotFoundError):
             failure_code = "sidecar_file_not_found"
         elif isinstance(error, BrokenPipeError):
