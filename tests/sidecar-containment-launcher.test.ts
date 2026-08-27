@@ -50,6 +50,7 @@ it("supplies the minimal sorted Windows and AppContainer environment", () => {
 
   expect(positions.every((position) => position >= 0)).toBe(true);
   expect(positions).toEqual([...positions].sort((left, right) => left - right));
+  expect(source).toContain('append_variable(L"LOCALAPPDATA=" + workspace);');
 });
 
 it("accepts recursive cleanup only for a canonical AppContainer AC root", () => {

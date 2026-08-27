@@ -77,7 +77,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         {
             "APPDATA": workspace,
             "HOME": workspace,
-            "LOCALAPPDATA": workspace.parents[1],
+            "LOCALAPPDATA": workspace,
             "TEMP": workspace,
             "TMP": workspace,
             "USERPROFILE": workspace,

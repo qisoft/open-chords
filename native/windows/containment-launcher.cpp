@@ -305,7 +305,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   };
   append_variable(L"APPDATA=" + workspace);
   append_variable(L"HOME=" + workspace);
-  append_variable(L"LOCALAPPDATA=" + root.wstring());
+  append_variable(L"LOCALAPPDATA=" + workspace);
   append_variable(L"PATH=");
   append_variable(L"SystemRoot=" + windows_directory());
   append_variable(L"TEMP=" + workspace);
