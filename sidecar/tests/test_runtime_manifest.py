@@ -19,6 +19,7 @@ class RuntimeManifestTests(unittest.TestCase):
         runtime_root = Path("runtime").resolve()
 
         cases = {
+            runtime_root: "sidecar_runtime_root_permission_denied",
             runtime_root / "runtime-manifest.json": "sidecar_runtime_manifest_permission_denied",
             runtime_root / "tools/ffprobe.exe": "sidecar_runtime_tool_permission_denied",
             runtime_root / "_internal/python313.dll": "sidecar_runtime_file_permission_denied",

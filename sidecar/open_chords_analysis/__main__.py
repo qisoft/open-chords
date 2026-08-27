@@ -12,6 +12,8 @@ def _runtime_permission_failure_code(error: PermissionError, runtime_root: Path)
         relative = denied_path.relative_to(runtime_root)
     except (OSError, TypeError, ValueError):
         return "sidecar_runtime_root_permission_denied"
+    if not relative.parts:
+        return "sidecar_runtime_root_permission_denied"
     if relative.as_posix() == "runtime-manifest.json":
         return "sidecar_runtime_manifest_permission_denied"
     if relative.parts[:1] == ("tools",):
