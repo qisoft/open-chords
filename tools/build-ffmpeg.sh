@@ -58,6 +58,8 @@ make -j2
 make install
 popd >/dev/null
 
+"${install_root}/bin/ffmpeg" -version | sed -n '1,4p' > "${install_root}/ffmpeg-version.txt"
+
 if [[ "${platform_profile}" == "windows-server-2025-x64" ]]; then
   python_command=""
   if command -v python3 >/dev/null 2>&1; then
@@ -68,13 +70,13 @@ if [[ "${platform_profile}" == "windows-server-2025-x64" ]]; then
     echo "Python is required to mark Windows helpers as AppContainer compatible" >&2
     exit 1
   fi
-  "${python_command}" "${repository_root}/tools/mark-pe-appcontainer.py" \
-    "${install_root}/bin/ffmpeg.exe" "${install_root}/bin/ffprobe.exe"
-
   runtime_dlls_output="$(
     bash "${manifest_reader}" array "${build_manifest}" windowsRuntimeDlls
   )"
-  runtime_files_json='[]'
+  appcontainer_pe_files=(
+    "${install_root}/bin/ffmpeg.exe"
+    "${install_root}/bin/ffprobe.exe"
+  )
   while IFS= read -r runtime_dll; do
     runtime_source="/ucrt64/bin/${runtime_dll}"
     if [[ ! -f "${runtime_source}" ]]; then
@@ -82,6 +84,13 @@ if [[ "${platform_profile}" == "windows-server-2025-x64" ]]; then
       exit 1
     fi
     cp "${runtime_source}" "${install_root}/bin/${runtime_dll}"
+    appcontainer_pe_files+=("${install_root}/bin/${runtime_dll}")
+  done <<< "${runtime_dlls_output}"
+  "${python_command}" "${repository_root}/tools/mark-pe-appcontainer.py" \
+    "${appcontainer_pe_files[@]}"
+
+  runtime_files_json='[]'
+  while IFS= read -r runtime_dll; do
     runtime_sha256="$(shasum -a 256 "${install_root}/bin/${runtime_dll}" | awk '{print $1}')"
     runtime_files_json="$(
       jq -c \
@@ -124,4 +133,3 @@ fi
 
 mkdir -p "${install_root}/licenses"
 cp "${source_root}/ffmpeg-${version}/COPYING.LGPLv2.1" "${install_root}/licenses/FFmpeg-LGPL-2.1.txt"
-"${install_root}/bin/ffmpeg" -version | sed -n '1,4p' > "${install_root}/ffmpeg-version.txt"

@@ -17,10 +17,13 @@ def appcontainer_characteristics_offset(data: bytes) -> int:
     if len(data) < 0x40 or data[:2] != b"MZ":
         raise ValueError("invalid DOS header")
     pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
-    optional_offset = pe_offset + 24
-    characteristics_offset = optional_offset + 0x46
-    if characteristics_offset + 2 > len(data) or data[pe_offset : pe_offset + 4] != b"PE\0\0":
+    if pe_offset + 24 > len(data) or data[pe_offset : pe_offset + 4] != b"PE\0\0":
         raise ValueError("invalid PE header")
+    optional_offset = pe_offset + 24
+    optional_size = struct.unpack_from("<H", data, pe_offset + 20)[0]
+    characteristics_offset = optional_offset + 0x46
+    if optional_size < 0x48 or optional_offset + optional_size > len(data):
+        raise ValueError("invalid PE optional header size")
     magic = struct.unpack_from("<H", data, optional_offset)[0]
     if magic not in {PE32_MAGIC, PE32_PLUS_MAGIC}:
         raise ValueError("unsupported PE optional header")
