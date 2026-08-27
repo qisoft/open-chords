@@ -97,6 +97,7 @@ class ContainmentProbeTests(unittest.TestCase):
             self.assertIs(result["networkBlocked"], False)
             self.assertIs(result["linkEscapeBlocked"], False)
             self.assertIs(result["shellEscapeBlocked"], False)
+            self.assertEqual(set(result["environmentRedirects"]), {"HOME", "TMPDIR"})
             self.assertTrue(
                 all(value is False for value in result["sensitivePathsBlocked"].values())
             )

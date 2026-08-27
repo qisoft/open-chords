@@ -41,7 +41,11 @@ const SensitiveSurfacesSchema = z.object({
 const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_probe_failed",
   "adversarial_environment_isolation_failed",
-  "adversarial_environment_redirect_failed",
+  "adversarial_environment_redirect_appdata_failed",
+  "adversarial_environment_redirect_home_failed",
+  "adversarial_environment_redirect_localappdata_failed",
+  "adversarial_environment_redirect_tmpdir_failed",
+  "adversarial_environment_redirect_userprofile_failed",
   "adversarial_helper_failed",
   "adversarial_link_failed",
   "adversarial_network_failed",
@@ -331,7 +335,7 @@ async function runAdversarialContainmentProbe(
       .object({
         controlHandleClosed: z.boolean(),
         environmentIsolated: z.boolean(),
-        environmentRedirected: z.boolean(),
+        environmentRedirects: z.record(z.string(), z.boolean()),
         linkEscapeBlocked: z.boolean(),
         networkBlocked: z.boolean(),
         packagedHelperRan: z.boolean(),
@@ -345,7 +349,20 @@ async function runAdversarialContainmentProbe(
       .parse(rawEvidence);
     requireAdversarial(evidence.controlHandleClosed, "adversarial_protocol_failed");
     requireAdversarial(evidence.environmentIsolated, "adversarial_environment_isolation_failed");
-    requireAdversarial(evidence.environmentRedirected, "adversarial_environment_redirect_failed");
+    const requiredRedirects =
+      platform === "win32"
+        ? (["APPDATA", "HOME", "LOCALAPPDATA", "USERPROFILE"] as const)
+        : (["HOME", "TMPDIR"] as const);
+    const redirectFailureCodes = {
+      APPDATA: "adversarial_environment_redirect_appdata_failed",
+      HOME: "adversarial_environment_redirect_home_failed",
+      LOCALAPPDATA: "adversarial_environment_redirect_localappdata_failed",
+      TMPDIR: "adversarial_environment_redirect_tmpdir_failed",
+      USERPROFILE: "adversarial_environment_redirect_userprofile_failed",
+    } as const satisfies Record<(typeof requiredRedirects)[number], PackagedProofFailureCode>;
+    for (const name of requiredRedirects) {
+      requireAdversarial(evidence.environmentRedirects[name] === true, redirectFailureCodes[name]);
+    }
     requireAdversarial(evidence.packagedHelperRan, "adversarial_helper_failed");
     requireAdversarial(evidence.networkBlocked, "adversarial_network_failed");
     requireAdversarial(evidence.processEscapeBlocked, "adversarial_process_failed");

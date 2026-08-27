@@ -83,15 +83,15 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         if os.name == "nt"
         else {"HOME": workspace, "TMPDIR": workspace / "tmp"}
     )
-    environment_redirected = all(
-        (value := os.environ.get(name)) is not None
+    environment_redirects = {
+        name: (value := os.environ.get(name)) is not None
         and _normalized_path(value) == _normalized_path(expected)
         for name, expected in redirected_environment.items()
-    )
+    }
     return {
         "controlHandleClosed": not _descriptor_is_control_channel(3),
         "environmentIsolated": environment_isolated,
-        "environmentRedirected": environment_redirected,
+        "environmentRedirects": environment_redirects,
         "linkEscapeBlocked": all(value is True for value in link_access_blocked.values()),
         "networkBlocked": network_blocked,
         "packagedHelperRan": packaged_helper_ran,
