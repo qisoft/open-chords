@@ -27,6 +27,36 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(raised.exception.stage, "entry_content")
         self.assertNotIn("private", str(raised.exception))
 
+    def test_classifies_a_denied_symlink_target_read_as_entry_metadata(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-runtime-link-denial-") as temporary:
+            runtime_root = self._runtime_root(Path(temporary))
+            target = runtime_root / "payload.bin"
+            target.write_bytes(b"payload")
+            link = runtime_root / "payload-link"
+            try:
+                link.symlink_to(target.name)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"symbolic links are unavailable: {error}")
+            write_runtime_manifest(runtime_root, build_id="test-build", platform_profile="test")
+            original_readlink = os.readlink
+
+            def denied_runtime_link(path: str | os.PathLike[str]) -> str:
+                if Path(path).name == link.name:
+                    raise PermissionError(13, "private path", str(link))
+                return original_readlink(path)
+
+            with (
+                patch(
+                    "sidecar.open_chords_analysis.runtime_manifest.os.readlink",
+                    side_effect=denied_runtime_link,
+                ),
+                self.assertRaises(RuntimeManifestPermissionError) as raised,
+            ):
+                load_frozen_runtime(runtime_root)
+
+            self.assertEqual(raised.exception.stage, "entry_metadata")
+            self.assertNotIn("private", str(raised.exception))
+
     def test_classifies_runtime_permission_failures_without_exposing_paths(self) -> None:
         runtime_root = Path("runtime").resolve()
 

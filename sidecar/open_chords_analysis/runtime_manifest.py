@@ -121,7 +121,10 @@ def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
                 "entry_metadata", candidate.is_symlink
             ):
                 raise RuntimeManifestError("frozen runtime symbolic link is invalid")
-            if os.readlink(candidate) != entry["target"] or not _resolve_runtime_path(candidate).is_relative_to(runtime_root):
+            target = _permission_checked("entry_metadata", lambda: os.readlink(candidate))
+            if target != entry["target"] or not _resolve_runtime_path(candidate).is_relative_to(
+                runtime_root
+            ):
                 raise RuntimeManifestError("frozen runtime symbolic link escaped its package")
             expected_paths.add(relative)
             continue
