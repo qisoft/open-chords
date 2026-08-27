@@ -93,9 +93,7 @@ it("surfaces bounded native containment failure reasons", () => {
 it("does not log raw packaged-proof errors or paths", () => {
   const source = readFileSync("apps/desktop/src/main/index.ts", "utf8");
 
-  expect(source).toContain(
-    'process.stderr.write("Packaged sidecar proof failed: proof_failed\\n")',
-  );
+  expect(source).toContain("packagedProofFailureCode(cause)");
   expect(source).not.toContain("cause.stack");
   expect(source).not.toContain("cause.message");
 });

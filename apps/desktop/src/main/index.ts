@@ -12,7 +12,7 @@ import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-constants.ts";
-import { runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
+import { packagedProofFailureCode, runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
 import {
@@ -28,8 +28,8 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
     .then(runPackagedSidecarProof)
     .then(
       () => app.exit(0),
-      () => {
-        process.stderr.write("Packaged sidecar proof failed: proof_failed\n");
+      (cause: unknown) => {
+        process.stderr.write(`Packaged sidecar proof failed: ${packagedProofFailureCode(cause)}\n`);
         app.exit(1);
       },
     );

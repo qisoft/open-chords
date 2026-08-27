@@ -32,6 +32,36 @@ const SensitiveSurfacesSchema = z.object({
   source: z.literal(true),
 });
 
+const PACKAGED_PROOF_FAILURE_CODES = [
+  "adversarial_probe_failed",
+  "cancel_probe_failed",
+  "cleanup_failed",
+  "crash_probe_failed",
+  "session_probe_failed",
+] as const;
+type PackagedProofFailureCode = (typeof PACKAGED_PROOF_FAILURE_CODES)[number];
+
+class PackagedProofFailure extends Error {
+  readonly code: PackagedProofFailureCode;
+
+  constructor(code: PackagedProofFailureCode) {
+    super(code);
+    this.name = "PackagedProofFailure";
+    this.code = code;
+  }
+}
+
+export function packagedProofFailureCode(cause: unknown): string {
+  if (cause instanceof PackagedProofFailure) return cause.code;
+  if (cause instanceof AggregateError) {
+    for (const nested of cause.errors) {
+      const code = packagedProofFailureCode(nested);
+      if (code !== "proof_failed") return code;
+    }
+  }
+  return "proof_failed";
+}
+
 export async function runPackagedSidecarProof(): Promise<void> {
   if (process.platform !== "darwin" && process.platform !== "win32") {
     throw new Error("Packaged containment proof targets macOS and Windows only");
@@ -64,6 +94,7 @@ export async function runPackagedSidecarProof(): Promise<void> {
   );
   const prepared = prepareWorkspace(platform, containment.helperPath, verifiedRuntime.runtimeRoot);
   let proofFailure: { cause: unknown } | undefined;
+  let stage: PackagedProofFailureCode = "adversarial_probe_failed";
   try {
     const containedRuntime = verifyPackagedSidecarRuntime(
       prepared.runtimeRoot,
@@ -90,8 +121,11 @@ export async function runPackagedSidecarProof(): Promise<void> {
         platform,
       );
     await runAdversarialContainmentProbe(createLauncher, workspace, platform);
+    stage = "cancel_probe_failed";
     await runLifecycleContainmentProbe(createLauncher, workspace, "cancel");
+    stage = "crash_probe_failed";
     await runLifecycleContainmentProbe(createLauncher, workspace, "crash");
+    stage = "session_probe_failed";
     const client = createEffectSidecarClient(createLauncher([]));
     const request = parseSidecarSessionRequest({
       jobId: "job-packaged-proof",
@@ -125,14 +159,14 @@ export async function runPackagedSidecarProof(): Promise<void> {
     } finally {
       await client.dispose();
     }
-  } catch (cause) {
-    proofFailure = { cause };
+  } catch {
+    proofFailure = { cause: new PackagedProofFailure(stage) };
   }
   const cleanupFailures: unknown[] = [];
   try {
     prepared.cleanup();
-  } catch (cause) {
-    cleanupFailures.push(cause);
+  } catch {
+    cleanupFailures.push(new PackagedProofFailure("cleanup_failed"));
   }
   throwCombinedFailures(
     "Packaged containment proof and cleanup failed",
