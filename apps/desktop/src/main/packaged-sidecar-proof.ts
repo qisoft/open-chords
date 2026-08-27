@@ -367,9 +367,13 @@ async function runLifecycleContainmentProbe(
   }
   try {
     await assertProcessesExited([evidence.parentPid, evidence.descendantPid]);
-    if (existsSync(publishablePath)) {
-      throw new Error(`Contained ${mode} probe left publishable output`);
-    }
+  } catch {
+    throw new PackagedProofFailure("cleanup_failed");
+  }
+  if (existsSync(publishablePath)) {
+    throw new Error(`Contained ${mode} probe left publishable output`);
+  }
+  try {
     rmSync(partialPath, { force: true });
   } catch {
     throw new PackagedProofFailure("cleanup_failed");
