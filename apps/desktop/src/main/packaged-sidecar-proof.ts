@@ -28,7 +28,10 @@ import {
   parseSidecarSessionRequest,
   SidecarSessionError,
 } from "./sidecar-session.ts";
-import { isExpectedWindowsProfileRoot } from "./windows-app-container-path.ts";
+import {
+  isExpectedWindowsProfileRoot,
+  isExpectedWindowsRuntimeRoot,
+} from "./windows-app-container-path.ts";
 
 const SensitiveSurfacesSchema = z.object({
   browserState: z.boolean(),
@@ -683,13 +686,15 @@ function prepareWorkspace(
     };
   }
   const profile = `OpenChords.Analysis.${identifier}`;
-  let reportedProfileRoot: string;
+  let reportedRoots: string[];
   try {
-    reportedProfileRoot = execFileSync(helperPath, [`--prepare=${profile}`], {
+    reportedRoots = execFileSync(helperPath, [`--prepare=${profile}`], {
       encoding: "utf8",
       env: {},
       windowsHide: true,
-    }).trim();
+    })
+      .trim()
+      .split(/\r?\n/);
   } catch {
     throwCombinedFailures(
       "AppContainer profile preparation and cleanup failed",
@@ -698,16 +703,26 @@ function prepareWorkspace(
     );
     throw new PackagedProofFailure("setup_failed");
   }
-  const profileRoot = canonicalWindowsProfileRoot(reportedProfileRoot);
-  if (profileRoot === null) {
+  if (reportedRoots.length !== 2) {
     throwCombinedFailures(
-      "AppContainer profile validation and cleanup failed",
+      "AppContainer profile response and cleanup failed",
       { cause: new PackagedProofFailure("setup_failed") },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
     );
     throw new PackagedProofFailure("setup_failed");
   }
-  const runtimeRoot = join(profileRoot, "runtime");
+  const reportedProfileRoot = reportedRoots[0]!;
+  const reportedRuntimeRoot = reportedRoots[1]!;
+  const profileRoot = canonicalWindowsProfileRoot(reportedProfileRoot);
+  const runtimeRoot = canonicalWindowsRuntimeRoot(reportedRuntimeRoot, profile);
+  if (profileRoot === null || runtimeRoot === null) {
+    throwCombinedFailures(
+      "AppContainer profile validation and cleanup failed",
+      { cause: new PackagedProofFailure("setup_failed") },
+      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile, profileRoot, runtimeRoot)),
+    );
+    throw new PackagedProofFailure("setup_failed");
+  }
   const workspace = join(profileRoot, "jobs", identifier);
   try {
     cpSync(packagedRuntimeRoot, runtimeRoot, { recursive: true });
@@ -716,7 +731,7 @@ function prepareWorkspace(
     throwCombinedFailures(
       "AppContainer workspace setup and cleanup failed",
       { cause: new PackagedProofFailure("setup_failed") },
-      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile, profileRoot)),
+      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile, profileRoot, runtimeRoot)),
     );
   }
   return {
@@ -724,7 +739,7 @@ function prepareWorkspace(
       throwCombinedFailures(
         "AppContainer profile cleanup failed",
         undefined,
-        cleanupWindowsProfile(helperPath, profile, profileRoot),
+        cleanupWindowsProfile(helperPath, profile, profileRoot, runtimeRoot),
       );
     },
     runtimeRoot,
@@ -743,16 +758,35 @@ function canonicalWindowsProfileRoot(reportedRoot: string): string | null {
   }
 }
 
+function canonicalWindowsRuntimeRoot(reportedRoot: string, profile: string): string | null {
+  try {
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData === undefined) return null;
+    const localAppDataRoot = realpathSync(localAppData);
+    const runtimeRoot = realpathSync(reportedRoot);
+    return isExpectedWindowsRuntimeRoot(runtimeRoot, localAppDataRoot, profile)
+      ? runtimeRoot
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function cleanupWindowsProfile(
   helperPath: string,
   profile: string,
-  profileRoot: string,
+  profileRoot: string | null,
+  runtimeRoot: string | null,
 ): unknown[] {
   const failures = destroyWindowsProfile(helperPath, profile);
-  try {
-    rmSync(profileRoot, { force: true, recursive: true });
-  } catch (cause) {
-    failures.push(cause);
+  for (const root of [profileRoot, runtimeRoot]) {
+    if (root !== null) {
+      try {
+        rmSync(root, { force: true, recursive: true });
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
   }
   return failures;
 }

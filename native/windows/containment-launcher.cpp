@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <aclapi.h>
+#include <shlobj.h>
 #include <sddl.h>
 #include <userenv.h>
 #include <io.h>
@@ -70,6 +71,42 @@ static void write_utf8_stdout(const std::wstring& value) {
   if (_write(STDOUT_FILENO, encoded.data(), static_cast<unsigned int>(encoded.size())) < 0) {
     throw std::runtime_error("profile path output");
   }
+}
+
+static bool valid_profile_name(const std::wstring& profile) {
+  static constexpr wchar_t prefix[] = L"OpenChords.Analysis.";
+  static constexpr size_t prefix_length = (sizeof(prefix) / sizeof(wchar_t)) - 1;
+  static constexpr size_t uuid_length = 36;
+  if (profile.rfind(prefix, 0) != 0 || profile.size() != prefix_length + uuid_length) return false;
+  for (size_t index = 0; index < uuid_length; index += 1) {
+    const wchar_t character = profile[prefix_length + index];
+    const bool is_separator = index == 8 || index == 13 || index == 18 || index == 23;
+    if (is_separator ? character != L'-' : !((character >= L'a' && character <= L'f') ||
+                                                (character >= L'A' && character <= L'F') ||
+                                                (character >= L'0' && character <= L'9'))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static fs::path runtime_staging_root(const std::wstring& profile) {
+  if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
+  PWSTR local_app_data = nullptr;
+  HRESULT result = SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr,
+      &local_app_data);
+  if (FAILED(result) || local_app_data == nullptr) throw std::runtime_error("local app data");
+  fs::path root(local_app_data);
+  CoTaskMemFree(local_app_data);
+  for (const fs::path& component : {fs::path(L"OpenChords"),
+           fs::path(L"ContainmentRuntime"), fs::path(profile)}) {
+    root /= component;
+    fs::create_directory(root);
+    if ((GetFileAttributesW(root.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+      throw std::runtime_error("runtime staging reparse");
+    }
+  }
+  return fs::canonical(root);
 }
 
 static std::wstring windows_directory() {
@@ -214,9 +251,13 @@ static int prepare(const std::wstring& profile) {
     throw std::runtime_error("profile already exists");
   }
   if (FAILED(result)) throw std::runtime_error("create profile");
+  fs::path runtime_root;
   try {
+    runtime_root = runtime_staging_root(profile);
     write_utf8_stdout(profile_root(sid));
+    write_utf8_stdout(runtime_root.wstring());
   } catch (...) {
+    if (!runtime_root.empty()) fs::remove_all(runtime_root);
     FreeSid(sid);
     DeleteAppContainerProfile(profile.c_str());
     throw;
@@ -239,8 +280,10 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   }
   PSID sid = derive_profile(profile);
   fs::path root = profile_root(sid);
+  fs::path expected_runtime_root = runtime_staging_root(profile);
   fs::path executable = fs::canonical(argv[separator + 1]);
-  if (!is_strict_child(root, workspace) || !is_strict_child(root, runtime_root) ||
+  if (!is_strict_child(root, workspace) ||
+      fs::canonical(runtime_root) != expected_runtime_root ||
       !is_strict_child(runtime_root, executable)) {
     FreeSid(sid);
     throw std::runtime_error("path escaped profile");
@@ -267,13 +310,13 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   SECURITY_CAPABILITIES capabilities{};
   capabilities.AppContainerSid = sid;
   SIZE_T attribute_size = 0;
-  InitializeProcThreadAttributeList(nullptr, 4, 0, &attribute_size);
+  InitializeProcThreadAttributeList(nullptr, 3, 0, &attribute_size);
   auto attributes = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
       HeapAlloc(GetProcessHeap(), 0, attribute_size));
   if (attributes == nullptr) {
     close_job(job); FreeSid(sid); throw std::runtime_error("security capabilities allocation");
   }
-  if (!InitializeProcThreadAttributeList(attributes, 4, 0, &attribute_size)) {
+  if (!InitializeProcThreadAttributeList(attributes, 3, 0, &attribute_size)) {
     HeapFree(GetProcessHeap(), 0, attributes);
     close_job(job); FreeSid(sid); throw std::runtime_error("security capabilities");
   }
@@ -315,15 +358,6 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     close_job(job);
     FreeSid(sid);
     throw std::runtime_error("handle allowlist");
-  }
-  DWORD child_process_policy = PROCESS_CREATION_CHILD_PROCESS_OVERRIDE;
-  if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY,
-          &child_process_policy, sizeof(child_process_policy), nullptr, nullptr)) {
-    DeleteProcThreadAttributeList(attributes);
-    HeapFree(GetProcessHeap(), 0, attributes);
-    close_job(job);
-    FreeSid(sid);
-    throw std::runtime_error("child process policy");
   }
   HANDLE job_list[] = {job};
   if (!UpdateProcThreadAttribute(
@@ -419,10 +453,12 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (destroy) {
       HRESULT result = DeleteAppContainerProfile(profile.c_str());
-      return SUCCEEDED(result) || result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) ||
-              result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)
-          ? 0
-          : 1;
+      if (!(SUCCEEDED(result) || result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) ||
+              result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND))) return 1;
+      fs::path runtime_root = runtime_staging_root(profile);
+      reject_reparse_points(runtime_root);
+      fs::remove_all(runtime_root);
+      return 0;
     }
     if (profile.empty()) throw std::runtime_error("profile missing");
     return launch(argc, argv, profile);

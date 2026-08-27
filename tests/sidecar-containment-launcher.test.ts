@@ -16,7 +16,10 @@ import {
   parseSidecarSessionRequest,
   SidecarSessionError,
 } from "../apps/desktop/src/main/sidecar-session.ts";
-import { isExpectedWindowsProfileRoot } from "../apps/desktop/src/main/windows-app-container-path.ts";
+import {
+  isExpectedWindowsProfileRoot,
+  isExpectedWindowsRuntimeRoot,
+} from "../apps/desktop/src/main/windows-app-container-path.ts";
 
 const fixtureRoot = resolve("tests/fixtures");
 
@@ -27,15 +30,42 @@ it("assigns the Windows containment job atomically during process creation", () 
   expect(source).not.toContain("AssignProcessToJobObject(");
 });
 
-it("allows required helpers only inside the inherited AppContainer and job", () => {
+it("keeps required helpers inside the inherited AppContainer and job", () => {
   const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
 
-  expect(source).toContain("PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY");
-  expect(source).toContain("PROCESS_CREATION_CHILD_PROCESS_OVERRIDE");
+  expect(source).not.toContain("PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY");
+  expect(source).not.toContain("PROCESS_CREATION_CHILD_PROCESS_OVERRIDE");
   expect(source).toContain("PROC_THREAD_ATTRIBUTE_JOB_LIST");
   expect(source).toContain("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE");
   expect(source).toContain("JOB_OBJECT_LIMIT_ACTIVE_PROCESS");
   expect(source).not.toContain("CREATE_BREAKAWAY_FROM_JOB");
+});
+
+it("accepts only the exact per-profile Windows runtime staging root", () => {
+  const localAppData = String.raw`C:\Users\Alice\AppData\Local`;
+  const profile = "OpenChords.Analysis.1234";
+
+  expect(
+    isExpectedWindowsRuntimeRoot(
+      String.raw`C:\Users\Alice\AppData\Local\OpenChords\ContainmentRuntime\OpenChords.Analysis.1234`,
+      localAppData,
+      profile,
+    ),
+  ).toBe(true);
+  expect(
+    isExpectedWindowsRuntimeRoot(
+      String.raw`C:\Users\Alice\AppData\Local\OpenChords\ContainmentRuntime\other`,
+      localAppData,
+      profile,
+    ),
+  ).toBe(false);
+  expect(
+    isExpectedWindowsRuntimeRoot(
+      String.raw`C:\Users\Alice\AppData\Local\OpenChords\..\Secrets\OpenChords.Analysis.1234`,
+      localAppData,
+      profile,
+    ),
+  ).toBe(false);
 });
 
 it("releases the Windows attribute list at every initialized failure seam", () => {
@@ -54,6 +84,7 @@ it("makes Windows AppContainer profile destruction idempotent", () => {
 
   expect(source).toContain("HRESULT_FROM_WIN32(ERROR_NOT_FOUND)");
   expect(source).toContain("HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)");
+  expect(source).toContain("fs::remove_all(runtime_root);");
 });
 
 it("supplies the minimal sorted Windows and AppContainer environment", () => {

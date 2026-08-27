@@ -121,7 +121,9 @@ def build_windows(output_root: Path) -> None:
             str(executable),
             "-ladvapi32",
             "-lole32",
+            "-lshell32",
             "-luserenv",
+            "-luuid",
         ],
         check=True,
     )
