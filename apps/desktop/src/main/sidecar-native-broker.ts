@@ -58,7 +58,7 @@ type NativeBrokerOptions = {
 const MAX_ATTESTATION_BYTES = 4 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
 const SIDECAR_FAILURE_PATTERN =
-  /(?:^|\n)Open Chords analysis sidecar failed safely: (sidecar_(?:broken_pipe|file_not_found|internal_error|os_error|permission_denied|protocol_error|runtime_error|runtime_permission_denied|session_permission_denied|value_error))(?:\r?\n|$)/u;
+  /(?:^|\n)Open Chords analysis sidecar failed safely: (sidecar_(?:broken_pipe|file_not_found|internal_error|os_error|protocol_error|runtime_error|runtime_permission_denied|session_permission_denied|value_error))(?:\r?\n|$)/u;
 
 export function createExecutableNativeContainmentBroker(
   options: NativeBrokerOptions,

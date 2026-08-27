@@ -117,7 +117,6 @@ const SIDECAR_PROCESS_FAILURE_CODES = [
   "sidecar_file_not_found",
   "sidecar_internal_error",
   "sidecar_os_error",
-  "sidecar_permission_denied",
   "sidecar_protocol_error",
   "sidecar_runtime_permission_denied",
   "sidecar_runtime_error",
