@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -83,8 +84,6 @@ class ContainmentProbeTests(unittest.TestCase):
             )
             previous = Path.cwd()
             try:
-                import os
-
                 os.chdir(root)
                 with mock.patch(
                     "sidecar.open_chords_analysis.containment_probe.socket.create_connection"
@@ -97,7 +96,12 @@ class ContainmentProbeTests(unittest.TestCase):
             self.assertIs(result["networkBlocked"], False)
             self.assertIs(result["linkEscapeBlocked"], False)
             self.assertIs(result["shellEscapeBlocked"], False)
-            self.assertEqual(set(result["environmentRedirects"]), {"HOME", "TMPDIR"})
+            expected_redirects = (
+                {"APPDATA", "HOME", "LOCALAPPDATA", "TEMP", "TMP", "USERPROFILE"}
+                if os.name == "nt"
+                else {"HOME", "TMPDIR"}
+            )
+            self.assertEqual(set(result["environmentRedirects"]), expected_redirects)
             self.assertTrue(
                 all(value is False for value in result["sensitivePathsBlocked"].values())
             )
