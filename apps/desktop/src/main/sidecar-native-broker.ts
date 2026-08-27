@@ -45,6 +45,7 @@ const FailureSchema = z.object({
 });
 
 type NativeBrokerOptions = {
+  acceptedExitCodes?: readonly number[];
   args: readonly string[];
   containment: VerifiedContainmentRuntime;
   executablePath: string;
@@ -62,6 +63,13 @@ const SIDECAR_FAILURE_PATTERN =
 export function createExecutableNativeContainmentBroker(
   options: NativeBrokerOptions,
 ): NativeContainmentBroker {
+  const acceptedExitCodes = options.acceptedExitCodes ?? [0];
+  if (
+    acceptedExitCodes.length === 0 ||
+    acceptedExitCodes.some((code) => !Number.isInteger(code) || code < 0)
+  ) {
+    throw new SidecarSessionError("launch_failure", "Accepted sidecar exit codes are invalid");
+  }
   const runtimeRoot = absolute(options.runtimeRoot, "Sidecar runtime root");
   const executablePath = absolute(options.executablePath, "Sidecar executable");
   const workspace = absolute(options.workspace, "Analysis workspace");
@@ -115,7 +123,12 @@ export function createExecutableNativeContainmentBroker(
         return {
           evidence,
           process: {
-            stdout: containedProcessStdout(child.stdout, exited, stderr.snapshot),
+            stdout: containedProcessStdout(
+              child.stdout,
+              exited,
+              stderr.snapshot,
+              acceptedExitCodes,
+            ),
             async stop() {
               if (stopped) return;
               stopped = true;
@@ -156,10 +169,11 @@ async function* containedProcessStdout(
   stdout: NonNullable<ChildProcess["stdout"]>,
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
   stderr: () => { bytes: Buffer; exceeded: boolean },
+  acceptedExitCodes: readonly number[],
 ): AsyncGenerator<Uint8Array> {
   yield* stdout;
   const status = await exited;
-  if (status.code === 0 && status.signal === null) return;
+  if (containedExitWasAccepted(status, acceptedExitCodes)) return;
   const capturedStderr = stderr();
   const failureCode = parseSidecarProcessFailure(
     capturedStderr.bytes.toString("utf8"),
@@ -170,6 +184,13 @@ async function* containedProcessStdout(
     "Contained sidecar exited before completing its protocol",
     failureCode === null ? undefined : { remoteCode: failureCode },
   );
+}
+
+export function containedExitWasAccepted(
+  status: { code: number | null; signal: NodeJS.Signals | null },
+  acceptedExitCodes: readonly number[],
+): boolean {
+  return status.signal === null && status.code !== null && acceptedExitCodes.includes(status.code);
 }
 
 export function createBoundedSidecarStderrCapture(onExceeded: () => void): {

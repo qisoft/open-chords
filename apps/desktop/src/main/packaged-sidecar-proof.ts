@@ -212,9 +212,10 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     const inputPath = join(workspace, "input", "source-media");
     mkdirSync(dirname(inputPath), { recursive: true });
     writeFileSync(inputPath, canonicalWavFixture());
-    const createLauncher = (args: readonly string[]) =>
+    const createLauncher = (args: readonly string[], acceptedExitCodes: readonly number[] = [0]) =>
       createNativeContainmentLauncher(
         createExecutableNativeContainmentBroker({
+          acceptedExitCodes,
           args,
           containment,
           executablePath: containedRuntime.executablePath,
@@ -591,7 +592,10 @@ const LifecycleEvidenceSchema = z.object({
 });
 
 async function runLifecycleContainmentProbe(
-  createLauncher: (args: readonly string[]) => ReturnType<typeof createNativeContainmentLauncher>,
+  createLauncher: (
+    args: readonly string[],
+    acceptedExitCodes?: readonly number[],
+  ) => ReturnType<typeof createNativeContainmentLauncher>,
   workspace: string,
   mode: "cancel" | "crash",
 ): Promise<void> {
@@ -606,10 +610,10 @@ async function runLifecycleContainmentProbe(
     requestId: `request-containment-${mode}`,
     timeoutMs: 15_000,
   });
-  const process = await createLauncher([`--containment-lifecycle-probe=${plan}`]).launch(
-    request,
-    AbortSignal.timeout(15_000),
-  );
+  const process = await createLauncher(
+    [`--containment-lifecycle-probe=${plan}`],
+    mode === "crash" ? [0, 73] : [0],
+  ).launch(request, AbortSignal.timeout(15_000));
   let primaryFailure: { cause: unknown } | undefined;
   let evidence: z.infer<typeof LifecycleEvidenceSchema> | undefined;
   const iterator = process.stdout[Symbol.asyncIterator]();
