@@ -27,6 +27,7 @@ import {
   createEffectSidecarClient,
   parseSidecarSessionRequest,
   SidecarSessionError,
+  type SidecarSessionErrorCode,
 } from "./sidecar-session.ts";
 import {
   isExpectedWindowsProfileRoot,
@@ -78,6 +79,9 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "cleanup_failed",
   "crash_probe_failed",
   "proof_and_cleanup_failed",
+  "session_artifact_failed",
+  "session_descriptor_failed",
+  "session_evidence_failed",
   "session_probe_failed",
   "setup_failed",
   "setup_prepare_failed",
@@ -112,6 +116,7 @@ type SessionRemoteFailureCode = (typeof SESSION_REMOTE_FAILURE_CODES)[number];
 const SessionRemoteFailureCodeSchema = z.enum(SESSION_REMOTE_FAILURE_CODES);
 type PackagedProofFailureCode =
   | (typeof PACKAGED_PROOF_FAILURE_CODES)[number]
+  | `session_${SidecarSessionErrorCode}`
   | `session_${SessionRemoteFailureCode}`;
 
 class PackagedProofFailure extends Error {
@@ -220,6 +225,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     });
     try {
       const result = await client.runSession(request);
+      stage = "session_descriptor_failed";
       if (
         result.artifact.path !== "artifacts/decode-manifest.json" ||
         result.jobId !== request.jobId ||
@@ -227,6 +233,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       ) {
         throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
       }
+      stage = "session_artifact_failed";
       const decodeManifestBytes = readFileSync(join(workspace, result.artifact.path));
       if (
         decodeManifestBytes.byteLength !== result.artifact.byteSize ||
@@ -234,6 +241,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       ) {
         throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
       }
+      stage = "session_evidence_failed";
       const decodeManifest = z
         .object({ canonicalAudio: z.object({ sampleCount: z.literal(4_800) }) })
         .parse(JSON.parse(decodeManifestBytes.toString("utf8")));
@@ -275,10 +283,14 @@ function sessionFailureCode(
   if (
     stage === "session_probe_failed" &&
     cause instanceof SidecarSessionError &&
-    cause.code === "remote_failure" &&
-    remoteFailureCode?.success === true
+    cause.code === "remote_failure"
   ) {
-    return `session_${remoteFailureCode.data}`;
+    return remoteFailureCode?.success === true
+      ? `session_${remoteFailureCode.data}`
+      : "session_remote_failure";
+  }
+  if (stage === "session_probe_failed" && cause instanceof SidecarSessionError) {
+    return `session_${cause.code}`;
   }
   return stage;
 }
