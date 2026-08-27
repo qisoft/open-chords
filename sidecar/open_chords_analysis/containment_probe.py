@@ -28,7 +28,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     }
     if set(sensitive_paths) != SENSITIVE_SURFACES:
         raise ValueError("containment probe plan has unexpected sensitive surfaces")
-    workspace = Path.cwd().resolve(strict=True)
+    workspace = Path.cwd()
     path_access_blocked = {
         name: not _can_read(path) for name, path in sensitive_paths.items()
     }
@@ -40,7 +40,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         name: _shell_cannot_read(path) for name, path in sensitive_paths.items()
     }
     network_blocked = not _can_connect_loopback(int(plan["loopbackPort"]))
-    helper = Path(sys.executable).resolve().parent / "tools" / (
+    helper = Path(sys.executable).parent / "tools" / (
         "ffprobe.exe" if os.name == "nt" else "ffprobe"
     )
     try:
@@ -65,7 +65,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     }
     environment_isolated = all(
         key not in os.environ for key in sensitive_environment if key != "HOME"
-    ) and Path(os.environ.get("HOME", workspace)).resolve() == workspace
+    ) and _normalized_path(os.environ.get("HOME", workspace)) == _normalized_path(workspace)
     redirected_environment = (
         {
             "APPDATA": workspace,
@@ -78,7 +78,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     )
     environment_redirected = all(
         (value := os.environ.get(name)) is not None
-        and Path(value).resolve() == expected
+        and _normalized_path(value) == _normalized_path(expected)
         for name, expected in redirected_environment.items()
     )
     return {
@@ -95,6 +95,10 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         "sensitiveShellEscapesBlocked": shell_access_blocked,
         "shellEscapeBlocked": all(shell_access_blocked.values()),
     }
+
+
+def _normalized_path(path: str | os.PathLike[str]) -> str:
+    return os.path.normcase(os.path.abspath(os.fspath(path)))
 
 
 def run_descendant_probe(plan_path: Path) -> int:
