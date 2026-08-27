@@ -99,7 +99,7 @@ static fs::path runtime_staging_path(const std::wstring& profile) {
   if (FAILED(result) || local_app_data == nullptr) throw std::runtime_error("local app data");
   fs::path root(local_app_data);
   CoTaskMemFree(local_app_data);
-  return root / L"OpenChords" / L"ContainmentRuntime" / profile;
+  return fs::canonical(root) / L"OpenChords" / L"ContainmentRuntime" / profile;
 }
 
 static fs::path create_runtime_staging_root(const std::wstring& profile) {
@@ -172,19 +172,39 @@ static void reject_reparse_points(const fs::path& root) {
 }
 
 static fs::path existing_runtime_staging_root(const std::wstring& profile) {
-  const fs::path root = runtime_staging_path(profile);
+  const fs::path expected = runtime_staging_path(profile);
+  fs::path root = expected.parent_path().parent_path().parent_path();
+  for (const fs::path& component : {fs::path(L"OpenChords"),
+           fs::path(L"ContainmentRuntime"), fs::path(profile)}) {
+    root /= component;
+    const DWORD attributes = GetFileAttributesW(root.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+      throw std::runtime_error("runtime staging ancestor");
+    }
+  }
   reject_reparse_points(root);
-  return fs::canonical(root);
+  const fs::path canonical_root = fs::canonical(root);
+  if (canonical_root != expected) throw std::runtime_error("runtime staging path");
+  return canonical_root;
 }
 
 static bool remove_runtime_staging_root(const std::wstring& profile) noexcept {
   try {
-    const fs::path root = runtime_staging_path(profile);
-    std::error_code status_error;
-    const fs::file_status status = fs::symlink_status(root, status_error);
-    if (status_error || fs::is_symlink(status)) return false;
-    if (status.type() == fs::file_type::not_found) return true;
+    const fs::path expected = runtime_staging_path(profile);
+    fs::path root = expected.parent_path().parent_path().parent_path();
+    for (const fs::path& component : {fs::path(L"OpenChords"),
+             fs::path(L"ContainmentRuntime"), fs::path(profile)}) {
+      root /= component;
+      const DWORD attributes = GetFileAttributesW(root.c_str());
+      if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+      }
+      if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return false;
+    }
     reject_reparse_points(root);
+    if (fs::canonical(root) != expected) return false;
     fs::remove_all(root);
     return fs::symlink_status(root).type() == fs::file_type::not_found;
   } catch (...) {
