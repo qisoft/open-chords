@@ -50,6 +50,33 @@ class CanonicalDecodeTests(unittest.TestCase):
         self.assertIs(launch.call_args.kwargs["stdin"], subprocess.PIPE)
         self.assertTrue(stdin.closed)
 
+    def test_reaps_native_process_when_delivering_stdin_eof_fails(self) -> None:
+        stdin = SimpleNamespace(
+            close=unittest.mock.Mock(
+                side_effect=[OSError("injected stdin close failure"), None],
+            ),
+        )
+        stdout = io.BytesIO()
+        stderr = io.BytesIO()
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(),
+            stdin=stdin,
+            stderr=stderr,
+            stdout=stdout,
+            wait=unittest.mock.Mock(return_value=0),
+        )
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.subprocess.Popen", return_value=process),
+            self.assertRaisesRegex(OSError, "stdin close failure"),
+        ):
+            _run_tool([sys.executable, "-V"], threading.Event())
+
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=1)
+        self.assertEqual(stdin.close.call_count, 2)
+        self.assertTrue(stdout.closed)
+        self.assertTrue(stderr.closed)
+
     def test_cancellation_survives_kill_race_after_successful_reap(self) -> None:
         process = SimpleNamespace(
             kill=unittest.mock.Mock(side_effect=ProcessLookupError("already exited")),

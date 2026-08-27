@@ -389,14 +389,14 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
             env=_tool_environment(),
             shell=False,
         )
-        if stdin_pipe := getattr(process, "stdin", None):
-            stdin_pipe.close()
     except Exception as error:
         raise _NativeToolSpawnError("native tool process spawn failed") from error
     started_readers: list[threading.Thread] = []
     reaped = False
     primary_error: BaseException | None = None
     try:
+        if stdin_pipe := getattr(process, "stdin", None):
+            stdin_pipe.close()
         stdout = bytearray()
         stderr = bytearray()
         exceeded = threading.Event()
@@ -489,7 +489,13 @@ def _cleanup_native_process(
                 cleanup_failed = True
         except Exception:
             cleanup_failed = True
-    for pipe in (process.stdout, process.stderr):
+    for pipe in (
+        getattr(process, "stdin", None),
+        process.stdout,
+        process.stderr,
+    ):
+        if pipe is None:
+            continue
         try:
             pipe.close()
         except Exception:
