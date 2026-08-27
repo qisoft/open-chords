@@ -48,7 +48,11 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_environment_redirect_tmp_failed",
   "adversarial_environment_redirect_tmpdir_failed",
   "adversarial_environment_redirect_userprofile_failed",
-  "adversarial_helper_failed",
+  "adversarial_helper_missing",
+  "adversarial_helper_nonzero",
+  "adversarial_helper_os_error",
+  "adversarial_helper_permission_denied",
+  "adversarial_helper_timeout",
   "adversarial_link_failed",
   "adversarial_network_failed",
   "adversarial_path_failed",
@@ -340,7 +344,14 @@ async function runAdversarialContainmentProbe(
         environmentRedirects: z.record(z.string(), z.boolean()),
         linkEscapeBlocked: z.boolean(),
         networkBlocked: z.boolean(),
-        packagedHelperRan: z.boolean(),
+        packagedHelperStatus: z.enum([
+          "missing",
+          "nonzero",
+          "os_error",
+          "permission_denied",
+          "ran",
+          "timeout",
+        ]),
         pathBlocked: z.boolean(),
         processEscapeBlocked: z.boolean(),
         sensitiveLinkEscapesBlocked: SensitiveSurfacesSchema,
@@ -367,7 +378,9 @@ async function runAdversarialContainmentProbe(
     for (const name of requiredRedirects) {
       requireAdversarial(evidence.environmentRedirects[name] === true, redirectFailureCodes[name]);
     }
-    requireAdversarial(evidence.packagedHelperRan, "adversarial_helper_failed");
+    if (evidence.packagedHelperStatus !== "ran") {
+      throw new PackagedProofFailure(`adversarial_helper_${evidence.packagedHelperStatus}`);
+    }
     requireAdversarial(evidence.networkBlocked, "adversarial_network_failed");
     requireAdversarial(evidence.processEscapeBlocked, "adversarial_process_failed");
     requireAdversarial(

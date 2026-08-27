@@ -51,16 +51,23 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         "ffprobe.exe" if os.name == "nt" else "ffprobe"
     )
     try:
-        packaged_helper_ran = subprocess.run(
+        helper_result = subprocess.run(
             [str(helper), "-version"],
             check=False,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=10,
-        ).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        packaged_helper_ran = False
+        )
+        packaged_helper_status = "ran" if helper_result.returncode == 0 else "nonzero"
+    except FileNotFoundError:
+        packaged_helper_status = "missing"
+    except PermissionError:
+        packaged_helper_status = "permission_denied"
+    except subprocess.TimeoutExpired:
+        packaged_helper_status = "timeout"
+    except OSError:
+        packaged_helper_status = "os_error"
     sensitive_environment = {
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
@@ -96,7 +103,7 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         "environmentRedirects": environment_redirects,
         "linkEscapeBlocked": all(value is True for value in link_access_blocked.values()),
         "networkBlocked": network_blocked,
-        "packagedHelperRan": packaged_helper_ran,
+        "packagedHelperStatus": packaged_helper_status,
         "pathBlocked": all(path_access_blocked.values()),
         "processEscapeBlocked": _process_escape_cannot_reach_host(plan_path),
         "sensitiveLinkEscapesBlocked": link_access_blocked,
