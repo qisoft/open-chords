@@ -487,11 +487,21 @@ function prepareWorkspace(
     };
   }
   const profile = `OpenChords.Analysis.${identifier}`;
-  const reportedProfileRoot = execFileSync(helperPath, [`--prepare=${profile}`], {
-    encoding: "utf8",
-    env: {},
-    windowsHide: true,
-  }).trim();
+  let reportedProfileRoot: string;
+  try {
+    reportedProfileRoot = execFileSync(helperPath, [`--prepare=${profile}`], {
+      encoding: "utf8",
+      env: {},
+      windowsHide: true,
+    }).trim();
+  } catch {
+    throwCombinedFailures(
+      "AppContainer profile preparation and cleanup failed",
+      { cause: new PackagedProofFailure("setup_failed") },
+      privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
+    );
+    throw new PackagedProofFailure("setup_failed");
+  }
   const profileRoot = canonicalWindowsProfileRoot(reportedProfileRoot);
   if (profileRoot === null) {
     throwCombinedFailures(

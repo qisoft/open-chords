@@ -373,7 +373,13 @@ int wmain(int argc, wchar_t** argv) {
       }
       if (auto value = value_after(argv[index], L"--profile="); !value.empty()) profile = value;
     }
-    if (destroy) return SUCCEEDED(DeleteAppContainerProfile(profile.c_str())) ? 0 : 1;
+    if (destroy) {
+      HRESULT result = DeleteAppContainerProfile(profile.c_str());
+      return SUCCEEDED(result) || result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) ||
+              result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)
+          ? 0
+          : 1;
+    }
     if (profile.empty()) throw std::runtime_error("profile missing");
     return launch(argc, argv, profile);
   } catch (const std::exception& error) {

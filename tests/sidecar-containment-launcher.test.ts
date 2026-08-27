@@ -27,6 +27,13 @@ it("assigns the Windows containment job atomically during process creation", () 
   expect(source).not.toContain("AssignProcessToJobObject(");
 });
 
+it("makes Windows AppContainer profile destruction idempotent", () => {
+  const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
+
+  expect(source).toContain("HRESULT_FROM_WIN32(ERROR_NOT_FOUND)");
+  expect(source).toContain("HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)");
+});
+
 it("supplies the minimal sorted Windows and AppContainer environment", () => {
   const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
   const entries = [
