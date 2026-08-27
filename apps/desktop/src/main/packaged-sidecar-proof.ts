@@ -25,15 +25,23 @@ import { createEffectSidecarClient, parseSidecarSessionRequest } from "./sidecar
 import { isExpectedWindowsProfileRoot } from "./windows-app-container-path.ts";
 
 const SensitiveSurfacesSchema = z.object({
-  browserState: z.literal(true),
-  credentials: z.literal(true),
-  modelStore: z.literal(true),
-  projectLibrary: z.literal(true),
-  source: z.literal(true),
+  browserState: z.boolean(),
+  credentials: z.boolean(),
+  modelStore: z.boolean(),
+  projectLibrary: z.boolean(),
+  source: z.boolean(),
 });
 
 const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_probe_failed",
+  "adversarial_environment_failed",
+  "adversarial_helper_failed",
+  "adversarial_link_failed",
+  "adversarial_network_failed",
+  "adversarial_path_failed",
+  "adversarial_process_failed",
+  "adversarial_protocol_failed",
+  "adversarial_shell_failed",
   "cancel_probe_failed",
   "cleanup_failed",
   "crash_probe_failed",
@@ -172,8 +180,13 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     } finally {
       await client.dispose();
     }
-  } catch {
-    proofFailure = { cause: new PackagedProofFailure(stage) };
+  } catch (cause) {
+    proofFailure = {
+      cause:
+        packagedProofFailureCode(cause) === "proof_failed"
+          ? new PackagedProofFailure(stage)
+          : cause,
+    };
   }
   const cleanupFailures: unknown[] = [];
   try {
@@ -230,20 +243,44 @@ async function runAdversarialContainmentProbe(
       output = Buffer.concat([output, chunk]);
       if (output.byteLength > 64 * 1024) throw new Error("Containment probe output is oversized");
     }
-    z.object({
-      controlHandleClosed: z.literal(true),
-      environmentIsolated: z.literal(true),
-      environmentRedirected: z.literal(true),
-      linkEscapeBlocked: z.literal(true),
-      networkBlocked: z.literal(true),
-      packagedHelperRan: z.literal(true),
-      pathBlocked: z.literal(true),
-      processEscapeBlocked: z.literal(true),
-      sensitiveLinkEscapesBlocked: SensitiveSurfacesSchema,
-      sensitivePathsBlocked: SensitiveSurfacesSchema,
-      sensitiveShellEscapesBlocked: SensitiveSurfacesSchema,
-      shellEscapeBlocked: z.literal(true),
-    }).parse(JSON.parse(output.toString("utf8")));
+    const evidence = z
+      .object({
+        controlHandleClosed: z.boolean(),
+        environmentIsolated: z.boolean(),
+        environmentRedirected: z.boolean(),
+        linkEscapeBlocked: z.boolean(),
+        networkBlocked: z.boolean(),
+        packagedHelperRan: z.boolean(),
+        pathBlocked: z.boolean(),
+        processEscapeBlocked: z.boolean(),
+        sensitiveLinkEscapesBlocked: SensitiveSurfacesSchema,
+        sensitivePathsBlocked: SensitiveSurfacesSchema,
+        sensitiveShellEscapesBlocked: SensitiveSurfacesSchema,
+        shellEscapeBlocked: z.boolean(),
+      })
+      .parse(JSON.parse(output.toString("utf8")));
+    requireAdversarial(evidence.controlHandleClosed, "adversarial_protocol_failed");
+    requireAdversarial(
+      evidence.environmentIsolated && evidence.environmentRedirected,
+      "adversarial_environment_failed",
+    );
+    requireAdversarial(evidence.packagedHelperRan, "adversarial_helper_failed");
+    requireAdversarial(evidence.networkBlocked, "adversarial_network_failed");
+    requireAdversarial(evidence.processEscapeBlocked, "adversarial_process_failed");
+    requireAdversarial(
+      evidence.pathBlocked && Object.values(evidence.sensitivePathsBlocked).every(Boolean),
+      "adversarial_path_failed",
+    );
+    requireAdversarial(
+      evidence.linkEscapeBlocked &&
+        Object.values(evidence.sensitiveLinkEscapesBlocked).every(Boolean),
+      "adversarial_link_failed",
+    );
+    requireAdversarial(
+      evidence.shellEscapeBlocked &&
+        Object.values(evidence.sensitiveShellEscapesBlocked).every(Boolean),
+      "adversarial_shell_failed",
+    );
   } catch (cause) {
     proofFailure = { cause };
   }
@@ -270,6 +307,10 @@ async function runAdversarialContainmentProbe(
     proofFailure,
     cleanupErrors,
   );
+}
+
+function requireAdversarial(condition: boolean, code: PackagedProofFailureCode): void {
+  if (!condition) throw new PackagedProofFailure(code);
 }
 
 const LifecycleEvidenceSchema = z.object({
