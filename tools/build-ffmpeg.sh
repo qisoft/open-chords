@@ -62,12 +62,18 @@ popd >/dev/null
 
 if [[ "${platform_profile}" == "windows-server-2025-x64" ]]; then
   python_command=""
-  if command -v python3 >/dev/null 2>&1; then
+  if [[ -n "${pythonLocation:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+    python_command="$(cygpath -u "${pythonLocation}/python.exe")"
+  elif command -v python3 >/dev/null 2>&1; then
     python_command="python3"
   elif command -v python >/dev/null 2>&1; then
     python_command="python"
   else
     echo "Python is required to mark Windows helpers as AppContainer compatible" >&2
+    exit 1
+  fi
+  if [[ ! -x "${python_command}" ]] && ! command -v "${python_command}" >/dev/null 2>&1; then
+    echo "Resolved Python executable is unavailable" >&2
     exit 1
   fi
   runtime_dlls_output="$(

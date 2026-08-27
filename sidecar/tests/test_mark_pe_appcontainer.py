@@ -23,6 +23,7 @@ class MarkPeAppContainerTests(unittest.TestCase):
         self.assertLess(version_capture, runtime_closure)
         self.assertLess(runtime_closure, marker)
         self.assertLess(marker, provenance_hash)
+        self.assertIn('cygpath -u "${pythonLocation}/python.exe"', build_script)
 
     def test_marks_a_pe32_plus_binary_and_preserves_existing_flags(self) -> None:
         data = bytearray(320)
