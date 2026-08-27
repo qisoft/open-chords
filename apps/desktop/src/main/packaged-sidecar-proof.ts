@@ -23,7 +23,11 @@ import { verifyContainmentRuntime } from "./sidecar-containment-integrity.ts";
 import { createNativeContainmentLauncher } from "./sidecar-containment-launcher.ts";
 import { createExecutableNativeContainmentBroker } from "./sidecar-native-broker.ts";
 import { verifyPackagedSidecarRuntime } from "./sidecar-runtime-integrity.ts";
-import { createEffectSidecarClient, parseSidecarSessionRequest } from "./sidecar-session.ts";
+import {
+  createEffectSidecarClient,
+  parseSidecarSessionRequest,
+  SidecarSessionError,
+} from "./sidecar-session.ts";
 import { isExpectedWindowsProfileRoot } from "./windows-app-container-path.ts";
 
 const SensitiveSurfacesSchema = z.object({
@@ -254,8 +258,17 @@ async function runAdversarialContainmentProbe(
         | undefined;
       try {
         escapedProcess = await createLauncher([]).launch(request, AbortSignal.timeout(15_000));
-      } catch {
-        linkEscapePreflightBlocked = true;
+      } catch (cause) {
+        if (
+          cause instanceof SidecarSessionError &&
+          cause.code === "launch_failure" &&
+          cause.message ===
+            "Native containment rejected launch: containment_setup_failed_reparse_entry"
+        ) {
+          linkEscapePreflightBlocked = true;
+        } else {
+          throw cause;
+        }
       }
       if (escapedProcess !== undefined) {
         try {
