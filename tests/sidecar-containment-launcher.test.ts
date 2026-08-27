@@ -204,8 +204,9 @@ it("caps sidecar stderr and rejects markers after overflow even when kill does n
 it("accepts the intentional crash code only when the main-owned probe declares it", () => {
   const status = { code: 73, signal: null };
   expect(containedExitWasAccepted(status, [0])).toBe(false);
-  expect(containedExitWasAccepted(status, [0, 73])).toBe(true);
-  expect(containedExitWasAccepted({ code: null, signal: "SIGKILL" }, [0, 73])).toBe(false);
+  expect(containedExitWasAccepted(status, [73])).toBe(true);
+  expect(containedExitWasAccepted({ code: 0, signal: null }, [73])).toBe(false);
+  expect(containedExitWasAccepted({ code: null, signal: "SIGKILL" }, [73])).toBe(false);
 });
 
 it("does not log raw packaged-proof errors or paths", () => {

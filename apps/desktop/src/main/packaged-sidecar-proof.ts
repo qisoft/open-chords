@@ -612,7 +612,7 @@ async function runLifecycleContainmentProbe(
   });
   const process = await createLauncher(
     [`--containment-lifecycle-probe=${plan}`],
-    mode === "crash" ? [0, 73] : [0],
+    mode === "crash" ? [73] : [0],
   ).launch(request, AbortSignal.timeout(15_000));
   let primaryFailure: { cause: unknown } | undefined;
   let evidence: z.infer<typeof LifecycleEvidenceSchema> | undefined;
