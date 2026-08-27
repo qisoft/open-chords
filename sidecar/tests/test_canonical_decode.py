@@ -32,6 +32,24 @@ from sidecar.open_chords_analysis.canonical_decode import (
 
 
 class CanonicalDecodeTests(unittest.TestCase):
+    def test_native_tools_receive_eof_without_opening_the_null_device(self) -> None:
+        stdin = io.BytesIO()
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(),
+            stdin=stdin,
+            stderr=io.BytesIO(),
+            stdout=io.BytesIO(),
+            wait=unittest.mock.Mock(return_value=0),
+        )
+        with patch(
+            "sidecar.open_chords_analysis.canonical_decode.subprocess.Popen",
+            return_value=process,
+        ) as launch:
+            _run_tool([sys.executable, "-V"], threading.Event())
+
+        self.assertIs(launch.call_args.kwargs["stdin"], subprocess.PIPE)
+        self.assertTrue(stdin.closed)
+
     def test_cancellation_survives_kill_race_after_successful_reap(self) -> None:
         process = SimpleNamespace(
             kill=unittest.mock.Mock(side_effect=ProcessLookupError("already exited")),

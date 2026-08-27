@@ -383,12 +383,14 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
     try:
         process = subprocess.Popen(
             arguments,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=_tool_environment(),
             shell=False,
         )
+        if stdin_pipe := getattr(process, "stdin", None):
+            stdin_pipe.close()
     except Exception as error:
         raise _NativeToolSpawnError("native tool process spawn failed") from error
     started_readers: list[threading.Thread] = []
