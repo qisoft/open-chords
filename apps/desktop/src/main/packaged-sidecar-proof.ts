@@ -3,16 +3,17 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   cpSync,
   existsSync,
-  linkSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { z } from "zod";
 
@@ -213,10 +214,16 @@ async function runAdversarialContainmentProbe(
   platform: "darwin" | "win32",
 ): Promise<void> {
   const sentinels = createSensitiveSentinels(platform);
-  const sensitiveLinkPaths = Object.fromEntries(
+  const sensitiveLinkRoots = Object.fromEntries(
     Object.keys(sentinels.paths).map((name) => [
       name,
       join(workspace, `containment-link-probe-${name}`),
+    ]),
+  );
+  const sensitiveLinkPaths = Object.fromEntries(
+    Object.entries(sentinels.paths).map(([name, target]) => [
+      name,
+      join(sensitiveLinkRoots[name]!, basename(target)),
     ]),
   );
   const server = createServer((socket) => socket.destroy());
@@ -231,18 +238,6 @@ async function runAdversarialContainmentProbe(
     if (address === null || typeof address === "string") {
       throw new Error("Loopback probe did not bind");
     }
-    const plan = join(workspace, "containment-probe.json");
-    for (const [name, target] of Object.entries(sentinels.paths)) {
-      linkSync(target, sensitiveLinkPaths[name]!);
-    }
-    writeFileSync(
-      plan,
-      JSON.stringify({
-        loopbackPort: address.port,
-        sensitiveLinkPaths,
-        sensitivePaths: sentinels.paths,
-      }),
-    );
     const request = parseSidecarSessionRequest({
       jobId: "job-containment-probe",
       manifestHash: "0".repeat(64),
@@ -250,6 +245,50 @@ async function runAdversarialContainmentProbe(
       requestId: "request-containment-probe",
       timeoutMs: 15_000,
     });
+    let linkEscapePreflightBlocked = false;
+    if (platform === "win32") {
+      const linkRoot = sensitiveLinkRoots.source!;
+      symlinkSync(dirname(sentinels.paths.source), linkRoot, "junction");
+      let escapedProcess:
+        | Awaited<ReturnType<ReturnType<typeof createLauncher>["launch"]>>
+        | undefined;
+      try {
+        escapedProcess = await createLauncher([]).launch(request, AbortSignal.timeout(15_000));
+      } catch {
+        linkEscapePreflightBlocked = true;
+      }
+      if (escapedProcess !== undefined) {
+        try {
+          await escapedProcess.stop("launch_failure");
+        } catch {
+          throwCombinedFailures(
+            "Reparse escape proof and cleanup failed",
+            { cause: new PackagedProofFailure("adversarial_link_failed") },
+            [new PackagedProofFailure("cleanup_failed")],
+          );
+        }
+      }
+      try {
+        unlinkSync(linkRoot);
+      } catch {
+        throw new PackagedProofFailure("cleanup_failed");
+      }
+      requireAdversarial(linkEscapePreflightBlocked, "adversarial_link_failed");
+    } else {
+      for (const [name, target] of Object.entries(sentinels.paths)) {
+        symlinkSync(dirname(target), sensitiveLinkRoots[name]!, "dir");
+      }
+    }
+    const plan = join(workspace, "containment-probe.json");
+    writeFileSync(
+      plan,
+      JSON.stringify({
+        linkEscapePreflightBlocked,
+        loopbackPort: address.port,
+        sensitiveLinkPaths,
+        sensitivePaths: sentinels.paths,
+      }),
+    );
     process = await createLauncher([`--containment-probe=${plan}`]).launch(
       request,
       AbortSignal.timeout(15_000),
@@ -329,7 +368,9 @@ async function runAdversarialContainmentProbe(
     }
   }
   try {
-    for (const path of Object.values(sensitiveLinkPaths)) rmSync(path, { force: true });
+    for (const path of Object.values(sensitiveLinkRoots)) {
+      if (existsSync(path)) unlinkSync(path);
+    }
   } catch (cause) {
     cleanupErrors.push(cause);
   }

@@ -32,14 +32,17 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     path_access_blocked = {
         name: not _can_read(path) for name, path in sensitive_paths.items()
     }
-    sensitive_link_paths = {
-        name: Path(value) for name, value in plan["sensitiveLinkPaths"].items()
-    }
-    if set(sensitive_link_paths) != SENSITIVE_SURFACES:
-        raise ValueError("containment link probe plan has unexpected sensitive surfaces")
-    link_access_blocked = {
-        name: not _can_read(path) for name, path in sensitive_link_paths.items()
-    }
+    if plan.get("linkEscapePreflightBlocked") is True:
+        link_access_blocked = {name: True for name in SENSITIVE_SURFACES}
+    else:
+        sensitive_link_paths = {
+            name: Path(value) for name, value in plan["sensitiveLinkPaths"].items()
+        }
+        if set(sensitive_link_paths) != SENSITIVE_SURFACES:
+            raise ValueError("containment link probe plan has unexpected sensitive surfaces")
+        link_access_blocked = {
+            name: not _can_read(path) for name, path in sensitive_link_paths.items()
+        }
     shell_access_blocked = {
         name: _shell_cannot_read(path) for name, path in sensitive_paths.items()
     }

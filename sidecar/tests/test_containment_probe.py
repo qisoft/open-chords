@@ -59,6 +59,7 @@ class ContainmentProbeTests(unittest.TestCase):
                 json.dumps(
                     {
                         "loopbackPort": 9,
+                        "linkEscapePreflightBlocked": False,
                         "sensitiveLinkPaths": {
                             name: str(sentinel)
                             for name in (
