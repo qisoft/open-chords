@@ -170,7 +170,7 @@ def main() -> None:
         observed = {
             "python": sys.version.split()[0],
             "pyinstaller": _tool_version([sys.executable, "-m", "PyInstaller", "--version"]),
-            "ffmpeg": _tool_version([str(tools / f"ffmpeg{executable_suffix}"), "-version"]),
+            "ffmpeg": _bounded_version_file(native_root / "ffmpeg-version.txt"),
         }
         inventory = json.loads(
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
@@ -249,6 +249,13 @@ def _tool_version(command: list[str]) -> str:
         text=True,
     )
     return result.stdout.splitlines()[0][:512]
+
+
+def _bounded_version_file(path: Path) -> str:
+    lines = path.read_text("utf-8").splitlines()
+    if not lines or not lines[0] or len(lines[0]) > 512:
+        raise ValueError("Native tool version metadata is invalid")
+    return lines[0]
 
 
 def _python_license() -> Path:

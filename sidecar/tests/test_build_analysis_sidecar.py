@@ -11,6 +11,19 @@ from unittest.mock import patch
 
 
 class BuildAnalysisSidecarTests(unittest.TestCase):
+    def test_reads_bounded_pre_mark_native_version_metadata(self) -> None:
+        bounded_version_file = runpy.run_path(
+            Path(__file__).resolve().parents[2] / "tools/build-analysis-sidecar.py"
+        )["_bounded_version_file"]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            version_file = Path(temporary) / "ffmpeg-version.txt"
+            version_file.write_text("ffmpeg version reviewed\nconfiguration\n", "utf-8")
+            self.assertEqual(bounded_version_file(version_file), "ffmpeg version reviewed")
+            version_file.write_text("x" * 513, "utf-8")
+            with self.assertRaisesRegex(ValueError, "version metadata is invalid"):
+                bounded_version_file(version_file)
+
     @unittest.skipUnless(sys.platform == "darwin", "macOS codesign bundle semantics")
     def test_materializes_pyinstaller_symlinks_for_nested_bundle_signing(self) -> None:
         materialize = runpy.run_path(
