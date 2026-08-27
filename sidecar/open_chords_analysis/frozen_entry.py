@@ -16,6 +16,8 @@ from sidecar.open_chords_analysis.__main__ import main
 
 
 def frozen_main() -> None:
+    if sys.argv[1:] == ["--containment-child-smoke"]:
+        return
     if len(sys.argv) == 2 and sys.argv[1].startswith("--containment-probe="):
         from sidecar.open_chords_analysis.containment_probe import run_probe
 

@@ -14,11 +14,46 @@ from sidecar.open_chords_analysis.containment_probe import (
     _process_escape_cannot_reach_host,
     _runtime_mutation_evidence,
     _runtime_mutation_blocked,
+    _windows_helper_permission_denial,
     run_probe,
 )
 
 
 class ContainmentProbeTests(unittest.TestCase):
+    def test_bounds_windows_helper_permission_diagnostics(self) -> None:
+        helper = Path("runtime") / "tools" / "ffprobe.exe"
+        with mock.patch(
+            "sidecar.open_chords_analysis.containment_probe._can_read", return_value=False
+        ):
+            self.assertEqual(
+                _windows_helper_permission_denial(helper),
+                "permission_denied_unreadable",
+            )
+        with (
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe._can_read", return_value=True
+            ),
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe.subprocess.run",
+                side_effect=PermissionError,
+            ),
+        ):
+            self.assertEqual(
+                _windows_helper_permission_denial(helper), "permission_denied_child"
+            )
+        with (
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe._can_read", return_value=True
+            ),
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0),
+            ),
+        ):
+            self.assertEqual(
+                _windows_helper_permission_denial(helper), "permission_denied_image"
+            )
+
     def test_disabled_runtime_mutation_probe_leaves_installed_runtime_unchanged(self) -> None:
         with tempfile.TemporaryDirectory(prefix="open-chords-runtime-probe-test-") as temporary:
             runtime_root = Path(temporary)

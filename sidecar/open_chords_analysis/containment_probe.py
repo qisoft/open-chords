@@ -68,7 +68,11 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     except FileNotFoundError:
         packaged_helper_status = "missing"
     except PermissionError:
-        packaged_helper_status = "permission_denied"
+        packaged_helper_status = (
+            _windows_helper_permission_denial(helper)
+            if os.name == "nt"
+            else "permission_denied"
+        )
     except subprocess.TimeoutExpired:
         packaged_helper_status = "timeout"
     except OSError:
@@ -134,6 +138,25 @@ def _runtime_mutation_evidence(
         ),
         "runtimeDeleteBlocked": _runtime_mutation_blocked(runtime_manifest.unlink),
     }
+
+
+def _windows_helper_permission_denial(helper: Path) -> str:
+    if not _can_read(helper):
+        return "permission_denied_unreadable"
+    try:
+        child = subprocess.run(
+            [sys.executable, "--containment-child-smoke"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except PermissionError:
+        return "permission_denied_child"
+    except (OSError, subprocess.TimeoutExpired):
+        return "permission_denied_probe"
+    return "permission_denied_image" if child.returncode == 0 else "permission_denied_probe"
 
 
 def _runtime_mutation_blocked(operation: Callable[[], object]) -> bool:
