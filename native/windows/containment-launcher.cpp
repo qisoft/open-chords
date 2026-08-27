@@ -217,22 +217,28 @@ static bool remove_runtime_staging_root(const std::wstring& profile) noexcept {
 }
 
 static void grant_path_read_execute(
-    const fs::path& path, PSID app_container_sid, DWORD inheritance) {
+    const fs::path& path, PSID app_container_sid, PSID host_user_sid, DWORD inheritance) {
   PACL current_dacl = nullptr;
   PSECURITY_DESCRIPTOR descriptor = nullptr;
   DWORD result = GetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
       DACL_SECURITY_INFORMATION, nullptr, nullptr, &current_dacl, nullptr, &descriptor);
   if (result != ERROR_SUCCESS) throw_last_error("read runtime dacl", result);
 
-  EXPLICIT_ACCESSW grant{};
-  grant.grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
-  grant.grfAccessMode = SET_ACCESS;
-  grant.grfInheritance = inheritance;
-  grant.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-  grant.Trustee.TrusteeType = TRUSTEE_IS_USER;
-  grant.Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
+  EXPLICIT_ACCESSW grants[2]{};
+  grants[0].grfAccessPermissions = FILE_ALL_ACCESS;
+  grants[0].grfAccessMode = SET_ACCESS;
+  grants[0].grfInheritance = inheritance;
+  grants[0].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  grants[0].Trustee.TrusteeType = TRUSTEE_IS_USER;
+  grants[0].Trustee.ptstrName = static_cast<LPWSTR>(host_user_sid);
+  grants[1].grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+  grants[1].grfAccessMode = SET_ACCESS;
+  grants[1].grfInheritance = inheritance;
+  grants[1].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  grants[1].Trustee.TrusteeType = TRUSTEE_IS_USER;
+  grants[1].Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
   PACL updated_dacl = nullptr;
-  result = SetEntriesInAclW(1, &grant, current_dacl, &updated_dacl);
+  result = SetEntriesInAclW(2, grants, current_dacl, &updated_dacl);
   if (result == ERROR_SUCCESS) {
     result = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
         DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
@@ -243,13 +249,34 @@ static void grant_path_read_execute(
   if (result != ERROR_SUCCESS) throw_last_error("grant runtime access", result);
 }
 
-static void grant_runtime_read_execute(const fs::path& runtime_root, PSID app_container_sid) {
+static void grant_runtime_read_execute(
+    const fs::path& runtime_root, PSID app_container_sid, PSID host_user_sid) {
   grant_path_read_execute(
-      runtime_root, app_container_sid, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
+      runtime_root, app_container_sid, host_user_sid, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
   for (const auto& entry : fs::recursive_directory_iterator(runtime_root)) {
-    grant_path_read_execute(entry.path(), app_container_sid,
+    grant_path_read_execute(entry.path(), app_container_sid, host_user_sid,
         entry.is_directory() ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE);
   }
+}
+
+static std::vector<unsigned char> current_user_token_information() {
+  HANDLE token = nullptr;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+    throw std::runtime_error("open host token");
+  }
+  DWORD size = 0;
+  GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+  if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || size < sizeof(TOKEN_USER)) {
+    CloseHandle(token);
+    throw std::runtime_error("size host user sid");
+  }
+  std::vector<unsigned char> information(size);
+  const bool loaded = GetTokenInformation(token, TokenUser, information.data(), size, &size);
+  CloseHandle(token);
+  if (!loaded || !IsValidSid(reinterpret_cast<TOKEN_USER*>(information.data())->User.Sid)) {
+    throw std::runtime_error("read host user sid");
+  }
+  return information;
 }
 
 static std::wstring quote(const std::wstring& value) {
@@ -348,6 +375,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   if (workspace.empty() || runtime_root.empty() || separator < 0 || separator + 1 >= argc) {
     throw std::runtime_error("launch plan");
   }
+  auto host_user = current_user_token_information();
   PSID sid = derive_profile(profile);
   fs::path root = profile_root(sid);
   fs::path expected_runtime_root = existing_runtime_staging_root(profile);
@@ -360,7 +388,8 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   }
   reject_reparse_points(workspace);
   reject_reparse_points(runtime_root);
-  grant_runtime_read_execute(runtime_root, sid);
+  grant_runtime_read_execute(runtime_root, sid,
+      reinterpret_cast<TOKEN_USER*>(host_user.data())->User.Sid);
 
   HANDLE job = CreateJobObjectW(nullptr, nullptr);
   if (job == nullptr) throw std::runtime_error("create job");

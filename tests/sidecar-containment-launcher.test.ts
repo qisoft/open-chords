@@ -112,10 +112,16 @@ it("supplies the minimal sorted Windows and AppContainer environment", () => {
   expect(source).toContain('append_variable(L"LOCALAPPDATA=" + workspace);');
 });
 
-it("grants the AppContainer read and execute access only to its verified runtime tree", () => {
+it("grants both Windows principals only their required runtime access", () => {
   const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
 
-  expect(source).toContain("grant_runtime_read_execute(runtime_root, sid);");
+  expect(source).toContain("current_user_token_information()");
+  expect(source).toContain("GetTokenInformation(token, TokenUser");
+  expect(source).toContain("grant_runtime_read_execute(runtime_root, sid,");
+  expect(source).toContain("grants[0].grfAccessPermissions = FILE_ALL_ACCESS");
+  expect(source).toContain(
+    "grants[1].grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE",
+  );
   expect(source).toContain("FILE_GENERIC_READ | FILE_GENERIC_EXECUTE");
   expect(source).toContain("SUB_CONTAINERS_AND_OBJECTS_INHERIT");
   expect(source).toContain("SET_ACCESS");
@@ -123,7 +129,7 @@ it("grants the AppContainer read and execute access only to its verified runtime
   expect(source).toContain("SetNamedSecurityInfoW");
   expect(source).not.toContain("FILE_GENERIC_WRITE");
   expect(source.indexOf("reject_reparse_points(runtime_root);")).toBeLessThan(
-    source.indexOf("grant_runtime_read_execute(runtime_root, sid);"),
+    source.indexOf("grant_runtime_read_execute(runtime_root, sid,"),
   );
 });
 
