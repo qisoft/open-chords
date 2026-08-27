@@ -125,6 +125,8 @@ it("grants both Windows principals only their required runtime access", () => {
   expect(source).toContain("FILE_GENERIC_READ | FILE_GENERIC_EXECUTE");
   expect(source).toContain("SUB_CONTAINERS_AND_OBJECTS_INHERIT");
   expect(source).toContain("SET_ACCESS");
+  expect(source).toContain("SetEntriesInAclW(2, grants, nullptr, &updated_dacl)");
+  expect(source).not.toContain("GetNamedSecurityInfoW");
   expect(source).toContain("PROTECTED_DACL_SECURITY_INFORMATION");
   expect(source).toContain("SetNamedSecurityInfoW");
   expect(source).not.toContain("FILE_GENERIC_WRITE");

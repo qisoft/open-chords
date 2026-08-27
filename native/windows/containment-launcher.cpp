@@ -218,12 +218,6 @@ static bool remove_runtime_staging_root(const std::wstring& profile) noexcept {
 
 static void grant_path_read_execute(
     const fs::path& path, PSID app_container_sid, PSID host_user_sid, DWORD inheritance) {
-  PACL current_dacl = nullptr;
-  PSECURITY_DESCRIPTOR descriptor = nullptr;
-  DWORD result = GetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
-      DACL_SECURITY_INFORMATION, nullptr, nullptr, &current_dacl, nullptr, &descriptor);
-  if (result != ERROR_SUCCESS) throw_last_error("read runtime dacl", result);
-
   EXPLICIT_ACCESSW grants[2]{};
   grants[0].grfAccessPermissions = FILE_ALL_ACCESS;
   grants[0].grfAccessMode = SET_ACCESS;
@@ -238,14 +232,13 @@ static void grant_path_read_execute(
   grants[1].Trustee.TrusteeType = TRUSTEE_IS_USER;
   grants[1].Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
   PACL updated_dacl = nullptr;
-  result = SetEntriesInAclW(2, grants, current_dacl, &updated_dacl);
+  DWORD result = SetEntriesInAclW(2, grants, nullptr, &updated_dacl);
   if (result == ERROR_SUCCESS) {
     result = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
         DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
         nullptr, nullptr, updated_dacl, nullptr);
   }
   if (updated_dacl != nullptr) LocalFree(updated_dacl);
-  LocalFree(descriptor);
   if (result != ERROR_SUCCESS) throw_last_error("grant runtime access", result);
 }
 
