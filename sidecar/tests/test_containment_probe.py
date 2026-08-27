@@ -9,6 +9,7 @@ from unittest import mock
 
 from sidecar.open_chords_analysis.containment_probe import (
     _descriptor_is_control_channel,
+    _environment_redirect_matches,
     _normalized_path_is_within,
     _process_escape_cannot_reach_host,
     run_probe,
@@ -16,6 +17,24 @@ from sidecar.open_chords_analysis.containment_probe import (
 
 
 class ContainmentProbeTests(unittest.TestCase):
+    def test_windows_remapped_environment_stays_inside_disposable_profile(self) -> None:
+        workspace = Path("profile") / "AC" / "jobs" / "job"
+        remapped = workspace.parents[1] / "TempState"
+
+        with mock.patch("sidecar.open_chords_analysis.containment_probe.os.name", "nt"):
+            for name in ("LOCALAPPDATA", "TEMP", "TMP"):
+                self.assertTrue(
+                    _environment_redirect_matches(name, remapped, workspace, workspace)
+                )
+                self.assertFalse(
+                    _environment_redirect_matches(
+                        name, workspace.parents[2] / "host-temp", workspace, workspace
+                    )
+                )
+            self.assertFalse(
+                _environment_redirect_matches("APPDATA", remapped, workspace, workspace)
+            )
+
     def test_lexical_containment_rejects_siblings_and_parent_traversal(self) -> None:
         root = Path("profile") / "AC"
 
