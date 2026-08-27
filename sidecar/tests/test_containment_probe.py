@@ -12,11 +12,23 @@ from sidecar.open_chords_analysis.containment_probe import (
     _environment_redirect_matches,
     _normalized_path_is_within,
     _process_escape_cannot_reach_host,
+    _runtime_mutation_blocked,
     run_probe,
 )
 
 
 class ContainmentProbeTests(unittest.TestCase):
+    def test_runtime_mutation_requires_an_access_denial(self) -> None:
+        self.assertTrue(
+            _runtime_mutation_blocked(
+                mock.Mock(side_effect=PermissionError("runtime is read-only"))
+            )
+        )
+        self.assertFalse(
+            _runtime_mutation_blocked(mock.Mock(side_effect=OSError("unexpected failure")))
+        )
+        self.assertFalse(_runtime_mutation_blocked(mock.Mock(return_value=None)))
+
     def test_windows_remapped_environment_stays_inside_disposable_profile(self) -> None:
         workspace = Path("profile") / "AC" / "jobs" / "job"
         remapped = workspace.parents[1] / "TempState"

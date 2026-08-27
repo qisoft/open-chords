@@ -59,6 +59,8 @@ it("grants the AppContainer read and execute access only to its verified runtime
   expect(source).toContain("grant_runtime_read_execute(runtime_root, sid);");
   expect(source).toContain("FILE_GENERIC_READ | FILE_GENERIC_EXECUTE");
   expect(source).toContain("SUB_CONTAINERS_AND_OBJECTS_INHERIT");
+  expect(source).toContain("SET_ACCESS");
+  expect(source).toContain("PROTECTED_DACL_SECURITY_INFORMATION");
   expect(source).toContain("SetNamedSecurityInfoW");
   expect(source).not.toContain("FILE_GENERIC_WRITE");
   expect(source.indexOf("reject_reparse_points(runtime_root);")).toBeLessThan(

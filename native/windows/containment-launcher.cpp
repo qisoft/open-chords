@@ -134,18 +134,19 @@ static void grant_runtime_read_execute(const fs::path& runtime_root, PSID app_co
       DACL_SECURITY_INFORMATION, nullptr, nullptr, &current_dacl, nullptr, &descriptor);
   if (result != ERROR_SUCCESS) throw_last_error("read runtime dacl", result);
 
-  EXPLICIT_ACCESSW access{};
-  access.grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
-  access.grfAccessMode = GRANT_ACCESS;
-  access.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
-  access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-  access.Trustee.TrusteeType = TRUSTEE_IS_USER;
-  access.Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
+  EXPLICIT_ACCESSW grant{};
+  grant.grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+  grant.grfAccessMode = SET_ACCESS;
+  grant.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+  grant.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  grant.Trustee.TrusteeType = TRUSTEE_IS_USER;
+  grant.Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
   PACL updated_dacl = nullptr;
-  result = SetEntriesInAclW(1, &access, current_dacl, &updated_dacl);
+  result = SetEntriesInAclW(1, &grant, current_dacl, &updated_dacl);
   if (result == ERROR_SUCCESS) {
     result = SetNamedSecurityInfoW(const_cast<LPWSTR>(runtime_root.c_str()), SE_FILE_OBJECT,
-        DACL_SECURITY_INFORMATION, nullptr, nullptr, updated_dacl, nullptr);
+        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+        nullptr, nullptr, updated_dacl, nullptr);
   }
   if (updated_dacl != nullptr) LocalFree(updated_dacl);
   LocalFree(descriptor);

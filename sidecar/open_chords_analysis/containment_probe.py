@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -47,7 +48,16 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         name: _shell_cannot_read(path) for name, path in sensitive_paths.items()
     }
     network_blocked = not _can_connect_loopback(int(plan["loopbackPort"]))
-    helper = Path(sys.executable).parent / "tools" / (
+    runtime_root = Path(sys.executable).parent
+    runtime_create_blocked = _runtime_mutation_blocked(
+        lambda: (runtime_root / ".containment-write-probe").write_bytes(b"blocked")
+    )
+    runtime_manifest = runtime_root / "runtime-manifest.json"
+    runtime_modify_blocked = _runtime_mutation_blocked(
+        lambda: _append_runtime_probe(runtime_manifest)
+    )
+    runtime_delete_blocked = _runtime_mutation_blocked(runtime_manifest.unlink)
+    helper = runtime_root / "tools" / (
         "ffprobe.exe" if os.name == "nt" else "ffprobe"
     )
     try:
@@ -106,11 +116,29 @@ def run_probe(plan_path: Path) -> dict[str, object]:
         "packagedHelperStatus": packaged_helper_status,
         "pathBlocked": all(path_access_blocked.values()),
         "processEscapeBlocked": _process_escape_cannot_reach_host(plan_path),
+        "runtimeCreateBlocked": runtime_create_blocked,
+        "runtimeDeleteBlocked": runtime_delete_blocked,
+        "runtimeModifyBlocked": runtime_modify_blocked,
         "sensitiveLinkEscapesBlocked": link_access_blocked,
         "sensitivePathsBlocked": path_access_blocked,
         "sensitiveShellEscapesBlocked": shell_access_blocked,
         "shellEscapeBlocked": all(shell_access_blocked.values()),
     }
+
+
+def _runtime_mutation_blocked(operation: Callable[[], object]) -> bool:
+    try:
+        operation()
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _append_runtime_probe(path: Path) -> None:
+    with path.open("ab") as runtime_file:
+        runtime_file.write(b"\ncontainment-write-probe\n")
 
 
 def _normalized_path(path: str | os.PathLike[str]) -> str:

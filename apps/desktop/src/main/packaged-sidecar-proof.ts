@@ -57,6 +57,7 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_network_failed",
   "adversarial_path_failed",
   "adversarial_process_failed",
+  "adversarial_runtime_mutation_failed",
   "adversarial_protocol_failed",
   "adversarial_probe_file_missing",
   "adversarial_probe_invalid_plan",
@@ -354,6 +355,9 @@ async function runAdversarialContainmentProbe(
         ]),
         pathBlocked: z.boolean(),
         processEscapeBlocked: z.boolean(),
+        runtimeCreateBlocked: z.boolean(),
+        runtimeDeleteBlocked: z.boolean(),
+        runtimeModifyBlocked: z.boolean(),
         sensitiveLinkEscapesBlocked: SensitiveSurfacesSchema,
         sensitivePathsBlocked: SensitiveSurfacesSchema,
         sensitiveShellEscapesBlocked: SensitiveSurfacesSchema,
@@ -381,6 +385,12 @@ async function runAdversarialContainmentProbe(
     if (evidence.packagedHelperStatus !== "ran") {
       throw new PackagedProofFailure(`adversarial_helper_${evidence.packagedHelperStatus}`);
     }
+    requireAdversarial(
+      evidence.runtimeCreateBlocked &&
+        evidence.runtimeModifyBlocked &&
+        evidence.runtimeDeleteBlocked,
+      "adversarial_runtime_mutation_failed",
+    );
     requireAdversarial(evidence.networkBlocked, "adversarial_network_failed");
     requireAdversarial(evidence.processEscapeBlocked, "adversarial_process_failed");
     requireAdversarial(
