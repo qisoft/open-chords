@@ -53,6 +53,19 @@ it("supplies the minimal sorted Windows and AppContainer environment", () => {
   expect(source).toContain('append_variable(L"LOCALAPPDATA=" + workspace);');
 });
 
+it("grants the AppContainer read and execute access only to its verified runtime tree", () => {
+  const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
+
+  expect(source).toContain("grant_runtime_read_execute(runtime_root, sid);");
+  expect(source).toContain("FILE_GENERIC_READ | FILE_GENERIC_EXECUTE");
+  expect(source).toContain("SUB_CONTAINERS_AND_OBJECTS_INHERIT");
+  expect(source).toContain("SetNamedSecurityInfoW");
+  expect(source).not.toContain("FILE_GENERIC_WRITE");
+  expect(source.indexOf("reject_reparse_points(runtime_root);")).toBeLessThan(
+    source.indexOf("grant_runtime_read_execute(runtime_root, sid);"),
+  );
+});
+
 it("accepts recursive cleanup only for a canonical AppContainer AC root", () => {
   const packagesRoot = String.raw`C:\Users\Alice\AppData\Local\Packages`;
 

@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <aclapi.h>
 #include <sddl.h>
 #include <userenv.h>
 #include <io.h>
@@ -126,6 +127,31 @@ static void reject_reparse_points(const fs::path& root) {
   }
 }
 
+static void grant_runtime_read_execute(const fs::path& runtime_root, PSID app_container_sid) {
+  PACL current_dacl = nullptr;
+  PSECURITY_DESCRIPTOR descriptor = nullptr;
+  DWORD result = GetNamedSecurityInfoW(const_cast<LPWSTR>(runtime_root.c_str()), SE_FILE_OBJECT,
+      DACL_SECURITY_INFORMATION, nullptr, nullptr, &current_dacl, nullptr, &descriptor);
+  if (result != ERROR_SUCCESS) throw_last_error("read runtime dacl", result);
+
+  EXPLICIT_ACCESSW access{};
+  access.grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+  access.grfAccessMode = GRANT_ACCESS;
+  access.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+  access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+  access.Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
+  PACL updated_dacl = nullptr;
+  result = SetEntriesInAclW(1, &access, current_dacl, &updated_dacl);
+  if (result == ERROR_SUCCESS) {
+    result = SetNamedSecurityInfoW(const_cast<LPWSTR>(runtime_root.c_str()), SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION, nullptr, nullptr, updated_dacl, nullptr);
+  }
+  if (updated_dacl != nullptr) LocalFree(updated_dacl);
+  LocalFree(descriptor);
+  if (result != ERROR_SUCCESS) throw_last_error("grant runtime access", result);
+}
+
 static std::wstring quote(const std::wstring& value) {
   if (value.find_first_of(L" \t\"") == std::wstring::npos) return value;
   std::wstring output = L"\"";
@@ -220,6 +246,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   }
   reject_reparse_points(workspace);
   reject_reparse_points(runtime_root);
+  grant_runtime_read_execute(runtime_root, sid);
 
   HANDLE job = CreateJobObjectW(nullptr, nullptr);
   if (job == nullptr) throw std::runtime_error("create job");
