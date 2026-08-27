@@ -346,7 +346,9 @@ def _shell_cannot_read(path: Path) -> bool:
             stderr=subprocess.PIPE,
             timeout=5,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return True
+    except subprocess.TimeoutExpired:
+        return False
+    except OSError as error:
+        return windows and getattr(error, "winerror", None) == 5
     # The POSIX command asserts unreadability, while cmd.exe `type` attempts the read.
     return result.returncode != 0 if windows else result.returncode == 0

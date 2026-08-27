@@ -14,12 +14,39 @@ from sidecar.open_chords_analysis.containment_probe import (
     _process_escape_cannot_reach_host,
     _runtime_mutation_evidence,
     _runtime_mutation_blocked,
+    _shell_cannot_read,
     _windows_helper_permission_denial,
     run_probe,
 )
 
 
 class ContainmentProbeTests(unittest.TestCase):
+    def test_shell_escape_accepts_only_a_specific_windows_spawn_denial(self) -> None:
+        path = Path("sensitive.txt")
+        access_denied = OSError("shell denied")
+        access_denied.winerror = 5
+        with (
+            mock.patch("sidecar.open_chords_analysis.containment_probe.os.name", "nt"),
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe.subprocess.run",
+                side_effect=access_denied,
+            ),
+        ):
+            self.assertTrue(_shell_cannot_read(path))
+        with (
+            mock.patch("sidecar.open_chords_analysis.containment_probe.os.name", "nt"),
+            mock.patch(
+                "sidecar.open_chords_analysis.containment_probe.subprocess.run",
+                side_effect=OSError("unrelated shell failure"),
+            ),
+        ):
+            self.assertFalse(_shell_cannot_read(path))
+        with mock.patch(
+            "sidecar.open_chords_analysis.containment_probe.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("shell", 1),
+        ):
+            self.assertFalse(_shell_cannot_read(path))
+
     def test_bounds_windows_helper_permission_diagnostics(self) -> None:
         helper = Path("runtime") / "tools" / "ffprobe.exe"
         with mock.patch(
