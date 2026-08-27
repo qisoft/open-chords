@@ -41,6 +41,11 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_path_failed",
   "adversarial_process_failed",
   "adversarial_protocol_failed",
+  "adversarial_probe_file_missing",
+  "adversarial_probe_invalid_plan",
+  "adversarial_probe_os_error",
+  "adversarial_probe_permission_denied",
+  "adversarial_probe_runtime_error",
   "adversarial_shell_failed",
   "cancel_probe_failed",
   "cleanup_failed",
@@ -243,6 +248,21 @@ async function runAdversarialContainmentProbe(
       output = Buffer.concat([output, chunk]);
       if (output.byteLength > 64 * 1024) throw new Error("Containment probe output is oversized");
     }
+    const rawEvidence: unknown = JSON.parse(output.toString("utf8"));
+    const probeError = z
+      .object({
+        probeError: z.enum([
+          "file_missing",
+          "invalid_plan",
+          "os_error",
+          "permission_denied",
+          "runtime_error",
+        ]),
+      })
+      .safeParse(rawEvidence);
+    if (probeError.success) {
+      throw new PackagedProofFailure(`adversarial_probe_${probeError.data.probeError}`);
+    }
     const evidence = z
       .object({
         controlHandleClosed: z.boolean(),
@@ -258,7 +278,7 @@ async function runAdversarialContainmentProbe(
         sensitiveShellEscapesBlocked: SensitiveSurfacesSchema,
         shellEscapeBlocked: z.boolean(),
       })
-      .parse(JSON.parse(output.toString("utf8")));
+      .parse(rawEvidence);
     requireAdversarial(evidence.controlHandleClosed, "adversarial_protocol_failed");
     requireAdversarial(
       evidence.environmentIsolated && evidence.environmentRedirected,

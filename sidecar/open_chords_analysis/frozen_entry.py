@@ -20,7 +20,19 @@ def frozen_main() -> None:
         from sidecar.open_chords_analysis.containment_probe import run_probe
 
         plan = Path(sys.argv[1].split("=", 1)[1])
-        print(json.dumps(run_probe(plan), separators=(",", ":"), sort_keys=True))
+        try:
+            result = run_probe(plan)
+        except PermissionError:
+            result = {"probeError": "permission_denied"}
+        except FileNotFoundError:
+            result = {"probeError": "file_missing"}
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            result = {"probeError": "invalid_plan"}
+        except OSError:
+            result = {"probeError": "os_error"}
+        except Exception:
+            result = {"probeError": "runtime_error"}
+        print(json.dumps(result, separators=(",", ":"), sort_keys=True))
         return
     if len(sys.argv) == 2 and sys.argv[1].startswith("--containment-descendant-probe="):
         from sidecar.open_chords_analysis.containment_probe import run_descendant_probe
