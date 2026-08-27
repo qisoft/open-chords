@@ -10,6 +10,7 @@ import {
   type NativeContainmentPlatform,
 } from "../apps/desktop/src/main/sidecar-containment-launcher.ts";
 import {
+  createBoundedSidecarStderrCapture,
   parseNativeContainmentFailure,
   parseSidecarProcessFailure,
 } from "../apps/desktop/src/main/sidecar-native-broker.ts";
@@ -179,6 +180,24 @@ it("surfaces only allowlisted bounded sidecar crash reasons", () => {
   expect(
     parseSidecarProcessFailure("Open Chords analysis sidecar failed safely: sidecar_secret_path\n"),
   ).toBeNull();
+});
+
+it("caps sidecar stderr and rejects markers after overflow even when kill does not finish", () => {
+  let killRequests = 0;
+  const capture = createBoundedSidecarStderrCapture(() => {
+    killRequests += 1;
+  });
+  capture.append(Buffer.alloc(64 * 1024 - 8, 0x78));
+  capture.append(
+    Buffer.from("overflow\nOpen Chords analysis sidecar failed safely: sidecar_protocol_error\n"),
+  );
+  capture.append(Buffer.alloc(128 * 1024, 0x79));
+
+  const snapshot = capture.snapshot();
+  expect(snapshot.bytes.byteLength).toBe(64 * 1024);
+  expect(snapshot.exceeded).toBe(true);
+  expect(killRequests).toBe(1);
+  expect(parseSidecarProcessFailure(snapshot.bytes.toString("utf8"), snapshot.exceeded)).toBeNull();
 });
 
 it("does not log raw packaged-proof errors or paths", () => {

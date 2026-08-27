@@ -105,17 +105,17 @@ export function createExecutableNativeContainmentBroker(
           throw new SidecarSessionError("launch_failure", "Contained process pipes are missing");
         }
         const stdin = child.stdin;
-        let stderr = Buffer.alloc(0);
+        const stderr = createBoundedSidecarStderrCapture(() => {
+          if (child.exitCode === null) child.kill("SIGKILL");
+        });
         child.stderr?.on("data", (chunk: Buffer) => {
-          stderr = Buffer.concat([stderr, chunk]);
-          if (stderr.byteLength > MAX_STDERR_BYTES && child.exitCode === null)
-            child.kill("SIGKILL");
+          stderr.append(chunk);
         });
         let stopped = false;
         return {
           evidence,
           process: {
-            stdout: containedProcessStdout(child.stdout, exited, () => stderr),
+            stdout: containedProcessStdout(child.stdout, exited, stderr.snapshot),
             async stop() {
               if (stopped) return;
               stopped = true;
@@ -155,12 +155,16 @@ export function createExecutableNativeContainmentBroker(
 async function* containedProcessStdout(
   stdout: NonNullable<ChildProcess["stdout"]>,
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
-  stderr: () => Buffer,
+  stderr: () => { bytes: Buffer; exceeded: boolean },
 ): AsyncGenerator<Uint8Array> {
   yield* stdout;
   const status = await exited;
   if (status.code === 0 && status.signal === null) return;
-  const failureCode = parseSidecarProcessFailure(stderr().toString("utf8"));
+  const capturedStderr = stderr();
+  const failureCode = parseSidecarProcessFailure(
+    capturedStderr.bytes.toString("utf8"),
+    capturedStderr.exceeded,
+  );
   throw new SidecarSessionError(
     "process_failure",
     "Contained sidecar exited before completing its protocol",
@@ -168,7 +172,30 @@ async function* containedProcessStdout(
   );
 }
 
-export function parseSidecarProcessFailure(value: string): string | null {
+export function createBoundedSidecarStderrCapture(onExceeded: () => void): {
+  append(chunk: Buffer): void;
+  snapshot: () => { bytes: Buffer; exceeded: boolean };
+} {
+  let bytes = Buffer.alloc(0);
+  let exceeded = false;
+  return {
+    append(chunk) {
+      if (exceeded) return;
+      const remaining = MAX_STDERR_BYTES - bytes.byteLength;
+      if (chunk.byteLength > remaining) {
+        bytes = Buffer.concat([bytes, chunk.subarray(0, remaining)]);
+        exceeded = true;
+        onExceeded();
+        return;
+      }
+      bytes = Buffer.concat([bytes, chunk]);
+    },
+    snapshot: () => ({ bytes, exceeded }),
+  };
+}
+
+export function parseSidecarProcessFailure(value: string, exceeded = false): string | null {
+  if (exceeded) return null;
   return SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? null;
 }
 
