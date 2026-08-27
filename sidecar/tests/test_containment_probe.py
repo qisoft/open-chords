@@ -9,12 +9,20 @@ from unittest import mock
 
 from sidecar.open_chords_analysis.containment_probe import (
     _descriptor_is_control_channel,
+    _normalized_path_is_within,
     _process_escape_cannot_reach_host,
     run_probe,
 )
 
 
 class ContainmentProbeTests(unittest.TestCase):
+    def test_lexical_containment_rejects_siblings_and_parent_traversal(self) -> None:
+        root = Path("profile") / "AC"
+
+        self.assertTrue(_normalized_path_is_within(root / "LocalCache" / "Local", root))
+        self.assertFalse(_normalized_path_is_within(root.parent / "host-data", root))
+        self.assertFalse(_normalized_path_is_within(root / "jobs" / ".." / "..", root))
+
     def test_process_escape_requires_specific_non_breakaway_evidence(self) -> None:
         plan = Path("unused-plan.json")
         with mock.patch(

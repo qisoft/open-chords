@@ -87,7 +87,11 @@ def run_probe(plan_path: Path) -> dict[str, object]:
     )
     environment_redirects = {
         name: (value := os.environ.get(name)) is not None
-        and _normalized_path(value) == _normalized_path(expected)
+        and (
+            _normalized_path_is_within(value, workspace.parents[1])
+            if os.name == "nt" and name == "LOCALAPPDATA"
+            else _normalized_path(value) == _normalized_path(expected)
+        )
         for name, expected in redirected_environment.items()
     }
     return {
@@ -108,6 +112,17 @@ def run_probe(plan_path: Path) -> dict[str, object]:
 
 def _normalized_path(path: str | os.PathLike[str]) -> str:
     return os.path.normcase(os.path.abspath(os.fspath(path)))
+
+
+def _normalized_path_is_within(
+    path: str | os.PathLike[str], root: str | os.PathLike[str]
+) -> bool:
+    normalized_path = _normalized_path(path)
+    normalized_root = _normalized_path(root)
+    try:
+        return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
+    except ValueError:
+        return False
 
 
 def run_descendant_probe(plan_path: Path) -> int:
