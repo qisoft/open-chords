@@ -1,13 +1,24 @@
-import { expect, it, vi } from "vitest";
+import { beforeAll, expect, it, vi } from "vitest";
 
 import { SidecarSessionError } from "../apps/desktop/src/main/sidecar-session.ts";
 
-vi.stubGlobal("OPEN_CHORDS_EMBEDDED_CONTAINMENT_MANIFEST_SHA256", "0".repeat(64));
-vi.stubGlobal("OPEN_CHORDS_EMBEDDED_SIDECAR_MANIFEST_SHA256", "0".repeat(64));
-const { packagedProofFailureCode, runWithPackagedSessionCleanup } =
-  await import("../apps/desktop/src/main/packaged-sidecar-proof.ts");
+type PackagedProofModule = typeof import("../apps/desktop/src/main/packaged-sidecar-proof.ts");
+
+let packagedProofModule: PackagedProofModule | undefined;
+
+beforeAll(async () => {
+  vi.stubGlobal("OPEN_CHORDS_EMBEDDED_CONTAINMENT_MANIFEST_SHA256", "0".repeat(64));
+  vi.stubGlobal("OPEN_CHORDS_EMBEDDED_SIDECAR_MANIFEST_SHA256", "0".repeat(64));
+  packagedProofModule = await import("../apps/desktop/src/main/packaged-sidecar-proof.ts");
+});
+
+function packagedProof(): PackagedProofModule {
+  if (packagedProofModule === undefined) throw new Error("Packaged proof module was not loaded");
+  return packagedProofModule;
+}
 
 it("classifies a packaged session dispose failure without masking it as evidence", async () => {
+  const { packagedProofFailureCode, runWithPackagedSessionCleanup } = packagedProof();
   const failure = await runWithPackagedSessionCleanup(
     async () => undefined,
     async () => {
@@ -19,6 +30,7 @@ it("classifies a packaged session dispose failure without masking it as evidence
 });
 
 it("preserves a packaged session primary failure alongside dispose failure", async () => {
+  const { packagedProofFailureCode, runWithPackagedSessionCleanup } = packagedProof();
   const primary = new SidecarSessionError("unexpected_eof", "injected session failure");
   const failure = await runWithPackagedSessionCleanup(
     async () => {
