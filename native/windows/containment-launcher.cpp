@@ -106,6 +106,151 @@ static fs::path runtime_staging_path(const std::wstring& profile) {
   return local_app_data_root() / L"OpenChords" / L"ContainmentRuntime" / profile;
 }
 
+static void update_shared_ancestor_traverse(
+    const fs::path& path, PSID app_container_sid, ACCESS_MODE mode) {
+  if (fs::canonical(path) != path ||
+      (GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+    throw std::runtime_error("runtime staging shared ancestor");
+  }
+  HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\OpenChords.ContainmentRuntimeAcl");
+  if (mutex == nullptr) throw std::runtime_error("runtime staging acl mutex");
+  const DWORD wait = WaitForSingleObject(mutex, 5000);
+  if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+    CloseHandle(mutex);
+    throw std::runtime_error("runtime staging acl lock");
+  }
+  PACL current_dacl = nullptr;
+  PSECURITY_DESCRIPTOR descriptor = nullptr;
+  DWORD result = GetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
+      DACL_SECURITY_INFORMATION, nullptr, nullptr, &current_dacl, nullptr, &descriptor);
+  PACL updated_dacl = nullptr;
+  if (result == ERROR_SUCCESS && current_dacl != nullptr) {
+    EXPLICIT_ACCESSW access{};
+    access.grfAccessPermissions = FILE_TRAVERSE;
+    access.grfAccessMode = mode;
+    access.grfInheritance = NO_INHERITANCE;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    access.Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
+    result = SetEntriesInAclW(1, &access, current_dacl, &updated_dacl);
+    if (result == ERROR_SUCCESS) {
+      result = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
+          DACL_SECURITY_INFORMATION, nullptr, nullptr, updated_dacl, nullptr);
+    }
+  }
+  if (updated_dacl != nullptr) LocalFree(updated_dacl);
+  if (descriptor != nullptr) LocalFree(descriptor);
+  ReleaseMutex(mutex);
+  CloseHandle(mutex);
+  if (result != ERROR_SUCCESS) throw_last_error("update shared ancestor traverse", result);
+}
+
+class ScopedProfileLaunchLock {
+ public:
+  explicit ScopedProfileLaunchLock(const std::wstring& profile) {
+    const std::wstring name = L"Local\\OpenChords.ContainmentRuntime." + profile;
+    mutex_ = CreateMutexW(nullptr, FALSE, name.c_str());
+    if (mutex_ == nullptr) throw std::runtime_error("profile launch mutex");
+    const DWORD wait = WaitForSingleObject(mutex_, 5000);
+    if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+      CloseHandle(mutex_);
+      mutex_ = nullptr;
+      throw std::runtime_error("profile launch lock");
+    }
+  }
+
+  ScopedProfileLaunchLock(const ScopedProfileLaunchLock&) = delete;
+  ScopedProfileLaunchLock& operator=(const ScopedProfileLaunchLock&) = delete;
+
+  ~ScopedProfileLaunchLock() {
+    if (mutex_ != nullptr) {
+      ReleaseMutex(mutex_);
+      CloseHandle(mutex_);
+    }
+  }
+
+ private:
+  HANDLE mutex_ = nullptr;
+};
+
+class ScopedAncestorTraverse {
+ public:
+  ScopedAncestorTraverse(const fs::path& runtime_root, PSID app_container_sid)
+      : sid_storage_(GetLengthSid(app_container_sid)),
+        paths_{runtime_root.parent_path().parent_path(), runtime_root.parent_path()},
+        granted_(paths_.size(), false) {
+    sid_ = sid_storage_.data();
+    if (!CopySid(static_cast<DWORD>(sid_storage_.size()), sid_, app_container_sid)) {
+      throw std::runtime_error("copy app container sid");
+    }
+    try {
+      for (size_t index = 0; index < paths_.size(); index += 1) {
+        update_shared_ancestor_traverse(paths_[index], sid_, SET_ACCESS);
+        granted_[index] = true;
+      }
+    } catch (...) {
+      remove_noexcept();
+      throw;
+    }
+  }
+
+  ScopedAncestorTraverse(const ScopedAncestorTraverse&) = delete;
+  ScopedAncestorTraverse& operator=(const ScopedAncestorTraverse&) = delete;
+
+  ~ScopedAncestorTraverse() { remove_noexcept(); }
+
+  void remove() {
+    if (!remove_noexcept()) throw std::runtime_error("revoke shared ancestor traverse");
+  }
+
+ private:
+  bool remove_noexcept() noexcept {
+    bool removed = true;
+    for (size_t index = paths_.size(); index > 0; index -= 1) {
+      if (!granted_[index - 1]) continue;
+      try {
+        update_shared_ancestor_traverse(paths_[index - 1], sid_, REVOKE_ACCESS);
+        granted_[index - 1] = false;
+      } catch (...) {
+        removed = false;
+      }
+    }
+    return removed;
+  }
+
+  std::vector<unsigned char> sid_storage_;
+  PSID sid_ = nullptr;
+  std::vector<fs::path> paths_;
+  std::vector<bool> granted_;
+};
+
+static bool revoke_profile_ancestor_traverse(
+    const std::wstring& profile, PSID app_container_sid) noexcept {
+  bool removed = true;
+  fs::path runtime_root;
+  try {
+    runtime_root = runtime_staging_path(profile);
+  } catch (...) {
+    return false;
+  }
+  for (const fs::path& path :
+      {runtime_root.parent_path(), runtime_root.parent_path().parent_path()}) {
+    try {
+      const DWORD attributes = GetFileAttributesW(path.c_str());
+      if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) continue;
+        removed = false;
+        continue;
+      }
+      update_shared_ancestor_traverse(path, app_container_sid, REVOKE_ACCESS);
+    } catch (...) {
+      removed = false;
+    }
+  }
+  return removed;
+}
+
 static fs::path create_runtime_staging_root(const std::wstring& profile) {
   const fs::path target = runtime_staging_path(profile);
   fs::path root = target.parent_path().parent_path().parent_path();
@@ -357,6 +502,7 @@ static int prepare(const std::wstring& profile) {
 
 static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
+  ScopedProfileLaunchLock profile_lock(profile);
   std::wstring workspace;
   std::wstring runtime_root;
   int separator = -1;
@@ -383,6 +529,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   reject_reparse_points(runtime_root);
   grant_runtime_read_execute(runtime_root, sid,
       reinterpret_cast<TOKEN_USER*>(host_user.data())->User.Sid);
+  ScopedAncestorTraverse ancestor_traverse(runtime_root, sid);
 
   HANDLE job = CreateJobObjectW(nullptr, nullptr);
   if (job == nullptr) throw std::runtime_error("create job");
@@ -536,6 +683,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   bool job_drained = terminate_and_wait_for_empty_job(job);
   CloseHandle(process.hProcess);
   close_job(job);
+  ancestor_traverse.remove();
   FreeSid(sid);
   if (!job_drained) throw std::runtime_error("job did not drain");
   return static_cast<int>(exit_code);
@@ -554,12 +702,16 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (destroy) {
       if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
+      ScopedProfileLaunchLock profile_lock(profile);
+      PSID sid = derive_profile(profile);
+      const bool traverse_removed = revoke_profile_ancestor_traverse(profile, sid);
+      FreeSid(sid);
       HRESULT result = DeleteAppContainerProfile(profile.c_str());
       const bool profile_removed = SUCCEEDED(result) ||
           result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) ||
           result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
       const bool runtime_removed = remove_runtime_staging_root(profile);
-      return profile_removed && runtime_removed ? 0 : 1;
+      return traverse_removed && profile_removed && runtime_removed ? 0 : 1;
     }
     if (profile.empty()) throw std::runtime_error("profile missing");
     return launch(argc, argv, profile);

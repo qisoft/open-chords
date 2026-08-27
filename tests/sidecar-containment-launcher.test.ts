@@ -126,13 +126,33 @@ it("grants both Windows principals only their required runtime access", () => {
   expect(source).toContain("SUB_CONTAINERS_AND_OBJECTS_INHERIT");
   expect(source).toContain("SET_ACCESS");
   expect(source).toContain("SetEntriesInAclW(2, grants, nullptr, &updated_dacl)");
-  expect(source).not.toContain("GetNamedSecurityInfoW");
   expect(source).toContain("PROTECTED_DACL_SECURITY_INFORMATION");
   expect(source).toContain("SetNamedSecurityInfoW");
   expect(source).not.toContain("FILE_GENERIC_WRITE");
   expect(source.indexOf("reject_reparse_points(runtime_root);")).toBeLessThan(
     source.indexOf("grant_runtime_read_execute(runtime_root, sid,"),
   );
+});
+
+it("temporarily grants only the exact profile SID traversal on shared ancestors", () => {
+  const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
+
+  expect(source).toContain("access.grfAccessPermissions = FILE_TRAVERSE");
+  expect(source).toContain("update_shared_ancestor_traverse(paths_[index], sid_, SET_ACCESS)");
+  expect(source).toContain("access.grfInheritance = NO_INHERITANCE");
+  expect(source).toContain("SetEntriesInAclW(1, &access, current_dacl, &updated_dacl)");
+  expect(source).toContain(
+    'CreateMutexW(nullptr, FALSE, L"Local\\\\OpenChords.ContainmentRuntimeAcl")',
+  );
+  expect(source).toContain("ScopedAncestorTraverse ancestor_traverse(runtime_root, sid)");
+  expect(source).toContain("ancestor_traverse.remove()");
+  expect(source).toContain("REVOKE_ACCESS");
+  expect(source).toContain('L"Local\\\\OpenChords.ContainmentRuntime." + profile');
+  expect(source).toContain("ScopedProfileLaunchLock profile_lock(profile)");
+  expect(source).toContain("granted_[index - 1] = false");
+  expect(source).toContain("revoke_profile_ancestor_traverse(profile, sid)");
+  expect(source).toContain("traverse_removed && profile_removed && runtime_removed");
+  expect(source).not.toContain("WinBuiltinAnyPackageSid");
 });
 
 it("accepts recursive cleanup only for a canonical AppContainer AC root", () => {
