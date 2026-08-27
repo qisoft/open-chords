@@ -365,11 +365,15 @@ async function runLifecycleContainmentProbe(
   if (evidence === undefined) {
     throw new Error(`Contained ${mode} probe returned no evidence`);
   }
-  await assertProcessesExited([evidence.parentPid, evidence.descendantPid]);
-  if (existsSync(publishablePath)) {
-    throw new Error(`Contained ${mode} probe left publishable output`);
+  try {
+    await assertProcessesExited([evidence.parentPid, evidence.descendantPid]);
+    if (existsSync(publishablePath)) {
+      throw new Error(`Contained ${mode} probe left publishable output`);
+    }
+    rmSync(partialPath, { force: true });
+  } catch {
+    throw new PackagedProofFailure("cleanup_failed");
   }
-  rmSync(partialPath, { force: true });
 }
 
 async function readBoundedLine(iterator: AsyncIterator<Uint8Array>): Promise<string> {
