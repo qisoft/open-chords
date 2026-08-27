@@ -118,8 +118,11 @@ const SIDECAR_PROCESS_FAILURE_CODES = [
   "sidecar_internal_error",
   "sidecar_os_error",
   "sidecar_protocol_error",
-  "sidecar_runtime_permission_denied",
+  "sidecar_runtime_file_permission_denied",
+  "sidecar_runtime_manifest_permission_denied",
+  "sidecar_runtime_root_permission_denied",
   "sidecar_runtime_error",
+  "sidecar_runtime_tool_permission_denied",
   "sidecar_session_permission_denied",
   "sidecar_value_error",
 ] as const;

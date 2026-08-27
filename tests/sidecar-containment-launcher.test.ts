@@ -198,7 +198,12 @@ it("surfaces only allowlisted bounded sidecar crash reasons", () => {
     parseSidecarProcessFailure(
       "Open Chords analysis sidecar failed safely: sidecar_runtime_permission_denied\n",
     ),
-  ).toBe("sidecar_runtime_permission_denied");
+  ).toBeNull();
+  expect(
+    parseSidecarProcessFailure(
+      "Open Chords analysis sidecar failed safely: sidecar_runtime_manifest_permission_denied\n",
+    ),
+  ).toBe("sidecar_runtime_manifest_permission_denied");
   expect(
     parseSidecarProcessFailure(
       "Open Chords analysis sidecar failed safely: sidecar_session_permission_denied\n",

@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 from multiprocessing import freeze_support
+from pathlib import Path
+
+
+def _runtime_permission_failure_code(error: PermissionError, runtime_root: Path) -> str:
+    try:
+        denied_path = Path(error.filename).resolve(strict=False)
+        relative = denied_path.relative_to(runtime_root)
+    except (OSError, TypeError, ValueError):
+        return "sidecar_runtime_root_permission_denied"
+    if relative.as_posix() == "runtime-manifest.json":
+        return "sidecar_runtime_manifest_permission_denied"
+    if relative.parts[:1] == ("tools",):
+        return "sidecar_runtime_tool_permission_denied"
+    return "sidecar_runtime_file_permission_denied"
 
 
 def main() -> None:
     freeze_support()
 
     import sys
-    from pathlib import Path
-
     try:
         from .protocol import serve_one_session
         from .runtime_manifest import load_frozen_runtime
@@ -20,10 +32,10 @@ def main() -> None:
         runtime_root = Path(sys.executable).resolve().parent
         try:
             runtime = load_frozen_runtime(runtime_root)
-        except PermissionError:
+        except PermissionError as error:
             sys.stderr.write(
                 "Open Chords analysis sidecar failed safely: "
-                "sidecar_runtime_permission_denied\n"
+                f"{_runtime_permission_failure_code(error, runtime_root)}\n"
             )
             raise SystemExit(2) from None
         serve_one_session(sys.stdin.buffer, sys.stdout.buffer, Path.cwd(), runtime)

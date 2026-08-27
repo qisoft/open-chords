@@ -11,9 +11,28 @@ from sidecar.open_chords_analysis.runtime_manifest import (
     load_frozen_runtime,
     write_runtime_manifest,
 )
+from sidecar.open_chords_analysis.__main__ import _runtime_permission_failure_code
 
 
 class RuntimeManifestTests(unittest.TestCase):
+    def test_classifies_runtime_permission_failures_without_exposing_paths(self) -> None:
+        runtime_root = Path("runtime").resolve()
+
+        cases = {
+            runtime_root / "runtime-manifest.json": "sidecar_runtime_manifest_permission_denied",
+            runtime_root / "tools/ffprobe.exe": "sidecar_runtime_tool_permission_denied",
+            runtime_root / "_internal/python313.dll": "sidecar_runtime_file_permission_denied",
+        }
+        for denied_path, expected in cases.items():
+            with self.subTest(denied_path=denied_path.name):
+                error = PermissionError(13, "denied", str(denied_path))
+                self.assertEqual(_runtime_permission_failure_code(error, runtime_root), expected)
+
+        self.assertEqual(
+            _runtime_permission_failure_code(PermissionError(13, "denied"), runtime_root),
+            "sidecar_runtime_root_permission_denied",
+        )
+
     def test_manifest_identifies_and_verifies_every_runtime_file(self) -> None:
         with tempfile.TemporaryDirectory(prefix="open-chords-runtime-") as temporary:
             runtime_root = Path(temporary)
