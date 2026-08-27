@@ -305,7 +305,7 @@ async function runAdversarialContainmentProbe(
   throwCombinedFailures(
     "Packaged containment proof and cleanup failed",
     proofFailure,
-    cleanupErrors,
+    privateCleanupFailures(cleanupErrors),
   );
 }
 
@@ -360,7 +360,7 @@ async function runLifecycleContainmentProbe(
   throwCombinedFailures(
     `Contained ${mode} proof and cleanup failed`,
     primaryFailure,
-    cleanupFailures,
+    privateCleanupFailures(cleanupFailures),
   );
   if (evidence === undefined) {
     throw new Error(`Contained ${mode} probe returned no evidence`);
