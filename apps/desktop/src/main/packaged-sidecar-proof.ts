@@ -133,7 +133,13 @@ export function packagedProofFailureCode(cause: unknown): string {
   if (cause instanceof PackagedProofFailure) return cause.code;
   if (cause instanceof AggregateError) {
     const codes = cause.errors.map(packagedProofFailureCode);
-    if (codes.includes("cleanup_failed") && codes.some((code) => code !== "cleanup_failed")) {
+    const hasCleanupFailure = codes.some(
+      (code) => code === "cleanup_failed" || code === "session_cleanup_failure",
+    );
+    if (
+      hasCleanupFailure &&
+      codes.some((code) => code !== "cleanup_failed" && code !== "session_cleanup_failure")
+    ) {
       return "proof_and_cleanup_failed";
     }
     return codes.find((code) => code !== "proof_failed") ?? "proof_failed";
@@ -223,34 +229,35 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       requestId: "request-packaged-proof",
       timeoutMs: 15_000,
     });
-    try {
-      const result = await client.runSession(request);
-      stage = "session_descriptor_failed";
-      if (
-        result.artifact.path !== "artifacts/decode-manifest.json" ||
-        result.jobId !== request.jobId ||
-        result.requestId !== request.requestId
-      ) {
-        throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
-      }
-      stage = "session_artifact_failed";
-      const decodeManifestBytes = readFileSync(join(workspace, result.artifact.path));
-      if (
-        decodeManifestBytes.byteLength !== result.artifact.byteSize ||
-        createHash("sha256").update(decodeManifestBytes).digest("hex") !== result.artifact.sha256
-      ) {
-        throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
-      }
-      stage = "session_evidence_failed";
-      const decodeManifest = z
-        .object({ canonicalAudio: z.object({ sampleCount: z.literal(4_800) }) })
-        .parse(JSON.parse(decodeManifestBytes.toString("utf8")));
-      if (decodeManifest.canonicalAudio.sampleCount !== 4_800) {
-        throw new Error("Packaged sidecar lifecycle proof returned unexpected evidence");
-      }
-    } finally {
-      await client.dispose();
-    }
+    await runWithPackagedSessionCleanup(
+      async () => {
+        const result = await client.runSession(request);
+        stage = "session_descriptor_failed";
+        if (
+          result.artifact.path !== "artifacts/decode-manifest.json" ||
+          result.jobId !== request.jobId ||
+          result.requestId !== request.requestId
+        ) {
+          throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
+        }
+        stage = "session_artifact_failed";
+        const decodeManifestBytes = readFileSync(join(workspace, result.artifact.path));
+        if (
+          decodeManifestBytes.byteLength !== result.artifact.byteSize ||
+          createHash("sha256").update(decodeManifestBytes).digest("hex") !== result.artifact.sha256
+        ) {
+          throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
+        }
+        stage = "session_evidence_failed";
+        const decodeManifest = z
+          .object({ canonicalAudio: z.object({ sampleCount: z.literal(4_800) }) })
+          .parse(JSON.parse(decodeManifestBytes.toString("utf8")));
+        if (decodeManifest.canonicalAudio.sampleCount !== 4_800) {
+          throw new Error("Packaged sidecar lifecycle proof returned unexpected evidence");
+        }
+      },
+      () => client.dispose(),
+    );
   } catch (cause) {
     proofFailure = {
       cause:
@@ -268,6 +275,33 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
   throwCombinedFailures(
     "Packaged containment proof and cleanup failed",
     proofFailure,
+    cleanupFailures,
+  );
+}
+
+export async function runWithPackagedSessionCleanup(
+  run: () => Promise<void>,
+  dispose: () => Promise<void>,
+): Promise<void> {
+  let primaryFailure: { cause: unknown } | undefined;
+  try {
+    await run();
+  } catch (cause) {
+    primaryFailure = { cause };
+  }
+  const cleanupFailures: unknown[] = [];
+  try {
+    await dispose();
+  } catch (cause) {
+    cleanupFailures.push(
+      new PackagedProofFailure(
+        cause instanceof SidecarSessionError ? `session_${cause.code}` : "session_cleanup_failure",
+      ),
+    );
+  }
+  throwCombinedFailures(
+    "Packaged session proof and cleanup failed",
+    primaryFailure,
     cleanupFailures,
   );
 }
