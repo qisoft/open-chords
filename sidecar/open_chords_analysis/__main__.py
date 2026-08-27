@@ -27,13 +27,26 @@ def main() -> None:
     import sys
     try:
         from .protocol import serve_one_session
-        from .runtime_manifest import load_frozen_runtime
+        from .runtime_manifest import RuntimeManifestPermissionError, load_frozen_runtime
 
         if not getattr(sys, "frozen", False):
             raise RuntimeError("source entry point is disabled")
         runtime_root = Path(sys.executable).resolve().parent
         try:
             runtime = load_frozen_runtime(runtime_root)
+        except RuntimeManifestPermissionError as error:
+            permission_codes = {
+                "entry_content": "sidecar_runtime_entry_content_permission_denied",
+                "entry_metadata": "sidecar_runtime_entry_metadata_permission_denied",
+                "inventory": "sidecar_runtime_inventory_permission_denied",
+                "manifest": "sidecar_runtime_manifest_permission_denied",
+                "root": "sidecar_runtime_root_permission_denied",
+            }
+            sys.stderr.write(
+                "Open Chords analysis sidecar failed safely: "
+                f"{permission_codes.get(error.stage, 'sidecar_runtime_file_permission_denied')}\n"
+            )
+            raise SystemExit(2) from None
         except PermissionError as error:
             sys.stderr.write(
                 "Open Chords analysis sidecar failed safely: "

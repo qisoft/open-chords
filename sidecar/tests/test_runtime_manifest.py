@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 from sidecar.open_chords_analysis.runtime_manifest import (
     RuntimeManifestError,
+    RuntimeManifestPermissionError,
+    _permission_checked,
     load_frozen_runtime,
     write_runtime_manifest,
 )
@@ -15,6 +17,16 @@ from sidecar.open_chords_analysis.__main__ import _runtime_permission_failure_co
 
 
 class RuntimeManifestTests(unittest.TestCase):
+    def test_preserves_only_the_runtime_permission_operation_category(self) -> None:
+        def denied() -> None:
+            raise PermissionError(13, "private path", "/private/source")
+
+        with self.assertRaises(RuntimeManifestPermissionError) as raised:
+            _permission_checked("entry_content", denied)
+
+        self.assertEqual(raised.exception.stage, "entry_content")
+        self.assertNotIn("private", str(raised.exception))
+
     def test_classifies_runtime_permission_failures_without_exposing_paths(self) -> None:
         runtime_root = Path("runtime").resolve()
 
