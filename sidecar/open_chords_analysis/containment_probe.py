@@ -78,6 +78,8 @@ def run_probe(plan_path: Path) -> dict[str, object]:
             "APPDATA": workspace,
             "HOME": workspace,
             "LOCALAPPDATA": workspace.parents[1],
+            "TEMP": workspace,
+            "TMP": workspace,
             "USERPROFILE": workspace,
         }
         if os.name == "nt"

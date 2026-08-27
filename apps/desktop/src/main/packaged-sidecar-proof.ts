@@ -44,6 +44,8 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_environment_redirect_appdata_failed",
   "adversarial_environment_redirect_home_failed",
   "adversarial_environment_redirect_localappdata_failed",
+  "adversarial_environment_redirect_temp_failed",
+  "adversarial_environment_redirect_tmp_failed",
   "adversarial_environment_redirect_tmpdir_failed",
   "adversarial_environment_redirect_userprofile_failed",
   "adversarial_helper_failed",
@@ -351,12 +353,14 @@ async function runAdversarialContainmentProbe(
     requireAdversarial(evidence.environmentIsolated, "adversarial_environment_isolation_failed");
     const requiredRedirects =
       platform === "win32"
-        ? (["APPDATA", "HOME", "LOCALAPPDATA", "USERPROFILE"] as const)
+        ? (["APPDATA", "HOME", "LOCALAPPDATA", "TEMP", "TMP", "USERPROFILE"] as const)
         : (["HOME", "TMPDIR"] as const);
     const redirectFailureCodes = {
       APPDATA: "adversarial_environment_redirect_appdata_failed",
       HOME: "adversarial_environment_redirect_home_failed",
       LOCALAPPDATA: "adversarial_environment_redirect_localappdata_failed",
+      TEMP: "adversarial_environment_redirect_temp_failed",
+      TMP: "adversarial_environment_redirect_tmp_failed",
       TMPDIR: "adversarial_environment_redirect_tmpdir_failed",
       USERPROFILE: "adversarial_environment_redirect_userprofile_failed",
     } as const satisfies Record<(typeof requiredRedirects)[number], PackagedProofFailureCode>;
