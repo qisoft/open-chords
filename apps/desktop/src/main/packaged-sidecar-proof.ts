@@ -37,7 +37,9 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "cancel_probe_failed",
   "cleanup_failed",
   "crash_probe_failed",
+  "proof_and_cleanup_failed",
   "session_probe_failed",
+  "setup_failed",
 ] as const;
 type PackagedProofFailureCode = (typeof PACKAGED_PROOF_FAILURE_CODES)[number];
 
@@ -54,10 +56,11 @@ class PackagedProofFailure extends Error {
 export function packagedProofFailureCode(cause: unknown): string {
   if (cause instanceof PackagedProofFailure) return cause.code;
   if (cause instanceof AggregateError) {
-    for (const nested of cause.errors) {
-      const code = packagedProofFailureCode(nested);
-      if (code !== "proof_failed") return code;
+    const codes = cause.errors.map(packagedProofFailureCode);
+    if (codes.includes("cleanup_failed") && codes.some((code) => code !== "cleanup_failed")) {
+      return "proof_and_cleanup_failed";
     }
+    return codes.find((code) => code !== "proof_failed") ?? "proof_failed";
   }
   return "proof_failed";
 }
@@ -94,7 +97,7 @@ export async function runPackagedSidecarProof(): Promise<void> {
   );
   const prepared = prepareWorkspace(platform, containment.helperPath, verifiedRuntime.runtimeRoot);
   let proofFailure: { cause: unknown } | undefined;
-  let stage: PackagedProofFailureCode = "adversarial_probe_failed";
+  let stage: PackagedProofFailureCode = "setup_failed";
   try {
     const containedRuntime = verifyPackagedSidecarRuntime(
       prepared.runtimeRoot,
@@ -120,6 +123,7 @@ export async function runPackagedSidecarProof(): Promise<void> {
         }),
         platform,
       );
+    stage = "adversarial_probe_failed";
     await runAdversarialContainmentProbe(createLauncher, workspace, platform);
     stage = "cancel_probe_failed";
     await runLifecycleContainmentProbe(createLauncher, workspace, "cancel");
