@@ -9,7 +9,10 @@ import {
   type NativeContainmentEvidence,
   type NativeContainmentPlatform,
 } from "../apps/desktop/src/main/sidecar-containment-launcher.ts";
-import { parseNativeContainmentFailure } from "../apps/desktop/src/main/sidecar-native-broker.ts";
+import {
+  parseNativeContainmentFailure,
+  parseSidecarProcessFailure,
+} from "../apps/desktop/src/main/sidecar-native-broker.ts";
 import {
   createPromiseSidecarClient,
   createUncontainedSpawnLauncherForProof,
@@ -165,6 +168,17 @@ it("surfaces bounded native containment failure reasons", () => {
     "service_bundle_validation_failed_-67030",
   );
   expect(parseNativeContainmentFailure('{"error":"invalid reason"}')).toBeNull();
+});
+
+it("surfaces only allowlisted bounded sidecar crash reasons", () => {
+  expect(
+    parseSidecarProcessFailure(
+      "Open Chords analysis sidecar failed safely: sidecar_protocol_error\n",
+    ),
+  ).toBe("sidecar_protocol_error");
+  expect(
+    parseSidecarProcessFailure("Open Chords analysis sidecar failed safely: sidecar_secret_path\n"),
+  ).toBeNull();
 });
 
 it("does not log raw packaged-proof errors or paths", () => {

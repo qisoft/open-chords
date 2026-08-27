@@ -112,12 +112,25 @@ const SESSION_REMOTE_FAILURE_CODES = [
   "canonical_tool_identity_failed",
   "canonical_transcode_failed",
 ] as const;
+const SIDECAR_PROCESS_FAILURE_CODES = [
+  "sidecar_broken_pipe",
+  "sidecar_file_not_found",
+  "sidecar_internal_error",
+  "sidecar_os_error",
+  "sidecar_permission_denied",
+  "sidecar_protocol_error",
+  "sidecar_runtime_error",
+  "sidecar_value_error",
+] as const;
 type SessionRemoteFailureCode = (typeof SESSION_REMOTE_FAILURE_CODES)[number];
 const SessionRemoteFailureCodeSchema = z.enum(SESSION_REMOTE_FAILURE_CODES);
+type SidecarProcessFailureCode = (typeof SIDECAR_PROCESS_FAILURE_CODES)[number];
+const SidecarProcessFailureCodeSchema = z.enum(SIDECAR_PROCESS_FAILURE_CODES);
 type PackagedProofFailureCode =
   | (typeof PACKAGED_PROOF_FAILURE_CODES)[number]
   | `session_${SidecarSessionErrorCode}`
-  | `session_${SessionRemoteFailureCode}`;
+  | `session_${SessionRemoteFailureCode}`
+  | `session_${SidecarProcessFailureCode}`;
 
 class PackagedProofFailure extends Error {
   readonly code: PackagedProofFailureCode;
@@ -314,6 +327,10 @@ function sessionFailureCode(
     cause instanceof SidecarSessionError
       ? SessionRemoteFailureCodeSchema.safeParse(cause.remoteCode)
       : undefined;
+  const processFailureCode =
+    cause instanceof SidecarSessionError
+      ? SidecarProcessFailureCodeSchema.safeParse(cause.remoteCode)
+      : undefined;
   if (
     stage === "session_probe_failed" &&
     cause instanceof SidecarSessionError &&
@@ -322,6 +339,14 @@ function sessionFailureCode(
     return remoteFailureCode?.success === true
       ? `session_${remoteFailureCode.data}`
       : "session_remote_failure";
+  }
+  if (
+    stage === "session_probe_failed" &&
+    cause instanceof SidecarSessionError &&
+    cause.code === "process_failure" &&
+    processFailureCode?.success === true
+  ) {
+    return `session_${processFailureCode.data}`;
   }
   if (stage === "session_probe_failed" && cause instanceof SidecarSessionError) {
     return `session_${cause.code}`;

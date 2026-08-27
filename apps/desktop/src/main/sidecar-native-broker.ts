@@ -56,6 +56,8 @@ type NativeBrokerOptions = {
 
 const MAX_ATTESTATION_BYTES = 4 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
+const SIDECAR_FAILURE_PATTERN =
+  /(?:^|\n)Open Chords analysis sidecar failed safely: (sidecar_(?:broken_pipe|file_not_found|internal_error|os_error|permission_denied|protocol_error|runtime_error|value_error))(?:\r?\n|$)/u;
 
 export function createExecutableNativeContainmentBroker(
   options: NativeBrokerOptions,
@@ -85,6 +87,11 @@ export function createExecutableNativeContainmentBroker(
         stdio: ["pipe", "pipe", "pipe", "pipe"],
         windowsHide: true,
       });
+      const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+        (resolveExit) => {
+          child.once("close", (code, exitSignal) => resolveExit({ code, signal: exitSignal }));
+        },
+      );
       try {
         await waitForSpawn(child);
         const evidence = await readEvidence(child);
@@ -98,16 +105,17 @@ export function createExecutableNativeContainmentBroker(
           throw new SidecarSessionError("launch_failure", "Contained process pipes are missing");
         }
         const stdin = child.stdin;
-        let stderrBytes = 0;
+        let stderr = Buffer.alloc(0);
         child.stderr?.on("data", (chunk: Buffer) => {
-          stderrBytes += chunk.byteLength;
-          if (stderrBytes > MAX_STDERR_BYTES && child.exitCode === null) child.kill("SIGKILL");
+          stderr = Buffer.concat([stderr, chunk]);
+          if (stderr.byteLength > MAX_STDERR_BYTES && child.exitCode === null)
+            child.kill("SIGKILL");
         });
         let stopped = false;
         return {
           evidence,
           process: {
-            stdout: child.stdout,
+            stdout: containedProcessStdout(child.stdout, exited, () => stderr),
             async stop() {
               if (stopped) return;
               stopped = true;
@@ -142,6 +150,26 @@ export function createExecutableNativeContainmentBroker(
       }
     },
   };
+}
+
+async function* containedProcessStdout(
+  stdout: NonNullable<ChildProcess["stdout"]>,
+  exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
+  stderr: () => Buffer,
+): AsyncGenerator<Uint8Array> {
+  yield* stdout;
+  const status = await exited;
+  if (status.code === 0 && status.signal === null) return;
+  const failureCode = parseSidecarProcessFailure(stderr().toString("utf8"));
+  throw new SidecarSessionError(
+    "process_failure",
+    "Contained sidecar exited before completing its protocol",
+    failureCode === null ? undefined : { remoteCode: failureCode },
+  );
+}
+
+export function parseSidecarProcessFailure(value: string): string | null {
+  return SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? null;
 }
 
 async function readEvidence(child: ChildProcess): Promise<NativeContainmentEvidence> {

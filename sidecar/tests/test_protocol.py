@@ -61,7 +61,6 @@ class DecodeFinishedControlReader(io.BytesIO):
             self.waited = True
             if not self.decode_finished.wait(timeout=1):
                 raise TimeoutError("decode did not finish before terminal cancel arbitration")
-            time.sleep(0.02)
         return super().read(size)
 
 
@@ -379,9 +378,15 @@ class ProtocolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="open-chords-protocol-terminal-cancel-") as temporary:
             workspace = Path(temporary)
             output = io.BytesIO()
-            with patch(
-                "sidecar.open_chords_analysis.protocol.decode_canonical",
-                side_effect=finish_before_control_read,
+            with (
+                patch(
+                    "sidecar.open_chords_analysis.protocol.decode_canonical",
+                    side_effect=finish_before_control_read,
+                ),
+                patch(
+                    "sidecar.open_chords_analysis.protocol.TERMINAL_CONTROL_ARBITRATION_SECONDS",
+                    1,
+                ),
             ):
                 serve_one_session(
                     DecodeFinishedControlReader(self._start_frame(), cancel, decode_finished),

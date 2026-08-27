@@ -20,8 +20,24 @@ def main() -> None:
         runtime_root = Path(sys.executable).resolve().parent
         runtime = load_frozen_runtime(runtime_root)
         serve_one_session(sys.stdin.buffer, sys.stdout.buffer, Path.cwd(), runtime)
-    except Exception:
-        sys.stderr.write("Open Chords analysis sidecar failed safely\n")
+    except Exception as error:
+        if isinstance(error, PermissionError):
+            failure_code = "sidecar_permission_denied"
+        elif isinstance(error, FileNotFoundError):
+            failure_code = "sidecar_file_not_found"
+        elif isinstance(error, BrokenPipeError):
+            failure_code = "sidecar_broken_pipe"
+        elif error.__class__.__name__ == "ProtocolError":
+            failure_code = "sidecar_protocol_error"
+        elif isinstance(error, OSError):
+            failure_code = "sidecar_os_error"
+        elif isinstance(error, RuntimeError):
+            failure_code = "sidecar_runtime_error"
+        elif isinstance(error, ValueError):
+            failure_code = "sidecar_value_error"
+        else:
+            failure_code = "sidecar_internal_error"
+        sys.stderr.write(f"Open Chords analysis sidecar failed safely: {failure_code}\n")
         raise SystemExit(2) from None
 
 
