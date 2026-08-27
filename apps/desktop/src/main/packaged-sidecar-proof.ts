@@ -85,7 +85,34 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "setup_validation_failed",
   "setup_workspace_failed",
 ] as const;
-type PackagedProofFailureCode = (typeof PACKAGED_PROOF_FAILURE_CODES)[number];
+const SESSION_REMOTE_FAILURE_CODES = [
+  "canonical_artifact_validation_failed",
+  "canonical_cleanup_failed",
+  "canonical_decode_failed",
+  "canonical_prepare_failed",
+  "canonical_probe_execution_failed",
+  "canonical_probe_exit_failed",
+  "canonical_probe_loader_init_failed",
+  "canonical_probe_loader_invalid_image",
+  "canonical_probe_loader_missing",
+  "canonical_probe_loader_symbol_missing",
+  "canonical_probe_output_failed",
+  "canonical_probe_output_limit_failed",
+  "canonical_probe_process_cleanup_failed",
+  "canonical_probe_process_failed",
+  "canonical_probe_runtime_failed",
+  "canonical_probe_spawn_failed",
+  "canonical_probe_stream_missing",
+  "canonical_probe_timeout_failed",
+  "canonical_publication_failed",
+  "canonical_tool_identity_failed",
+  "canonical_transcode_failed",
+] as const;
+type SessionRemoteFailureCode = (typeof SESSION_REMOTE_FAILURE_CODES)[number];
+const SessionRemoteFailureCodeSchema = z.enum(SESSION_REMOTE_FAILURE_CODES);
+type PackagedProofFailureCode =
+  | (typeof PACKAGED_PROOF_FAILURE_CODES)[number]
+  | `session_${SessionRemoteFailureCode}`;
 
 class PackagedProofFailure extends Error {
   readonly code: PackagedProofFailureCode;
@@ -220,7 +247,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     proofFailure = {
       cause:
         packagedProofFailureCode(cause) === "proof_failed"
-          ? new PackagedProofFailure(stage)
+          ? new PackagedProofFailure(sessionFailureCode(stage, cause))
           : cause,
     };
   }
@@ -235,6 +262,25 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     proofFailure,
     cleanupFailures,
   );
+}
+
+function sessionFailureCode(
+  stage: PackagedProofFailureCode,
+  cause: unknown,
+): PackagedProofFailureCode {
+  const remoteFailureCode =
+    cause instanceof SidecarSessionError
+      ? SessionRemoteFailureCodeSchema.safeParse(cause.remoteCode)
+      : undefined;
+  if (
+    stage === "session_probe_failed" &&
+    cause instanceof SidecarSessionError &&
+    cause.code === "remote_failure" &&
+    remoteFailureCode?.success === true
+  ) {
+    return `session_${remoteFailureCode.data}`;
+  }
+  return stage;
 }
 
 async function runAdversarialContainmentProbe(

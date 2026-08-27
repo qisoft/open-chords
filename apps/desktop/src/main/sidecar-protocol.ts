@@ -149,10 +149,16 @@ const DEFAULT_PROTOCOL_POLICY: SidecarProtocolPolicy = {
 
 export class SidecarSessionError extends Error {
   readonly code: SidecarSessionErrorCode;
+  readonly remoteCode: string | undefined;
 
-  constructor(code: SidecarSessionErrorCode, message: string, options?: ErrorOptions) {
+  constructor(
+    code: SidecarSessionErrorCode,
+    message: string,
+    options?: ErrorOptions & { remoteCode?: string },
+  ) {
     super(message, options);
     this.code = code;
+    this.remoteCode = options?.remoteCode;
   }
 }
 
@@ -391,6 +397,7 @@ export async function runSidecarProtocol(
         throw new SidecarSessionError(
           "remote_failure",
           `Sidecar ${message.code}: ${message.message}`,
+          { remoteCode: message.code },
         );
       }
       if (message.type === "result") {
