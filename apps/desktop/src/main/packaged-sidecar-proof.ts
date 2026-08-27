@@ -66,6 +66,15 @@ export function packagedProofFailureCode(cause: unknown): string {
 }
 
 export async function runPackagedSidecarProof(): Promise<void> {
+  try {
+    await runPackagedSidecarProofInternal();
+  } catch (cause) {
+    if (packagedProofFailureCode(cause) !== "proof_failed") throw cause;
+    throw new PackagedProofFailure("setup_failed");
+  }
+}
+
+async function runPackagedSidecarProofInternal(): Promise<void> {
   if (process.platform !== "darwin" && process.platform !== "win32") {
     throw new Error("Packaged containment proof targets macOS and Windows only");
   }
