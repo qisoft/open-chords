@@ -216,30 +216,40 @@ static bool remove_runtime_staging_root(const std::wstring& profile) noexcept {
   }
 }
 
-static void grant_runtime_read_execute(const fs::path& runtime_root, PSID app_container_sid) {
+static void grant_path_read_execute(
+    const fs::path& path, PSID app_container_sid, DWORD inheritance) {
   PACL current_dacl = nullptr;
   PSECURITY_DESCRIPTOR descriptor = nullptr;
-  DWORD result = GetNamedSecurityInfoW(const_cast<LPWSTR>(runtime_root.c_str()), SE_FILE_OBJECT,
+  DWORD result = GetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
       DACL_SECURITY_INFORMATION, nullptr, nullptr, &current_dacl, nullptr, &descriptor);
   if (result != ERROR_SUCCESS) throw_last_error("read runtime dacl", result);
 
   EXPLICIT_ACCESSW grant{};
   grant.grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
   grant.grfAccessMode = SET_ACCESS;
-  grant.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+  grant.grfInheritance = inheritance;
   grant.Trustee.TrusteeForm = TRUSTEE_IS_SID;
   grant.Trustee.TrusteeType = TRUSTEE_IS_USER;
   grant.Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
   PACL updated_dacl = nullptr;
   result = SetEntriesInAclW(1, &grant, current_dacl, &updated_dacl);
   if (result == ERROR_SUCCESS) {
-    result = SetNamedSecurityInfoW(const_cast<LPWSTR>(runtime_root.c_str()), SE_FILE_OBJECT,
+    result = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
         DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
         nullptr, nullptr, updated_dacl, nullptr);
   }
   if (updated_dacl != nullptr) LocalFree(updated_dacl);
   LocalFree(descriptor);
   if (result != ERROR_SUCCESS) throw_last_error("grant runtime access", result);
+}
+
+static void grant_runtime_read_execute(const fs::path& runtime_root, PSID app_container_sid) {
+  grant_path_read_execute(
+      runtime_root, app_container_sid, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
+  for (const auto& entry : fs::recursive_directory_iterator(runtime_root)) {
+    grant_path_read_execute(entry.path(), app_container_sid,
+        entry.is_directory() ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE);
+  }
 }
 
 static std::wstring quote(const std::wstring& value) {
