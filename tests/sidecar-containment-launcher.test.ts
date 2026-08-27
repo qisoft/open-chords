@@ -38,6 +38,17 @@ it("allows required helpers only inside the inherited AppContainer and job", () 
   expect(source).not.toContain("CREATE_BREAKAWAY_FROM_JOB");
 });
 
+it("releases the Windows attribute list at every initialized failure seam", () => {
+  const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
+  const firstUpdateFailure = source.slice(
+    source.indexOf("if (!UpdateProcThreadAttribute(attributes"),
+    source.indexOf("STARTUPINFOEXW startup"),
+  );
+
+  expect(firstUpdateFailure).toContain("DeleteProcThreadAttributeList(attributes);");
+  expect(firstUpdateFailure).toContain("HeapFree(GetProcessHeap(), 0, attributes);");
+});
+
 it("makes Windows AppContainer profile destruction idempotent", () => {
   const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
 

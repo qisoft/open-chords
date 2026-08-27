@@ -270,10 +270,17 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   InitializeProcThreadAttributeList(nullptr, 4, 0, &attribute_size);
   auto attributes = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
       HeapAlloc(GetProcessHeap(), 0, attribute_size));
-  if (attributes == nullptr ||
-      !InitializeProcThreadAttributeList(attributes, 4, 0, &attribute_size) ||
-      !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+  if (attributes == nullptr) {
+    close_job(job); FreeSid(sid); throw std::runtime_error("security capabilities allocation");
+  }
+  if (!InitializeProcThreadAttributeList(attributes, 4, 0, &attribute_size)) {
+    HeapFree(GetProcessHeap(), 0, attributes);
+    close_job(job); FreeSid(sid); throw std::runtime_error("security capabilities");
+  }
+  if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
           &capabilities, sizeof(capabilities), nullptr, nullptr)) {
+    DeleteProcThreadAttributeList(attributes);
+    HeapFree(GetProcessHeap(), 0, attributes);
     close_job(job); FreeSid(sid); throw std::runtime_error("security capabilities");
   }
   STARTUPINFOEXW startup{};
