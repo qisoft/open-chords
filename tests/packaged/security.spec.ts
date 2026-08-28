@@ -289,8 +289,9 @@ async function waitForApplicationExit(
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      application.kill();
-      reject(new Error("Packaged lifecycle proof did not exit"));
+      void stopApplication(application).finally(() => {
+        reject(new Error("Packaged lifecycle proof did not exit"));
+      });
     }, timeoutMs);
     application.once("error", (error) => {
       clearTimeout(timeout);

@@ -57,3 +57,14 @@ it("preserves a safe sidecar process marker during adversarial probes", () => {
     "session_sidecar_runtime_root_permission_denied",
   );
 });
+
+it.each([
+  "adversarial_launch_failed",
+  "adversarial_output_failed",
+  "adversarial_output_invalid",
+  "adversarial_evidence_invalid",
+] as const)("preserves the adversarial stage marker %s for generic failures", (stage) => {
+  const { sessionFailureCode } = packagedProof();
+
+  expect(sessionFailureCode(stage, new Error("private diagnostic"))).toBe(stage);
+});

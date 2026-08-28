@@ -44,6 +44,7 @@ const SensitiveSurfacesSchema = z.object({
 
 const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_probe_failed",
+  "adversarial_evidence_invalid",
   "adversarial_environment_isolation_failed",
   "adversarial_environment_redirect_appdata_failed",
   "adversarial_environment_redirect_home_failed",
@@ -64,7 +65,10 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "adversarial_helper_permission_denied_unreadable",
   "adversarial_helper_timeout",
   "adversarial_link_failed",
+  "adversarial_launch_failed",
   "adversarial_network_failed",
+  "adversarial_output_failed",
+  "adversarial_output_invalid",
   "adversarial_path_failed",
   "adversarial_process_failed",
   "adversarial_runtime_mutation_failed",
@@ -385,6 +389,7 @@ async function runAdversarialContainmentProbe(
   const server = createServer((socket) => socket.destroy());
   let process: Awaited<ReturnType<ReturnType<typeof createLauncher>["launch"]>> | undefined;
   let proofFailure: { cause: unknown } | undefined;
+  let stage: PackagedProofFailureCode = "adversarial_probe_failed";
   try {
     await new Promise<void>((resolveListen, reject) => {
       server.once("error", reject);
@@ -454,15 +459,18 @@ async function runAdversarialContainmentProbe(
         sensitivePaths: sentinels.paths,
       }),
     );
+    stage = "adversarial_launch_failed";
     process = await createLauncher([`--containment-probe=${plan}`]).launch(
       request,
       AbortSignal.timeout(15_000),
     );
+    stage = "adversarial_output_failed";
     let output = Buffer.alloc(0);
     for await (const chunk of process.stdout) {
       output = Buffer.concat([output, chunk]);
       if (output.byteLength > 64 * 1024) throw new Error("Containment probe output is oversized");
     }
+    stage = "adversarial_output_invalid";
     const rawEvidence: unknown = JSON.parse(output.toString("utf8"));
     const probeError = z
       .object({
@@ -478,6 +486,7 @@ async function runAdversarialContainmentProbe(
     if (probeError.success) {
       throw new PackagedProofFailure(`adversarial_probe_${probeError.data.probeError}`);
     }
+    stage = "adversarial_evidence_invalid";
     const evidence = z
       .object({
         controlHandleClosed: z.boolean(),
@@ -510,6 +519,7 @@ async function runAdversarialContainmentProbe(
         shellEscapeBlocked: z.boolean(),
       })
       .parse(rawEvidence);
+    stage = "adversarial_probe_failed";
     requireAdversarial(evidence.controlHandleClosed, "adversarial_protocol_failed");
     requireAdversarial(evidence.environmentIsolated, "adversarial_environment_isolation_failed");
     const requiredRedirects =
@@ -556,7 +566,12 @@ async function runAdversarialContainmentProbe(
       "adversarial_shell_failed",
     );
   } catch (cause) {
-    proofFailure = { cause };
+    proofFailure = {
+      cause:
+        packagedProofFailureCode(cause) === "proof_failed"
+          ? new PackagedProofFailure(sessionFailureCode(stage, cause))
+          : cause,
+    };
   }
   const cleanupErrors: unknown[] = [];
   try {
