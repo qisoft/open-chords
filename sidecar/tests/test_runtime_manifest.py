@@ -242,7 +242,7 @@ class RuntimeManifestTests(unittest.TestCase):
 
             self.assertEqual(runtime.manifest_hash, expected_hash)
             self.assertEqual(runtime.platform_profile, "darwin-arm64-test")
-            self.assertEqual(runtime.toolchain.ffmpeg, ffmpeg.resolve())
+            self.assertTrue(os.path.samefile(runtime.toolchain.ffmpeg, ffmpeg))
 
             ffmpeg.write_bytes(b"changed")
             with self.assertRaisesRegex(RuntimeManifestError, "hash mismatch"):
