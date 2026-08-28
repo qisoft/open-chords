@@ -256,7 +256,7 @@ async function readEvidence(child: ChildProcess): Promise<NativeContainmentEvide
     const onError = (error: Error) => finish(error);
     const timer = setTimeout(
       () => finish(new SidecarSessionError("launch_failure", "Containment setup timed out")),
-      5_000,
+      15_000,
     );
     control.on("data", onData);
     control.once("end", onEnd);

@@ -16,6 +16,7 @@ from .protocol import FrozenRuntime
 MANIFEST_NAME: Final = "runtime-manifest.json"
 MAX_MANIFEST_BYTES: Final = 4 * 1024 * 1024
 WINDOWS_FILE_FLAG_BACKUP_SEMANTICS: Final = 0x02000000
+WINDOWS_FILE_NAME_OPENED: Final = 0x00000008
 WINDOWS_FILE_SHARE_ALL: Final = 0x00000001 | 0x00000002 | 0x00000004
 WINDOWS_OPEN_EXISTING: Final = 3
 T = TypeVar("T")
@@ -251,7 +252,12 @@ def _resolve_windows_path(
         size = 32_768
         while True:
             buffer = ctypes.create_unicode_buffer(size)
-            length = kernel32.GetFinalPathNameByHandleW(handle, buffer, size, 0)
+            # The native broker has already rejected reparse points and protected the
+            # staged tree. FILE_NAME_OPENED avoids re-walking shared ancestors that
+            # the exact AppContainer SID intentionally cannot enumerate.
+            length = kernel32.GetFinalPathNameByHandleW(
+                handle, buffer, size, WINDOWS_FILE_NAME_OPENED
+            )
             if length == 0:
                 error = ctypes.WinError(ctypes.get_last_error())
                 error.filename = absolute

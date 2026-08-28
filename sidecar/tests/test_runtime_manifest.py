@@ -10,6 +10,7 @@ from sidecar.open_chords_analysis.runtime_manifest import (
     RuntimeManifestError,
     RuntimeManifestPermissionError,
     WINDOWS_FILE_FLAG_BACKUP_SEMANTICS,
+    WINDOWS_FILE_NAME_OPENED,
     WINDOWS_FILE_SHARE_ALL,
     WINDOWS_OPEN_EXISTING,
     _permission_checked,
@@ -61,6 +62,7 @@ class _FakeKernel32:
         self.required_sizes = required_sizes or []
         self.create_calls: list[tuple[object, ...]] = []
         self.buffer_sizes: list[int] = []
+        self.final_path_flags: list[int] = []
         self.closed_handles: list[int] = []
 
     def CreateFileW(self, *args: object) -> int:
@@ -68,10 +70,11 @@ class _FakeKernel32:
         return self.open_handle
 
     def GetFinalPathNameByHandleW(
-        self, _handle: int, buffer: _FakeBuffer, size: int, _flags: int
+        self, _handle: int, buffer: _FakeBuffer, size: int, flags: int
     ) -> int:
         index = len(self.buffer_sizes)
         self.buffer_sizes.append(size)
+        self.final_path_flags.append(flags)
         if index < len(self.required_sizes):
             return self.required_sizes[index]
         value = self.final_paths[index]
@@ -135,6 +138,10 @@ class RuntimeManifestTests(unittest.TestCase):
             ),
         )
         self.assertEqual(kernel32.buffer_sizes, [32_768, 40_001])
+        self.assertEqual(
+            kernel32.final_path_flags,
+            [WINDOWS_FILE_NAME_OPENED, WINDOWS_FILE_NAME_OPENED],
+        )
         self.assertEqual(kernel32.closed_handles, [kernel32.handle])
 
     def test_windows_shared_handle_resolver_reports_open_failure(self) -> None:
