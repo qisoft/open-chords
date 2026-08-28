@@ -149,6 +149,7 @@ it("temporarily grants only the exact profile SID traversal on shared ancestors"
   expect(source).toContain("REVOKE_ACCESS");
   expect(source).toContain('L"Local\\\\OpenChords.ContainmentRuntime." + profile');
   expect(source).toContain("ScopedProfileLaunchLock profile_lock(profile)");
+  expect(source).toContain("runtime_root.parent_path().parent_path().parent_path()");
   expect(source).toContain("granted_[index - 1] = false");
   expect(source).toContain("revoke_profile_ancestor_traverse(profile, sid)");
   expect(source).toContain("traverse_removed && profile_removed && runtime_removed");
