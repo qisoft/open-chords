@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 from collections.abc import Callable
 from typing import Final, TypeVar
@@ -14,6 +15,9 @@ from .protocol import FrozenRuntime
 
 MANIFEST_NAME: Final = "runtime-manifest.json"
 MAX_MANIFEST_BYTES: Final = 4 * 1024 * 1024
+WINDOWS_FILE_FLAG_BACKUP_SEMANTICS: Final = 0x02000000
+WINDOWS_FILE_SHARE_ALL: Final = 0x00000001 | 0x00000002 | 0x00000004
+WINDOWS_OPEN_EXISTING: Final = 3
 T = TypeVar("T")
 
 
@@ -75,7 +79,7 @@ def write_runtime_manifest(
 def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
     """Verify the complete runtime before exposing its protocol handshake."""
 
-    runtime_root = _permission_checked("root", lambda: runtime_root.resolve(strict=True))
+    runtime_root = _resolve_runtime_path(runtime_root, stage="root")
     manifest_path = runtime_root / MANIFEST_NAME
     if _permission_checked("manifest", manifest_path.stat).st_size > MAX_MANIFEST_BYTES:
         raise RuntimeManifestError("frozen runtime manifest exceeds four MiB")
@@ -186,13 +190,85 @@ def _canonical_json(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode()
 
 
-def _resolve_runtime_path(path: Path) -> Path:
+def _resolve_runtime_path(path: Path, *, stage: str = "entry_metadata") -> Path:
     try:
-        return path.resolve(strict=True)
+        return _resolve_windows_path(path) if os.name == "nt" else path.resolve(strict=True)
     except PermissionError as error:
-        raise RuntimeManifestPermissionError("entry_metadata") from error
+        raise RuntimeManifestPermissionError(stage) from error
     except (OSError, RuntimeError) as error:
         raise RuntimeManifestError("frozen runtime path could not be resolved") from error
+
+
+@lru_cache(maxsize=1)
+def _windows_path_api() -> tuple[object, object]:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetFinalPathNameByHandleW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return ctypes, kernel32
+
+
+def _resolve_windows_path(
+    path: Path, *, api: tuple[object, object] | None = None
+) -> Path:
+    """Resolve a Windows path without CPython's exclusive directory handle."""
+
+    ctypes, kernel32 = api if api is not None else _windows_path_api()
+    absolute = os.path.abspath(path)
+    handle = kernel32.CreateFileW(
+        absolute,
+        0,
+        WINDOWS_FILE_SHARE_ALL,
+        None,
+        WINDOWS_OPEN_EXISTING,
+        WINDOWS_FILE_FLAG_BACKUP_SEMANTICS,
+        None,
+    )
+    if handle == ctypes.c_void_p(-1).value:
+        error = ctypes.WinError(ctypes.get_last_error())
+        error.filename = absolute
+        raise error
+    try:
+        size = 32_768
+        while True:
+            buffer = ctypes.create_unicode_buffer(size)
+            length = kernel32.GetFinalPathNameByHandleW(handle, buffer, size, 0)
+            if length == 0:
+                error = ctypes.WinError(ctypes.get_last_error())
+                error.filename = absolute
+                raise error
+            if length < size:
+                return Path(_strip_windows_extended_prefix(buffer.value))
+            size = length + 1
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _strip_windows_extended_prefix(path: str) -> str:
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    if path.startswith("\\\\?\\"):
+        return path[4:]
+    return path
 
 
 def _permission_checked(stage: str, operation: Callable[[], T]) -> T:

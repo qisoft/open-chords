@@ -9,14 +9,152 @@ from unittest.mock import patch
 from sidecar.open_chords_analysis.runtime_manifest import (
     RuntimeManifestError,
     RuntimeManifestPermissionError,
+    WINDOWS_FILE_FLAG_BACKUP_SEMANTICS,
+    WINDOWS_FILE_SHARE_ALL,
+    WINDOWS_OPEN_EXISTING,
     _permission_checked,
+    _resolve_runtime_path,
+    _resolve_windows_path,
+    _strip_windows_extended_prefix,
     load_frozen_runtime,
     write_runtime_manifest,
 )
 from sidecar.open_chords_analysis.__main__ import _runtime_permission_failure_code
 
 
+class _FakeBuffer:
+    def __init__(self) -> None:
+        self.value = ""
+
+
+class _FakeCtypes:
+    @staticmethod
+    def c_void_p(value: int) -> object:
+        return type("FakePointer", (), {"value": value})()
+
+    @staticmethod
+    def create_unicode_buffer(_size: int) -> _FakeBuffer:
+        return _FakeBuffer()
+
+    @staticmethod
+    def get_last_error() -> int:
+        return 5
+
+    @staticmethod
+    def WinError(code: int) -> PermissionError:
+        error = PermissionError(code, "access denied")
+        error.winerror = code
+        return error
+
+
+class _FakeKernel32:
+    def __init__(
+        self,
+        *,
+        final_paths: list[str | None] | None = None,
+        open_handle: int | None = None,
+        required_sizes: list[int] | None = None,
+    ) -> None:
+        self.handle = 73
+        self.open_handle = self.handle if open_handle is None else open_handle
+        self.final_paths = final_paths or [r"\\?\C:\runtime"]
+        self.required_sizes = required_sizes or []
+        self.create_calls: list[tuple[object, ...]] = []
+        self.buffer_sizes: list[int] = []
+        self.closed_handles: list[int] = []
+
+    def CreateFileW(self, *args: object) -> int:
+        self.create_calls.append(args)
+        return self.open_handle
+
+    def GetFinalPathNameByHandleW(
+        self, _handle: int, buffer: _FakeBuffer, size: int, _flags: int
+    ) -> int:
+        index = len(self.buffer_sizes)
+        self.buffer_sizes.append(size)
+        if index < len(self.required_sizes):
+            return self.required_sizes[index]
+        value = self.final_paths[index]
+        if value is None:
+            return 0
+        buffer.value = value
+        return len(value)
+
+    def CloseHandle(self, handle: int) -> bool:
+        self.closed_handles.append(handle)
+        return True
+
+
 class RuntimeManifestTests(unittest.TestCase):
+    def test_strips_only_windows_extended_path_prefixes(self) -> None:
+        self.assertEqual(
+            _strip_windows_extended_prefix(r"\\?\C:\runtime"), r"C:\runtime"
+        )
+        self.assertEqual(
+            _strip_windows_extended_prefix(r"\\?\UNC\server\share\runtime"),
+            r"\\server\share\runtime",
+        )
+        self.assertEqual(
+            _strip_windows_extended_prefix(r"C:\runtime"), r"C:\runtime"
+        )
+
+    def test_windows_runtime_resolution_uses_the_shared_handle_resolver(self) -> None:
+        path = Path("runtime")
+        resolved = Path("resolved-runtime")
+        with (
+            patch("sidecar.open_chords_analysis.runtime_manifest.os.name", "nt"),
+            patch(
+                "sidecar.open_chords_analysis.runtime_manifest._resolve_windows_path",
+                return_value=resolved,
+            ) as resolve_windows,
+        ):
+            self.assertEqual(_resolve_runtime_path(path, stage="root"), resolved)
+
+        resolve_windows.assert_called_once_with(path)
+
+    def test_windows_shared_handle_resolver_uses_exact_flags_and_closes(self) -> None:
+        ctypes = _FakeCtypes()
+        kernel32 = _FakeKernel32(
+            final_paths=[None, r"\\?\C:\runtime"], required_sizes=[40_000]
+        )
+
+        resolved = _resolve_windows_path(
+            Path("runtime"), api=(ctypes, kernel32)
+        )
+
+        self.assertEqual(resolved, Path(r"C:\runtime"))
+        self.assertEqual(
+            kernel32.create_calls[0][1:],
+            (
+                0,
+                WINDOWS_FILE_SHARE_ALL,
+                None,
+                WINDOWS_OPEN_EXISTING,
+                WINDOWS_FILE_FLAG_BACKUP_SEMANTICS,
+                None,
+            ),
+        )
+        self.assertEqual(kernel32.buffer_sizes, [32_768, 40_001])
+        self.assertEqual(kernel32.closed_handles, [kernel32.handle])
+
+    def test_windows_shared_handle_resolver_reports_open_failure(self) -> None:
+        ctypes = _FakeCtypes()
+        kernel32 = _FakeKernel32(open_handle=ctypes.c_void_p(-1).value)
+
+        with self.assertRaises(PermissionError):
+            _resolve_windows_path(Path("runtime"), api=(ctypes, kernel32))
+
+        self.assertEqual(kernel32.closed_handles, [])
+
+    def test_windows_shared_handle_resolver_closes_after_final_path_failure(self) -> None:
+        ctypes = _FakeCtypes()
+        kernel32 = _FakeKernel32(final_paths=[None], required_sizes=[0])
+
+        with self.assertRaises(PermissionError):
+            _resolve_windows_path(Path("runtime"), api=(ctypes, kernel32))
+
+        self.assertEqual(kernel32.closed_handles, [kernel32.handle])
+
     def test_preserves_only_the_runtime_permission_operation_category(self) -> None:
         def denied() -> None:
             raise PermissionError(13, "private path", "/private/source")
