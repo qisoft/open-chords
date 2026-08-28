@@ -327,7 +327,7 @@ export async function runWithPackagedSessionCleanup(
   );
 }
 
-function sessionFailureCode(
+export function sessionFailureCode(
   stage: PackagedProofFailureCode,
   cause: unknown,
 ): PackagedProofFailureCode {
@@ -349,12 +349,14 @@ function sessionFailureCode(
       : "session_remote_failure";
   }
   if (
-    stage === "session_probe_failed" &&
     cause instanceof SidecarSessionError &&
     cause.code === "process_failure" &&
     processFailureCode?.success === true
   ) {
     return `session_${processFailureCode.data}`;
+  }
+  if (cause instanceof SidecarSessionError && cause.code === "process_failure") {
+    return "session_process_failure";
   }
   if (stage === "session_probe_failed" && cause instanceof SidecarSessionError) {
     return `session_${cause.code}`;

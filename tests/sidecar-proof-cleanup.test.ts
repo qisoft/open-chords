@@ -46,3 +46,14 @@ it("preserves a packaged session primary failure alongside dispose failure", asy
   expect(failure.errors).toContain(primary);
   expect(packagedProofFailureCode(failure)).toBe("proof_and_cleanup_failed");
 });
+
+it("preserves a safe sidecar process marker during adversarial probes", () => {
+  const { sessionFailureCode } = packagedProof();
+  const failure = new SidecarSessionError("process_failure", "sidecar exited", {
+    remoteCode: "sidecar_runtime_root_permission_denied",
+  });
+
+  expect(sessionFailureCode("adversarial_probe_failed", failure)).toBe(
+    "session_sidecar_runtime_root_permission_denied",
+  );
+});
