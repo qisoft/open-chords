@@ -177,7 +177,9 @@ class ScopedAncestorTraverse {
  public:
   ScopedAncestorTraverse(const fs::path& runtime_root, PSID app_container_sid)
       : sid_storage_(GetLengthSid(app_container_sid)),
-        paths_{runtime_root.parent_path().parent_path().parent_path(),
+        paths_{runtime_root.parent_path().parent_path().parent_path().parent_path().parent_path(),
+            runtime_root.parent_path().parent_path().parent_path().parent_path(),
+            runtime_root.parent_path().parent_path().parent_path(),
             runtime_root.parent_path().parent_path(), runtime_root.parent_path()},
         granted_(paths_.size(), false) {
     sid_ = sid_storage_.data();
@@ -236,7 +238,9 @@ static bool revoke_profile_ancestor_traverse(
   }
   for (const fs::path& path :
       {runtime_root.parent_path(), runtime_root.parent_path().parent_path(),
-          runtime_root.parent_path().parent_path().parent_path()}) {
+          runtime_root.parent_path().parent_path().parent_path(),
+          runtime_root.parent_path().parent_path().parent_path().parent_path(),
+          runtime_root.parent_path().parent_path().parent_path().parent_path().parent_path()}) {
     try {
       const DWORD attributes = GetFileAttributesW(path.c_str());
       if (attributes == INVALID_FILE_ATTRIBUTES) {
