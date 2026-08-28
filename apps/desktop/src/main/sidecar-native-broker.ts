@@ -270,7 +270,7 @@ async function readEvidence(child: ChildProcess): Promise<NativeContainmentEvide
       throw new SidecarSessionError(
         "launch_failure",
         `Native containment rejected launch: ${failure}`,
-        { cause },
+        { cause, remoteCode: failure },
       );
     }
     throw new SidecarSessionError("launch_failure", "Containment evidence is invalid", { cause });

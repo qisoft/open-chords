@@ -139,6 +139,7 @@ type SidecarProcessFailureCode = (typeof SIDECAR_PROCESS_FAILURE_CODES)[number];
 const SidecarProcessFailureCodeSchema = z.enum(SIDECAR_PROCESS_FAILURE_CODES);
 type PackagedProofFailureCode =
   | (typeof PACKAGED_PROOF_FAILURE_CODES)[number]
+  | `adversarial_containment_setup_failed_${string}`
   | `session_${SidecarSessionErrorCode}`
   | `session_${SessionRemoteFailureCode}`
   | `session_${SidecarProcessFailureCode}`;
@@ -344,6 +345,14 @@ export function sessionFailureCode(
       ? SidecarProcessFailureCodeSchema.safeParse(cause.remoteCode)
       : undefined;
   if (
+    stage === "adversarial_launch_failed" &&
+    cause instanceof SidecarSessionError &&
+    cause.code === "launch_failure" &&
+    isNativeContainmentFailureCode(cause.remoteCode)
+  ) {
+    return `adversarial_${cause.remoteCode}`;
+  }
+  if (
     stage === "session_probe_failed" &&
     cause instanceof SidecarSessionError &&
     cause.code === "remote_failure"
@@ -366,6 +375,16 @@ export function sessionFailureCode(
     return `session_${cause.code}`;
   }
   return stage;
+}
+
+function isNativeContainmentFailureCode(
+  value: string | undefined,
+): value is `containment_setup_failed_${string}` {
+  return (
+    value !== undefined &&
+    value.length <= 128 &&
+    /^containment_setup_failed_[a-z0-9_-]+$/u.test(value)
+  );
 }
 
 async function runAdversarialContainmentProbe(

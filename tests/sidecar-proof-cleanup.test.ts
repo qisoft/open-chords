@@ -68,3 +68,25 @@ it.each([
 
   expect(sessionFailureCode(stage, new Error("private diagnostic"))).toBe(stage);
 });
+
+it("preserves a validated native containment launch marker", () => {
+  const { sessionFailureCode } = packagedProof();
+  const failure = new SidecarSessionError("launch_failure", "native launch rejected", {
+    remoteCode: "containment_setup_failed_create_contained_process-5",
+  });
+
+  expect(sessionFailureCode("adversarial_launch_failed", failure)).toBe(
+    "adversarial_containment_setup_failed_create_contained_process-5",
+  );
+});
+
+it("does not expose an unvalidated native containment launch marker", () => {
+  const { sessionFailureCode } = packagedProof();
+  const failure = new SidecarSessionError("launch_failure", "native launch rejected", {
+    remoteCode: "private diagnostic",
+  });
+
+  expect(sessionFailureCode("adversarial_launch_failed", failure)).toBe(
+    "adversarial_launch_failed",
+  );
+});
