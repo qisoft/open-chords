@@ -622,8 +622,10 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     FreeSid(sid);
     throw std::runtime_error("job allowlist");
   }
-  std::wstring command;
-  for (int index = separator + 1; index < argc; index += 1) {
+  std::wstring command = quote(argv[separator + 1]);
+  command += L" ";
+  command += quote(L"--contained-workspace=" + workspace);
+  for (int index = separator + 2; index < argc; index += 1) {
     if (!command.empty()) command += L" ";
     command += quote(argv[index]);
   }
@@ -647,7 +649,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   bool created = CreateProcessW(executable.c_str(), mutable_command.data(), nullptr, nullptr, TRUE,
       CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT |
           EXTENDED_STARTUPINFO_PRESENT,
-      environment.data(), workspace.c_str(), &startup.StartupInfo, &process);
+      environment.data(), runtime_root.c_str(), &startup.StartupInfo, &process);
   DWORD create_error = created ? ERROR_SUCCESS : GetLastError();
   DeleteProcThreadAttributeList(attributes);
   HeapFree(GetProcessHeap(), 0, attributes);

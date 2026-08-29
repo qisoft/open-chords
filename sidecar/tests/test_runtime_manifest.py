@@ -14,6 +14,7 @@ from sidecar.open_chords_analysis.runtime_manifest import (
     WINDOWS_FILE_SHARE_ALL,
     WINDOWS_OPEN_EXISTING,
     _permission_checked,
+    _resolve_runtime_entry,
     _resolve_runtime_path,
     _resolve_windows_path,
     _runtime_root_path,
@@ -164,6 +165,30 @@ class RuntimeManifestTests(unittest.TestCase):
 
         self.assertEqual(resolved, Path(os.path.abspath(runtime_root)))
         resolve.assert_not_called()
+
+    def test_contained_windows_entries_open_relative_to_the_runtime_root(self) -> None:
+        runtime_root = Path("runtime-root")
+        entry = runtime_root / "_internal" / "python313.dll"
+        resolved = Path("resolved-entry")
+        with (
+            patch("sidecar.open_chords_analysis.runtime_manifest.os.name", "nt"),
+            patch(
+                "sidecar.open_chords_analysis.runtime_manifest._resolve_windows_path",
+                return_value=resolved,
+            ) as resolve_windows,
+        ):
+            self.assertEqual(
+                _resolve_runtime_entry(
+                    entry,
+                    runtime_root,
+                    windows_runtime_is_current_directory=True,
+                ),
+                resolved,
+            )
+
+        resolve_windows.assert_called_once_with(
+            Path("_internal") / "python313.dll", preserve_relative=True
+        )
 
     def test_windows_shared_handle_resolver_closes_after_final_path_failure(self) -> None:
         ctypes = _FakeCtypes()

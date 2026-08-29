@@ -16,6 +16,14 @@ from sidecar.open_chords_analysis.__main__ import main
 
 
 def frozen_main() -> None:
+    contained_workspace: Path | None = None
+    if len(sys.argv) > 1 and sys.argv[1].startswith("--contained-workspace="):
+        contained_workspace = Path(sys.argv.pop(1).split("=", 1)[1])
+    if contained_workspace is not None and sys.argv[1:]:
+        # Probe modes intentionally exercise workspace-relative behavior. The
+        # protocol session keeps the native-validated runtime as cwd while
+        # receiving the writable workspace explicitly below.
+        os.chdir(contained_workspace)
     if sys.argv[1:] == ["--containment-child-smoke"]:
         return
     if len(sys.argv) == 2 and sys.argv[1].startswith("--containment-probe="):
@@ -115,7 +123,10 @@ def frozen_main() -> None:
         return
     if sys.argv[1:]:
         raise SystemExit("unsupported frozen sidecar argument")
-    main()
+    main(
+        workspace=contained_workspace,
+        windows_runtime_is_current_directory=contained_workspace is not None,
+    )
 
 
 if __name__ == "__main__":

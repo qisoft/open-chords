@@ -77,7 +77,11 @@ def write_runtime_manifest(
     return hashlib.sha256(content).hexdigest()
 
 
-def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
+def load_frozen_runtime(
+    runtime_root: Path,
+    *,
+    windows_runtime_is_current_directory: bool = False,
+) -> FrozenRuntime:
     """Verify the complete runtime before exposing its protocol handshake."""
 
     # The Windows native launcher has already canonicalized the exact staging
@@ -131,15 +135,21 @@ def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
             ):
                 raise RuntimeManifestError("frozen runtime symbolic link is invalid")
             target = _permission_checked("entry_metadata", lambda: os.readlink(candidate))
-            if target != entry["target"] or not _resolve_runtime_path(candidate).is_relative_to(
-                runtime_root
-            ):
+            if target != entry["target"] or not _resolve_runtime_entry(
+                candidate,
+                runtime_root,
+                windows_runtime_is_current_directory=windows_runtime_is_current_directory,
+            ).is_relative_to(runtime_root):
                 raise RuntimeManifestError("frozen runtime symbolic link escaped its package")
             expected_paths.add(relative)
             continue
         if set(entry) != {"byteSize", "path", "sha256", "type"}:
             raise RuntimeManifestError("frozen runtime file entry is invalid")
-        resolved = _resolve_runtime_path(candidate)
+        resolved = _resolve_runtime_entry(
+            candidate,
+            runtime_root,
+            windows_runtime_is_current_directory=windows_runtime_is_current_directory,
+        )
         if (
             not resolved.is_relative_to(runtime_root)
             or not _permission_checked("entry_metadata", candidate.is_file)
@@ -210,6 +220,18 @@ def _runtime_root_path(path: Path, *, windows: bool | None = None) -> Path:
     return Path(os.path.abspath(path)) if windows else _resolve_runtime_path(path, stage="root")
 
 
+def _resolve_runtime_entry(
+    path: Path,
+    runtime_root: Path,
+    *,
+    windows_runtime_is_current_directory: bool = False,
+) -> Path:
+    if os.name == "nt" and windows_runtime_is_current_directory:
+        relative = path.relative_to(runtime_root)
+        return _resolve_windows_path(relative, preserve_relative=True)
+    return _resolve_runtime_path(path)
+
+
 @lru_cache(maxsize=1)
 def _windows_path_api() -> tuple[object, object]:
     import ctypes
@@ -239,14 +261,17 @@ def _windows_path_api() -> tuple[object, object]:
 
 
 def _resolve_windows_path(
-    path: Path, *, api: tuple[object, object] | None = None
+    path: Path,
+    *,
+    api: tuple[object, object] | None = None,
+    preserve_relative: bool = False,
 ) -> Path:
     """Resolve a Windows path without CPython's exclusive directory handle."""
 
     ctypes, kernel32 = api if api is not None else _windows_path_api()
-    absolute = os.path.abspath(path)
+    opened_path = os.fspath(path) if preserve_relative else os.path.abspath(path)
     handle = kernel32.CreateFileW(
-        absolute,
+        opened_path,
         0,
         WINDOWS_FILE_SHARE_ALL,
         None,
@@ -256,7 +281,7 @@ def _resolve_windows_path(
     )
     if handle == ctypes.c_void_p(-1).value:
         error = ctypes.WinError(ctypes.get_last_error())
-        error.filename = absolute
+        error.filename = opened_path
         raise error
     try:
         size = 32_768
@@ -270,7 +295,7 @@ def _resolve_windows_path(
             )
             if length == 0:
                 error = ctypes.WinError(ctypes.get_last_error())
-                error.filename = absolute
+                error.filename = opened_path
                 raise error
             if length < size:
                 return Path(_strip_windows_extended_prefix(buffer.value))

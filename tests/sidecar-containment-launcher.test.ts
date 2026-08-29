@@ -110,6 +110,26 @@ it("supplies the minimal sorted Windows and AppContainer environment", () => {
   expect(positions.every((position) => position >= 0)).toBe(true);
   expect(positions).toEqual([...positions].sort((left, right) => left - right));
   expect(source).toContain('append_variable(L"LOCALAPPDATA=" + workspace);');
+  expect(source).toContain('quote(L"--contained-workspace=" + workspace)');
+  expect(source).toContain(
+    "environment.data(), runtime_root.c_str(), &startup.StartupInfo, &process",
+  );
+});
+
+it("keeps the explicit workspace while resolving Windows runtime entries from its current root", () => {
+  const frozenEntry = readFileSync("sidecar/open_chords_analysis/frozen_entry.py", "utf8");
+  const main = readFileSync("sidecar/open_chords_analysis/__main__.py", "utf8");
+
+  expect(frozenEntry).toContain('sys.argv[1].startswith("--contained-workspace=")');
+  expect(frozenEntry).toContain("os.chdir(contained_workspace)");
+  expect(frozenEntry).toContain("workspace=contained_workspace");
+  expect(frozenEntry).toContain(
+    "windows_runtime_is_current_directory=contained_workspace is not None",
+  );
+  expect(main).toContain("workspace or Path.cwd()");
+  expect(main).toContain(
+    "windows_runtime_is_current_directory=windows_runtime_is_current_directory",
+  );
 });
 
 it("grants both Windows principals only their required runtime access", () => {

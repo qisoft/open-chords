@@ -21,7 +21,11 @@ def _runtime_permission_failure_code(error: PermissionError, runtime_root: Path)
     return "sidecar_runtime_file_permission_denied"
 
 
-def main() -> None:
+def main(
+    *,
+    workspace: Path | None = None,
+    windows_runtime_is_current_directory: bool = False,
+) -> None:
     freeze_support()
 
     import sys
@@ -31,9 +35,12 @@ def main() -> None:
 
         if not getattr(sys, "frozen", False):
             raise RuntimeError("source entry point is disabled")
-        runtime_root = Path(sys.executable).resolve().parent
+        runtime_root = Path(sys.executable).absolute().parent
         try:
-            runtime = load_frozen_runtime(runtime_root)
+            runtime = load_frozen_runtime(
+                runtime_root,
+                windows_runtime_is_current_directory=windows_runtime_is_current_directory,
+            )
         except RuntimeManifestPermissionError as error:
             permission_codes = {
                 "entry_content": "sidecar_runtime_entry_content_permission_denied",
@@ -53,7 +60,7 @@ def main() -> None:
                 f"{_runtime_permission_failure_code(error, runtime_root)}\n"
             )
             raise SystemExit(2) from None
-        serve_one_session(sys.stdin.buffer, sys.stdout.buffer, Path.cwd(), runtime)
+        serve_one_session(sys.stdin.buffer, sys.stdout.buffer, workspace or Path.cwd(), runtime)
     except Exception as error:
         if isinstance(error, PermissionError):
             failure_code = "sidecar_session_permission_denied"
