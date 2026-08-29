@@ -16,6 +16,7 @@ from .protocol import FrozenRuntime
 MANIFEST_NAME: Final = "runtime-manifest.json"
 MAX_MANIFEST_BYTES: Final = 4 * 1024 * 1024
 WINDOWS_FILE_FLAG_BACKUP_SEMANTICS: Final = 0x02000000
+WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT: Final = 0x00200000
 WINDOWS_FILE_NAME_OPENED: Final = 0x00000008
 WINDOWS_FILE_SHARE_ALL: Final = 0x00000001 | 0x00000002 | 0x00000004
 WINDOWS_OPEN_EXISTING: Final = 3
@@ -270,13 +271,19 @@ def _resolve_windows_path(
 
     ctypes, kernel32 = api if api is not None else _windows_path_api()
     opened_path = os.fspath(path) if preserve_relative else os.path.abspath(path)
+    flags = WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+    if preserve_relative:
+        # Native has just canonicalized every immutable runtime entry beneath
+        # its root. Keep a cheap per-entry access check without repeating the
+        # expensive final-name query inside the AppContainer.
+        flags |= WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
     handle = kernel32.CreateFileW(
         opened_path,
         0,
         WINDOWS_FILE_SHARE_ALL,
         None,
         WINDOWS_OPEN_EXISTING,
-        WINDOWS_FILE_FLAG_BACKUP_SEMANTICS,
+        flags,
         None,
     )
     if handle == ctypes.c_void_p(-1).value:
@@ -284,6 +291,8 @@ def _resolve_windows_path(
         error.filename = opened_path
         raise error
     try:
+        if preserve_relative:
+            return Path(os.path.abspath(opened_path))
         size = 32_768
         while True:
             buffer = ctypes.create_unicode_buffer(size)

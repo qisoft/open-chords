@@ -10,6 +10,7 @@ from sidecar.open_chords_analysis.runtime_manifest import (
     RuntimeManifestError,
     RuntimeManifestPermissionError,
     WINDOWS_FILE_FLAG_BACKUP_SEMANTICS,
+    WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
     WINDOWS_FILE_NAME_OPENED,
     WINDOWS_FILE_SHARE_ALL,
     WINDOWS_OPEN_EXISTING,
@@ -144,6 +145,25 @@ class RuntimeManifestTests(unittest.TestCase):
             kernel32.final_path_flags,
             [WINDOWS_FILE_NAME_OPENED, WINDOWS_FILE_NAME_OPENED],
         )
+        self.assertEqual(kernel32.closed_handles, [kernel32.handle])
+
+    def test_contained_windows_handle_avoids_final_name_rewalk(self) -> None:
+        ctypes = _FakeCtypes()
+        kernel32 = _FakeKernel32()
+        entry = Path("_internal") / "python313.dll"
+
+        resolved = _resolve_windows_path(
+            entry,
+            api=(ctypes, kernel32),
+            preserve_relative=True,
+        )
+
+        self.assertEqual(resolved, Path(os.path.abspath(entry)))
+        self.assertEqual(
+            kernel32.create_calls[0][5],
+            WINDOWS_FILE_FLAG_BACKUP_SEMANTICS | WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+        )
+        self.assertEqual(kernel32.final_path_flags, [])
         self.assertEqual(kernel32.closed_handles, [kernel32.handle])
 
     def test_windows_shared_handle_resolver_reports_open_failure(self) -> None:

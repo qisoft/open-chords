@@ -314,14 +314,25 @@ static bool is_strict_child(const fs::path& root, const fs::path& child) {
   return *relative.begin() != L"..";
 }
 
+static bool canonical_path_is_strict_child(
+    const fs::path& canonical_root, const fs::path& canonical_child) {
+  fs::path relative = canonical_child.lexically_relative(canonical_root);
+  if (relative.empty() || relative.is_absolute()) return false;
+  return *relative.begin() != L"..";
+}
+
 static void reject_reparse_points(const fs::path& root) {
   if ((GetFileAttributesW(root.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
     throw std::runtime_error("reparse root");
   }
+  const fs::path canonical_root = fs::canonical(root);
   for (const auto& entry : fs::recursive_directory_iterator(root)) {
     if (entry.is_symlink() ||
         (GetFileAttributesW(entry.path().c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
       throw std::runtime_error("reparse entry");
+    }
+    if (!canonical_path_is_strict_child(canonical_root, fs::canonical(entry.path()))) {
+      throw std::runtime_error("runtime entry escaped root");
     }
   }
 }

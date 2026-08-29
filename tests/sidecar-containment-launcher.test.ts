@@ -93,6 +93,18 @@ it("makes Windows AppContainer profile destruction idempotent", () => {
   expect(source).toContain("reject_reparse_points(root);");
 });
 
+it("canonicalizes every staged runtime entry before starting the AppContainer", () => {
+  const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
+
+  expect(source).toContain("const fs::path canonical_root = fs::canonical(root)");
+  expect(source).toContain("fs::canonical(entry.path())");
+  expect(source).toContain("canonical_path_is_strict_child");
+  expect(source).toContain('throw std::runtime_error("runtime entry escaped root")');
+  expect(source.indexOf("reject_reparse_points(runtime_root);")).toBeLessThan(
+    source.indexOf("CreateProcessW("),
+  );
+});
+
 it("supplies the minimal sorted Windows and AppContainer environment", () => {
   const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
   const entries = [
