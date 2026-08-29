@@ -97,6 +97,7 @@ it("canonicalizes every staged runtime entry before starting the AppContainer", 
   const source = readFileSync("native/windows/containment-launcher.cpp", "utf8");
 
   expect(source).toContain("const fs::path canonical_root = fs::canonical(root)");
+  expect(source).toContain("attributes & FILE_ATTRIBUTE_DIRECTORY");
   expect(source).toContain("fs::canonical(entry.path())");
   expect(source).toContain("canonical_path_is_strict_child");
   expect(source).toContain('throw std::runtime_error("runtime entry escaped root")');

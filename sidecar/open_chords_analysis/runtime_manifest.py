@@ -198,6 +198,7 @@ def load_frozen_runtime(
         toolchain=NativeToolchain(
             ffmpeg=tools / f"ffmpeg{executable_suffix}",
             ffprobe=tools / f"ffprobe{executable_suffix}",
+            verified_runtime_root=runtime_root,
         ),
     )
 

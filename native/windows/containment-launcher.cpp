@@ -327,11 +327,13 @@ static void reject_reparse_points(const fs::path& root) {
   }
   const fs::path canonical_root = fs::canonical(root);
   for (const auto& entry : fs::recursive_directory_iterator(root)) {
-    if (entry.is_symlink() ||
-        (GetFileAttributesW(entry.path().c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+    const DWORD attributes = GetFileAttributesW(entry.path().c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || entry.is_symlink() ||
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
       throw std::runtime_error("reparse entry");
     }
-    if (!canonical_path_is_strict_child(canonical_root, fs::canonical(entry.path()))) {
+    if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+        !canonical_path_is_strict_child(canonical_root, fs::canonical(entry.path()))) {
       throw std::runtime_error("runtime entry escaped root");
     }
   }

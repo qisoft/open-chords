@@ -24,6 +24,7 @@ from sidecar.open_chords_analysis.canonical_decode import (
     _NativeToolCleanupError,
     _NativeToolOutputLimitError,
     _NativeToolTimeoutError,
+    _exact_executable,
     _probe_audio,
     _run_tool,
     _sanitize_external_tool_runtime,
@@ -32,6 +33,22 @@ from sidecar.open_chords_analysis.canonical_decode import (
 
 
 class CanonicalDecodeTests(unittest.TestCase):
+    def test_manifest_verified_tool_reuses_the_runtime_path_proof(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-verified-tool-") as temporary:
+            runtime_root = Path(temporary)
+            tool = runtime_root / "tools" / "ffmpeg.exe"
+            tool.parent.mkdir()
+            tool.write_bytes(b"tool")
+
+            with patch.object(
+                Path,
+                "resolve",
+                side_effect=AssertionError("must not resolve a verified tool again"),
+            ) as resolve:
+                self.assertEqual(_exact_executable(tool, runtime_root), tool)
+
+            resolve.assert_not_called()
+
     def test_native_tools_receive_eof_without_opening_the_null_device(self) -> None:
         stdin = io.BytesIO()
         process = SimpleNamespace(

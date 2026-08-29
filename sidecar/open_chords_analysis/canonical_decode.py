@@ -100,6 +100,7 @@ class _NativeToolCleanupError(RuntimeError):
 class NativeToolchain:
     ffmpeg: Path
     ffprobe: Path
+    verified_runtime_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -142,8 +143,8 @@ def decode_canonical(
             failure_code = CanonicalDecodeFailureCode.CLEANUP
             raise cleanup_error
         input_path = _workspace_file(workspace, INPUT_PATH, must_exist=True)
-        ffmpeg = _exact_executable(toolchain.ffmpeg)
-        ffprobe = _exact_executable(toolchain.ffprobe)
+        ffmpeg = _exact_executable(toolchain.ffmpeg, toolchain.verified_runtime_root)
+        ffprobe = _exact_executable(toolchain.ffprobe, toolchain.verified_runtime_root)
         input_descriptor = _file_descriptor(workspace, input_path)
         cancellation = cancellation or threading.Event()
         _raise_if_cancelled(cancellation)
@@ -563,9 +564,13 @@ def _tool_identity(
     }
 
 
-def _exact_executable(path: Path) -> Path:
+def _exact_executable(path: Path, verified_runtime_root: Path | None = None) -> Path:
     if not path.is_absolute():
         raise CanonicalDecodeError("native media tool path must be absolute")
+    if verified_runtime_root is not None:
+        if not path.is_relative_to(verified_runtime_root) or not path.is_file():
+            raise CanonicalDecodeError("verified native media tool is outside its runtime")
+        return path
     resolved = path.resolve(strict=True)
     if not resolved.is_file():
         raise CanonicalDecodeError("native media tool is not a file")
