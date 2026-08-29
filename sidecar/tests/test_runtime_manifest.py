@@ -16,6 +16,7 @@ from sidecar.open_chords_analysis.runtime_manifest import (
     _permission_checked,
     _resolve_runtime_path,
     _resolve_windows_path,
+    _runtime_root_path,
     _strip_windows_extended_prefix,
     load_frozen_runtime,
     write_runtime_manifest,
@@ -152,6 +153,17 @@ class RuntimeManifestTests(unittest.TestCase):
             _resolve_windows_path(Path("runtime"), api=(ctypes, kernel32))
 
         self.assertEqual(kernel32.closed_handles, [])
+
+    def test_windows_runtime_root_uses_native_prevalidated_absolute_path(self) -> None:
+        runtime_root = Path("runtime")
+        with patch(
+            "sidecar.open_chords_analysis.runtime_manifest._resolve_windows_path",
+            side_effect=AssertionError("must not reopen the prevalidated root"),
+        ) as resolve:
+            resolved = _runtime_root_path(runtime_root, windows=True)
+
+        self.assertEqual(resolved, Path(os.path.abspath(runtime_root)))
+        resolve.assert_not_called()
 
     def test_windows_shared_handle_resolver_closes_after_final_path_failure(self) -> None:
         ctypes = _FakeCtypes()

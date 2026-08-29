@@ -80,7 +80,11 @@ def write_runtime_manifest(
 def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
     """Verify the complete runtime before exposing its protocol handshake."""
 
-    runtime_root = _resolve_runtime_path(runtime_root, stage="root")
+    # The Windows native launcher has already canonicalized the exact staging
+    # root and rejected every reparse point before starting the AppContainer.
+    # Avoid opening that directory again from the restricted token: every
+    # manifest entry is still handle-resolved and bounded by this absolute root.
+    runtime_root = _runtime_root_path(runtime_root)
     manifest_path = runtime_root / MANIFEST_NAME
     if _permission_checked("manifest", manifest_path.stat).st_size > MAX_MANIFEST_BYTES:
         raise RuntimeManifestError("frozen runtime manifest exceeds four MiB")
@@ -198,6 +202,12 @@ def _resolve_runtime_path(path: Path, *, stage: str = "entry_metadata") -> Path:
         raise RuntimeManifestPermissionError(stage) from error
     except (OSError, RuntimeError) as error:
         raise RuntimeManifestError("frozen runtime path could not be resolved") from error
+
+
+def _runtime_root_path(path: Path, *, windows: bool | None = None) -> Path:
+    if windows is None:
+        windows = os.name == "nt"
+    return Path(os.path.abspath(path)) if windows else _resolve_runtime_path(path, stage="root")
 
 
 @lru_cache(maxsize=1)

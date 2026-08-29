@@ -117,7 +117,7 @@ it("grants both Windows principals only their required runtime access", () => {
 
   expect(source).toContain("current_user_token_information()");
   expect(source).toContain("GetTokenInformation(token, TokenUser");
-  expect(source).toContain("grant_runtime_read_execute(runtime_root, sid,");
+  expect(source).toContain("protect_empty_runtime_root(runtime_root, sid,");
   expect(source).toContain("grants[0].grfAccessPermissions = FILE_ALL_ACCESS");
   expect(source).toContain(
     "grants[1].grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE",
@@ -129,8 +129,12 @@ it("grants both Windows principals only their required runtime access", () => {
   expect(source).toContain("PROTECTED_DACL_SECURITY_INFORMATION");
   expect(source).toContain("SetNamedSecurityInfoW");
   expect(source).not.toContain("FILE_GENERIC_WRITE");
-  expect(source.indexOf("reject_reparse_points(runtime_root);")).toBeLessThan(
-    source.indexOf("grant_runtime_read_execute(runtime_root, sid,"),
+  expect(source).not.toContain("recursive_directory_iterator(runtime_root)");
+  expect(source.indexOf("runtime_root = create_runtime_staging_root(profile);")).toBeLessThan(
+    source.indexOf("protect_empty_runtime_root(runtime_root, sid,"),
+  );
+  expect(source.indexOf("protect_empty_runtime_root(runtime_root, sid,")).toBeLessThan(
+    source.indexOf("write_utf8_stdout(runtime_root.wstring());"),
   );
 });
 

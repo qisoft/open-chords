@@ -393,14 +393,13 @@ static void grant_path_read_execute(
   if (result != ERROR_SUCCESS) throw_last_error("grant runtime access", result);
 }
 
-static void grant_runtime_read_execute(
+static void protect_empty_runtime_root(
     const fs::path& runtime_root, PSID app_container_sid, PSID host_user_sid) {
+  // Protect the empty staging root before main copies the frozen runtime into
+  // it. New descendants inherit this exact dual-principal DACL as they are
+  // created, avoiding a SetNamedSecurityInfoW call for every packaged file.
   grant_path_read_execute(
       runtime_root, app_container_sid, host_user_sid, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
-  for (const auto& entry : fs::recursive_directory_iterator(runtime_root)) {
-    grant_path_read_execute(entry.path(), app_container_sid, host_user_sid,
-        entry.is_directory() ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE);
-  }
 }
 
 static std::vector<unsigned char> current_user_token_information() {
@@ -488,6 +487,9 @@ static int prepare(const std::wstring& profile) {
   fs::path runtime_root;
   try {
     runtime_root = create_runtime_staging_root(profile);
+    auto host_user = current_user_token_information();
+    protect_empty_runtime_root(runtime_root, sid,
+        reinterpret_cast<TOKEN_USER*>(host_user.data())->User.Sid);
     write_utf8_stdout(profile_root(sid));
     write_utf8_stdout(local_app_data_root().wstring());
     write_utf8_stdout(runtime_root.wstring());
@@ -520,7 +522,6 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   if (workspace.empty() || runtime_root.empty() || separator < 0 || separator + 1 >= argc) {
     throw std::runtime_error("launch plan");
   }
-  auto host_user = current_user_token_information();
   PSID sid = derive_profile(profile);
   fs::path root = profile_root(sid);
   fs::path expected_runtime_root = existing_runtime_staging_root(profile);
@@ -533,8 +534,6 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
   }
   reject_reparse_points(workspace);
   reject_reparse_points(runtime_root);
-  grant_runtime_read_execute(runtime_root, sid,
-      reinterpret_cast<TOKEN_USER*>(host_user.data())->User.Sid);
   ScopedAncestorTraverse ancestor_traverse(runtime_root, sid);
 
   HANDLE job = CreateJobObjectW(nullptr, nullptr);
