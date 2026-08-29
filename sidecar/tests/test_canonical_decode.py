@@ -555,7 +555,7 @@ class CanonicalDecodeTests(unittest.TestCase):
                     NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
                     CanonicalDecodeConfig(platform_profile="test"),
                 )
-            self.assertEqual(raised.exception.code, "canonical_prepare_failed")
+            self.assertEqual(raised.exception.code, "canonical_prepare_input_failed")
 
             self.assertEqual(list(artifacts.iterdir()), [])
 
@@ -573,7 +573,7 @@ class CanonicalDecodeTests(unittest.TestCase):
                     CanonicalDecodeConfig(platform_profile="test"),
                 )
 
-            self.assertEqual(raised.exception.code, "canonical_prepare_failed")
+            self.assertEqual(raised.exception.code, "canonical_prepare_tools_failed")
 
     def test_reports_publication_fault_and_removes_artifacts(self) -> None:
         ffmpeg = shutil.which("ffmpeg")

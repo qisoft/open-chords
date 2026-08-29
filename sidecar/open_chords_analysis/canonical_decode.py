@@ -29,6 +29,10 @@ TOOL_TIMEOUT_SECONDS: Final = 30
 class CanonicalDecodeFailureCode(str, Enum):
     DECODE = "canonical_decode_failed"
     PREPARE = "canonical_prepare_failed"
+    PREPARE_ARTIFACTS = "canonical_prepare_artifacts_failed"
+    PREPARE_INPUT = "canonical_prepare_input_failed"
+    PREPARE_TOOLS = "canonical_prepare_tools_failed"
+    PREPARE_WORKSPACE = "canonical_prepare_workspace_failed"
     PROBE = "canonical_probe_failed"
     PROBE_EXECUTION = "canonical_probe_execution_failed"
     PROBE_EXIT = "canonical_probe_exit_failed"
@@ -132,7 +136,9 @@ def decode_canonical(
     artifacts: tuple[Path, ...] = ()
     failure_code = CanonicalDecodeFailureCode.PREPARE
     try:
+        failure_code = CanonicalDecodeFailureCode.PREPARE_WORKSPACE
         workspace = workspace.resolve(strict=True)
+        failure_code = CanonicalDecodeFailureCode.PREPARE_ARTIFACTS
         output_path = _workspace_file(workspace, OUTPUT_PATH)
         manifest_path = _workspace_file(workspace, MANIFEST_PATH)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,7 +148,9 @@ def decode_canonical(
         if cleanup_error := _cleanup_artifacts(artifacts):
             failure_code = CanonicalDecodeFailureCode.CLEANUP
             raise cleanup_error
+        failure_code = CanonicalDecodeFailureCode.PREPARE_INPUT
         input_path = _workspace_file(workspace, INPUT_PATH, must_exist=True)
+        failure_code = CanonicalDecodeFailureCode.PREPARE_TOOLS
         ffmpeg = _exact_executable(toolchain.ffmpeg, toolchain.verified_runtime_root)
         ffprobe = _exact_executable(toolchain.ffprobe, toolchain.verified_runtime_root)
         input_descriptor = _file_descriptor(workspace, input_path)
