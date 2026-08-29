@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from multiprocessing import freeze_support
+import os
 from pathlib import Path
 
 
@@ -60,7 +61,12 @@ def main(
                 f"{_runtime_permission_failure_code(error, runtime_root)}\n"
             )
             raise SystemExit(2) from None
-        serve_one_session(sys.stdin.buffer, sys.stdout.buffer, workspace or Path.cwd(), runtime)
+        session_workspace = workspace or Path.cwd()
+        if workspace is not None:
+            # Runtime verification uses the native-validated runtime cwd on
+            # Windows. Analysis and its Numba cache remain workspace-confined.
+            os.chdir(workspace)
+        serve_one_session(sys.stdin.buffer, sys.stdout.buffer, session_workspace, runtime)
     except Exception as error:
         if isinstance(error, PermissionError):
             failure_code = "sidecar_session_permission_denied"
