@@ -4,6 +4,7 @@ import { cpSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { throwCombinedFailures } from "./packaged-sidecar-proof-failures.ts";
 import {
   isExpectedWindowsProfileRoot,
   isExpectedWindowsRuntimeRoot,
@@ -74,7 +75,7 @@ export function preparePackagedWorkspace(
       .trim()
       .split(/\r?\n/);
   } catch {
-    throwWorkspaceFailures(
+    throwCombinedFailures(
       "AppContainer profile preparation and cleanup failed",
       { cause: new PackagedWorkspaceFailure("setup_prepare_failed") },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
@@ -82,7 +83,7 @@ export function preparePackagedWorkspace(
     throw new PackagedWorkspaceFailure("setup_prepare_failed");
   }
   if (reportedRoots.length !== 3) {
-    throwWorkspaceFailures(
+    throwCombinedFailures(
       "AppContainer profile response and cleanup failed",
       { cause: new PackagedWorkspaceFailure("setup_response_failed") },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
@@ -96,7 +97,7 @@ export function preparePackagedWorkspace(
   const profileRoot = canonicalWindowsProfileRoot(reportedProfileRoot, localAppDataRoot);
   const runtimeRoot = canonicalWindowsRuntimeRoot(reportedRuntimeRoot, localAppDataRoot, profile);
   if (profileRoot === null || runtimeRoot === null) {
-    throwWorkspaceFailures(
+    throwCombinedFailures(
       "AppContainer profile validation and cleanup failed",
       { cause: new PackagedWorkspaceFailure("setup_validation_failed") },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
@@ -108,7 +109,7 @@ export function preparePackagedWorkspace(
     cpSync(packagedRuntimeRoot, runtimeRoot, { recursive: true });
     mkdirSync(workspace, { recursive: true });
   } catch {
-    throwWorkspaceFailures(
+    throwCombinedFailures(
       "AppContainer workspace setup and cleanup failed",
       { cause: new PackagedWorkspaceFailure("setup_workspace_failed") },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
@@ -116,7 +117,7 @@ export function preparePackagedWorkspace(
   }
   return {
     cleanup() {
-      throwWorkspaceFailures(
+      throwCombinedFailures(
         "AppContainer profile cleanup failed",
         undefined,
         destroyWindowsProfile(helperPath, profile),
@@ -181,17 +182,4 @@ function destroyWindowsProfile(helperPath: string, profile: string): unknown[] {
     failures.push(cause);
   }
   return failures;
-}
-
-function throwWorkspaceFailures(
-  message: string,
-  primaryFailure: { cause: unknown } | undefined,
-  cleanupFailures: readonly unknown[],
-): void {
-  const failures = [
-    ...(primaryFailure === undefined ? [] : [primaryFailure.cause]),
-    ...cleanupFailures,
-  ];
-  if (failures.length === 1) throw failures[0];
-  if (failures.length > 1) throw new AggregateError(failures, message);
 }

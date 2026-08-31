@@ -15,6 +15,7 @@ import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
+import { throwCombinedFailures } from "./packaged-sidecar-proof-failures.ts";
 import {
   packagedWorkspaceFailureCode,
   preparePackagedWorkspace,
@@ -817,19 +818,6 @@ function createSensitiveSentinels(platform: "darwin" | "win32"): {
     },
     paths,
   };
-}
-
-function throwCombinedFailures(
-  message: string,
-  primaryFailure: { cause: unknown } | undefined,
-  cleanupFailures: readonly unknown[],
-): void {
-  const failures = [
-    ...(primaryFailure === undefined ? [] : [primaryFailure.cause]),
-    ...cleanupFailures,
-  ];
-  if (failures.length === 1) throw failures[0];
-  if (failures.length > 1) throw new AggregateError(failures, message);
 }
 
 function privateCleanupFailures(failures: readonly unknown[]): PackagedProofFailure[] {
