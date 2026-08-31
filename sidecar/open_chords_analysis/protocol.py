@@ -43,6 +43,10 @@ class ProtocolError(RuntimeError):
 class AnalysisExecutionError(RuntimeError):
     """The staged Recipe could not produce a complete analysis candidate."""
 
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
 
 class _CleanInputEnd(ProtocolError):
     """The control stream closed between complete frames."""
@@ -188,7 +192,7 @@ def serve_one_session(
                 except CanonicalDecodeCancelled:
                     raise
                 except Exception as error:
-                    raise AnalysisExecutionError("CPU analysis failed") from error
+                    raise AnalysisExecutionError(_analysis_failure_kind(error)) from error
         except CanonicalDecodeCancelled as error:
             events.put(("decode_cancelled", error))
         except CanonicalDecodeError as error:
@@ -285,7 +289,10 @@ def serve_one_session(
                         else CanonicalDecodeFailureCode.DECODE
                     ),
                     "message": (
-                        "CPU analysis failed"
+                        f"CPU analysis failed [{payload.kind}]"
+                        if event == "analysis_error"
+                        and isinstance(payload, AnalysisExecutionError)
+                        else "CPU analysis failed [unknown]"
                         if event == "analysis_error"
                         else "Canonical media decode failed"
                     ),
@@ -513,6 +520,13 @@ def _preload_cpu_analysis() -> None:
     from . import cpu_analysis as _cpu_analysis
 
     del _cpu_analysis
+
+
+def _analysis_failure_kind(error: Exception) -> str:
+    module = type(error).__module__
+    name = type(error).__name__
+    kind = f"{module}.{name}"
+    return kind if re.fullmatch(r"[A-Za-z0-9_.]{1,160}", kind) else "unknown"
 
 
 def _publish_analysis_result(

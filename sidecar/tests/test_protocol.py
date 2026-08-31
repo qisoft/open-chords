@@ -95,7 +95,10 @@ class ProtocolTests(unittest.TestCase):
             messages = self._messages(output.getvalue())
             self.assertEqual([message["type"] for message in messages], ["handshake", "error"])
             self.assertEqual(messages[1]["code"], "analysis_failed")
-            self.assertEqual(messages[1]["message"], "CPU analysis failed")
+            self.assertEqual(
+                messages[1]["message"],
+                "CPU analysis failed [builtins.ValueError]",
+            )
             self.assertFalse((workspace / "artifacts" / "analysis-result.json").exists())
 
     def test_publishes_a_cpu_analysis_candidate_when_a_recipe_is_staged(self) -> None:

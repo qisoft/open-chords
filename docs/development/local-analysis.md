@@ -29,3 +29,5 @@ before starting the decode worker so Windows AppContainer cold starts exercise t
 initialization boundary as the standalone frozen-runtime proof. A bounded writer preserves
 monotonic protocol heartbeats during that preload, so the host's liveness and absolute session
 deadlines remain authoritative.
+Analysis failures retain the stable `analysis_failed` protocol code while installed proofs may log
+only a bounded exception-class fingerprint; exception messages, paths, and media data remain private.

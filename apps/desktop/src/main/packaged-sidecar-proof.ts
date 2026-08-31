@@ -324,6 +324,10 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       throw new Error("Packaged cold and warm analysis candidates are not deterministic");
     }
   } catch (cause) {
+    const analysisDiagnostic = findAnalysisDiagnostic(cause);
+    if (analysisDiagnostic !== undefined) {
+      process.stderr.write(`Packaged sidecar analysis diagnostic: ${analysisDiagnostic}\n`);
+    }
     proofFailure = {
       cause:
         packagedProofFailureCode(cause) === "proof_failed"
@@ -342,6 +346,19 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     proofFailure,
     cleanupFailures,
   );
+}
+
+function findAnalysisDiagnostic(cause: unknown): string | undefined {
+  if (cause instanceof SidecarSessionError && cause.remoteCode === "analysis_failed") {
+    const match = /^Sidecar analysis_failed: CPU analysis failed \[([A-Za-z0-9_.]{1,160})\]$/u.exec(
+      cause.message,
+    );
+    return match?.[1];
+  }
+  if (cause instanceof AggregateError) {
+    return cause.errors.map(findAnalysisDiagnostic).find((value) => value !== undefined);
+  }
+  return undefined;
 }
 
 function packagedAnalysisRecipe() {
