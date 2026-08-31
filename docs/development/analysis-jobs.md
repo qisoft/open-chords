@@ -65,10 +65,11 @@ Projects written before Manifest retention are upgraded in memory by the v1 stor
 which records their existing Analysis Revision IDs as explicitly legacy-manifestless. New writes
 must provide exactly one retained Manifest or explicit legacy marker for every Analysis Revision.
 
-The runner and dependency types remain module-private until the DSP slice supplies a real production
-sidecar and Model Store adapter. There is deliberately no placeholder production runner: tests use
-the same `AnalysisJobs.open` boundary while production composition is deferred to that dependent
-slice.
+The runner and dependency types remain module-private. `LocalAnalysisService` is the production
+composition for the weight-free local-file Recipe: it supplies the real contained sidecar runner and
+delegates media identity checks to Project Library. The default CPU path has no Model Artifacts, so
+its Model Store adapter returns no model blockers; any future model-backed Recipe must replace that
+adapter with exact content-addressed availability checks before it can start an Attempt.
 
 Containment, protocol, and integrity failures are forced non-retryable and open the runtime circuit
 breaker. Restart clears the breaker as the explicit recovery boundary; queued work still requires

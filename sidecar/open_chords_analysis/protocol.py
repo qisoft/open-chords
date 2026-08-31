@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import struct
 import threading
@@ -28,10 +30,18 @@ PROTOCOL_VERSION: Final = 1
 HEARTBEAT_INTERVAL_SECONDS: Final = 5
 TERMINAL_CONTROL_ARBITRATION_SECONDS: Final = 0.1
 SHA256_PATTERN: Final = re.compile(r"^[a-f0-9]{64}$")
+ANALYSIS_RECIPE_PATH: Final = Path("input/analysis-recipe.json")
+ANALYSIS_RESULT_PATH: Final = Path("artifacts/analysis-result.json")
+MAX_ANALYSIS_RECIPE_BYTES: Final = 1024 * 1024
+MAX_ANALYSIS_RESULT_BYTES: Final = 16 * 1024 * 1024
 
 
 class ProtocolError(RuntimeError):
     """A malformed or unsupported sidecar protocol message."""
+
+
+class AnalysisExecutionError(RuntimeError):
+    """The staged Recipe could not produce a complete analysis candidate."""
 
 
 class _CleanInputEnd(ProtocolError):
@@ -123,10 +133,25 @@ def serve_one_session(
                 cancellation,
                 **decode_kwargs,
             )
+            recipe_path = workspace / ANALYSIS_RECIPE_PATH
+            if recipe_path.exists():
+                if cancellation.is_set():
+                    raise CanonicalDecodeCancelled("analysis cancelled before CPU processing")
+                try:
+                    candidate = _analyze_decoded(workspace)
+                    if cancellation.is_set():
+                        raise CanonicalDecodeCancelled("analysis cancelled before publication")
+                    artifact = _publish_analysis_result(workspace, candidate)
+                except CanonicalDecodeCancelled:
+                    raise
+                except Exception as error:
+                    raise AnalysisExecutionError("CPU analysis failed") from error
         except CanonicalDecodeCancelled as error:
             events.put(("decode_cancelled", error))
         except CanonicalDecodeError as error:
             events.put(("decode_error", error))
+        except AnalysisExecutionError as error:
+            events.put(("analysis_error", error))
         except Exception as error:
             events.put(("decode_error", error))
         else:
@@ -188,7 +213,7 @@ def serve_one_session(
                 {**_identity(start, sequence), "artifact": _descriptor_json(payload), "type": "result"},
             )
             return
-        if event in {"decode_cancelled", "decode_error"}:
+        if event in {"decode_cancelled", "decode_error", "analysis_error"}:
             decode_finished = True
             decode_cleanup_failed = (
                 isinstance(payload, CanonicalDecodeError)
@@ -209,11 +234,19 @@ def serve_one_session(
                 stdout,
                 {
                     **_identity(start, sequence),
-                    "code": payload.code
-                    if isinstance(payload, CanonicalDecodeError)
-                    and isinstance(payload.code, CanonicalDecodeFailureCode)
-                    else CanonicalDecodeFailureCode.DECODE,
-                    "message": "Canonical media decode failed",
+                    "code": (
+                        "analysis_failed"
+                        if event == "analysis_error"
+                        else payload.code
+                        if isinstance(payload, CanonicalDecodeError)
+                        and isinstance(payload.code, CanonicalDecodeFailureCode)
+                        else CanonicalDecodeFailureCode.DECODE
+                    ),
+                    "message": (
+                        "CPU analysis failed"
+                        if event == "analysis_error"
+                        else "Canonical media decode failed"
+                    ),
                     "type": "error",
                 },
             )
@@ -357,6 +390,8 @@ def _cleanup_decode_artifacts(workspace: Path) -> bool:
         "artifacts/canonical.wav",
         "artifacts/decode-manifest.json.partial",
         "artifacts/decode-manifest.json",
+        "artifacts/analysis-result.json.partial",
+        "artifacts/analysis-result.json",
     ):
         candidate = workspace_root / relative
         try:
@@ -410,3 +445,62 @@ def _descriptor_json(descriptor: ArtifactDescriptor) -> dict[str, int | str]:
         "path": descriptor.path,
         "sha256": descriptor.sha256,
     }
+
+
+def _analyze_decoded(workspace: Path) -> dict[str, object]:
+    from .cpu_analysis import AnalysisConfig, analyze_canonical
+
+    recipe_path = workspace / ANALYSIS_RECIPE_PATH
+    if recipe_path.is_symlink() or not recipe_path.is_file():
+        raise ProtocolError("analysis Recipe is not a regular file")
+    recipe_bytes = recipe_path.read_bytes()
+    if not recipe_bytes or len(recipe_bytes) > MAX_ANALYSIS_RECIPE_BYTES:
+        raise ProtocolError("analysis Recipe exceeds its bounded size")
+    try:
+        recipe = json.loads(recipe_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ProtocolError("analysis Recipe is invalid") from error
+    result = analyze_canonical(
+        workspace / "artifacts" / "canonical.wav",
+        AnalysisConfig.from_recipe_document(recipe),
+    )
+    return result.to_document()
+
+
+def _publish_analysis_result(
+    workspace: Path, candidate: dict[str, object]
+) -> ArtifactDescriptor:
+    workspace_root = workspace.resolve(strict=True)
+    result_path = workspace_root / ANALYSIS_RESULT_PATH
+    if result_path.parent.resolve(strict=True) != workspace_root / "artifacts":
+        raise ProtocolError("analysis result escaped its workspace")
+    try:
+        content = json.dumps(
+            candidate,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise ProtocolError("analysis result is invalid") from error
+    if not content or len(content) > MAX_ANALYSIS_RESULT_BYTES:
+        raise ProtocolError("analysis result exceeds its bounded size")
+    temporary = result_path.with_suffix(".json.partial")
+    temporary.unlink(missing_ok=True)
+    result_path.unlink(missing_ok=True)
+    try:
+        with temporary.open("xb") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, result_path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        result_path.unlink(missing_ok=True)
+        raise
+    return ArtifactDescriptor(
+        byte_size=len(content),
+        path=ANALYSIS_RESULT_PATH.as_posix(),
+        sha256=hashlib.sha256(content).hexdigest(),
+    )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import hashlib
 import shutil
 import struct
 import tempfile
@@ -23,6 +24,7 @@ from sidecar.open_chords_analysis.canonical_decode import (
     NativeToolchain,
 )
 from sidecar.open_chords_analysis.protocol import FrozenRuntime, ProtocolError, serve_one_session
+from sidecar.open_chords_analysis.analysis_profiles import PROFILE_SETTINGS
 
 
 class FragmentedReader(io.BytesIO):
@@ -65,6 +67,100 @@ class DecodeFinishedControlReader(io.BytesIO):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_reports_a_bounded_analysis_failure_for_an_invalid_staged_recipe(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if ffmpeg is None or ffprobe is None:
+            self.skipTest("FFmpeg development tools are unavailable")
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-protocol-analysis-failure-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input" / "source-media"
+            media.parent.mkdir(parents=True)
+            self._write_fixture(media)
+            (workspace / "input" / "analysis-recipe.json").write_text("{}", "utf-8")
+            output = io.BytesIO()
+
+            serve_one_session(
+                io.BytesIO(self._start_frame()),
+                output,
+                workspace,
+                FrozenRuntime(
+                    manifest_hash="a" * 64,
+                    platform_profile="darwin-arm64-test",
+                    toolchain=NativeToolchain(Path(ffmpeg), Path(ffprobe)),
+                ),
+            )
+
+            messages = self._messages(output.getvalue())
+            self.assertEqual([message["type"] for message in messages], ["handshake", "error"])
+            self.assertEqual(messages[1]["code"], "analysis_failed")
+            self.assertEqual(messages[1]["message"], "CPU analysis failed")
+            self.assertFalse((workspace / "artifacts" / "analysis-result.json").exists())
+
+    def test_publishes_a_cpu_analysis_candidate_when_a_recipe_is_staged(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if ffmpeg is None or ffprobe is None:
+            self.skipTest("FFmpeg development tools are unavailable")
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-protocol-analysis-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input" / "source-media"
+            media.parent.mkdir(parents=True)
+            self._write_fixture(media)
+            recipe = self._analysis_recipe()
+            (workspace / "input" / "analysis-recipe.json").write_text(
+                json.dumps(recipe, separators=(",", ":"), sort_keys=True),
+                "utf-8",
+            )
+            output = io.BytesIO()
+
+            with patch(
+                "sidecar.open_chords_analysis.protocol._analyze_decoded",
+                return_value={
+                    "durationSamples": 4_800,
+                    "recipe": recipe,
+                    "sampleRate": 48_000,
+                    "stageOutcomes": [
+                        {"stage": "preflight", "state": "completed"},
+                        {"stage": "canonical_decode", "state": "completed"},
+                        {"stage": "shared_features", "state": "completed"},
+                        {"stage": "rhythm", "state": "completed_with_abstentions"},
+                        {"stage": "harmony", "state": "completed_with_abstentions"},
+                        {"stage": "sections", "state": "completed_with_abstentions"},
+                        {"stage": "assemble", "state": "completed"},
+                    ],
+                    "supportClaimIds": [],
+                    "timeline": {},
+                    "warnings": [],
+                },
+            ):
+                serve_one_session(
+                    io.BytesIO(self._start_frame()),
+                    output,
+                    workspace,
+                    FrozenRuntime(
+                        manifest_hash="a" * 64,
+                        platform_profile="darwin-arm64-test",
+                        toolchain=NativeToolchain(Path(ffmpeg), Path(ffprobe)),
+                    ),
+                )
+
+            messages = self._messages(output.getvalue())
+            self.assertEqual([message["type"] for message in messages], ["handshake", "result"])
+            descriptor = messages[1]["artifact"]
+            self.assertEqual(descriptor["path"], "artifacts/analysis-result.json")
+            candidate_bytes = (workspace / descriptor["path"]).read_bytes()
+            self.assertEqual(descriptor["byteSize"], len(candidate_bytes))
+            self.assertEqual(descriptor["sha256"], hashlib.sha256(candidate_bytes).hexdigest())
+            candidate = json.loads(candidate_bytes)
+            self.assertEqual(candidate["durationSamples"], 4_800)
+            self.assertEqual(candidate["sampleRate"], 48_000)
+            self.assertEqual(candidate["recipe"], recipe)
+            self.assertEqual(candidate["supportClaimIds"], [])
+            self.assertEqual(candidate["stageOutcomes"][-1]["stage"], "assemble")
+
     def test_returns_only_framed_protocol_and_a_file_descriptor(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")
@@ -635,6 +731,43 @@ class ProtocolTests(unittest.TestCase):
                     for index in range(4_800)
                 )
             )
+
+    @staticmethod
+    def _analysis_recipe() -> dict[str, object]:
+        return {
+            "capabilities": ["rhythm", "meter", "key", "chords", "sections"],
+            "components": [
+                {
+                    "hash": f"sha256:{'1' * 64}",
+                    "id": "open-chords-cpu-dsp",
+                    "version": "1.0.0",
+                }
+            ],
+            "numericalBackend": {
+                "hash": f"sha256:{'2' * 64}",
+                "id": "numpy",
+                "version": "2.5.2",
+            },
+            "pipeline": [
+                "preflight",
+                "canonical_decode",
+                "shared_features",
+                "rhythm",
+                "harmony",
+                "sections",
+                "assemble",
+                "main_validation",
+                "publish",
+            ],
+            "profile": {
+                "hash": f"sha256:{'3' * 64}",
+                "id": "balanced",
+                "name": "balanced",
+                "version": "1.0.0",
+            },
+            "seeds": {"decoder": 0},
+            "settings": PROFILE_SETTINGS["balanced"],
+        }
 
     @staticmethod
     def _frame(message: object) -> bytes:

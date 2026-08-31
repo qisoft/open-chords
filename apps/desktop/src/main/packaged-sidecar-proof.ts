@@ -92,6 +92,7 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "setup_workspace_failed",
 ] as const;
 const SESSION_REMOTE_FAILURE_CODES = [
+  "analysis_failed",
   "canonical_artifact_validation_failed",
   "canonical_cleanup_failed",
   "canonical_decode_failed",
@@ -232,6 +233,10 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     const inputPath = join(workspace, "input", "source-media");
     mkdirSync(dirname(inputPath), { recursive: true });
     writeFileSync(inputPath, canonicalWavFixture());
+    writeFileSync(
+      join(workspace, "input", "analysis-recipe.json"),
+      JSON.stringify(packagedAnalysisRecipe()),
+    );
     const createLauncher = (args: readonly string[], acceptedExitCodes: readonly number[] = [0]) =>
       createNativeContainmentLauncher(
         createExecutableNativeContainmentBroker({
@@ -255,43 +260,64 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     stage = "crash_probe_failed";
     await runLifecycleContainmentProbe(createLauncher, workspace, "crash");
     stage = "session_probe_failed";
-    const client = createEffectSidecarClient(createLauncher([]));
-    const request = parseSidecarSessionRequest({
-      jobId: "job-packaged-proof",
-      manifestHash: containedRuntime.manifestHash,
-      nonce: "nonce-packaged-proof",
-      requestId: "request-packaged-proof",
-      timeoutMs: 15_000,
-    });
-    await runWithPackagedSessionCleanup(
-      async () => {
-        const result = await client.runSession(request);
-        stage = "session_descriptor_failed";
-        if (
-          result.artifact.path !== "artifacts/decode-manifest.json" ||
-          result.jobId !== request.jobId ||
-          result.requestId !== request.requestId
-        ) {
-          throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
-        }
-        stage = "session_artifact_failed";
-        const decodeManifestBytes = readFileSync(join(workspace, result.artifact.path));
-        if (
-          decodeManifestBytes.byteLength !== result.artifact.byteSize ||
-          createHash("sha256").update(decodeManifestBytes).digest("hex") !== result.artifact.sha256
-        ) {
-          throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
-        }
-        stage = "session_evidence_failed";
-        const decodeManifest = z
-          .object({ canonicalAudio: z.object({ sampleCount: z.literal(4_800) }) })
-          .parse(JSON.parse(decodeManifestBytes.toString("utf8")));
-        if (decodeManifest.canonicalAudio.sampleCount !== 4_800) {
-          throw new Error("Packaged sidecar lifecycle proof returned unexpected evidence");
-        }
-      },
-      () => client.dispose(),
-    );
+    const candidates: Buffer[] = [];
+    for (const temperature of ["cold", "warm"] as const) {
+      const client = createEffectSidecarClient(createLauncher([]));
+      const request = parseSidecarSessionRequest({
+        jobId: `job-packaged-proof-${temperature}`,
+        manifestHash: containedRuntime.manifestHash,
+        nonce: `nonce-packaged-proof-${temperature}`,
+        requestId: `request-packaged-proof-${temperature}`,
+        timeoutMs: 60_000,
+      });
+      await runWithPackagedSessionCleanup(
+        async () => {
+          const result = await client.runSession(request);
+          stage = "session_descriptor_failed";
+          if (
+            result.artifact.path !== "artifacts/analysis-result.json" ||
+            result.jobId !== request.jobId ||
+            result.requestId !== request.requestId
+          ) {
+            throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
+          }
+          stage = "session_artifact_failed";
+          const candidateBytes = readFileSync(join(workspace, result.artifact.path));
+          if (
+            candidateBytes.byteLength !== result.artifact.byteSize ||
+            createHash("sha256").update(candidateBytes).digest("hex") !== result.artifact.sha256
+          ) {
+            throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
+          }
+          stage = "session_evidence_failed";
+          const candidate = z
+            .strictObject({
+              durationSamples: z.literal(4_800),
+              recipe: z.unknown(),
+              sampleRate: z.literal(48_000),
+              stageOutcomes: z.array(z.object({ stage: z.string(), state: z.string() })),
+              supportClaimIds: z.array(z.string()).length(0),
+              timeline: z.object({
+                chordEvents: z.array(z.unknown()).min(1),
+                keyRegions: z.array(z.unknown()).min(1),
+                sectionRegions: z.array(z.unknown()).min(1),
+              }),
+              warnings: z.array(z.string()),
+            })
+            .parse(JSON.parse(candidateBytes.toString("utf8")));
+          if (candidate.stageOutcomes.at(-1)?.stage !== "assemble") {
+            throw new Error(
+              "Packaged sidecar lifecycle proof returned incomplete analysis evidence",
+            );
+          }
+          candidates.push(candidateBytes);
+        },
+        () => client.dispose(),
+      );
+    }
+    if (candidates.length !== 2 || !candidates[0]!.equals(candidates[1]!)) {
+      throw new Error("Packaged cold and warm analysis candidates are not deterministic");
+    }
   } catch (cause) {
     proofFailure = {
       cause:
@@ -311,6 +337,47 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     proofFailure,
     cleanupFailures,
   );
+}
+
+function packagedAnalysisRecipe() {
+  return {
+    capabilities: ["rhythm", "meter", "key", "chords", "sections"],
+    components: [
+      {
+        hash: `sha256:${"1".repeat(64)}`,
+        id: "open-chords-cpu-dsp",
+        version: "1.0.0",
+      },
+    ],
+    numericalBackend: {
+      hash: `sha256:${"2".repeat(64)}`,
+      id: "numpy",
+      version: "2.5.2",
+    },
+    pipeline: [
+      "preflight",
+      "canonical_decode",
+      "shared_features",
+      "rhythm",
+      "harmony",
+      "sections",
+      "assemble",
+      "main_validation",
+      "publish",
+    ],
+    profile: {
+      hash: `sha256:${"3".repeat(64)}`,
+      id: "fast",
+      name: "fast",
+      version: "1.0.0",
+    },
+    seeds: { decoder: 0 },
+    settings: {
+      analysisWindowSamples: 96_000,
+      hopLength: 1_024,
+      nFft: 8_192,
+    },
+  };
 }
 
 export async function runWithPackagedSessionCleanup(
