@@ -130,6 +130,8 @@ def decode_canonical(
     toolchain: NativeToolchain,
     config: CanonicalDecodeConfig,
     cancellation: threading.Event | None = None,
+    *,
+    workspace_is_current_directory: bool = False,
 ) -> ArtifactDescriptor:
     """Decode the fixed staged input and publish a deterministic manifest."""
 
@@ -137,10 +139,24 @@ def decode_canonical(
     failure_code = CanonicalDecodeFailureCode.PREPARE
     try:
         failure_code = CanonicalDecodeFailureCode.PREPARE_WORKSPACE
-        workspace = workspace.resolve(strict=True)
+        if workspace_is_current_directory:
+            current_workspace = Path.cwd()
+            if current_workspace != Path(os.path.abspath(workspace)):
+                raise CanonicalDecodeError("native workspace differs from current directory")
+            workspace = current_workspace
+        else:
+            workspace = workspace.resolve(strict=True)
         failure_code = CanonicalDecodeFailureCode.PREPARE_ARTIFACTS
-        output_path = _workspace_file(workspace, OUTPUT_PATH)
-        manifest_path = _workspace_file(workspace, MANIFEST_PATH)
+        output_path = _workspace_file(
+            workspace,
+            OUTPUT_PATH,
+            relative_to_current_directory=workspace_is_current_directory,
+        )
+        manifest_path = _workspace_file(
+            workspace,
+            MANIFEST_PATH,
+            relative_to_current_directory=workspace_is_current_directory,
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_output = output_path.with_suffix(".wav.partial")
         temporary_manifest = manifest_path.with_suffix(".json.partial")
@@ -149,7 +165,12 @@ def decode_canonical(
             failure_code = CanonicalDecodeFailureCode.CLEANUP
             raise cleanup_error
         failure_code = CanonicalDecodeFailureCode.PREPARE_INPUT
-        input_path = _workspace_file(workspace, INPUT_PATH, must_exist=True)
+        input_path = _workspace_file(
+            workspace,
+            INPUT_PATH,
+            must_exist=True,
+            relative_to_current_directory=workspace_is_current_directory,
+        )
         failure_code = CanonicalDecodeFailureCode.PREPARE_TOOLS
         ffmpeg = _exact_executable(toolchain.ffmpeg, toolchain.verified_runtime_root)
         ffprobe = _exact_executable(toolchain.ffprobe, toolchain.verified_runtime_root)
@@ -585,8 +606,14 @@ def _exact_executable(path: Path, verified_runtime_root: Path | None = None) -> 
     return resolved
 
 
-def _workspace_file(workspace: Path, relative: Path, must_exist: bool = False) -> Path:
-    candidate = workspace / relative
+def _workspace_file(
+    workspace: Path,
+    relative: Path,
+    must_exist: bool = False,
+    *,
+    relative_to_current_directory: bool = False,
+) -> Path:
+    candidate = relative if relative_to_current_directory else workspace / relative
     if must_exist:
         candidate = candidate.resolve(strict=True)
     else:

@@ -66,7 +66,13 @@ def main(
             # Runtime verification uses the native-validated runtime cwd on
             # Windows. Analysis and its Numba cache remain workspace-confined.
             os.chdir(workspace)
-        serve_one_session(sys.stdin.buffer, sys.stdout.buffer, session_workspace, runtime)
+        serve_one_session(
+            sys.stdin.buffer,
+            sys.stdout.buffer,
+            session_workspace,
+            runtime,
+            workspace_is_current_directory=windows_runtime_is_current_directory,
+        )
     except Exception as error:
         if isinstance(error, PermissionError):
             failure_code = "sidecar_session_permission_denied"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import os
 import shutil
 import subprocess
 import sys
@@ -28,11 +29,33 @@ from sidecar.open_chords_analysis.canonical_decode import (
     _probe_audio,
     _run_tool,
     _sanitize_external_tool_runtime,
+    _workspace_file,
     decode_canonical,
 )
 
 
 class CanonicalDecodeTests(unittest.TestCase):
+    def test_native_workspace_entry_resolves_from_the_current_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-native-workspace-") as temporary:
+            workspace = Path(temporary)
+            staged_input = workspace / "input" / "source-media"
+            staged_input.parent.mkdir()
+            staged_input.write_bytes(b"media")
+            previous_directory = Path.cwd()
+            try:
+                os.chdir(workspace)
+                native_workspace = Path.cwd()
+                resolved = _workspace_file(
+                    native_workspace,
+                    Path("input/source-media"),
+                    must_exist=True,
+                    relative_to_current_directory=True,
+                )
+            finally:
+                os.chdir(previous_directory)
+
+            self.assertEqual(resolved, staged_input.resolve())
+
     def test_manifest_verified_tool_reuses_the_runtime_path_proof(self) -> None:
         with tempfile.TemporaryDirectory(prefix="open-chords-verified-tool-") as temporary:
             runtime_root = Path(temporary)

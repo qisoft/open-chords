@@ -141,6 +141,7 @@ it("keeps the explicit workspace while resolving Windows runtime entries from it
   );
   expect(main).toContain("workspace or Path.cwd()");
   expect(main).toContain("os.chdir(workspace)");
+  expect(main).toContain("workspace_is_current_directory=windows_runtime_is_current_directory");
   expect(main).toContain(
     "windows_runtime_is_current_directory=windows_runtime_is_current_directory",
   );
