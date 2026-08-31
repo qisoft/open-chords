@@ -102,6 +102,15 @@ def serve_one_session(
         return
     cancellation = threading.Event()
     events: Queue[tuple[str, object]] = Queue()
+    analysis_import_error: Exception | None = None
+    if (workspace / ANALYSIS_RECIPE_PATH).exists():
+        try:
+            # Import NumPy, SciPy, Librosa, and Numba on the interpreter's main
+            # thread. Their frozen Windows initialization is not a safe first
+            # import from the decode worker inside AppContainer.
+            _preload_cpu_analysis()
+        except Exception as error:
+            analysis_import_error = error
 
     def read_control() -> None:
         try:
@@ -138,6 +147,8 @@ def serve_one_session(
                 if cancellation.is_set():
                     raise CanonicalDecodeCancelled("analysis cancelled before CPU processing")
                 try:
+                    if analysis_import_error is not None:
+                        raise analysis_import_error
                     candidate = _analyze_decoded(workspace)
                     if cancellation.is_set():
                         raise CanonicalDecodeCancelled("analysis cancelled before publication")
@@ -465,6 +476,12 @@ def _analyze_decoded(workspace: Path) -> dict[str, object]:
         AnalysisConfig.from_recipe_document(recipe),
     )
     return result.to_document()
+
+
+def _preload_cpu_analysis() -> None:
+    from . import cpu_analysis as _cpu_analysis
+
+    del _cpu_analysis
 
 
 def _publish_analysis_result(

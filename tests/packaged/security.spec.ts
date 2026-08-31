@@ -289,19 +289,24 @@ async function waitForApplicationExit(
   timeoutMs: number,
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      void stopApplication(application).finally(() => {
-        reject(new Error("Packaged lifecycle proof did not exit"));
-      });
-    }, timeoutMs);
-    application.once("error", (error) => {
+    const onError = (error: Error) => {
       clearTimeout(timeout);
+      application.off("exit", onExit);
       reject(error);
-    });
-    application.once("exit", (code, signal) => {
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timeout);
+      application.off("error", onError);
       resolve({ code, signal });
-    });
+    };
+    const timeout = setTimeout(() => {
+      application.off("error", onError);
+      application.off("exit", onExit);
+      reject(new Error("Packaged lifecycle proof did not exit"));
+      void stopApplication(application).catch(() => undefined);
+    }, timeoutMs);
+    application.once("error", onError);
+    application.once("exit", onExit);
   });
 }
 

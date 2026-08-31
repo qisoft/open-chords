@@ -115,26 +115,33 @@ class ProtocolTests(unittest.TestCase):
                 "utf-8",
             )
             output = io.BytesIO()
+            preload_threads: list[int] = []
 
-            with patch(
-                "sidecar.open_chords_analysis.protocol._analyze_decoded",
-                return_value={
-                    "durationSamples": 4_800,
-                    "recipe": recipe,
-                    "sampleRate": 48_000,
-                    "stageOutcomes": [
-                        {"stage": "preflight", "state": "completed"},
-                        {"stage": "canonical_decode", "state": "completed"},
-                        {"stage": "shared_features", "state": "completed"},
-                        {"stage": "rhythm", "state": "completed_with_abstentions"},
-                        {"stage": "harmony", "state": "completed_with_abstentions"},
-                        {"stage": "sections", "state": "completed_with_abstentions"},
-                        {"stage": "assemble", "state": "completed"},
-                    ],
-                    "supportClaimIds": [],
-                    "timeline": {},
-                    "warnings": [],
-                },
+            with (
+                patch(
+                    "sidecar.open_chords_analysis.protocol._preload_cpu_analysis",
+                    side_effect=lambda: preload_threads.append(threading.get_ident()),
+                ),
+                patch(
+                    "sidecar.open_chords_analysis.protocol._analyze_decoded",
+                    return_value={
+                        "durationSamples": 4_800,
+                        "recipe": recipe,
+                        "sampleRate": 48_000,
+                        "stageOutcomes": [
+                            {"stage": "preflight", "state": "completed"},
+                            {"stage": "canonical_decode", "state": "completed"},
+                            {"stage": "shared_features", "state": "completed"},
+                            {"stage": "rhythm", "state": "completed_with_abstentions"},
+                            {"stage": "harmony", "state": "completed_with_abstentions"},
+                            {"stage": "sections", "state": "completed_with_abstentions"},
+                            {"stage": "assemble", "state": "completed"},
+                        ],
+                        "supportClaimIds": [],
+                        "timeline": {},
+                        "warnings": [],
+                    },
+                ),
             ):
                 serve_one_session(
                     io.BytesIO(self._start_frame()),
@@ -146,6 +153,8 @@ class ProtocolTests(unittest.TestCase):
                         toolchain=NativeToolchain(Path(ffmpeg), Path(ffprobe)),
                     ),
                 )
+
+            self.assertEqual(preload_threads, [threading.get_ident()])
 
             messages = self._messages(output.getvalue())
             self.assertEqual([message["type"] for message in messages], ["handshake", "result"])

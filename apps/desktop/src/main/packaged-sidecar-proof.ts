@@ -911,10 +911,8 @@ function canonicalWavFixture(): Buffer {
   result.writeUInt16LE(16, 34);
   result.write("data", 36, "ascii");
   result.writeUInt32LE(sampleCount * 2, 40);
-  // Silence exercises the complete installed decode -> CPU DSP -> assemble
-  // boundary while producing explicit abstentions. It also keeps this
-  // trust-boundary benchmark independent of first-run Numba compilation for
-  // optional beat tracking on Windows; non-silent capability correctness is
-  // covered at the CPU and main-owned orchestration seams.
+  for (let index = 0; index < sampleCount; index += 1) {
+    result.writeInt16LE(Math.round(Math.sin(index / 13) * 4_000), 44 + index * 2);
+  }
   return result;
 }
