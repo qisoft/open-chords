@@ -56,6 +56,14 @@ class CanonicalDecodeTests(unittest.TestCase):
 
             self.assertEqual(resolved, staged_input.resolve())
 
+    def test_native_workspace_entry_rejects_parent_traversal(self) -> None:
+        with self.assertRaisesRegex(CanonicalDecodeError, "fixed relative path"):
+            _workspace_file(
+                Path.cwd(),
+                Path("../outside"),
+                relative_to_current_directory=True,
+            )
+
     def test_manifest_verified_tool_reuses_the_runtime_path_proof(self) -> None:
         with tempfile.TemporaryDirectory(prefix="open-chords-verified-tool-") as temporary:
             runtime_root = Path(temporary)

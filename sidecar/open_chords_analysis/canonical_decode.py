@@ -140,10 +140,7 @@ def decode_canonical(
     try:
         failure_code = CanonicalDecodeFailureCode.PREPARE_WORKSPACE
         if workspace_is_current_directory:
-            current_workspace = Path.cwd()
-            if current_workspace != Path(os.path.abspath(workspace)):
-                raise CanonicalDecodeError("native workspace differs from current directory")
-            workspace = current_workspace
+            workspace = Path.cwd()
         else:
             workspace = workspace.resolve(strict=True)
         failure_code = CanonicalDecodeFailureCode.PREPARE_ARTIFACTS
@@ -613,12 +610,17 @@ def _workspace_file(
     *,
     relative_to_current_directory: bool = False,
 ) -> Path:
-    candidate = relative if relative_to_current_directory else workspace / relative
+    if relative_to_current_directory:
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            raise CanonicalDecodeError("job artifact path is not a fixed relative path")
+        candidate = relative
+    else:
+        candidate = workspace / relative
     if must_exist:
         candidate = candidate.resolve(strict=True)
     else:
         candidate = candidate.resolve(strict=False)
-    if not candidate.is_relative_to(workspace):
+    if not relative_to_current_directory and not candidate.is_relative_to(workspace):
         raise CanonicalDecodeError("job artifact escaped its workspace")
     if must_exist and not candidate.is_file():
         raise CanonicalDecodeError("staged media is not a regular file")
