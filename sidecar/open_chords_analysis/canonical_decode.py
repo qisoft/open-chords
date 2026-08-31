@@ -613,15 +613,15 @@ def _workspace_file(
     if relative_to_current_directory:
         if relative.is_absolute() or not relative.parts or ".." in relative.parts:
             raise CanonicalDecodeError("job artifact path is not a fixed relative path")
-        candidate = relative
+        candidate = Path(os.path.abspath(relative))
     else:
         candidate = workspace / relative
-    if must_exist:
-        candidate = candidate.resolve(strict=True)
-    else:
-        candidate = candidate.resolve(strict=False)
-    if not relative_to_current_directory and not candidate.is_relative_to(workspace):
-        raise CanonicalDecodeError("job artifact escaped its workspace")
+        if must_exist:
+            candidate = candidate.resolve(strict=True)
+        else:
+            candidate = candidate.resolve(strict=False)
+        if not candidate.is_relative_to(workspace):
+            raise CanonicalDecodeError("job artifact escaped its workspace")
     if must_exist and not candidate.is_file():
         raise CanonicalDecodeError("staged media is not a regular file")
     return candidate

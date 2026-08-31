@@ -45,16 +45,23 @@ class CanonicalDecodeTests(unittest.TestCase):
             try:
                 os.chdir(workspace)
                 native_workspace = Path.cwd()
-                resolved = _workspace_file(
-                    native_workspace,
-                    Path("input/source-media"),
-                    must_exist=True,
-                    relative_to_current_directory=True,
-                )
+                expected = Path(os.path.abspath("input/source-media"))
+                with patch.object(
+                    Path,
+                    "resolve",
+                    side_effect=AssertionError("must not resolve a native-verified workspace entry"),
+                ) as resolve:
+                    resolved = _workspace_file(
+                        native_workspace,
+                        Path("input/source-media"),
+                        must_exist=True,
+                        relative_to_current_directory=True,
+                    )
             finally:
                 os.chdir(previous_directory)
 
-            self.assertEqual(resolved, staged_input.resolve())
+            resolve.assert_not_called()
+            self.assertEqual(resolved, expected)
 
     def test_native_workspace_entry_rejects_parent_traversal(self) -> None:
         with self.assertRaisesRegex(CanonicalDecodeError, "fixed relative path"):
