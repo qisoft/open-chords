@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { materializeEffectiveTimeline, type AnalysisRecipe } from "@open-chords/domain";
 import { monoPcmWav } from "@open-chords/testkit/media";
@@ -47,12 +47,9 @@ describe("LocalAnalysisService", () => {
     const analysis = await LocalAnalysisService.open({
       analyzer: {
         analyze: async ({ inputPath, recipe: requestedRecipe, reportProgress }) => {
-          expect(inputPath).toMatch(
-            new RegExp(
-              `^${join(root, "analysis-workspaces")}/attempt_(?:first|second)/input/source-media$`,
-              "u",
-            ),
-          );
+          expect(
+            relative(join(root, "analysis-workspaces"), inputPath).replaceAll("\\", "/"),
+          ).toMatch(/^attempt_(?:first|second)\/input\/source-media$/u);
           expect(requestedRecipe.capabilities).toEqual(recipe.capabilities);
           await reportProgress({ completedFraction: 0.8, elapsedMs: 20, stage: "assemble" });
           return {
