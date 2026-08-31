@@ -23,4 +23,8 @@ protocol, integrity, and containment failures publish no Revision. The scheduler
 slot until the analyzer confirms disposal of the process domain, and the Attempt workspace is then
 removed. The installed-artifact proof runs the same contained decode and CPU analysis twice (cold
 and warm) and requires byte-identical candidates after the existing cancel, crash, and adversarial
-containment probes on macOS arm64 and Windows x64.
+containment probes on macOS arm64 and Windows x64. The installed proof uses a bounded silent WAV so
+the complete pipeline produces explicit abstentions without making the trust-boundary benchmark
+depend on optional first-run beat-tracking JIT work. It emits cold and warm wall-clock durations in
+the CI log; non-silent capability correctness remains covered at the CPU and main orchestration
+seams.

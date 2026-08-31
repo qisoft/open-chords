@@ -262,6 +262,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     stage = "session_probe_failed";
     const candidates: Buffer[] = [];
     for (const temperature of ["cold", "warm"] as const) {
+      const analysisStartedAt = performance.now();
       process.stderr.write(`Packaged sidecar proof stage: analysis_${temperature}_started\n`);
       const client = createEffectSidecarClient(createLauncher([]));
       const request = parseSidecarSessionRequest({
@@ -315,7 +316,9 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
         },
         () => client.dispose(),
       );
-      process.stderr.write(`Packaged sidecar proof stage: analysis_${temperature}_completed\n`);
+      process.stderr.write(
+        `Packaged sidecar proof stage: analysis_${temperature}_completed duration_ms=${Math.round(performance.now() - analysisStartedAt)}\n`,
+      );
     }
     if (candidates.length !== 2 || !candidates[0]!.equals(candidates[1]!)) {
       throw new Error("Packaged cold and warm analysis candidates are not deterministic");
@@ -908,8 +911,10 @@ function canonicalWavFixture(): Buffer {
   result.writeUInt16LE(16, 34);
   result.write("data", 36, "ascii");
   result.writeUInt32LE(sampleCount * 2, 40);
-  for (let index = 0; index < sampleCount; index += 1) {
-    result.writeInt16LE(Math.round(Math.sin(index / 13) * 4_000), 44 + index * 2);
-  }
+  // Silence exercises the complete installed decode -> CPU DSP -> assemble
+  // boundary while producing explicit abstentions. It also keeps this
+  // trust-boundary benchmark independent of first-run Numba compilation for
+  // optional beat tracking on Windows; non-silent capability correctness is
+  // covered at the CPU and main-owned orchestration seams.
   return result;
 }
