@@ -103,7 +103,33 @@ def serve_one_session(
     cancellation = threading.Event()
     events: Queue[tuple[str, object]] = Queue()
     analysis_import_error: Exception | None = None
+    sequence = 1
     if (workspace / ANALYSIS_RECIPE_PATH).exists():
+        preload_finished = threading.Event()
+        preload_output_errors: list[Exception] = []
+        preload_sequence = [sequence]
+
+        def write_preload_heartbeats() -> None:
+            while not preload_finished.wait(HEARTBEAT_INTERVAL_SECONDS):
+                try:
+                    _write_frame(
+                        stdout,
+                        {
+                            "nonce": start.nonce,
+                            "sequence": preload_sequence[0],
+                            "type": "heartbeat",
+                        },
+                    )
+                    preload_sequence[0] += 1
+                except Exception as error:
+                    preload_output_errors.append(error)
+                    return
+
+        preload_heartbeat_thread = threading.Thread(
+            target=write_preload_heartbeats,
+            daemon=True,
+        )
+        preload_heartbeat_thread.start()
         try:
             # Import NumPy, SciPy, Librosa, and Numba on the interpreter's main
             # thread. Their frozen Windows initialization is not a safe first
@@ -111,6 +137,12 @@ def serve_one_session(
             _preload_cpu_analysis()
         except Exception as error:
             analysis_import_error = error
+        finally:
+            preload_finished.set()
+            preload_heartbeat_thread.join()
+        if preload_output_errors:
+            raise preload_output_errors[0]
+        sequence = preload_sequence[0]
 
     def read_control() -> None:
         try:
@@ -172,7 +204,6 @@ def serve_one_session(
     control_thread.start()
     decode_thread = threading.Thread(target=run_decode, daemon=True)
     decode_thread.start()
-    sequence = 1
     cancel_received = False
     decode_finished = False
     decode_cleanup_failed = False

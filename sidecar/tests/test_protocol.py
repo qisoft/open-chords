@@ -117,10 +117,14 @@ class ProtocolTests(unittest.TestCase):
             output = io.BytesIO()
             preload_threads: list[int] = []
 
+            def slow_main_thread_preload() -> None:
+                preload_threads.append(threading.get_ident())
+                time.sleep(protocol.HEARTBEAT_INTERVAL_SECONDS * 1.5)
+
             with (
                 patch(
                     "sidecar.open_chords_analysis.protocol._preload_cpu_analysis",
-                    side_effect=lambda: preload_threads.append(threading.get_ident()),
+                    side_effect=slow_main_thread_preload,
                 ),
                 patch(
                     "sidecar.open_chords_analysis.protocol._analyze_decoded",
@@ -157,8 +161,11 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(preload_threads, [threading.get_ident()])
 
             messages = self._messages(output.getvalue())
-            self.assertEqual([message["type"] for message in messages], ["handshake", "result"])
-            descriptor = messages[1]["artifact"]
+            self.assertEqual(
+                [message["type"] for message in messages],
+                ["handshake", "heartbeat", "result"],
+            )
+            descriptor = messages[-1]["artifact"]
             self.assertEqual(descriptor["path"], "artifacts/analysis-result.json")
             candidate_bytes = (workspace / descriptor["path"]).read_bytes()
             self.assertEqual(descriptor["byteSize"], len(candidate_bytes))

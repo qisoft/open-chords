@@ -26,4 +26,6 @@ and warm) and requires byte-identical candidates after the existing cancel, cras
 containment probes on macOS arm64 and Windows x64. It emits cold and warm wall-clock durations in
 the CI log. The frozen sidecar preloads the CPU analysis stack on the interpreter's main thread
 before starting the decode worker so Windows AppContainer cold starts exercise the same supported
-initialization boundary as the standalone frozen-runtime proof.
+initialization boundary as the standalone frozen-runtime proof. A bounded writer preserves
+monotonic protocol heartbeats during that preload, so the host's liveness and absolute session
+deadlines remain authoritative.
