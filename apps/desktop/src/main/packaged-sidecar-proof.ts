@@ -1,11 +1,8 @@
-import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -18,6 +15,10 @@ import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
+import {
+  packagedWorkspaceFailureCode,
+  preparePackagedWorkspace,
+} from "./packaged-sidecar-proof-workspace.ts";
 import { EXPECTED_SIDECAR_MANIFEST_SHA256 } from "./sidecar-build-metadata.ts";
 import { verifyContainmentRuntime } from "./sidecar-containment-integrity.ts";
 import { createNativeContainmentLauncher } from "./sidecar-containment-launcher.ts";
@@ -29,10 +30,6 @@ import {
   SidecarSessionError,
   type SidecarSessionErrorCode,
 } from "./sidecar-session.ts";
-import {
-  isExpectedWindowsProfileRoot,
-  isExpectedWindowsRuntimeRoot,
-} from "./windows-app-container-path.ts";
 
 const SensitiveSurfacesSchema = z.object({
   browserState: z.boolean(),
@@ -160,6 +157,8 @@ class PackagedProofFailure extends Error {
 
 export function packagedProofFailureCode(cause: unknown): string {
   if (cause instanceof PackagedProofFailure) return cause.code;
+  const workspaceFailureCode = packagedWorkspaceFailureCode(cause);
+  if (workspaceFailureCode !== undefined) return workspaceFailureCode;
   if (cause instanceof AggregateError) {
     const codes = cause.errors.map(packagedProofFailureCode);
     const hasCleanupFailure = codes.some(
@@ -215,7 +214,11 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       ? join(process.resourcesPath, "..", "MacOS", "open-chords-containment-bridge")
       : undefined,
   );
-  const prepared = prepareWorkspace(platform, containment.helperPath, verifiedRuntime.runtimeRoot);
+  const prepared = preparePackagedWorkspace(
+    platform,
+    containment.helperPath,
+    verifiedRuntime.runtimeRoot,
+  );
   let proofFailure: { cause: unknown } | undefined;
   let stage: PackagedProofFailureCode = "setup_failed";
   try {
@@ -829,156 +832,8 @@ function throwCombinedFailures(
   if (failures.length > 1) throw new AggregateError(failures, message);
 }
 
-function prepareWorkspace(
-  platform: "darwin" | "win32",
-  helperPath: string,
-  packagedRuntimeRoot: string,
-): {
-  cleanup(): void;
-  runtimeRoot: string;
-  windowsProfile?: string;
-  workspace: string;
-} {
-  const identifier = randomUUID();
-  if (platform === "darwin") {
-    const workspace = join(
-      homedir(),
-      "Library",
-      "Containers",
-      "io.github.qisoft.open-chords.analysis-service",
-      "Data",
-      "jobs",
-      identifier,
-    );
-    mkdirSync(workspace, { recursive: true, mode: 0o700 });
-    return {
-      cleanup: () => rmSync(workspace, { force: true, recursive: true }),
-      runtimeRoot: packagedRuntimeRoot,
-      workspace,
-    };
-  }
-  const profile = `OpenChords.Analysis.${identifier}`;
-  let reportedRoots: string[];
-  try {
-    reportedRoots = execFileSync(helperPath, [`--prepare=${profile}`], {
-      encoding: "utf8",
-      env: {},
-      windowsHide: true,
-    })
-      .trim()
-      .split(/\r?\n/);
-  } catch {
-    throwCombinedFailures(
-      "AppContainer profile preparation and cleanup failed",
-      { cause: new PackagedProofFailure("setup_prepare_failed") },
-      privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
-    );
-    throw new PackagedProofFailure("setup_prepare_failed");
-  }
-  if (reportedRoots.length !== 3) {
-    throwCombinedFailures(
-      "AppContainer profile response and cleanup failed",
-      { cause: new PackagedProofFailure("setup_response_failed") },
-      privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
-    );
-    throw new PackagedProofFailure("setup_response_failed");
-  }
-  const reportedProfileRoot = reportedRoots[0]!;
-  const reportedLocalAppDataRoot = reportedRoots[1]!;
-  const reportedRuntimeRoot = reportedRoots[2]!;
-  const localAppDataRoot = canonicalWindowsLocalAppDataRoot(reportedLocalAppDataRoot);
-  const profileRoot = canonicalWindowsProfileRoot(reportedProfileRoot, localAppDataRoot);
-  const runtimeRoot = canonicalWindowsRuntimeRoot(reportedRuntimeRoot, localAppDataRoot, profile);
-  if (profileRoot === null || runtimeRoot === null) {
-    throwCombinedFailures(
-      "AppContainer profile validation and cleanup failed",
-      { cause: new PackagedProofFailure("setup_validation_failed") },
-      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile)),
-    );
-    throw new PackagedProofFailure("setup_validation_failed");
-  }
-  const workspace = join(profileRoot, "jobs", identifier);
-  try {
-    cpSync(packagedRuntimeRoot, runtimeRoot, { recursive: true });
-    mkdirSync(workspace, { recursive: true });
-  } catch {
-    throwCombinedFailures(
-      "AppContainer workspace setup and cleanup failed",
-      { cause: new PackagedProofFailure("setup_workspace_failed") },
-      privateCleanupFailures(cleanupWindowsProfile(helperPath, profile)),
-    );
-  }
-  return {
-    cleanup() {
-      throwCombinedFailures(
-        "AppContainer profile cleanup failed",
-        undefined,
-        cleanupWindowsProfile(helperPath, profile),
-      );
-    },
-    runtimeRoot,
-    windowsProfile: profile,
-    workspace,
-  };
-}
-
-function canonicalWindowsLocalAppDataRoot(reportedRoot: string): string | null {
-  try {
-    return realpathSync(reportedRoot);
-  } catch {
-    return null;
-  }
-}
-
-function canonicalWindowsProfileRoot(
-  reportedRoot: string,
-  localAppDataRoot: string | null,
-): string | null {
-  if (localAppDataRoot === null) return null;
-  try {
-    const packagesRoot = realpathSync(join(localAppDataRoot, "Packages"));
-    const profileRoot = realpathSync(reportedRoot);
-    return isExpectedWindowsProfileRoot(profileRoot, packagesRoot) ? profileRoot : null;
-  } catch {
-    return null;
-  }
-}
-
-function canonicalWindowsRuntimeRoot(
-  reportedRoot: string,
-  localAppDataRoot: string | null,
-  profile: string,
-): string | null {
-  if (localAppDataRoot === null) return null;
-  try {
-    const runtimeRoot = realpathSync(reportedRoot);
-    return isExpectedWindowsRuntimeRoot(runtimeRoot, localAppDataRoot, profile)
-      ? runtimeRoot
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function cleanupWindowsProfile(helperPath: string, profile: string): unknown[] {
-  return destroyWindowsProfile(helperPath, profile);
-}
-
 function privateCleanupFailures(failures: readonly unknown[]): PackagedProofFailure[] {
   return failures.map(() => new PackagedProofFailure("cleanup_failed"));
-}
-
-function destroyWindowsProfile(helperPath: string, profile: string): unknown[] {
-  const failures: unknown[] = [];
-  try {
-    execFileSync(helperPath, [`--destroy=${profile}`], {
-      env: {},
-      windowsHide: true,
-    });
-  } catch (cause) {
-    failures.push(cause);
-  }
-  return failures;
 }
 
 function canonicalWavFixture(): Buffer {
