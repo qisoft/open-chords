@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import os
 import shutil
 import subprocess
 import sys
@@ -24,14 +25,113 @@ from sidecar.open_chords_analysis.canonical_decode import (
     _NativeToolCleanupError,
     _NativeToolOutputLimitError,
     _NativeToolTimeoutError,
+    _exact_executable,
     _probe_audio,
     _run_tool,
     _sanitize_external_tool_runtime,
+    _workspace_file,
     decode_canonical,
 )
 
 
 class CanonicalDecodeTests(unittest.TestCase):
+    def test_native_workspace_entry_resolves_from_the_current_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-native-workspace-") as temporary:
+            workspace = Path(temporary)
+            staged_input = workspace / "input" / "source-media"
+            staged_input.parent.mkdir()
+            staged_input.write_bytes(b"media")
+            previous_directory = Path.cwd()
+            try:
+                os.chdir(workspace)
+                native_workspace = Path.cwd()
+                expected = Path(os.path.abspath("input/source-media"))
+                with patch.object(
+                    Path,
+                    "resolve",
+                    side_effect=AssertionError("must not resolve a native-verified workspace entry"),
+                ) as resolve:
+                    resolved = _workspace_file(
+                        native_workspace,
+                        Path("input/source-media"),
+                        must_exist=True,
+                        relative_to_current_directory=True,
+                    )
+            finally:
+                os.chdir(previous_directory)
+
+            resolve.assert_not_called()
+            self.assertEqual(resolved, expected)
+
+    def test_native_workspace_entry_rejects_parent_traversal(self) -> None:
+        with self.assertRaisesRegex(CanonicalDecodeError, "fixed relative path"):
+            _workspace_file(
+                Path.cwd(),
+                Path("../outside"),
+                relative_to_current_directory=True,
+            )
+
+    def test_manifest_verified_tool_reuses_the_runtime_path_proof(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-verified-tool-") as temporary:
+            runtime_root = Path(temporary)
+            tool = runtime_root / "tools" / "ffmpeg.exe"
+            tool.parent.mkdir()
+            tool.write_bytes(b"tool")
+
+            with patch.object(
+                Path,
+                "resolve",
+                side_effect=AssertionError("must not resolve a verified tool again"),
+            ) as resolve:
+                self.assertEqual(_exact_executable(tool, runtime_root), tool)
+
+            resolve.assert_not_called()
+
+    def test_native_tools_receive_eof_without_opening_the_null_device(self) -> None:
+        stdin = io.BytesIO()
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(),
+            stdin=stdin,
+            stderr=io.BytesIO(),
+            stdout=io.BytesIO(),
+            wait=unittest.mock.Mock(return_value=0),
+        )
+        with patch(
+            "sidecar.open_chords_analysis.canonical_decode.subprocess.Popen",
+            return_value=process,
+        ) as launch:
+            _run_tool([sys.executable, "-V"], threading.Event())
+
+        self.assertIs(launch.call_args.kwargs["stdin"], subprocess.PIPE)
+        self.assertTrue(stdin.closed)
+
+    def test_reaps_native_process_when_delivering_stdin_eof_fails(self) -> None:
+        stdin = SimpleNamespace(
+            close=unittest.mock.Mock(
+                side_effect=[OSError("injected stdin close failure"), None],
+            ),
+        )
+        stdout = io.BytesIO()
+        stderr = io.BytesIO()
+        process = SimpleNamespace(
+            kill=unittest.mock.Mock(),
+            stdin=stdin,
+            stderr=stderr,
+            stdout=stdout,
+            wait=unittest.mock.Mock(return_value=0),
+        )
+        with (
+            patch("sidecar.open_chords_analysis.canonical_decode.subprocess.Popen", return_value=process),
+            self.assertRaisesRegex(OSError, "stdin close failure"),
+        ):
+            _run_tool([sys.executable, "-V"], threading.Event())
+
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=1)
+        self.assertEqual(stdin.close.call_count, 2)
+        self.assertTrue(stdout.closed)
+        self.assertTrue(stderr.closed)
+
     def test_cancellation_survives_kill_race_after_successful_reap(self) -> None:
         process = SimpleNamespace(
             kill=unittest.mock.Mock(side_effect=ProcessLookupError("already exited")),
@@ -493,7 +593,7 @@ class CanonicalDecodeTests(unittest.TestCase):
                     NativeToolchain(Path("/unused/ffmpeg"), Path("/unused/ffprobe")),
                     CanonicalDecodeConfig(platform_profile="test"),
                 )
-            self.assertEqual(raised.exception.code, "canonical_prepare_failed")
+            self.assertEqual(raised.exception.code, "canonical_prepare_input_failed")
 
             self.assertEqual(list(artifacts.iterdir()), [])
 
@@ -511,7 +611,7 @@ class CanonicalDecodeTests(unittest.TestCase):
                     CanonicalDecodeConfig(platform_profile="test"),
                 )
 
-            self.assertEqual(raised.exception.code, "canonical_prepare_failed")
+            self.assertEqual(raised.exception.code, "canonical_prepare_tools_failed")
 
     def test_reports_publication_fault_and_removes_artifacts(self) -> None:
         ffmpeg = shutil.which("ffmpeg")

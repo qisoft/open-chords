@@ -27,6 +27,7 @@ const RuntimeManifestSchema = z.strictObject({
 export type VerifiedSidecarRuntime = {
   executablePath: string;
   manifestHash: string;
+  runtimeRoot: string;
 };
 
 export function verifyPackagedSidecarRuntime(
@@ -92,6 +93,7 @@ export function verifyPackagedSidecarRuntime(
   return {
     executablePath: resolveRuntimeFile(runtimeRoot, requiredPaths[0]!),
     manifestHash: actualManifestHash,
+    runtimeRoot: realpathSync(runtimeRoot),
   };
 }
 

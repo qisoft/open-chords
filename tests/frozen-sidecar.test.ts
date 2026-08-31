@@ -36,7 +36,7 @@ afterAll(() => {
 });
 
 it.skipIf(executablePath === undefined)(
-  "runs the same canonical decode deterministically without PATH or system runtimes",
+  "validates the frozen runtime and runs uncontained decode only where supported",
   async () => {
     const runtimeRoot = dirname(executablePath!);
     const importWorkspace = mkdtempSync(join(tmpdir(), "open-chords-frozen-import-"));
@@ -125,6 +125,7 @@ it.skipIf(executablePath === undefined)(
         }),
       );
     }
+    if (process.platform === "win32") return;
     const fixture = monoPcmWav(
       Array.from({ length: 48_000 }, (_value, index) => Math.round(Math.sin(index / 13) * 4_000)),
     );
@@ -185,8 +186,7 @@ it.skipIf(executablePath === undefined)(
       },
       configuration: {
         value: {
-          platformProfile:
-            process.platform === "win32" ? "windows-server-2025-x64" : "darwin-arm64",
+          platformProfile: "darwin-arm64",
         },
       },
       tools: {

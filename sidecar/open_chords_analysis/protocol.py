@@ -66,6 +66,8 @@ def serve_one_session(
     stdout: BinaryIO,
     workspace: Path,
     runtime: FrozenRuntime,
+    *,
+    workspace_is_current_directory: bool = False,
 ) -> None:
     """Read one start frame, publish one result/error, and return."""
 
@@ -109,11 +111,17 @@ def serve_one_session(
 
     def run_decode() -> None:
         try:
+            decode_kwargs = (
+                {"workspace_is_current_directory": True}
+                if workspace_is_current_directory
+                else {}
+            )
             artifact = decode_canonical(
                 workspace,
                 runtime.toolchain,
                 CanonicalDecodeConfig(platform_profile=runtime.platform_profile),
                 cancellation,
+                **decode_kwargs,
             )
         except CanonicalDecodeCancelled as error:
             events.put(("decode_cancelled", error))

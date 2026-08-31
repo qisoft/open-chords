@@ -95,6 +95,8 @@ def main() -> None:
                 "numba._devicearray",
                 "--hidden-import",
                 "sidecar.open_chords_analysis.cpu_analysis",
+                "--hidden-import",
+                "sidecar.open_chords_analysis.containment_probe",
                 *[
                     argument
                     for module in PYINSTALLER_EXCLUDED_MODULES
@@ -165,9 +167,25 @@ def main() -> None:
         )
         analysis_license_file = licenses / "Python-Analysis-Dependencies.txt"
         analysis_versions = _write_python_analysis_licenses(analysis_license_file)
+        observed = {
+            "python": sys.version.split()[0],
+            "pyinstaller": _tool_version([sys.executable, "-m", "PyInstaller", "--version"]),
+            "ffmpeg": _bounded_version_file(native_root / "ffmpeg-version.txt"),
+        }
         inventory = json.loads(
             (ROOT / "sidecar/native/native-dependencies.json").read_text("utf-8")
         )
+        if sys.platform == "darwin":
+            _materialize_macos_runtime_symlinks(assembled)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools/sign-macos-analysis-runtime.py"),
+                    "--runtime-root",
+                    str(assembled),
+                ],
+                check=True,
+            )
         native_files = _native_files(assembled)
         _validate_native_closure(assembled, native_files, ffmpeg_build)
         present_components = {entry["component"] for entry in native_files} | {"pyinstaller"}
@@ -190,11 +208,7 @@ def main() -> None:
             )
         ]
         inventory["nativeFiles"] = native_files
-        inventory["observed"] = {
-            "python": sys.version.split()[0],
-            "pyinstaller": _tool_version([sys.executable, "-m", "PyInstaller", "--version"]),
-            "ffmpeg": _tool_version([str(tools / f"ffmpeg{executable_suffix}"), "-version"]),
-        }
+        inventory["observed"] = observed
         (assembled / "native-dependencies.json").write_text(
             json.dumps(inventory, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
             "utf-8",
@@ -211,6 +225,21 @@ def main() -> None:
         load_frozen_runtime(runtime_root)
 
 
+def _materialize_macos_runtime_symlinks(runtime_root: Path) -> None:
+    resolved_root = runtime_root.resolve()
+    links = [path for path in runtime_root.rglob("*") if path.is_symlink()]
+    if not links:
+        raise FileNotFoundError("PyInstaller macOS runtime symlinks are missing")
+    resolved_links = [(link, link.resolve(strict=True)) for link in links]
+    for link, target in resolved_links:
+        if resolved_root not in target.parents:
+            raise ValueError("PyInstaller macOS runtime symlink escaped the runtime")
+    for link, target in resolved_links:
+        link.unlink()
+        if link == runtime_root / "_internal/Python":
+            shutil.copy2(target, link)
+
+
 def _tool_version(command: list[str]) -> str:
     result = subprocess.run(
         command,
@@ -220,6 +249,13 @@ def _tool_version(command: list[str]) -> str:
         text=True,
     )
     return result.stdout.splitlines()[0][:512]
+
+
+def _bounded_version_file(path: Path) -> str:
+    lines = path.read_text("utf-8").splitlines()
+    if not lines or not lines[0] or len(lines[0]) > 512:
+        raise ValueError("Native tool version metadata is invalid")
+    return lines[0]
 
 
 def _python_license() -> Path:

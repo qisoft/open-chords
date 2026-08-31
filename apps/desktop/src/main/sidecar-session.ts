@@ -27,6 +27,13 @@ export {
   type SidecarSessionResult,
 } from "./sidecar-protocol.ts";
 export { createUncontainedSpawnLauncherForProof } from "./sidecar-proof-process.ts";
+export {
+  createNativeContainmentLauncher,
+  type NativeContainmentBroker,
+  type NativeContainmentEvidence,
+  type NativeContainmentPlatform,
+} from "./sidecar-containment-launcher.ts";
+export { createLinuxSystemdContainmentBroker } from "./sidecar-linux-systemd-broker.ts";
 
 export interface SidecarClient {
   runSession(request: SidecarSessionRequest): Promise<SidecarSessionResult>;

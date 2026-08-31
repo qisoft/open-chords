@@ -1,8 +1,15 @@
 const { spawn } = require("node:child_process");
+const { join } = require("node:path");
 
 const { MakerZIP } = require("@electron-forge/maker-zip");
 const { FusesPlugin } = require("@electron-forge/plugin-fuses");
 const { FuseV1Options, FuseVersion } = require("@electron/fuses");
+
+const {
+  installStagedMacOSContainment,
+  isPreverifiedContainmentPath,
+  needsUnsignedLibraryValidationEntitlement,
+} = require("./tools/forge-packaging.cjs");
 
 function buildApplication() {
   return new Promise((resolve, reject) => {
@@ -27,13 +34,42 @@ function buildApplication() {
 
 module.exports = {
   packagerConfig: {
+    appBundleId: "io.github.qisoft.open-chords",
     asar: true,
-    extraResource: ["dist/analysis-sidecar/open-chords-analysis"],
+    extraResource: ["dist/analysis-sidecar/open-chords-analysis", "dist/containment"],
+    osxSign: {
+      identity: "-",
+      identityValidation: false,
+      ignore: isPreverifiedContainmentPath,
+      optionsForFile: (filePath) =>
+        needsUnsignedLibraryValidationEntitlement(filePath)
+          ? {
+              entitlements: join(
+                __dirname,
+                "native",
+                "macos",
+                "unsigned-application.entitlements.plist",
+              ),
+            }
+          : {},
+      preAutoEntitlements: false,
+    },
   },
   rebuildConfig: {},
   makers: [new MakerZIP({}, ["darwin", "win32"])],
   hooks: {
     generateAssets: buildApplication,
+    packageAfterCopy: async (forgeConfig, buildPath, electronVersion, platform) => {
+      installStagedMacOSContainment(
+        forgeConfig,
+        buildPath,
+        electronVersion,
+        platform,
+        join(__dirname, "dist", "containment"),
+        join(__dirname, "dist", "analysis-sidecar", "open-chords-analysis"),
+        join(__dirname, "native", "macos", "analysis-service.entitlements.plist"),
+      );
+    },
   },
   plugins: [
     new FusesPlugin({

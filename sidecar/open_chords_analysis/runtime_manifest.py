@@ -5,18 +5,34 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
-from typing import Final
+from collections.abc import Callable
+from typing import Final, TypeVar
 
 from .canonical_decode import NativeToolchain
 from .protocol import FrozenRuntime
 
 MANIFEST_NAME: Final = "runtime-manifest.json"
 MAX_MANIFEST_BYTES: Final = 4 * 1024 * 1024
+WINDOWS_FILE_FLAG_BACKUP_SEMANTICS: Final = 0x02000000
+WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT: Final = 0x00200000
+WINDOWS_FILE_NAME_OPENED: Final = 0x00000008
+WINDOWS_FILE_SHARE_ALL: Final = 0x00000001 | 0x00000002 | 0x00000004
+WINDOWS_OPEN_EXISTING: Final = 3
+T = TypeVar("T")
 
 
 class RuntimeManifestError(RuntimeError):
     """The frozen runtime does not match its immutable manifest."""
+
+
+class RuntimeManifestPermissionError(PermissionError):
+    """A stable operation category for a denied frozen-runtime read."""
+
+    def __init__(self, stage: str) -> None:
+        super().__init__("frozen runtime access denied")
+        self.stage = stage
 
 
 def write_runtime_manifest(
@@ -62,14 +78,22 @@ def write_runtime_manifest(
     return hashlib.sha256(content).hexdigest()
 
 
-def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
+def load_frozen_runtime(
+    runtime_root: Path,
+    *,
+    windows_runtime_is_current_directory: bool = False,
+) -> FrozenRuntime:
     """Verify the complete runtime before exposing its protocol handshake."""
 
-    runtime_root = runtime_root.resolve(strict=True)
+    # The Windows native launcher has already canonicalized the exact staging
+    # root and rejected every reparse point before starting the AppContainer.
+    # Avoid opening that directory again from the restricted token: every
+    # manifest entry is still handle-resolved and bounded by this absolute root.
+    runtime_root = _runtime_root_path(runtime_root)
     manifest_path = runtime_root / MANIFEST_NAME
-    if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
+    if _permission_checked("manifest", manifest_path.stat).st_size > MAX_MANIFEST_BYTES:
         raise RuntimeManifestError("frozen runtime manifest exceeds four MiB")
-    content = manifest_path.read_bytes()
+    content = _permission_checked("manifest", manifest_path.read_bytes)
     try:
         manifest = json.loads(content)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
@@ -107,29 +131,51 @@ def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
             raise RuntimeManifestError("frozen runtime file path is invalid")
         candidate = runtime_root / relative_path
         if entry["type"] == "symlink":
-            if set(entry) != {"path", "target", "type"} or not candidate.is_symlink():
+            if set(entry) != {"path", "target", "type"} or not _permission_checked(
+                "entry_metadata", candidate.is_symlink
+            ):
                 raise RuntimeManifestError("frozen runtime symbolic link is invalid")
-            if os.readlink(candidate) != entry["target"] or not _resolve_runtime_path(candidate).is_relative_to(runtime_root):
+            target = _permission_checked("entry_metadata", lambda: os.readlink(candidate))
+            if target != entry["target"] or not _resolve_runtime_entry(
+                candidate,
+                runtime_root,
+                windows_runtime_is_current_directory=windows_runtime_is_current_directory,
+            ).is_relative_to(runtime_root):
                 raise RuntimeManifestError("frozen runtime symbolic link escaped its package")
             expected_paths.add(relative)
             continue
         if set(entry) != {"byteSize", "path", "sha256", "type"}:
             raise RuntimeManifestError("frozen runtime file entry is invalid")
-        resolved = _resolve_runtime_path(candidate)
-        if not resolved.is_relative_to(runtime_root) or not candidate.is_file() or candidate.is_symlink():
+        resolved = _resolve_runtime_entry(
+            candidate,
+            runtime_root,
+            windows_runtime_is_current_directory=windows_runtime_is_current_directory,
+        )
+        if (
+            not resolved.is_relative_to(runtime_root)
+            or not _permission_checked("entry_metadata", candidate.is_file)
+            or _permission_checked("entry_metadata", candidate.is_symlink)
+        ):
             raise RuntimeManifestError("frozen runtime file escaped its package")
-        if candidate.stat().st_size != entry["byteSize"] or _sha256_file(candidate) != entry["sha256"]:
+        if (
+            _permission_checked("entry_metadata", candidate.stat).st_size != entry["byteSize"]
+            or _permission_checked("entry_content", lambda: _sha256_file(candidate))
+            != entry["sha256"]
+        ):
             raise RuntimeManifestError(f"frozen runtime hash mismatch for {relative}")
         expected_paths.add(relative)
-    actual_paths = {
-        relative
-        for relative in (
-            path.relative_to(runtime_root).as_posix()
-            for path in runtime_root.rglob("*")
-            if path.is_file() or path.is_symlink()
-        )
-        if relative != MANIFEST_NAME
-    }
+    actual_paths = _permission_checked(
+        "inventory",
+        lambda: {
+            relative
+            for relative in (
+                path.relative_to(runtime_root).as_posix()
+                for path in runtime_root.rglob("*")
+                if path.is_file() or path.is_symlink()
+            )
+            if relative != MANIFEST_NAME
+        },
+    )
     if actual_paths != expected_paths:
         raise RuntimeManifestError("frozen runtime contains an unmanifested file")
     executable_suffix = ".exe" if os.name == "nt" else ""
@@ -152,6 +198,7 @@ def load_frozen_runtime(runtime_root: Path) -> FrozenRuntime:
         toolchain=NativeToolchain(
             ffmpeg=tools / f"ffmpeg{executable_suffix}",
             ffprobe=tools / f"ffprobe{executable_suffix}",
+            verified_runtime_root=runtime_root,
         ),
     )
 
@@ -160,11 +207,126 @@ def _canonical_json(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode()
 
 
-def _resolve_runtime_path(path: Path) -> Path:
+def _resolve_runtime_path(path: Path, *, stage: str = "entry_metadata") -> Path:
     try:
-        return path.resolve(strict=True)
+        return _resolve_windows_path(path) if os.name == "nt" else path.resolve(strict=True)
+    except PermissionError as error:
+        raise RuntimeManifestPermissionError(stage) from error
     except (OSError, RuntimeError) as error:
         raise RuntimeManifestError("frozen runtime path could not be resolved") from error
+
+
+def _runtime_root_path(path: Path, *, windows: bool | None = None) -> Path:
+    if windows is None:
+        windows = os.name == "nt"
+    return Path(os.path.abspath(path)) if windows else _resolve_runtime_path(path, stage="root")
+
+
+def _resolve_runtime_entry(
+    path: Path,
+    runtime_root: Path,
+    *,
+    windows_runtime_is_current_directory: bool = False,
+) -> Path:
+    if os.name == "nt" and windows_runtime_is_current_directory:
+        relative = path.relative_to(runtime_root)
+        return _resolve_windows_path(relative, preserve_relative=True)
+    return _resolve_runtime_path(path)
+
+
+@lru_cache(maxsize=1)
+def _windows_path_api() -> tuple[object, object]:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetFinalPathNameByHandleW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return ctypes, kernel32
+
+
+def _resolve_windows_path(
+    path: Path,
+    *,
+    api: tuple[object, object] | None = None,
+    preserve_relative: bool = False,
+) -> Path:
+    """Resolve a Windows path without CPython's exclusive directory handle."""
+
+    ctypes, kernel32 = api if api is not None else _windows_path_api()
+    opened_path = os.fspath(path) if preserve_relative else os.path.abspath(path)
+    flags = WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+    if preserve_relative:
+        # Native has just canonicalized every immutable runtime entry beneath
+        # its root. Keep a cheap per-entry access check without repeating the
+        # expensive final-name query inside the AppContainer.
+        flags |= WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
+    handle = kernel32.CreateFileW(
+        opened_path,
+        0,
+        WINDOWS_FILE_SHARE_ALL,
+        None,
+        WINDOWS_OPEN_EXISTING,
+        flags,
+        None,
+    )
+    if handle == ctypes.c_void_p(-1).value:
+        error = ctypes.WinError(ctypes.get_last_error())
+        error.filename = opened_path
+        raise error
+    try:
+        if preserve_relative:
+            return Path(os.path.abspath(opened_path))
+        size = 32_768
+        while True:
+            buffer = ctypes.create_unicode_buffer(size)
+            # The native broker has already rejected reparse points and protected the
+            # staged tree. FILE_NAME_OPENED avoids re-walking shared ancestors that
+            # the exact AppContainer SID intentionally cannot enumerate.
+            length = kernel32.GetFinalPathNameByHandleW(
+                handle, buffer, size, WINDOWS_FILE_NAME_OPENED
+            )
+            if length == 0:
+                error = ctypes.WinError(ctypes.get_last_error())
+                error.filename = opened_path
+                raise error
+            if length < size:
+                return Path(_strip_windows_extended_prefix(buffer.value))
+            size = length + 1
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _strip_windows_extended_prefix(path: str) -> str:
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    if path.startswith("\\\\?\\"):
+        return path[4:]
+    return path
+
+
+def _permission_checked(stage: str, operation: Callable[[], T]) -> T:
+    try:
+        return operation()
+    except PermissionError as error:
+        raise RuntimeManifestPermissionError(stage) from error
 
 
 def _write_atomic(path: Path, content: bytes) -> None:

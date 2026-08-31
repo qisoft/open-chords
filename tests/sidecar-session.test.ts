@@ -542,7 +542,10 @@ describe.each(clients)("%s sidecar client", (_name, createClient) => {
     ]);
     const client = createClient(launcherFor(process));
 
-    await expect(client.runSession(request)).rejects.toMatchObject({ code: "remote_failure" });
+    await expect(client.runSession(request)).rejects.toMatchObject({
+      code: "remote_failure",
+      remoteCode: "analysis_failed",
+    });
     expect(process.stops).toEqual(["remote_failure"]);
     await client.dispose();
   });

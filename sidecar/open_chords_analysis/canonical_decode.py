@@ -29,6 +29,10 @@ TOOL_TIMEOUT_SECONDS: Final = 30
 class CanonicalDecodeFailureCode(str, Enum):
     DECODE = "canonical_decode_failed"
     PREPARE = "canonical_prepare_failed"
+    PREPARE_ARTIFACTS = "canonical_prepare_artifacts_failed"
+    PREPARE_INPUT = "canonical_prepare_input_failed"
+    PREPARE_TOOLS = "canonical_prepare_tools_failed"
+    PREPARE_WORKSPACE = "canonical_prepare_workspace_failed"
     PROBE = "canonical_probe_failed"
     PROBE_EXECUTION = "canonical_probe_execution_failed"
     PROBE_EXIT = "canonical_probe_exit_failed"
@@ -100,6 +104,7 @@ class _NativeToolCleanupError(RuntimeError):
 class NativeToolchain:
     ffmpeg: Path
     ffprobe: Path
+    verified_runtime_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -125,15 +130,30 @@ def decode_canonical(
     toolchain: NativeToolchain,
     config: CanonicalDecodeConfig,
     cancellation: threading.Event | None = None,
+    *,
+    workspace_is_current_directory: bool = False,
 ) -> ArtifactDescriptor:
     """Decode the fixed staged input and publish a deterministic manifest."""
 
     artifacts: tuple[Path, ...] = ()
     failure_code = CanonicalDecodeFailureCode.PREPARE
     try:
-        workspace = workspace.resolve(strict=True)
-        output_path = _workspace_file(workspace, OUTPUT_PATH)
-        manifest_path = _workspace_file(workspace, MANIFEST_PATH)
+        failure_code = CanonicalDecodeFailureCode.PREPARE_WORKSPACE
+        if workspace_is_current_directory:
+            workspace = Path.cwd()
+        else:
+            workspace = workspace.resolve(strict=True)
+        failure_code = CanonicalDecodeFailureCode.PREPARE_ARTIFACTS
+        output_path = _workspace_file(
+            workspace,
+            OUTPUT_PATH,
+            relative_to_current_directory=workspace_is_current_directory,
+        )
+        manifest_path = _workspace_file(
+            workspace,
+            MANIFEST_PATH,
+            relative_to_current_directory=workspace_is_current_directory,
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_output = output_path.with_suffix(".wav.partial")
         temporary_manifest = manifest_path.with_suffix(".json.partial")
@@ -141,9 +161,16 @@ def decode_canonical(
         if cleanup_error := _cleanup_artifacts(artifacts):
             failure_code = CanonicalDecodeFailureCode.CLEANUP
             raise cleanup_error
-        input_path = _workspace_file(workspace, INPUT_PATH, must_exist=True)
-        ffmpeg = _exact_executable(toolchain.ffmpeg)
-        ffprobe = _exact_executable(toolchain.ffprobe)
+        failure_code = CanonicalDecodeFailureCode.PREPARE_INPUT
+        input_path = _workspace_file(
+            workspace,
+            INPUT_PATH,
+            must_exist=True,
+            relative_to_current_directory=workspace_is_current_directory,
+        )
+        failure_code = CanonicalDecodeFailureCode.PREPARE_TOOLS
+        ffmpeg = _exact_executable(toolchain.ffmpeg, toolchain.verified_runtime_root)
+        ffprobe = _exact_executable(toolchain.ffprobe, toolchain.verified_runtime_root)
         input_descriptor = _file_descriptor(workspace, input_path)
         cancellation = cancellation or threading.Event()
         _raise_if_cancelled(cancellation)
@@ -383,7 +410,7 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
     try:
         process = subprocess.Popen(
             arguments,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=_tool_environment(),
@@ -395,6 +422,8 @@ def _run_tool(arguments: list[str], cancellation: threading.Event) -> _ToolResul
     reaped = False
     primary_error: BaseException | None = None
     try:
+        if stdin_pipe := getattr(process, "stdin", None):
+            stdin_pipe.close()
         stdout = bytearray()
         stderr = bytearray()
         exceeded = threading.Event()
@@ -487,7 +516,13 @@ def _cleanup_native_process(
                 cleanup_failed = True
         except Exception:
             cleanup_failed = True
-    for pipe in (process.stdout, process.stderr):
+    for pipe in (
+        getattr(process, "stdin", None),
+        process.stdout,
+        process.stderr,
+    ):
+        if pipe is None:
+            continue
         try:
             pipe.close()
         except Exception:
@@ -555,23 +590,38 @@ def _tool_identity(
     }
 
 
-def _exact_executable(path: Path) -> Path:
+def _exact_executable(path: Path, verified_runtime_root: Path | None = None) -> Path:
     if not path.is_absolute():
         raise CanonicalDecodeError("native media tool path must be absolute")
+    if verified_runtime_root is not None:
+        if not path.is_relative_to(verified_runtime_root) or not path.is_file():
+            raise CanonicalDecodeError("verified native media tool is outside its runtime")
+        return path
     resolved = path.resolve(strict=True)
     if not resolved.is_file():
         raise CanonicalDecodeError("native media tool is not a file")
     return resolved
 
 
-def _workspace_file(workspace: Path, relative: Path, must_exist: bool = False) -> Path:
-    candidate = workspace / relative
-    if must_exist:
-        candidate = candidate.resolve(strict=True)
+def _workspace_file(
+    workspace: Path,
+    relative: Path,
+    must_exist: bool = False,
+    *,
+    relative_to_current_directory: bool = False,
+) -> Path:
+    if relative_to_current_directory:
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            raise CanonicalDecodeError("job artifact path is not a fixed relative path")
+        candidate = Path(os.path.abspath(relative))
     else:
-        candidate = candidate.resolve(strict=False)
-    if not candidate.is_relative_to(workspace):
-        raise CanonicalDecodeError("job artifact escaped its workspace")
+        candidate = workspace / relative
+        if must_exist:
+            candidate = candidate.resolve(strict=True)
+        else:
+            candidate = candidate.resolve(strict=False)
+        if not candidate.is_relative_to(workspace):
+            raise CanonicalDecodeError("job artifact escaped its workspace")
     if must_exist and not candidate.is_file():
         raise CanonicalDecodeError("staged media is not a regular file")
     return candidate
