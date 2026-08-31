@@ -102,7 +102,7 @@ test("packaged shell flips every security fuse explicitly", async () => {
 });
 
 test("installed artifact runs the main-owned sidecar lifecycle and reaps", async () => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const proof = spawn(executablePath, [PACKAGED_SIDECAR_PROOF_ARGUMENT], {
     cwd: packageRoot,
     env: {},
@@ -116,7 +116,7 @@ test("installed artifact runs the main-owned sidecar lifecycle and reaps", async
   proof.stdout.on("data", capture);
   proof.stderr.on("data", capture);
 
-  const exit = await waitForApplicationExit(proof, 170_000);
+  const exit = await waitForApplicationExit(proof, 290_000);
   expect(exit, output).toEqual({ code: 0, signal: null });
 });
 

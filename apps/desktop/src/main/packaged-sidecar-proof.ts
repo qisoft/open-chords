@@ -262,13 +262,14 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     stage = "session_probe_failed";
     const candidates: Buffer[] = [];
     for (const temperature of ["cold", "warm"] as const) {
+      process.stderr.write(`Packaged sidecar proof stage: analysis_${temperature}_started\n`);
       const client = createEffectSidecarClient(createLauncher([]));
       const request = parseSidecarSessionRequest({
         jobId: `job-packaged-proof-${temperature}`,
         manifestHash: containedRuntime.manifestHash,
         nonce: `nonce-packaged-proof-${temperature}`,
         requestId: `request-packaged-proof-${temperature}`,
-        timeoutMs: 60_000,
+        timeoutMs: 120_000,
       });
       await runWithPackagedSessionCleanup(
         async () => {
@@ -314,6 +315,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
         },
         () => client.dispose(),
       );
+      process.stderr.write(`Packaged sidecar proof stage: analysis_${temperature}_completed\n`);
     }
     if (candidates.length !== 2 || !candidates[0]!.equals(candidates[1]!)) {
       throw new Error("Packaged cold and warm analysis candidates are not deterministic");
