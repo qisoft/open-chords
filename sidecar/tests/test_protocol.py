@@ -101,6 +101,15 @@ class ProtocolTests(unittest.TestCase):
             )
             self.assertFalse((workspace / "artifacts" / "analysis-result.json").exists())
 
+    def test_classifies_analysis_permissions_without_disclosing_paths(self) -> None:
+        workspace = Path("analysis-workspace").absolute()
+        error = PermissionError(13, "private detail", workspace / "checkpoints" / "cache-file")
+
+        self.assertEqual(
+            protocol._analysis_failure_kind(error, workspace),
+            "builtins.PermissionError.workspace.checkpoints.errno13.winerror0",
+        )
+
     def test_publishes_a_cpu_analysis_candidate_when_a_recipe_is_staged(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")

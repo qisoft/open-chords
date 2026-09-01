@@ -7,6 +7,7 @@ import json
 import os
 import re
 import struct
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -192,7 +193,9 @@ def serve_one_session(
                 except CanonicalDecodeCancelled:
                     raise
                 except Exception as error:
-                    raise AnalysisExecutionError(_analysis_failure_kind(error)) from error
+                    raise AnalysisExecutionError(
+                        _analysis_failure_kind(error, workspace)
+                    ) from error
         except CanonicalDecodeCancelled as error:
             events.put(("decode_cancelled", error))
         except CanonicalDecodeError as error:
@@ -522,11 +525,41 @@ def _preload_cpu_analysis() -> None:
     del _cpu_analysis
 
 
-def _analysis_failure_kind(error: Exception) -> str:
+def _analysis_failure_kind(error: Exception, workspace: Path) -> str:
     module = type(error).__module__
     name = type(error).__name__
-    kind = f"{module}.{name}"
+    detail = ""
+    if isinstance(error, PermissionError):
+        scope = _permission_failure_scope(error, workspace)
+        error_number = error.errno if isinstance(error.errno, int) else 0
+        windows_error = getattr(error, "winerror", None)
+        windows_number = windows_error if isinstance(windows_error, int) else 0
+        detail = f".{scope}.errno{error_number}.winerror{windows_number}"
+    kind = f"{module}.{name}{detail}"
     return kind if re.fullmatch(r"[A-Za-z0-9_.]{1,160}", kind) else "unknown"
+
+
+def _permission_failure_scope(error: PermissionError, workspace: Path) -> str:
+    filename = error.filename
+    if not isinstance(filename, (str, bytes, os.PathLike)):
+        return "unknown"
+    try:
+        denied = Path(filename).absolute()
+        workspace_root = workspace.absolute()
+        if denied.is_relative_to(workspace_root):
+            relative = denied.relative_to(workspace_root)
+            top = relative.parts[0] if relative.parts else "root"
+            return (
+                f"workspace.{top}"
+                if top in {"artifacts", "checkpoints", "input", "tmp"}
+                else "workspace.other"
+            )
+        runtime_root = Path(sys.executable).absolute().parent
+        if denied.is_relative_to(runtime_root):
+            return "runtime"
+    except (OSError, TypeError, ValueError):
+        return "unknown"
+    return "outside"
 
 
 def _publish_analysis_result(

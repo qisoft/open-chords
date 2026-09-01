@@ -30,4 +30,5 @@ initialization boundary as the standalone frozen-runtime proof. A bounded writer
 monotonic protocol heartbeats during that preload, so the host's liveness and absolute session
 deadlines remain authoritative.
 Analysis failures retain the stable `analysis_failed` protocol code while installed proofs may log
-only a bounded exception-class fingerprint; exception messages, paths, and media data remain private.
+only a bounded exception fingerprint. Permission failures add a coarse path scope and numeric
+error codes; exception messages, concrete paths, and media data remain private.
