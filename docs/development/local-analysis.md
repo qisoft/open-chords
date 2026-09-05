@@ -48,3 +48,10 @@ clean process exit; module tests with a substituted analyzer do not stand in for
 The protocol records completed preflight and canonical-decode stages before the CPU module's
 stage outcomes. Main still requires the exact complete pipeline when validating the Manifest;
 DSP-only stage evidence cannot be published as a complete Analysis Revision.
+
+The native broker retains its child-process error listener until the process closes, including
+abort events emitted after a successful launch. Cancellation remains a session outcome rather
+than an uncaught main-process exception. In packaged proof mode only, unexpected main-process
+errors emit a bounded error kind/code and exit unsuccessfully instead of opening Electron's
+default error dialog. Captured proof output is retained on timeout, and the CI packaged gate
+does not automatically retry a failed attempt.

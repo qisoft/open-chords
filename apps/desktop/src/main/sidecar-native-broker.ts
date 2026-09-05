@@ -95,6 +95,12 @@ export function createExecutableNativeContainmentBroker(
         stdio: ["pipe", "pipe", "pipe", "pipe"],
         windowsHide: true,
       });
+      // AbortSignal can emit an error after spawn has succeeded. Keep a
+      // listener for the whole process lifetime; session cancellation and
+      // exit validation still report the failure through the public API.
+      const onChildError = () => undefined;
+      child.on("error", onChildError);
+      child.once("close", () => child.off("error", onChildError));
       const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
         (resolveExit) => {
           child.once("close", (code, exitSignal) => resolveExit({ code, signal: exitSignal }));
