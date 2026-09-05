@@ -7,14 +7,17 @@ import {
   symlinkSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { AnalysisRecipeSchema } from "@open-chords/domain";
 import { z } from "zod";
 
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
+import { runPackagedAnalysisPublicationProof } from "./packaged-analysis-publication-proof.ts";
 import { throwCombinedFailures } from "./packaged-sidecar-proof-failures.ts";
 import {
   packagedWorkspaceFailureCode,
@@ -81,6 +84,7 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "cleanup_failed",
   "crash_probe_failed",
   "proof_and_cleanup_failed",
+  "publication_probe_failed",
   "session_artifact_failed",
   "session_descriptor_failed",
   "session_evidence_failed",
@@ -92,6 +96,7 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "setup_workspace_failed",
 ] as const;
 const SESSION_REMOTE_FAILURE_CODES = [
+  "analysis_failed",
   "canonical_artifact_validation_failed",
   "canonical_cleanup_failed",
   "canonical_decode_failed",
@@ -177,6 +182,7 @@ export function packagedProofFailureCode(cause: unknown): string {
 }
 
 export async function runPackagedSidecarProof(): Promise<void> {
+  process.stderr.write("Packaged sidecar proof stage: application_ready\n");
   try {
     await runPackagedSidecarProofInternal();
   } catch (cause) {
@@ -204,6 +210,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       : join(process.resourcesPath, "open-chords-analysis"),
     EXPECTED_SIDECAR_MANIFEST_SHA256,
   );
+  process.stderr.write("Packaged sidecar proof stage: runtime_verified\n");
   const containment = verifyContainmentRuntime(
     join(
       process.resourcesPath,
@@ -215,11 +222,13 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       ? join(process.resourcesPath, "..", "MacOS", "open-chords-containment-bridge")
       : undefined,
   );
+  process.stderr.write("Packaged sidecar proof stage: containment_verified\n");
   const prepared = preparePackagedWorkspace(
     platform,
     containment.helperPath,
     verifiedRuntime.runtimeRoot,
   );
+  process.stderr.write("Packaged sidecar proof stage: workspace_prepared\n");
   let proofFailure: { cause: unknown } | undefined;
   let stage: PackagedProofFailureCode = "setup_failed";
   try {
@@ -232,7 +241,15 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     const inputPath = join(workspace, "input", "source-media");
     mkdirSync(dirname(inputPath), { recursive: true });
     writeFileSync(inputPath, canonicalWavFixture());
-    const createLauncher = (args: readonly string[], acceptedExitCodes: readonly number[] = [0]) =>
+    writeFileSync(
+      join(workspace, "input", "analysis-recipe.json"),
+      JSON.stringify(packagedAnalysisRecipe()),
+    );
+    const createLauncher = (
+      args: readonly string[],
+      acceptedExitCodes: readonly number[] = [0],
+      sessionWorkspace = workspace,
+    ) =>
       createNativeContainmentLauncher(
         createExecutableNativeContainmentBroker({
           acceptedExitCodes,
@@ -244,55 +261,99 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
           ...(prepared.windowsProfile === undefined
             ? {}
             : { windowsProfile: prepared.windowsProfile }),
-          workspace,
+          workspace: sessionWorkspace,
         }),
         platform,
       );
     stage = "adversarial_probe_failed";
+    process.stderr.write("Packaged sidecar proof stage: adversarial_started\n");
     await runAdversarialContainmentProbe(createLauncher, workspace, platform);
     stage = "cancel_probe_failed";
+    process.stderr.write("Packaged sidecar proof stage: cancel_started\n");
     await runLifecycleContainmentProbe(createLauncher, workspace, "cancel");
     stage = "crash_probe_failed";
+    process.stderr.write("Packaged sidecar proof stage: crash_started\n");
     await runLifecycleContainmentProbe(createLauncher, workspace, "crash");
     stage = "session_probe_failed";
-    const client = createEffectSidecarClient(createLauncher([]));
-    const request = parseSidecarSessionRequest({
-      jobId: "job-packaged-proof",
-      manifestHash: containedRuntime.manifestHash,
-      nonce: "nonce-packaged-proof",
-      requestId: "request-packaged-proof",
-      timeoutMs: 15_000,
+    const candidates: Buffer[] = [];
+    for (const temperature of ["cold", "warm"] as const) {
+      const analysisStartedAt = performance.now();
+      process.stderr.write(`Packaged sidecar proof stage: analysis_${temperature}_started\n`);
+      const client = createEffectSidecarClient(createLauncher([]));
+      const request = parseSidecarSessionRequest({
+        jobId: `job-packaged-proof-${temperature}`,
+        manifestHash: containedRuntime.manifestHash,
+        nonce: `nonce-packaged-proof-${temperature}`,
+        requestId: `request-packaged-proof-${temperature}`,
+        timeoutMs: 120_000,
+      });
+      await runWithPackagedSessionCleanup(
+        async () => {
+          const result = await client.runSession(request);
+          stage = "session_descriptor_failed";
+          if (
+            result.artifact.path !== "artifacts/analysis-result.json" ||
+            result.jobId !== request.jobId ||
+            result.requestId !== request.requestId
+          ) {
+            throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
+          }
+          stage = "session_artifact_failed";
+          const candidateBytes = readFileSync(join(workspace, result.artifact.path));
+          if (
+            candidateBytes.byteLength !== result.artifact.byteSize ||
+            createHash("sha256").update(candidateBytes).digest("hex") !== result.artifact.sha256
+          ) {
+            throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
+          }
+          stage = "session_evidence_failed";
+          const candidate = z
+            .strictObject({
+              durationSamples: z.literal(4_800),
+              recipe: z.unknown(),
+              sampleRate: z.literal(48_000),
+              stageOutcomes: z.array(z.object({ stage: z.string(), state: z.string() })),
+              supportClaimIds: z.array(z.string()).length(0),
+              timeline: z.object({
+                chordEvents: z.array(z.unknown()).min(1),
+                keyRegions: z.array(z.unknown()).min(1),
+                sectionRegions: z.array(z.unknown()).min(1),
+              }),
+              warnings: z.array(z.string()),
+            })
+            .parse(JSON.parse(candidateBytes.toString("utf8")));
+          if (candidate.stageOutcomes.at(-1)?.stage !== "assemble") {
+            throw new Error(
+              "Packaged sidecar lifecycle proof returned incomplete analysis evidence",
+            );
+          }
+          candidates.push(candidateBytes);
+        },
+        () => client.dispose(),
+      );
+      process.stderr.write(
+        `Packaged sidecar proof stage: analysis_${temperature}_completed duration_ms=${Math.round(performance.now() - analysisStartedAt)}\n`,
+      );
+    }
+    if (candidates.length !== 2 || !candidates[0]!.equals(candidates[1]!)) {
+      throw new Error("Packaged cold and warm analysis candidates are not deterministic");
+    }
+    stage = "publication_probe_failed";
+    process.stderr.write("Packaged sidecar proof stage: publication_started\n");
+    await runPackagedAnalysisPublicationProof({
+      clientForWorkspace: (attemptWorkspace) =>
+        createEffectSidecarClient(createLauncher([], [0], attemptWorkspace)),
+      fixture: canonicalWavFixture(),
+      recipe: AnalysisRecipeSchema.parse(packagedAnalysisRecipe()),
+      runtimeManifestHash: containedRuntime.manifestHash,
+      workspaceRoot: join(workspace, "publication-attempts"),
     });
-    await runWithPackagedSessionCleanup(
-      async () => {
-        const result = await client.runSession(request);
-        stage = "session_descriptor_failed";
-        if (
-          result.artifact.path !== "artifacts/decode-manifest.json" ||
-          result.jobId !== request.jobId ||
-          result.requestId !== request.requestId
-        ) {
-          throw new Error("Packaged sidecar lifecycle proof returned an unexpected descriptor");
-        }
-        stage = "session_artifact_failed";
-        const decodeManifestBytes = readFileSync(join(workspace, result.artifact.path));
-        if (
-          decodeManifestBytes.byteLength !== result.artifact.byteSize ||
-          createHash("sha256").update(decodeManifestBytes).digest("hex") !== result.artifact.sha256
-        ) {
-          throw new Error("Packaged sidecar lifecycle proof returned an invalid descriptor hash");
-        }
-        stage = "session_evidence_failed";
-        const decodeManifest = z
-          .object({ canonicalAudio: z.object({ sampleCount: z.literal(4_800) }) })
-          .parse(JSON.parse(decodeManifestBytes.toString("utf8")));
-        if (decodeManifest.canonicalAudio.sampleCount !== 4_800) {
-          throw new Error("Packaged sidecar lifecycle proof returned unexpected evidence");
-        }
-      },
-      () => client.dispose(),
-    );
+    process.stderr.write("Packaged sidecar proof stage: publication_completed\n");
   } catch (cause) {
+    const analysisDiagnostic = findAnalysisDiagnostic(cause);
+    if (analysisDiagnostic !== undefined) {
+      process.stderr.write(`Packaged sidecar analysis diagnostic: ${analysisDiagnostic}\n`);
+    }
     proofFailure = {
       cause:
         packagedProofFailureCode(cause) === "proof_failed"
@@ -302,7 +363,9 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
   }
   const cleanupFailures: unknown[] = [];
   try {
+    process.stderr.write("Packaged sidecar proof stage: workspace_cleanup_started\n");
     prepared.cleanup();
+    process.stderr.write("Packaged sidecar proof stage: workspace_cleanup_completed\n");
   } catch {
     cleanupFailures.push(new PackagedProofFailure("cleanup_failed"));
   }
@@ -311,6 +374,60 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     proofFailure,
     cleanupFailures,
   );
+}
+
+function findAnalysisDiagnostic(cause: unknown): string | undefined {
+  if (cause instanceof SidecarSessionError && cause.remoteCode === "analysis_failed") {
+    const match = /^Sidecar analysis_failed: CPU analysis failed \[([A-Za-z0-9_.]{1,160})\]$/u.exec(
+      cause.message,
+    );
+    return match?.[1];
+  }
+  if (cause instanceof AggregateError) {
+    return cause.errors.map(findAnalysisDiagnostic).find((value) => value !== undefined);
+  }
+  return undefined;
+}
+
+function packagedAnalysisRecipe() {
+  return {
+    capabilities: ["rhythm", "meter", "key", "chords", "sections"],
+    components: [
+      {
+        hash: `sha256:${"1".repeat(64)}`,
+        id: "open-chords-cpu-dsp",
+        version: "1.0.0",
+      },
+    ],
+    numericalBackend: {
+      hash: `sha256:${"2".repeat(64)}`,
+      id: "numpy",
+      version: "2.5.2",
+    },
+    pipeline: [
+      "preflight",
+      "canonical_decode",
+      "shared_features",
+      "rhythm",
+      "harmony",
+      "sections",
+      "assemble",
+      "main_validation",
+      "publish",
+    ],
+    profile: {
+      hash: `sha256:${"3".repeat(64)}`,
+      id: "fast",
+      name: "fast",
+      version: "1.0.0",
+    },
+    seeds: { decoder: 0 },
+    settings: {
+      analysisWindowSamples: 96_000,
+      hopLength: 1_024,
+      nFft: 8_192,
+    },
+  };
 }
 
 export async function runWithPackagedSessionCleanup(
@@ -417,6 +534,8 @@ async function runAdversarialContainmentProbe(
   let process: Awaited<ReturnType<ReturnType<typeof createLauncher>["launch"]>> | undefined;
   let proofFailure: { cause: unknown } | undefined;
   let stage: PackagedProofFailureCode = "adversarial_probe_failed";
+  let probeSignal: AbortSignal | undefined;
+  let probeStartedAt = 0;
   try {
     await new Promise<void>((resolveListen, reject) => {
       server.once("error", reject);
@@ -431,7 +550,7 @@ async function runAdversarialContainmentProbe(
       manifestHash: "0".repeat(64),
       nonce: "nonce-containment-probe",
       requestId: "request-containment-probe",
-      timeoutMs: 15_000,
+      timeoutMs: 60_000,
     });
     let linkEscapePreflightBlocked = false;
     if (platform === "win32") {
@@ -487,10 +606,11 @@ async function runAdversarialContainmentProbe(
       }),
     );
     stage = "adversarial_launch_failed";
-    process = await createLauncher([`--containment-probe=${plan}`]).launch(
-      request,
-      AbortSignal.timeout(15_000),
-    );
+    probeStartedAt = performance.now();
+    // Frozen Windows cold startup can exceed 15 seconds on CI. This is the
+    // adversarial fixture budget; production session deadlines are unchanged.
+    probeSignal = AbortSignal.timeout(60_000);
+    process = await createLauncher([`--containment-probe=${plan}`]).launch(request, probeSignal);
     stage = "adversarial_output_failed";
     let output = Buffer.alloc(0);
     for await (const chunk of process.stdout) {
@@ -593,6 +713,12 @@ async function runAdversarialContainmentProbe(
       "adversarial_shell_failed",
     );
   } catch (cause) {
+    if (probeSignal !== undefined) {
+      writeSync(
+        2,
+        `Packaged adversarial proof failure: duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted}\n`,
+      );
+    }
     proofFailure = {
       cause:
         packagedProofFailureCode(cause) === "proof_failed"

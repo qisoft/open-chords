@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { writeSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -23,6 +24,42 @@ import { createDesktopWindow, hardenWebContents } from "./shell.ts";
 import { presentDesktopWindow } from "./window-lifecycle.ts";
 
 if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
+  // Electron otherwise opens a modal error dialog, hiding native CI failures
+  // behind the outer process timeout. Never continue after an uncaught error.
+  process.on("uncaughtException", (error) => {
+    const allowedCodes = new Set([
+      "ABORT_ERR",
+      "EACCES",
+      "ECONNRESET",
+      "ENOENT",
+      "EPERM",
+      "EPIPE",
+      "ERR_INVALID_ARG_TYPE",
+      "ERR_INVALID_STATE",
+      "ERR_OUT_OF_RANGE",
+      "ERR_STREAM_DESTROYED",
+    ]);
+    const code: unknown = Object.getOwnPropertyDescriptor(error, "code")?.value;
+    const kind =
+      error instanceof TypeError
+        ? "TypeError"
+        : error instanceof RangeError
+          ? "RangeError"
+          : error instanceof SyntaxError
+            ? "SyntaxError"
+            : error instanceof AggregateError
+              ? "AggregateError"
+              : "Error";
+    try {
+      writeSync(
+        2,
+        `Packaged sidecar proof uncaught: ${kind}.${typeof code === "string" && allowedCodes.has(code) ? code : "unknown"}\n`,
+      );
+    } finally {
+      app.exit(1);
+    }
+  });
+  process.stderr.write("Packaged sidecar proof stage: application_started\n");
   void app
     .whenReady()
     .then(runPackagedSidecarProof)

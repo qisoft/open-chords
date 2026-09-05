@@ -123,6 +123,11 @@ export type SidecarSessionResult = Pick<
   "artifact" | "jobId" | "requestId"
 >;
 
+export function parseSidecarSessionResult(rawResult: unknown): SidecarSessionResult {
+  const result = ResultSchema.parse(rawResult);
+  return { artifact: result.artifact, jobId: result.jobId, requestId: result.requestId };
+}
+
 export interface SidecarProcess {
   readonly stdout: AsyncIterable<Uint8Array>;
   write(frame: Uint8Array): Promise<void>;

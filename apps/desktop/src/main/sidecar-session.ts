@@ -17,6 +17,7 @@ import {
 export {
   encodeSidecarFrame,
   parseSidecarSessionRequest,
+  parseSidecarSessionResult,
   SidecarSessionError,
   type SidecarProcess,
   type SidecarProcessLauncher,

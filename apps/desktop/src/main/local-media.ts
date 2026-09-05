@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { lstat, mkdir, open, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { CONTRACT_VERSION, ProjectEnvelopeSchema } from "@open-chords/contracts";
@@ -474,6 +474,86 @@ export class LocalMediaService {
 
   dispose(): Promise<void> {
     return this.#capabilities.dispose();
+  }
+
+  async getAnalysisSource(projectId: string): Promise<{
+    canonicalAudioFingerprint: string;
+    sourceSnapshotId: string;
+  }> {
+    const project = await this.#library.readProject(projectId);
+    const source = project.records.sources.find(
+      ({ id }) => id === project.records.projectRange.sourceId,
+    );
+    if (source === undefined || source.identity.kind !== "local_file") {
+      throw new LocalMediaCapabilityUnavailableError(
+        "Project Source is unavailable for local analysis",
+      );
+    }
+    const snapshot = source.snapshots[0];
+    if (snapshot === undefined) {
+      throw new LocalMediaCapabilityUnavailableError("Project Source Snapshot is unavailable");
+    }
+    return {
+      canonicalAudioFingerprint: snapshot.canonicalAudioFingerprint,
+      sourceSnapshotId: snapshot.id,
+    };
+  }
+
+  async stageAnalysisInput(input: {
+    destinationPath: string;
+    projectId: string;
+  }): Promise<{ durationSamples: number; sampleRate: number }> {
+    return this.#runServiceOperation(async () => {
+      const project = await this.#library.readProject(input.projectId);
+      const range = project.records.projectRange;
+      const source = project.records.sources.find(({ id }) => id === range.sourceId);
+      if (source === undefined || source.identity.kind !== "local_file") {
+        throw new LocalMediaCapabilityUnavailableError(
+          "Project Source is unavailable for local analysis",
+        );
+      }
+      const locator = source.locators
+        .filter(
+          (candidate): candidate is LocalFileLocator =>
+            candidate.kind === "local_file" && candidate.status === "available",
+        )
+        .toSorted((left, right) => Date.parse(right.verifiedAt) - Date.parse(left.verifiedAt))[0];
+      if (locator === undefined) {
+        throw new LocalMediaCapabilityUnavailableError("Project Source Locator is unavailable");
+      }
+      const lease = await this.#verifyLocalWav(locator.path);
+      const durationSamples = range.endSourceSample - range.startSourceSample;
+      await mkdir(dirname(input.destinationPath), { recursive: true, mode: 0o700 });
+      const staged = await open(input.destinationPath, "wx", 0o600);
+      try {
+        const media = lease.media;
+        if (media.byteFingerprint !== source.identity.fingerprint) {
+          throw new LocalMediaChangedError("Project Source Locator no longer matches its identity");
+        }
+        await staged.write(canonicalWavHeader(durationSamples, media.sampleRate));
+        const chunkSamples = Math.min(durationSamples, HASH_CHUNK_BYTES / 2);
+        for (let startProjectSample = 0; startProjectSample < durationSamples;) {
+          const endProjectSample = Math.min(durationSamples, startProjectSample + chunkSamples);
+          const bytes = await this.#readVerifiedBytes(
+            media,
+            media.dataOffset + (range.startSourceSample + startProjectSample) * 2,
+            media.dataOffset + (range.startSourceSample + endProjectSample) * 2,
+          );
+          await staged.write(bytes);
+          startProjectSample = endProjectSample;
+        }
+        await staged.sync();
+        return { durationSamples, sampleRate: media.sampleRate };
+      } catch (error) {
+        await staged.close().catch(() => undefined);
+        await rm(input.destinationPath, { force: true }).catch(() => undefined);
+        throw error;
+      } finally {
+        await staged.close().catch(() => undefined);
+        await releaseLeasesSuppressingCleanupErrors([lease]);
+        await this.#cleanup.retryFailed();
+      }
+    });
   }
 
   pickLocalFile(generationId: string): Promise<LocalMediaSelection> {
@@ -1103,6 +1183,28 @@ function buildUnanalyzedProjectEnvelope(input: {
     schemaVersion: CONTRACT_VERSION,
     type: "project_snapshot",
   });
+}
+
+function canonicalWavHeader(durationSamples: number, sampleRate: number): Buffer {
+  const dataSize = durationSamples * 2;
+  if (!Number.isSafeInteger(dataSize) || dataSize > 0xffff_ffff - 36) {
+    throw new Error("Project Range exceeds the canonical WAV staging limit");
+  }
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(dataSize, 40);
+  return header;
 }
 
 function assertProjectRange(

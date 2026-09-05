@@ -101,8 +101,8 @@ test("packaged shell flips every security fuse explicitly", async () => {
   });
 });
 
-test("installed artifact runs the main-owned sidecar lifecycle and reaps", async () => {
-  test.setTimeout(180_000);
+test("installed artifact runs contained analysis, publishes Revisions, and reaps", async () => {
+  test.setTimeout(300_000);
   const proof = spawn(executablePath, [PACKAGED_SIDECAR_PROOF_ARGUMENT], {
     cwd: packageRoot,
     env: {},
@@ -116,8 +116,11 @@ test("installed artifact runs the main-owned sidecar lifecycle and reaps", async
   proof.stdout.on("data", capture);
   proof.stderr.on("data", capture);
 
-  const exit = await waitForApplicationExit(proof, 170_000);
+  const exit = await waitForApplicationExit(proof, 290_000).finally(() => {
+    process.stdout.write(output);
+  });
   expect(exit, output).toEqual({ code: 0, signal: null });
+  expect(output).toContain("Packaged sidecar proof stage: publication_completed");
 });
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {
@@ -288,19 +291,24 @@ async function waitForApplicationExit(
   timeoutMs: number,
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      void stopApplication(application).finally(() => {
-        reject(new Error("Packaged lifecycle proof did not exit"));
-      });
-    }, timeoutMs);
-    application.once("error", (error) => {
+    const onError = (error: Error) => {
       clearTimeout(timeout);
+      application.off("exit", onExit);
       reject(error);
-    });
-    application.once("exit", (code, signal) => {
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timeout);
+      application.off("error", onError);
       resolve({ code, signal });
-    });
+    };
+    const timeout = setTimeout(() => {
+      application.off("error", onError);
+      application.off("exit", onExit);
+      reject(new Error("Packaged lifecycle proof did not exit"));
+      void stopApplication(application).catch(() => undefined);
+    }, timeoutMs);
+    application.once("error", onError);
+    application.once("exit", onExit);
   });
 }
 

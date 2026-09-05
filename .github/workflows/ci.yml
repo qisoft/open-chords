@@ -137,4 +137,4 @@ jobs:
       - name: Build installable Forge artifact
         run: pnpm make -- --arch=${{ matrix.arch }}
       - name: Verify installed trust boundary
-        run: pnpm test:packaged
+        run: pnpm test:packaged --retries=0

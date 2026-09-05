@@ -36,7 +36,7 @@ afterAll(() => {
 });
 
 it.skipIf(executablePath === undefined)(
-  "validates the frozen runtime and runs uncontained decode only where supported",
+  "validates the frozen runtime and runs deterministic uncontained analysis where supported",
   async () => {
     const runtimeRoot = dirname(executablePath!);
     const importWorkspace = mkdtempSync(join(tmpdir(), "open-chords-frozen-import-"));
@@ -130,13 +130,18 @@ it.skipIf(executablePath === undefined)(
       Array.from({ length: 48_000 }, (_value, index) => Math.round(Math.sin(index / 13) * 4_000)),
     );
 
-    const manifests: unknown[] = [];
+    const candidates: unknown[] = [];
+    const decodeManifests: unknown[] = [];
     for (const suffix of ["first", "second"]) {
       const workspace = mkdtempSync(join(tmpdir(), `open-chords-frozen-${suffix}-`));
       temporaryRoots.push(workspace);
       const inputPath = join(workspace, "input", "source-media");
       mkdirSync(dirname(inputPath), { recursive: true });
       writeFileSync(inputPath, fixture);
+      writeFileSync(
+        join(workspace, "input", "analysis-recipe.json"),
+        JSON.stringify(analysisRecipe),
+      );
       const client = createPromiseSidecarClient(
         createUncontainedSpawnLauncherForProof({
           args: [],
@@ -169,35 +174,81 @@ it.skipIf(executablePath === undefined)(
             `Frozen sidecar failed (${errorCode}); bounded native diagnostics: ${nativeToolDiagnostics(runtimeRoot, inputPath, workspace)}`,
           );
         }
-        expect(result.artifact.path).toBe("artifacts/decode-manifest.json");
-        manifests.push(JSON.parse(readFileSync(join(workspace, result.artifact.path), "utf8")));
+        expect(result.artifact.path).toBe("artifacts/analysis-result.json");
+        candidates.push(JSON.parse(readFileSync(join(workspace, result.artifact.path), "utf8")));
+        decodeManifests.push(
+          JSON.parse(readFileSync(join(workspace, "artifacts", "decode-manifest.json"), "utf8")),
+        );
       } finally {
         await client.dispose();
       }
     }
 
-    expect(manifests[0]).toEqual(manifests[1]);
-    expect(manifests[0]).toMatchObject({
+    expect(candidates[0]).toEqual(candidates[1]);
+    expect(decodeManifests[0]).toEqual(decodeManifests[1]);
+    expect(decodeManifests[0]).toMatchObject({
       canonicalAudio: {
         channels: 1,
         sampleCount: 48_000,
         sampleFormat: "s16le",
         sampleRate: 48_000,
       },
-      configuration: {
-        value: {
-          platformProfile: "darwin-arm64",
-        },
-      },
-      tools: {
-        ffmpeg: {
-          configuration: expect.stringContaining("--disable-network"),
-        },
+      configuration: { value: { platformProfile: "darwin-arm64" } },
+      tools: { ffmpeg: { configuration: expect.stringContaining("--disable-network") } },
+    });
+    expect(candidates[0]).toMatchObject({
+      durationSamples: 48_000,
+      recipe: analysisRecipe,
+      sampleRate: 48_000,
+      stageOutcomes: expect.arrayContaining([
+        { stage: "shared_features", state: expect.stringMatching(/^completed/u) },
+        { stage: "assemble", state: "completed" },
+      ]),
+      supportClaimIds: [],
+      timeline: {
+        chordEvents: expect.any(Array),
+        keyRegions: expect.any(Array),
+        sectionRegions: expect.any(Array),
       },
     });
   },
   180_000,
 );
+
+const analysisRecipe = {
+  capabilities: ["rhythm", "meter", "key", "chords", "sections"],
+  components: [
+    {
+      hash: `sha256:${"1".repeat(64)}`,
+      id: "open-chords-cpu-dsp",
+      version: "1.0.0",
+    },
+  ],
+  numericalBackend: {
+    hash: `sha256:${"2".repeat(64)}`,
+    id: "numpy",
+    version: "2.5.2",
+  },
+  pipeline: [
+    "preflight",
+    "canonical_decode",
+    "shared_features",
+    "rhythm",
+    "harmony",
+    "sections",
+    "assemble",
+    "main_validation",
+    "publish",
+  ],
+  profile: {
+    hash: `sha256:${"3".repeat(64)}`,
+    id: "balanced",
+    name: "balanced",
+    version: "1.0.0",
+  },
+  seeds: { decoder: 0 },
+  settings: { analysisWindowSamples: 96_000, hopLength: 1_024, nFft: 8_192 },
+};
 
 function allRuntimeFiles(root: string): string[] {
   const entries = readdirSync(root, { withFileTypes: true });
