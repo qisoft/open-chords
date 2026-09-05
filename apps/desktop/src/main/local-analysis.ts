@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 import {
@@ -213,9 +213,11 @@ function createLocalAnalysisRunner(options: LocalAnalysisOptions) {
       reportProgress: Parameters<LocalContainedAnalyzer["analyze"]>[0]["reportProgress"];
       signal: AbortSignal;
     }) {
-      const workspace = join(options.workspaceRoot, input.attemptId);
+      await mkdir(options.workspaceRoot, { recursive: true, mode: 0o700 });
+      // Attempt identity is durable Job/Manifest data. The disposable directory
+      // gets a short, exclusively allocated name for native Windows tools.
+      const workspace = await mkdtemp(join(options.workspaceRoot, "a-"));
       const inputPath = join(workspace, "input", "source-media");
-      await mkdir(workspace, { recursive: true, mode: 0o700 });
       try {
         let staged: { durationSamples: number; sampleRate: number };
         try {

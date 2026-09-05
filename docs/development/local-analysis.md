@@ -5,6 +5,11 @@ It submits durable `AnalysisJobs`, reopens and revalidates the Source before eve
 only the immutable Project Range as canonical mono PCM16 WAV, and removes the Attempt workspace
 after success, failure, cancellation, or deadline termination.
 
+Each Attempt receives a short directory created exclusively beneath the main-owned workspace
+root. Durable Job and Attempt identities remain in scheduler state and the Manifest instead of
+being repeated in native temporary paths. This keeps Windows workspace paths compact and avoids
+reusing leftover directories; every Attempt still owns and removes its complete workspace.
+
 The contained sidecar receives the exact Analysis Recipe beside the staged media. It performs the
 manifest-verified canonical FFmpeg decode and weight-free CPU analysis, then atomically writes a
 bounded `artifacts/analysis-result.json` descriptor. The sidecar candidate is untrusted: main

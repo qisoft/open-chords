@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
@@ -44,12 +44,22 @@ describe("LocalAnalysisService", () => {
       startSourceSample: 0,
     });
     const ids = ["job_first", "attempt_first"];
+    const workspaceNames = new Set<string>();
     const analysis = await LocalAnalysisService.open({
       analyzer: {
         analyze: async ({ inputPath, recipe: requestedRecipe, reportProgress }) => {
-          expect(
-            relative(join(root, "analysis-workspaces"), inputPath).replaceAll("\\", "/"),
-          ).toMatch(/^attempt_(?:first|second)\/input\/source-media$/u);
+          const [workspaceName, ...inputParts] = relative(
+            join(root, "analysis-workspaces"),
+            inputPath,
+          )
+            .replaceAll("\\", "/")
+            .split("/");
+          // Native dependencies must not inherit the durable Attempt ID's
+          // length in every temporary path beneath the private workspace.
+          expect(workspaceName!.length).toBeLessThanOrEqual(10);
+          expect(workspaceNames.has(workspaceName!)).toBe(false);
+          workspaceNames.add(workspaceName!);
+          expect(inputParts).toEqual(["input", "source-media"]);
           expect(requestedRecipe.capabilities).toEqual(recipe.capabilities);
           await reportProgress({ completedFraction: 0.8, elapsedMs: 20, stage: "assemble" });
           return {
@@ -174,6 +184,8 @@ describe("LocalAnalysisService", () => {
     expect(afterReviewable?.project.analysisRevisions).toHaveLength(2);
     expect(afterReviewable?.project.activeView?.analysisRevisionId).toBe(firstRevisionId);
     expect(afterReviewable?.project.editLayers).toHaveLength(1);
+    expect(workspaceNames.size).toBe(2);
+    expect(await readdir(join(root, "analysis-workspaces"))).toEqual([]);
   });
 
   it("publishes nothing when the contained analyzer returns a malformed timeline", async () => {
