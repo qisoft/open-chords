@@ -38,9 +38,11 @@ export async function runPackagedAnalysisPublicationProof(options: {
       startSourceSample: 0,
     });
     process.stderr.write("Packaged publication proof stage: project_created\n");
+    let nextIdentity = 0;
     const analysis = await LocalAnalysisService.open({
       analyzer: createSidecarContainedAnalyzer(options),
       attemptTimeoutMs: 120_000,
+      idFactory: () => `job_${++nextIdentity}`,
       library,
       media,
       stateRoot: join(mainRoot, "analysis"),

@@ -366,6 +366,9 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
               })(),
               async stop(reason) {
                 mark(`stop_${reason}_chunks_${chunks}`);
+                process.stderr.write(
+                  `Packaged publication workspace: path_length=${attemptWorkspace.length} canonical=${existsSync(join(attemptWorkspace, "artifacts", "canonical.wav"))} decode_manifest=${existsSync(join(attemptWorkspace, "artifacts", "decode-manifest.json"))} result=${existsSync(join(attemptWorkspace, "artifacts", "analysis-result.json"))} cache=${existsSync(join(attemptWorkspace, "checkpoints", "numba-cache"))}\n`,
+                );
                 await launched.stop(reason);
                 mark("stop_completed");
               },
