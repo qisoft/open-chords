@@ -12,9 +12,11 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { AnalysisRecipeSchema } from "@open-chords/domain";
 import { z } from "zod";
 
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
+import { runPackagedAnalysisPublicationProof } from "./packaged-analysis-publication-proof.ts";
 import { throwCombinedFailures } from "./packaged-sidecar-proof-failures.ts";
 import {
   packagedWorkspaceFailureCode,
@@ -81,6 +83,7 @@ const PACKAGED_PROOF_FAILURE_CODES = [
   "cleanup_failed",
   "crash_probe_failed",
   "proof_and_cleanup_failed",
+  "publication_probe_failed",
   "session_artifact_failed",
   "session_descriptor_failed",
   "session_evidence_failed",
@@ -237,7 +240,11 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       join(workspace, "input", "analysis-recipe.json"),
       JSON.stringify(packagedAnalysisRecipe()),
     );
-    const createLauncher = (args: readonly string[], acceptedExitCodes: readonly number[] = [0]) =>
+    const createLauncher = (
+      args: readonly string[],
+      acceptedExitCodes: readonly number[] = [0],
+      sessionWorkspace = workspace,
+    ) =>
       createNativeContainmentLauncher(
         createExecutableNativeContainmentBroker({
           acceptedExitCodes,
@@ -249,7 +256,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
           ...(prepared.windowsProfile === undefined
             ? {}
             : { windowsProfile: prepared.windowsProfile }),
-          workspace,
+          workspace: sessionWorkspace,
         }),
         platform,
       );
@@ -323,6 +330,17 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     if (candidates.length !== 2 || !candidates[0]!.equals(candidates[1]!)) {
       throw new Error("Packaged cold and warm analysis candidates are not deterministic");
     }
+    stage = "publication_probe_failed";
+    process.stderr.write("Packaged sidecar proof stage: publication_started\n");
+    await runPackagedAnalysisPublicationProof({
+      clientForWorkspace: (attemptWorkspace) =>
+        createEffectSidecarClient(createLauncher([], [0], attemptWorkspace)),
+      fixture: canonicalWavFixture(),
+      recipe: AnalysisRecipeSchema.parse(packagedAnalysisRecipe()),
+      runtimeManifestHash: containedRuntime.manifestHash,
+      workspaceRoot: join(workspace, "publication-attempts"),
+    });
+    process.stderr.write("Packaged sidecar proof stage: publication_completed\n");
   } catch (cause) {
     const analysisDiagnostic = findAnalysisDiagnostic(cause);
     if (analysisDiagnostic !== undefined) {

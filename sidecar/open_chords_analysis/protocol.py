@@ -520,7 +520,15 @@ def _analyze_decoded(workspace: Path) -> dict[str, object]:
         workspace / "artifacts" / "canonical.wav",
         AnalysisConfig.from_recipe_document(recipe),
     )
-    return result.to_document()
+    document = result.to_document()
+    # This entry is reached only after staged-input preflight and canonical
+    # decode succeed. The CPU module reports its own stages, not those seams.
+    document["stageOutcomes"] = [
+        {"stage": "preflight", "state": "completed"},
+        {"stage": "canonical_decode", "state": "completed"},
+        *document["stageOutcomes"],
+    ]
+    return document
 
 
 def _preload_cpu_analysis() -> None:

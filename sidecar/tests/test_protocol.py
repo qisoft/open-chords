@@ -162,6 +162,11 @@ class ProtocolTests(unittest.TestCase):
             candidate = json.loads(candidate_bytes)
             self.assertEqual(candidate["durationSamples"], 4_800)
             self.assertEqual(candidate["supportClaimIds"], [])
+            self.assertEqual(
+                [outcome["stage"] for outcome in candidate["stageOutcomes"]],
+                ["preflight", "canonical_decode", "shared_features", "rhythm",
+                 "harmony", "sections", "assemble"],
+            )
 
     def test_reports_a_bounded_analysis_failure_for_an_invalid_staged_recipe(self) -> None:
         ffmpeg = shutil.which("ffmpeg")

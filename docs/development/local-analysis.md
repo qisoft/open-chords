@@ -38,3 +38,13 @@ canonical decode does. Resolving that absolute root again can require access to 
 AppContainer profile ancestors and fail after DSP succeeds. Publication still rejects a symlink
 or reparse-point artifacts directory, writes a bounded temporary file, flushes it, and atomically
 replaces the final result. Non-native sessions retain absolute-path resolution checks.
+
+The installed-artifact gate also composes `LocalMediaService`, `LocalAnalysisService`, the real
+contained analyzer, and `ProjectLibrary`. A main-owned fixture outside the sidecar workspace
+produces the first active Revision, retained Recipe/Manifest, and Effective Timeline. A second
+profile produces a Reviewable Revision while the first Revision, Manifest, Active View, and Edit
+Layer count stay unchanged. The gate requires the `publication_completed` marker as well as a
+clean process exit; module tests with a substituted analyzer do not stand in for this journey.
+The protocol records completed preflight and canonical-decode stages before the CPU module's
+stage outcomes. Main still requires the exact complete pipeline when validating the Manifest;
+DSP-only stage evidence cannot be published as a complete Analysis Revision.

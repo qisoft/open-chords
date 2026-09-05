@@ -101,7 +101,7 @@ test("packaged shell flips every security fuse explicitly", async () => {
   });
 });
 
-test("installed artifact runs the main-owned sidecar lifecycle and reaps", async () => {
+test("installed artifact runs contained analysis, publishes Revisions, and reaps", async () => {
   test.setTimeout(300_000);
   const proof = spawn(executablePath, [PACKAGED_SIDECAR_PROOF_ARGUMENT], {
     cwd: packageRoot,
@@ -119,6 +119,7 @@ test("installed artifact runs the main-owned sidecar lifecycle and reaps", async
   const exit = await waitForApplicationExit(proof, 290_000);
   process.stdout.write(output);
   expect(exit, output).toEqual({ code: 0, signal: null });
+  expect(output).toContain("Packaged sidecar proof stage: publication_completed");
 });
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {
