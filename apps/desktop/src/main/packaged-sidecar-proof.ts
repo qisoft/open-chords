@@ -661,7 +661,9 @@ async function runAdversarialContainmentProbe(
     );
     stage = "adversarial_launch_failed";
     probeStartedAt = performance.now();
-    probeSignal = AbortSignal.timeout(15_000);
+    // Frozen Windows cold startup can exceed 15 seconds on CI. This is the
+    // adversarial fixture budget; production session deadlines are unchanged.
+    probeSignal = AbortSignal.timeout(60_000);
     process = await createLauncher([`--containment-probe=${plan}`]).launch(request, probeSignal);
     stage = "adversarial_output_failed";
     let output = Buffer.alloc(0);
