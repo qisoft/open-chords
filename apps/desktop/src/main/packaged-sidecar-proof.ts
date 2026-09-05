@@ -7,6 +7,7 @@ import {
   symlinkSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
@@ -554,6 +555,8 @@ async function runAdversarialContainmentProbe(
   let process: Awaited<ReturnType<ReturnType<typeof createLauncher>["launch"]>> | undefined;
   let proofFailure: { cause: unknown } | undefined;
   let stage: PackagedProofFailureCode = "adversarial_probe_failed";
+  let probeSignal: AbortSignal | undefined;
+  let probeStartedAt = 0;
   try {
     await new Promise<void>((resolveListen, reject) => {
       server.once("error", reject);
@@ -624,10 +627,9 @@ async function runAdversarialContainmentProbe(
       }),
     );
     stage = "adversarial_launch_failed";
-    process = await createLauncher([`--containment-probe=${plan}`]).launch(
-      request,
-      AbortSignal.timeout(15_000),
-    );
+    probeStartedAt = performance.now();
+    probeSignal = AbortSignal.timeout(15_000);
+    process = await createLauncher([`--containment-probe=${plan}`]).launch(request, probeSignal);
     stage = "adversarial_output_failed";
     let output = Buffer.alloc(0);
     for await (const chunk of process.stdout) {
@@ -730,6 +732,12 @@ async function runAdversarialContainmentProbe(
       "adversarial_shell_failed",
     );
   } catch (cause) {
+    if (probeSignal !== undefined) {
+      writeSync(
+        2,
+        `Packaged adversarial proof failure: duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted}\n`,
+      );
+    }
     proofFailure = {
       cause:
         packagedProofFailureCode(cause) === "proof_failed"
