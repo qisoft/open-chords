@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import builtins
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,39 @@ from sidecar.open_chords_analysis.numba_cache import FrozenWorkspaceCacheLocator
 
 
 class NumbaCacheTests(unittest.TestCase):
+    def test_frozen_cache_round_trips_beneath_a_long_windows_workspace(self) -> None:
+        from numba.core.caching import IndexDataCacheFile
+
+        with tempfile.TemporaryDirectory(prefix="open-chords-numba-long-") as temporary:
+            workspace = Path(temporary) / ("w" * 100) / ("w" * 100)
+            workspace.mkdir(parents=True)
+            original_cwd = Path.cwd()
+            real_open = builtins.open
+
+            def windows_path_open(path, *args, **kwargs):
+                # Reproduce the Win32 absolute-path limit at the actual cache I/O
+                # boundary while retaining real Numba serialization and files.
+                if isinstance(path, (str, os.PathLike)) and len(os.fspath(path)) >= 260:
+                    raise FileNotFoundError(2, "simulated Win32 path limit")
+                return real_open(path, *args, **kwargs)
+
+            try:
+                os.chdir(workspace)
+                with (
+                    patch.object(sys, "frozen", True, create=True),
+                    patch.object(sys, "platform", "win32"),
+                    patch.object(builtins, "open", windows_path_open),
+                ):
+                    locator = FrozenWorkspaceCacheLocator.from_function(
+                        self.test_frozen_cache_round_trips_beneath_a_long_windows_workspace,
+                        "librosa/core/notation.py",
+                    )
+                    cache = IndexDataCacheFile(locator.get_cache_path(), "fixture", (1, 1))
+                    cache.save("compiled", {"value": 42})
+                    self.assertEqual(cache.load("compiled"), {"value": 42})
+            finally:
+                os.chdir(original_cwd)
+
     def test_frozen_cache_is_confined_to_the_job_workspace(self) -> None:
         with tempfile.TemporaryDirectory(prefix="open-chords-numba-cache-") as temporary:
             workspace = Path(temporary)
@@ -26,7 +60,7 @@ class NumbaCacheTests(unittest.TestCase):
                 os.chdir(original_cwd)
 
             self.assertIsNotNone(locator)
-            cache_path = Path(locator.get_cache_path()).resolve()
+            cache_path = (workspace / locator.get_cache_path()).resolve()
             self.assertTrue(cache_path.is_relative_to(workspace.resolve()))
             self.assertEqual(cache_path.parent.name, "numba-cache")
 

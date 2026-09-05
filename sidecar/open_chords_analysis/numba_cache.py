@@ -15,7 +15,10 @@ class FrozenWorkspaceCacheLocator:
         code = getattr(py_func, "__code__")
         self._line = int(code.co_firstlineno)
         source_group = hashlib.sha256(py_file.encode("utf-8")).hexdigest()[:16]
-        self._cache_path = Path.cwd() / "checkpoints" / "numba-cache" / source_group
+        # The native session fixes cwd to its validated workspace. Relative
+        # cache paths avoid Win32 absolute-path limits in deep Attempt roots.
+        cache_root = Path() if sys.platform == "win32" else Path.cwd()
+        self._cache_path = cache_root / "checkpoints" / "numba-cache" / source_group
 
     @classmethod
     def from_function(

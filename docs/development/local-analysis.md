@@ -39,6 +39,11 @@ AppContainer profile ancestors and fail after DSP succeeds. Publication still re
 or reparse-point artifacts directory, writes a bounded temporary file, flushes it, and atomically
 replaces the final result. Non-native sessions retain absolute-path resolution checks.
 
+The frozen Windows Numba cache also uses paths relative to that fixed workspace. This avoids
+Win32 absolute-path limits when a normal Attempt identity makes the private workspace deep;
+cache data remains under the same disposable workspace. The installed gate uses normal random
+identities, and the cache regression exercises real Numba serialization across the path limit.
+
 The installed-artifact gate also composes `LocalMediaService`, `LocalAnalysisService`, the real
 contained analyzer, and `ProjectLibrary`. A main-owned fixture outside the sidecar workspace
 produces the first active Revision, retained Recipe/Manifest, and Effective Timeline. A second
