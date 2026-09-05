@@ -86,10 +86,23 @@ export function LyricsViewport({
         onWheel={() => setFollow(false)}
         onPointerDown={() => setFollow(false)}
         onKeyDown={(event) => {
-          if (
-            ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)
-          )
-            setFollow(false);
+          if (event.target !== event.currentTarget) return;
+          const viewport = event.currentTarget;
+          const next = {
+            ArrowUp: viewport.scrollTop - 40,
+            ArrowDown: viewport.scrollTop + 40,
+            PageUp: viewport.scrollTop - viewport.clientHeight,
+            PageDown: viewport.scrollTop + viewport.clientHeight,
+            Home: 0,
+            End: viewport.scrollHeight,
+            " ": viewport.scrollTop + viewport.clientHeight * (event.shiftKey ? -1 : 1),
+          }[event.key];
+          if (next === undefined) return;
+          // Native Home/End routing differs across macOS versions. Keep these
+          // commands inside the focused lyrics viewport on every platform.
+          event.preventDefault();
+          setFollow(false);
+          viewport.scrollTo({ top: next, behavior: "instant" });
         }}
       >
         {content.lines.length === 0 ? (
