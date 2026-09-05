@@ -333,8 +333,29 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     stage = "publication_probe_failed";
     process.stderr.write("Packaged sidecar proof stage: publication_started\n");
     await runPackagedAnalysisPublicationProof({
-      clientForWorkspace: (attemptWorkspace) =>
-        createEffectSidecarClient(createLauncher([], [0], attemptWorkspace)),
+      clientForWorkspace: (attemptWorkspace) => {
+        process.stderr.write("Packaged publication proof stage: client_created\n");
+        const client = createEffectSidecarClient(createLauncher([], [0], attemptWorkspace));
+        return {
+          async dispose() {
+            process.stderr.write("Packaged publication proof stage: dispose_started\n");
+            await client.dispose();
+            process.stderr.write("Packaged publication proof stage: dispose_completed\n");
+          },
+          async runSession(request) {
+            process.stderr.write("Packaged publication proof stage: session_started\n");
+            try {
+              const result = await client.runSession(request);
+              process.stderr.write("Packaged publication proof stage: session_completed\n");
+              return result;
+            } catch (cause) {
+              const failure = cause instanceof SidecarSessionError ? cause.code : "unknown";
+              process.stderr.write(`Packaged publication proof session failure: ${failure}\n`);
+              throw cause;
+            }
+          },
+        };
+      },
       fixture: canonicalWavFixture(),
       recipe: AnalysisRecipeSchema.parse(packagedAnalysisRecipe()),
       runtimeManifestHash: containedRuntime.manifestHash,

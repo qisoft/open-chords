@@ -46,7 +46,11 @@ export async function runPackagedAnalysisPublicationProof(options: {
       stateRoot: join(mainRoot, "analysis"),
       workspaceRoot: options.workspaceRoot,
     });
-    const first = await analysis.analyzeProject({ projectId, recipe: options.recipe });
+    process.stderr.write("Packaged publication proof stage: service_opened\n");
+    const submitted = await analysis.submitProject({ projectId, recipe: options.recipe });
+    process.stderr.write(`Packaged publication proof stage: job_submitted_${submitted.state}\n`);
+    if (submitted.state === "queued") await analysis.runNext();
+    const first = analysis.get(submitted.id);
     if (first.job.state !== "succeeded") {
       process.stderr.write(
         `Packaged publication proof job: ${first.job.state}.${first.attempts.at(-1)?.failure?.classification ?? "none"}\n`,
