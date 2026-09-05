@@ -78,7 +78,7 @@ export function createExecutableNativeContainmentBroker(
     throw new SidecarSessionError("launch_failure", "Windows AppContainer profile is required");
   }
   return {
-    async launchAndVerify(_request, signal) {
+    async launchAndVerify(request, signal) {
       const helperArguments = [
         ...(options.platform === "win32" ? [`--profile=${options.windowsProfile!}`] : []),
         `--workspace=${workspace}`,
@@ -108,7 +108,7 @@ export function createExecutableNativeContainmentBroker(
       );
       try {
         await waitForSpawn(child);
-        const evidence = await readEvidence(child);
+        const evidence = await readEvidence(child, Math.min(request.timeoutMs, 60_000));
         if (evidence.backend !== options.containment.backend) {
           throw new SidecarSessionError(
             "launch_failure",
@@ -226,7 +226,10 @@ export function parseSidecarProcessFailure(value: string, exceeded = false): str
   return SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? null;
 }
 
-async function readEvidence(child: ChildProcess): Promise<NativeContainmentEvidence> {
+async function readEvidence(
+  child: ChildProcess,
+  timeoutMs: number,
+): Promise<NativeContainmentEvidence> {
   const control = child.stdio[3];
   if (
     control === undefined ||
@@ -262,7 +265,7 @@ async function readEvidence(child: ChildProcess): Promise<NativeContainmentEvide
     const onError = (error: Error) => finish(error);
     const timer = setTimeout(
       () => finish(new SidecarSessionError("launch_failure", "Containment setup timed out")),
-      15_000,
+      timeoutMs,
     );
     control.on("data", onData);
     control.once("end", onEnd);

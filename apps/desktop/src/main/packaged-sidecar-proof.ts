@@ -550,7 +550,7 @@ async function runAdversarialContainmentProbe(
       manifestHash: "0".repeat(64),
       nonce: "nonce-containment-probe",
       requestId: "request-containment-probe",
-      timeoutMs: 15_000,
+      timeoutMs: 60_000,
     });
     let linkEscapePreflightBlocked = false;
     if (platform === "win32") {

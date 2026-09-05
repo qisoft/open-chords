@@ -56,7 +56,10 @@ DSP-only stage evidence cannot be published as a complete Analysis Revision.
 
 The native broker retains its child-process error listener until the process closes, including
 abort events emitted after a successful launch. Cancellation remains a session outcome rather
-than an uncaught main-process exception. In packaged proof mode only, unexpected main-process
+than an uncaught main-process exception. Native attestation is bounded by the request budget
+and a 60-second upper limit, with cancellation active throughout acquisition. The cold
+adversarial packaged probe uses a 60-second budget after Windows evidence showed its earlier
+15-second budget expiring during valid startup. In packaged proof mode only, unexpected main-process
 errors emit a bounded error kind/code and exit unsuccessfully instead of opening Electron's
 default error dialog. Captured proof output is retained on timeout, and the CI packaged gate
 does not automatically retry a failed attempt.
