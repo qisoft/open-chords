@@ -370,30 +370,21 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
                 process.stderr.write(
                   `Packaged publication workspace: path_length=${attemptWorkspace.length} canonical=${existsSync(join(attemptWorkspace, "artifacts", "canonical.wav"))} decode_manifest=${existsSync(join(attemptWorkspace, "artifacts", "decode-manifest.json"))} result=${existsSync(join(attemptWorkspace, "artifacts", "analysis-result.json"))} cache=${existsSync(join(attemptWorkspace, "checkpoints", "numba-cache"))}\n`,
                 );
+                await launched.stop(reason);
                 const preloadModules = z
                   .array(
-                    z.enum([
-                      "numpy",
-                      "scipy",
-                      "numba",
-                      "librosa",
-                      "llvmlite",
-                      "joblib",
-                      "threadpoolctl",
-                      "sklearn",
-                      "pooch",
-                      "soundfile",
-                      "threading",
-                      "ctypes",
-                      "importlib",
-                    ]),
+                    z
+                      .string()
+                      .max(200)
+                      .regex(/^[A-Za-z_][A-Za-z0-9_.]*:[0-9]{1,6}$/u),
                   )
-                  .max(13)
+                  .max(128)
                   .parse(
                     JSON.parse(readFileSync(join(attemptWorkspace, "preload-proof.json"), "utf8")),
                   );
-                process.stderr.write(`Packaged publication preload: ${preloadModules.join(".")}\n`);
-                await launched.stop(reason);
+                process.stderr.write(
+                  `Packaged publication execution scopes: ${preloadModules.join(",")}\n`,
+                );
                 mark("stop_completed");
               },
               async write(frame) {

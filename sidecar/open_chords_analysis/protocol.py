@@ -110,9 +110,9 @@ def serve_one_session(
     events: Queue[tuple[str, object]] = Queue()
     analysis_import_error: Exception | None = None
     sequence = 1
+    preload_probe = Path("preload-proof.json")
+    preload_probe_enabled = preload_probe.is_file()
     if (workspace / ANALYSIS_RECIPE_PATH).exists():
-        preload_probe = Path("preload-proof.json")
-        preload_probe_enabled = preload_probe.is_file()
         preload_finished = threading.Event()
         preload_output_errors: list[Exception] = []
         preload_sequence = [sequence]
@@ -121,19 +121,7 @@ def serve_one_session(
             while not preload_finished.wait(HEARTBEAT_INTERVAL_SECONDS):
                 try:
                     if preload_probe_enabled:
-                        frame = sys._current_frames().get(threading.main_thread().ident)
-                        modules = []
-                        while frame is not None:
-                            module = str(frame.f_globals.get("__name__", "")).split(".")[0]
-                            if module in {
-                                "numpy", "scipy", "numba", "librosa", "llvmlite",
-                                "joblib", "threadpoolctl", "sklearn", "pooch",
-                                "soundfile", "threading", "ctypes", "importlib",
-                            } and module not in modules:
-                                modules.append(module)
-                            frame = frame.f_back
-                        del frame
-                        preload_probe.write_text(json.dumps(modules), encoding="utf-8")
+                        _write_execution_probe(preload_probe)
                     _write_frame(
                         stdout,
                         {
@@ -239,6 +227,8 @@ def serve_one_session(
             event, payload = events.get(timeout=HEARTBEAT_INTERVAL_SECONDS)
         except Empty:
             if not cancel_received and not decode_finished:
+                if preload_probe_enabled:
+                    _write_execution_probe(preload_probe)
                 _write_frame(
                     stdout,
                     {"nonce": start.nonce, "sequence": sequence, "type": "heartbeat"},
@@ -545,6 +535,27 @@ def _analyze_decoded(workspace: Path) -> dict[str, object]:
         *document["stageOutcomes"],
     ]
     return document
+
+
+def _write_execution_probe(path: Path) -> None:
+    scopes = []
+    allowed = {
+        "numpy", "scipy", "numba", "librosa", "llvmlite", "joblib",
+        "threadpoolctl", "sklearn", "pooch", "soundfile", "threading",
+        "ctypes", "importlib", "_frozen_importlib", "_frozen_importlib_external",
+        "sidecar", "pathlib", "subprocess", "queue", "os", "ntpath", "tempfile",
+        "multiprocessing", "encodings", "logging", "enum", "re",
+    }
+    for frame in sys._current_frames().values():
+        while frame is not None and len(scopes) < 128:
+            module = str(frame.f_globals.get("__name__", ""))
+            if module.split(".")[0] in allowed:
+                scope = f"{module}:{frame.f_lineno}"
+                if scope not in scopes:
+                    scopes.append(scope)
+            frame = frame.f_back
+        del frame
+    path.write_text(json.dumps(scopes), encoding="utf-8")
 
 
 def _preload_cpu_analysis() -> None:
