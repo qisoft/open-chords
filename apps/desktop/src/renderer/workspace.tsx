@@ -8,7 +8,6 @@ import type {
 import { FolderOpen, Pause, Play, Repeat2, RotateCcw } from "lucide-react";
 import {
   type KeyboardEvent,
-  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -17,13 +16,15 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { LyricsViewport } from "./lyrics-viewport.tsx";
 import { createPlaybackClock, type PlaybackClock } from "./playback-clock.ts";
+import { TimelineSurface } from "./timeline-surface.tsx";
+import { buildWorkspaceContent } from "./workspace-content.ts";
 import { continueLoopAtBoundary, requestProjectPlayback } from "./workspace-playback.ts";
 import {
   buildWorkspaceTimeline,
   reconcileWorkspaceRegionState,
   shouldRestoreRegionFocus,
-  type WorkspaceTimeline,
   type WorkspaceTimelineRegion,
 } from "./workspace-timeline.ts";
 
@@ -35,6 +36,7 @@ export function ProjectWorkspace({
   snapshot: ProjectSnapshotResponse;
 }) {
   const timeline = useMemo(() => buildWorkspaceTimeline(snapshot.project), [snapshot.project]);
+  const content = useMemo(() => buildWorkspaceContent(snapshot.project), [snapshot.project]);
   const [playback, setPlayback] = useState<MediaPlaybackResponse | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [clock, setClock] = useState<PlaybackClock | null>(null);
@@ -74,7 +76,7 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     const audio = new Audio();
-    audio.preload = "metadata";
+    audio.preload = "auto";
     audioRef.current = audio;
     return () => {
       audio.pause();
@@ -110,16 +112,19 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (audio === null || playback?.type !== "media.playback_ready") return undefined;
-    audio.src = playback.playbackUrl;
-    audio.currentTime = playback.startSourceSample / playback.sampleRate;
+    if (audio === null) return undefined;
+    const ready = playback?.type === "media.playback_ready" ? playback : null;
+    if (ready !== null) {
+      audio.src = ready.playbackUrl;
+      audio.currentTime = ready.startSourceSample / ready.sampleRate;
+    }
     const nextClock = createPlaybackClock({
       cancelFrame: cancelAnimationFrame,
-      durationSamples: playback.endSourceSample - playback.startSourceSample,
+      durationSamples: snapshot.project.durationSamples,
       requestFrame: requestAnimationFrame,
-      sampleRate: playback.sampleRate,
+      sampleRate: snapshot.project.sampleRate,
       source: audio,
-      startSourceSample: playback.startSourceSample,
+      startSourceSample: ready?.startSourceSample ?? 0,
     });
     setClock(nextClock);
     return () => {
@@ -129,15 +134,18 @@ export function ProjectWorkspace({
       audio.load();
       setClock(null);
     };
-  }, [playback]);
+  }, [playback, snapshot.project.durationSamples, snapshot.project.sampleRate]);
 
   useEffect(() => {
     if (clock === null) return undefined;
     let current = true;
+    let wasPlaying = clock.getSnapshot().playing;
     const loop = timeline.regions.find(({ id }) => id === regionState.loopRegionId);
     const unsubscribe = clock.subscribe(() => {
       const { playing, positionSamples } = clock.getSnapshot();
-      if (loop !== undefined && positionSamples >= loop.endSample) {
+      const reachedMediaEnd = wasPlaying && audioRef.current?.ended === true;
+      wasPlaying = playing;
+      if (loop !== undefined && (playing || reachedMediaEnd) && positionSamples >= loop.endSample) {
         const audio = audioRef.current;
         if (audio === null) {
           clock.seek(loop.startSample);
@@ -246,37 +254,39 @@ export function ProjectWorkspace({
             </span>
           </div>
         </div>
-        <div className="timeline-viewport">
-          <div className="fixed-playhead" aria-hidden="true" />
-          <TimelineMotion clock={clock} timeline={timeline}>
-            {timeline.regions.map((region) => (
-              <button
-                aria-label={`${region.label}. ${region.chordLabels.length === 0 ? "No chord assertions" : `Chords: ${region.chordLabels.join(", ")}`}`}
-                aria-pressed={regionState.selectedRegionId === region.id}
-                className="timeline-region"
-                data-kind={region.kind}
-                data-looped={regionState.loopRegionId === region.id ? "true" : undefined}
-                key={region.id}
-                onClick={() => selectRegion(region)}
-                onKeyDown={(event) => handleRegionKey(event, selectAdjacent)}
-                ref={(element) => {
-                  if (element === null) regionElements.current.delete(region.id);
-                  else regionElements.current.set(region.id, element);
-                }}
-                style={{
-                  flexBasis: `${String(((region.endSample - region.startSample) / timeline.durationSamples) * 100)}%`,
-                }}
-                tabIndex={regionState.selectedRegionId === region.id ? 0 : -1}
-                type="button"
-              >
-                <span className="region-name">{region.label}</span>
-                <span className="region-chords">
-                  {region.chordLabels.length === 0 ? "No analysis" : region.chordLabels.join(" · ")}
-                </span>
-              </button>
-            ))}
-          </TimelineMotion>
-        </div>
+        <TimelineSurface clock={clock} timeline={timeline} sampleRate={snapshot.project.sampleRate}>
+          {timeline.regions.map((region) => (
+            <button
+              aria-label={`${region.label}. ${region.chordLabels.length === 0 ? "No chord assertions" : `Chords: ${region.chordLabels.join(", ")}`}`}
+              aria-pressed={regionState.selectedRegionId === region.id}
+              className="timeline-region"
+              data-kind={region.kind}
+              data-region-id={region.id}
+              data-looped={regionState.loopRegionId === region.id ? "true" : undefined}
+              key={region.id}
+              onClick={(event) => {
+                setSelectedRegionId(region.id);
+                if (event.detail === 0) clock?.seek(region.startSample);
+              }}
+              onKeyDown={(event) => handleRegionKey(event, selectAdjacent)}
+              ref={(element) => {
+                if (element === null) regionElements.current.delete(region.id);
+                else regionElements.current.set(region.id, element);
+              }}
+              style={{
+                left: `${String((region.startSample / timeline.durationSamples) * 100)}%`,
+                width: `${String(((region.endSample - region.startSample) / timeline.durationSamples) * 100)}%`,
+              }}
+              tabIndex={regionState.selectedRegionId === region.id ? 0 : -1}
+              type="button"
+            >
+              <span className="region-name">{region.label}</span>
+              <span className="region-chords">
+                {region.chordLabels.length === 0 ? "No analysis" : region.chordLabels.join(" · ")}
+              </span>
+            </button>
+          ))}
+        </TimelineSurface>
 
         <div className="selection-actions" aria-label="Timeline selection actions">
           <span>
@@ -307,16 +317,6 @@ export function ProjectWorkspace({
         </div>
       </section>
 
-      <section className="content-section" aria-labelledby="content-heading">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Reference content</p>
-            <h2 id="content-heading">Lyrics and instrumental sections</h2>
-          </div>
-        </div>
-        <ProjectContent snapshot={snapshot} />
-      </section>
-
       <footer className="transport" aria-label="Playback controls">
         <PlaybackButton
           clock={clock}
@@ -329,36 +329,17 @@ export function ProjectWorkspace({
             (readyPlayback === null ? "Preparing verified Source…" : "Verified local playback")}
         </span>
       </footer>
-    </main>
-  );
-}
 
-function TimelineMotion({
-  children,
-  clock,
-  timeline,
-}: {
-  children: ReactNode;
-  clock: PlaybackClock | null;
-  timeline: WorkspaceTimeline;
-}) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const renderPosition = () => {
-      const position = clock?.getSnapshot().positionSamples ?? 0;
-      const percentage = (position / timeline.durationSamples) * 100;
-      const track = trackRef.current;
-      if (track === null) return;
-      track.dataset.positionSamples = String(position);
-      track.style.transform = `translateX(calc(50% - ${String(percentage)}%))`;
-    };
-    renderPosition();
-    return clock?.subscribe(renderPosition);
-  }, [clock, timeline.durationSamples]);
-  return (
-    <div className="timeline-track" ref={trackRef}>
-      {children}
-    </div>
+      <section className="content-section" aria-labelledby="content-heading">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Reference content</p>
+            <h2 id="content-heading">Lyrics and instrumental sections</h2>
+          </div>
+        </div>
+        <LyricsViewport clock={clock} content={content} />
+      </section>
+    </main>
   );
 }
 
@@ -434,28 +415,6 @@ function useClockElapsedSeconds(clock: PlaybackClock | null, sampleRate: number)
     [clock, sampleRate],
   );
   return useSyncExternalStore(subscribe, getSnapshot);
-}
-
-function ProjectContent({ snapshot }: { snapshot: ProjectSnapshotResponse }) {
-  const active = snapshot.project.activeView;
-  const lyricsDocument = snapshot.project.lyricsDocuments.find(
-    ({ id }) => id === active?.lyricsDocumentId,
-  );
-  if (lyricsDocument === undefined) {
-    return (
-      <div className="instrumental-message">
-        <strong>Instrumental or no Reference Lyrics</strong>
-        <p>The chord timeline remains available without fabricating lyrical content.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="lyrics-lines">
-      {lyricsDocument.lines.map((line) => (
-        <p key={line.id}>{lyricsDocument.text.slice(line.startOffset, line.endOffset)}</p>
-      ))}
-    </div>
-  );
 }
 
 function handleRegionKey(

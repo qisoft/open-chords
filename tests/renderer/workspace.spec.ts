@@ -40,12 +40,34 @@ test("a durable local-media Project reopens into the centered workspace and play
   const application = await launch(userDataDirectory);
   try {
     const page = await application.firstWindow();
+    await page.emulateMedia({ reducedMotion: "no-preference" });
     await expect(page.getByRole("heading", { name: "Local Project" })).toBeVisible();
     await expect(page).toHaveTitle(/project_.+ · Local Project · Open Chords/);
     await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Unanalyzed Project range/ })).toBeVisible();
     await expect(page.getByText("Verified local playback")).toBeVisible();
     await expect(page.getByRole("status", { name: "Current Project Time" })).toHaveText("0:00");
+
+    const position = page.getByRole("slider", { name: "Project position", exact: true });
+    await expect(position).toBeVisible();
+    await position.focus();
+    await position.press("End");
+    await expect(position).toHaveValue("48000");
+    await position.press("Home");
+    await expect(position).toHaveValue("0");
+    const viewport = await page.locator(".timeline-viewport").boundingBox();
+    if (viewport === null) throw new Error("Timeline viewport is missing");
+    const center = viewport.x + viewport.width / 2;
+    await page.mouse.click(center + viewport.width / 4, viewport.y + 12);
+    await expect.poll(async () => Number(await position.inputValue())).toBeCloseTo(12000, -2);
+    await page.getByRole("slider", { name: "Timeline zoom" }).fill("2");
+    await page.mouse.move(center, viewport.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(center - viewport.width / 4, viewport.y + 12, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(async () => Number(await position.inputValue())).toBeCloseTo(18000, -2);
+    await position.focus();
+    await position.press("Home");
 
     const play = page.getByRole("button", { name: "Play" });
     await expect(play).toBeEnabled();
@@ -73,6 +95,16 @@ test("a durable local-media Project reopens into the centered workspace and play
       .poll(() => page.locator(".timeline-track").getAttribute("style"))
       .not.toBe(endPosition);
     await page.getByRole("button", { name: "Pause" }).click();
+    await page.emulateMedia({ reducedMotion: "reduce", forcedColors: "active" });
+    await position.focus();
+    await position.press("Home");
+    const reducedStart = await page.locator(".timeline-track").getAttribute("style");
+    await page.getByRole("button", { name: "Play" }).click();
+    await expect.poll(async () => Number(await position.inputValue())).toBeGreaterThan(12000);
+    await expect(page.locator(".timeline-track")).toHaveAttribute("style", reducedStart!);
+    await expect(position).toHaveAttribute("aria-valuetext", /of 1.00 seconds/);
+    await page.getByRole("button", { name: "Pause" }).click();
+    await page.emulateMedia({ reducedMotion: "no-preference", forcedColors: "none" });
     await page.evaluate(() => {
       Object.defineProperty(HTMLMediaElement.prototype, "play", {
         configurable: true,
@@ -124,8 +156,38 @@ test("selection and persistent loop remain independent in the deterministic fixt
     const pickup = page.getByRole("button", { name: /Pickup, 4\/4/ });
     const complete = page.getByRole("button", { name: /Complete, 3\/4/ });
     await expect(pickup).toBeVisible();
-    await expect(page.getByText("go go", { exact: true })).toBeVisible();
-    await expect(page.getByText("home go", { exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "go go", exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "home go", exact: true })).toBeVisible();
+    const follow = page.getByRole("button", { name: "Follow lyrics" });
+    await expect(follow).toHaveAttribute("aria-pressed", "true");
+    const lyrics = page.getByRole("region", { name: "Lyrics viewport" });
+    await lyrics.hover();
+    await page.mouse.wheel(0, 100);
+    await expect(follow).toHaveAttribute("aria-pressed", "false");
+    await follow.click();
+    await expect(follow).toHaveAttribute("aria-pressed", "true");
+    const chord = page.getByRole("button", {
+      name: "Chord Am7(9, add11, add9)/E. asserted",
+      exact: true,
+    });
+    await expect(chord).toBeVisible();
+    await chord.focus();
+    await chord.press("Enter");
+    await expect(page.getByRole("status", { name: "Selected chord" })).toHaveText(
+      "Am7(9, add11, add9)/E · asserted",
+    );
+    const position = page.getByRole("slider", { name: "Project position", exact: true });
+    await position.focus();
+    await position.press("End");
+    await expect(position).toHaveValue("48000");
+    await position.press("Home");
+    await expect(position).toHaveValue("0");
+    await position.fill("2000");
+    await expect(page.locator(".lyric-block[data-current=true]")).toContainText("go");
+    await expect(page.getByRole("group", { name: "go go", exact: true })).toContainText(
+      "Am7(9, add11, add9)/E",
+    );
+    await position.fill("0");
     await page.setViewportSize({ height: 720, width: 320 });
     const pickupBounds = await pickup.boundingBox();
     const completeBounds = await complete.boundingBox();
@@ -147,6 +209,9 @@ test("selection and persistent loop remain independent in the deterministic fixt
     await expect(pickup).toHaveAttribute("aria-pressed", "true");
     await expect(complete).toHaveAttribute("data-looped", "true");
     await expect(page.locator(".loop-status")).toContainText("Loop: Complete, 3/4");
+    await position.fill("40000");
+    await expect(position).toHaveValue("40000");
+    await position.fill("0");
 
     const projectId = (await page.locator(".project-identity").textContent())?.trim();
     if (projectId === undefined || projectId.length === 0) throw new Error("Project ID is missing");
@@ -176,6 +241,26 @@ test("selection and persistent loop remain independent in the deterministic fixt
     await publishProjectChange(application, thirdSnapshot);
     await expect(pickup).not.toHaveAttribute("data-stale-region", "true");
     await expect(pickup).toBeFocused();
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.getByRole("slider", { name: "Timeline zoom" }).fill("2");
+    await position.fill("2000");
+    await page.screenshot({ path: test.info().outputPath("workspace.png"), fullPage: true });
+    await chord.focus();
+    const fourthSnapshot = revisedSnapshot(thirdSnapshot, "fourth", 4);
+    fourthSnapshot.project.activeView = {
+      ...fourthSnapshot.project.activeView!,
+      analysisRevisionId: "revision_reviewable",
+      editLayerId: "edit_reviewable",
+      editHistoryPosition: 0,
+    };
+    delete fourthSnapshot.project.activeView.lyricsDocumentId;
+    delete fourthSnapshot.project.activeView.lyricsAlignmentId;
+    await installSnapshotResponse(application, fourthSnapshot);
+    await publishProjectChange(application, fourthSnapshot);
+    await expect(
+      page.getByRole("button", { name: "Chord N. asserted", exact: true }),
+    ).toBeFocused();
 
     await rejectPlaybackRequests(application);
     await page.reload();
@@ -351,3 +436,208 @@ async function rejectPlaybackRequests(application: Awaited<ReturnType<typeof lau
     ipcMain.handle(channel, () => Promise.reject(new Error("forced playback IPC rejection")));
   }, DESKTOP_IPC_CHANNELS.mediaOpenPlayback);
 }
+
+test("profile committed timeline density before choosing virtualization", async () => {
+  test.skip(process.env.OPEN_CHORDS_PROFILE_WORKSPACE !== "1", "Opt-in measured workspace profile");
+  test.setTimeout(120_000);
+  for (const count of [120, 1200, 4800]) {
+    const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-profile-")));
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(
+        readFileSync(
+          join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+          "utf8",
+        ),
+      ),
+    );
+    const project = envelope.payload;
+    const original = project.analysisRevisions[0]!;
+    const duration = count * 12_000;
+    project.durationSamples = duration;
+    project.analysisRevisions = [
+      {
+        ...original,
+        timeline: {
+          bars: Array.from({ length: count / 4 }, (_, index) => ({
+            id: `profile_bar_${index}`,
+            startSample: index * 48_000,
+            endSample: (index + 1) * 48_000,
+            status: "complete" as const,
+            meter: { numerator: 4, denominator: 4 },
+            beats: Array.from({ length: 4 }, (_unused, beat) => ({
+              id: `profile_beat_${index}_${beat}`,
+              atSample: index * 48_000 + beat * 12_000,
+              role: beat === 0 ? ("downbeat" as const) : ("beat" as const),
+            })),
+          })),
+          chordEvents: Array.from({ length: count }, (_, index) => ({
+            ...original.timeline.chordEvents[0]!,
+            id: `profile_chord_${index}`,
+            startSample: index * 12_000,
+            endSample: (index + 1) * 12_000,
+          })),
+          sectionRegions: [
+            { ...original.timeline.sectionRegions[0]!, endSample: duration, label: "neutral" },
+          ],
+          keyRegions: [{ ...original.timeline.keyRegions[0]!, endSample: duration }],
+          unmeteredRegions: [],
+        },
+      },
+    ];
+    project.editLayers = [{ ...project.editLayers[0]!, transactions: [] }];
+    project.activeView = { ...project.activeView!, editHistoryPosition: 0 };
+    delete project.activeView.lyricsAlignmentId;
+    delete project.activeView.lyricsDocumentId;
+    project.lyricsDocuments = [];
+    project.lyricsAlignments = [];
+    const records = goldenRecords();
+    records.projectRange.endSourceSample = duration;
+    records.sources[0]!.snapshots[0]!.durationSamples = duration;
+    records.legacyManifestlessAnalysisRevisionIds = [original.id];
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope, records });
+    const start = performance.now();
+    const application = await launch(stateRoot);
+    try {
+      const page = await application.firstWindow();
+      await expect(
+        page.getByRole("slider", { name: "Project position", exact: true }),
+      ).toBeVisible();
+      const readyMs = performance.now() - start;
+      const geometry = await page.locator(".timeline-viewport").evaluate((viewport) => ({
+        width: viewport.clientWidth,
+        bar: viewport.querySelector(".timeline-region")!.getBoundingClientRect().width,
+        chord: viewport.querySelector(".timeline-chord")!.getBoundingClientRect().width,
+      }));
+      expect(geometry.bar).toBeCloseTo(geometry.width / (count / 4), 1);
+      expect(geometry.chord).toBeCloseTo(geometry.width / count, 1);
+      const measurement = await page.evaluate(async () => {
+        const input = document.querySelector<HTMLInputElement>('[aria-label="Project position"]')!;
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!;
+        const samples: number[] = [];
+        for (let i = 1; i <= 20; i++) {
+          const seekStart = performance.now();
+          descriptor.set!.call(input, String(Math.round((Number(input.max) * i) / 21)));
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+          samples.push(performance.now() - seekStart);
+        }
+        return { samples, elements: document.querySelectorAll("*").length };
+      });
+      const ordered = measurement.samples.toSorted((a, b) => a - b);
+      console.log(
+        JSON.stringify({
+          profile: "workspace-density",
+          count,
+          readyMs,
+          elements: measurement.elements,
+          seekPaintMedianMs: ordered[10],
+          seekPaintP95Ms: ordered[18],
+        }),
+      );
+    } finally {
+      await application.close();
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("lyrics follow stays inside its viewport and manual scrolling retains focus and position", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-lyrics-follow-")));
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const document = envelope.payload.lyricsDocuments[0]!;
+  const alignment = envelope.payload.lyricsAlignments[0]!;
+  document.text = "";
+  document.lines = [];
+  document.tokens = [];
+  document.suppliedTimingKind = "line";
+  alignment.lineOccurrences = [];
+  alignment.occurrences = [];
+  for (let index = 0; index < 60; index++) {
+    const id = `follow_line_${index}`;
+    const startOffset = document.text.length;
+    document.text += `Verse ${index + 1}\n`;
+    document.lines.push({ id, startOffset, endOffset: document.text.length - 1 });
+    alignment.lineOccurrences.push({
+      lineId: id,
+      timing: {
+        state: "matched",
+        startSample: index * 800,
+        endSample: index * 800 + 600,
+        assertion: { state: "asserted", evidence: [], reasonCodes: [] },
+      },
+    });
+  }
+  const library = await openProjectLibrary({ stateRoot });
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const viewport = page.getByRole("region", { name: "Lyrics viewport" });
+    const position = page.getByRole("slider", { name: "Project position", exact: true });
+    await expect(viewport).toBeVisible();
+    await position.fill("47200");
+    const lastLine = page.getByRole("group", { name: "Verse 60", exact: true });
+    await expect
+      .poll(async () => {
+        const line = await lastLine.boundingBox();
+        const outer = await viewport.boundingBox();
+        return (
+          line !== null &&
+          outer !== null &&
+          line.y >= outer.y &&
+          line.y + line.height <= outer.y + outer.height
+        );
+      })
+      .toBe(true);
+    await viewport.focus();
+    await viewport.press("Home");
+    await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(0);
+    await expect(page.getByRole("button", { name: "Follow lyrics" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await expect(viewport).toBeFocused();
+    await expect(position).toHaveValue("47200");
+    // Explicitly moving the lyrics scrollbar must not seek or scroll the document.
+    await viewport.evaluate((element) => {
+      element.scrollTop = 200;
+    });
+    await position.fill("800");
+    expect(Math.abs((await viewport.evaluate((element) => element.scrollTop)) - 200)).toBeLessThan(
+      2,
+    );
+    await page.getByRole("button", { name: "Follow lyrics" }).click();
+    await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeLessThan(100);
+    await application.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(2),
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.document.documentElement.scrollWidth <=
+            window.document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+    await page.emulateMedia({ forcedColors: "active" });
+    await position.focus();
+    await position.press("End");
+    await expect(position).toHaveValue("48000");
+    await expect(position).toHaveAttribute("aria-valuetext", "1.00 of 1.00 seconds");
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
