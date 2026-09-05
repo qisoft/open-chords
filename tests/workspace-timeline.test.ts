@@ -37,6 +37,15 @@ describe("workspace timeline projection", () => {
       startSample: 0,
     });
     expect(timeline.durationSamples).toBe(48_000);
+    expect(timeline.chords[0]).toMatchObject({
+      id: "chord_am7_e",
+      label: "Am7(9, add11, add9)/E",
+      startSample: 0,
+      endSample: 8_000,
+    });
+    expect(timeline.beats[0]).toMatchObject({ atSample: 0 });
+    expect(timeline.sections[0]).toMatchObject({ id: "section_intro", label: "intro" });
+    expect(timeline.regions[1]?.chordLabels).toEqual(["Unknown chord", "N"]);
   });
 
   it("shows an unanalyzed Project range without fabricating musical assertions", () => {
