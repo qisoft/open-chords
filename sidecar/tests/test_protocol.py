@@ -3,9 +3,11 @@ from __future__ import annotations
 import io
 import json
 import math
+import os
 import hashlib
 import shutil
 import struct
+import subprocess
 import tempfile
 import threading
 import time
@@ -67,6 +69,100 @@ class DecodeFinishedControlReader(io.BytesIO):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_native_session_rejects_a_redirected_analysis_output_directory(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if ffmpeg is None or ffprobe is None:
+            self.skipTest("FFmpeg development tools are unavailable")
+        with tempfile.TemporaryDirectory(prefix="open-chords-output-link-") as temporary:
+            workspace = Path(temporary).resolve()
+            media = workspace / "input" / "source-media"
+            media.parent.mkdir()
+            self._write_fixture(media)
+            (media.parent / "analysis-recipe.json").write_text(
+                json.dumps(self._analysis_recipe()), "utf-8"
+            )
+            target = workspace / "redirected"
+            target.mkdir()
+            artifacts = workspace / "artifacts"
+            if os.name == "nt":
+                subprocess.run(
+                    ["cmd.exe", "/d", "/c", "mklink", "/J", str(artifacts), str(target)],
+                    check=True, capture_output=True,
+                )
+            else:
+                artifacts.symlink_to(target, target_is_directory=True)
+            output = io.BytesIO()
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(workspace)
+                serve_one_session(
+                    io.BytesIO(self._start_frame()), output, workspace,
+                    FrozenRuntime(
+                        manifest_hash="a" * 64,
+                        platform_profile="darwin-arm64-test",
+                        toolchain=NativeToolchain(Path(ffmpeg), Path(ffprobe)),
+                    ),
+                    workspace_is_current_directory=True,
+                )
+            finally:
+                os.chdir(original_cwd)
+
+            terminal = self._messages(output.getvalue())[-1]
+            self.assertEqual(terminal["type"], "error", terminal)
+            self.assertEqual(terminal["code"], "analysis_failed")
+            self.assertFalse((target / "analysis-result.json").exists())
+            self.assertFalse((target / "analysis-result.json.partial").exists())
+
+    def test_publishes_analysis_from_native_cwd_without_resolving_private_ancestors(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if ffmpeg is None or ffprobe is None:
+            self.skipTest("FFmpeg development tools are unavailable")
+        with tempfile.TemporaryDirectory(prefix="open-chords-native-cwd-") as temporary:
+            workspace = Path(temporary).resolve()
+            media = workspace / "input" / "source-media"
+            media.parent.mkdir()
+            self._write_fixture(media)
+            (media.parent / "analysis-recipe.json").write_text(
+                json.dumps(self._analysis_recipe()), "utf-8"
+            )
+            output = io.BytesIO()
+            original_cwd = Path.cwd()
+            original_resolve = Path.resolve
+
+            def restricted_resolve(path: Path, strict: bool = False) -> Path:
+                # AppContainer permits job I/O but not absolute-path resolution
+                # through private profile ancestors. Keep real decode/DSP/I/O.
+                if path == workspace or path.is_relative_to(workspace):
+                    raise PermissionError(13, "private ancestor", str(path))
+                return original_resolve(path, strict=strict)
+
+            try:
+                os.chdir(workspace)
+                with patch.object(Path, "resolve", restricted_resolve):
+                    serve_one_session(
+                        io.BytesIO(self._start_frame()), output, workspace,
+                        FrozenRuntime(
+                            manifest_hash="a" * 64,
+                            platform_profile="darwin-arm64-test",
+                            toolchain=NativeToolchain(Path(ffmpeg), Path(ffprobe)),
+                        ),
+                        workspace_is_current_directory=True,
+                    )
+            finally:
+                os.chdir(original_cwd)
+
+            terminal = self._messages(output.getvalue())[-1]
+            self.assertEqual(terminal["type"], "result", terminal)
+            descriptor = terminal["artifact"]
+            candidate_bytes = (workspace / descriptor["path"]).read_bytes()
+            self.assertEqual(descriptor["byteSize"], len(candidate_bytes))
+            self.assertEqual(descriptor["sha256"], hashlib.sha256(candidate_bytes).hexdigest())
+            candidate = json.loads(candidate_bytes)
+            self.assertEqual(candidate["durationSamples"], 4_800)
+            self.assertEqual(candidate["supportClaimIds"], [])
+
     def test_reports_a_bounded_analysis_failure_for_an_invalid_staged_recipe(self) -> None:
         ffmpeg = shutil.which("ffmpeg")
         ffprobe = shutil.which("ffprobe")

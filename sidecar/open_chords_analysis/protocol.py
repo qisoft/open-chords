@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import struct
 import sys
 import threading
@@ -189,7 +190,10 @@ def serve_one_session(
                     candidate = _analyze_decoded(workspace)
                     if cancellation.is_set():
                         raise CanonicalDecodeCancelled("analysis cancelled before publication")
-                    artifact = _publish_analysis_result(workspace, candidate)
+                    artifact = _publish_analysis_result(
+                        workspace, candidate,
+                        workspace_is_current_directory=workspace_is_current_directory,
+                    )
                 except CanonicalDecodeCancelled:
                     raise
                 except Exception as error:
@@ -563,11 +567,25 @@ def _permission_failure_scope(error: PermissionError, workspace: Path) -> str:
 
 
 def _publish_analysis_result(
-    workspace: Path, candidate: dict[str, object]
+    workspace: Path, candidate: dict[str, object],
+    *,
+    workspace_is_current_directory: bool = False,
 ) -> ArtifactDescriptor:
-    workspace_root = workspace.resolve(strict=True)
+    # The native launcher has already validated the Windows workspace. Reusing
+    # its cwd avoids resolving inaccessible AppContainer profile ancestors.
+    workspace_root = Path.cwd() if workspace_is_current_directory else workspace.resolve(strict=True)
     result_path = workspace_root / ANALYSIS_RESULT_PATH
-    if result_path.parent.resolve(strict=True) != workspace_root / "artifacts":
+    parent_metadata = result_path.parent.lstat()
+    if (
+        not stat.S_ISDIR(parent_metadata.st_mode)
+        or getattr(parent_metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        # Reject symlinks and Windows reparse points (including junctions).
+        raise ProtocolError("analysis result escaped its workspace")
+    if (
+        not workspace_is_current_directory
+        and result_path.parent.resolve(strict=True) != workspace_root / "artifacts"
+    ):
         raise ProtocolError("analysis result escaped its workspace")
     try:
         content = json.dumps(

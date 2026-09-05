@@ -32,3 +32,9 @@ deadlines remain authoritative.
 Analysis failures retain the stable `analysis_failed` protocol code while installed proofs may log
 only a bounded exception fingerprint. Permission failures add a coarse path scope and numeric
 error codes; exception messages, concrete paths, and media data remain private.
+
+On Windows, result publication reuses the native-validated workspace current directory, just as
+canonical decode does. Resolving that absolute root again can require access to private
+AppContainer profile ancestors and fail after DSP succeeds. Publication still rejects a symlink
+or reparse-point artifacts directory, writes a bounded temporary file, flushes it, and atomically
+replaces the final result. Non-native sessions retain absolute-path resolution checks.
