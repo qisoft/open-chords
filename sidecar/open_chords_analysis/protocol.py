@@ -111,6 +111,8 @@ def serve_one_session(
     analysis_import_error: Exception | None = None
     sequence = 1
     if (workspace / ANALYSIS_RECIPE_PATH).exists():
+        preload_probe = Path("preload-proof.json")
+        preload_probe_enabled = preload_probe.is_file()
         preload_finished = threading.Event()
         preload_output_errors: list[Exception] = []
         preload_sequence = [sequence]
@@ -118,6 +120,20 @@ def serve_one_session(
         def write_preload_heartbeats() -> None:
             while not preload_finished.wait(HEARTBEAT_INTERVAL_SECONDS):
                 try:
+                    if preload_probe_enabled:
+                        frame = sys._current_frames().get(threading.main_thread().ident)
+                        modules = []
+                        while frame is not None:
+                            module = str(frame.f_globals.get("__name__", "")).split(".")[0]
+                            if module in {
+                                "numpy", "scipy", "numba", "librosa", "llvmlite",
+                                "joblib", "threadpoolctl", "sklearn", "pooch",
+                                "soundfile", "threading", "ctypes", "importlib",
+                            } and module not in modules:
+                                modules.append(module)
+                            frame = frame.f_back
+                        del frame
+                        preload_probe.write_text(json.dumps(modules), encoding="utf-8")
                     _write_frame(
                         stdout,
                         {

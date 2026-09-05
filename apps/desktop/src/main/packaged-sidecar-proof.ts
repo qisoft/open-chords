@@ -342,6 +342,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     process.stderr.write("Packaged sidecar proof stage: publication_started\n");
     await runPackagedAnalysisPublicationProof({
       clientForWorkspace: (attemptWorkspace) => {
+        writeFileSync(join(attemptWorkspace, "preload-proof.json"), "[]");
         process.stderr.write("Packaged publication proof stage: client_created\n");
         const launcher = createLauncher([], [0], attemptWorkspace);
         const client = createEffectSidecarClient({
@@ -369,6 +370,29 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
                 process.stderr.write(
                   `Packaged publication workspace: path_length=${attemptWorkspace.length} canonical=${existsSync(join(attemptWorkspace, "artifacts", "canonical.wav"))} decode_manifest=${existsSync(join(attemptWorkspace, "artifacts", "decode-manifest.json"))} result=${existsSync(join(attemptWorkspace, "artifacts", "analysis-result.json"))} cache=${existsSync(join(attemptWorkspace, "checkpoints", "numba-cache"))}\n`,
                 );
+                const preloadModules = z
+                  .array(
+                    z.enum([
+                      "numpy",
+                      "scipy",
+                      "numba",
+                      "librosa",
+                      "llvmlite",
+                      "joblib",
+                      "threadpoolctl",
+                      "sklearn",
+                      "pooch",
+                      "soundfile",
+                      "threading",
+                      "ctypes",
+                      "importlib",
+                    ]),
+                  )
+                  .max(13)
+                  .parse(
+                    JSON.parse(readFileSync(join(attemptWorkspace, "preload-proof.json"), "utf8")),
+                  );
+                process.stderr.write(`Packaged publication preload: ${preloadModules.join(".")}\n`);
                 await launched.stop(reason);
                 mark("stop_completed");
               },
