@@ -343,7 +343,40 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     await runPackagedAnalysisPublicationProof({
       clientForWorkspace: (attemptWorkspace) => {
         process.stderr.write("Packaged publication proof stage: client_created\n");
-        const client = createEffectSidecarClient(createLauncher([], [0], attemptWorkspace));
+        const launcher = createLauncher([], [0], attemptWorkspace);
+        const client = createEffectSidecarClient({
+          async launch(request, signal) {
+            const startedAt = performance.now();
+            const mark = (name: string) =>
+              process.stderr.write(
+                `Packaged publication transport: ${name} elapsed_ms=${Math.round(performance.now() - startedAt)}\n`,
+              );
+            mark("launch_started");
+            const launched = await launcher.launch(request, signal);
+            mark("launch_completed");
+            let chunks = 0;
+            return {
+              stdout: (async function* () {
+                for await (const chunk of launched.stdout) {
+                  chunks += 1;
+                  if (chunks === 1) mark("first_output");
+                  yield chunk;
+                }
+                mark(`output_completed_chunks_${chunks}`);
+              })(),
+              async stop(reason) {
+                mark(`stop_${reason}_chunks_${chunks}`);
+                await launched.stop(reason);
+                mark("stop_completed");
+              },
+              async write(frame) {
+                mark("write_started");
+                await launched.write(frame);
+                mark("write_completed");
+              },
+            };
+          },
+        });
         return {
           async dispose() {
             process.stderr.write("Packaged publication proof stage: dispose_started\n");
