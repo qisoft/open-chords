@@ -58,11 +58,11 @@ it.skipIf(process.platform === "win32")(
     );
     try {
       controller.abort();
-      await expect(acquired.process.stop()).resolves.toBeUndefined();
+      await expect(acquired.process.stop("cancelled")).resolves.toBeUndefined();
       // Flush Node's deferred uncaught-error delivery as part of this test.
       await new Promise<void>((resolve) => setImmediate(resolve));
     } finally {
-      await acquired.process.stop();
+      await acquired.process.stop("cancelled");
     }
   },
 );
