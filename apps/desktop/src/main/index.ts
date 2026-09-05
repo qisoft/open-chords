@@ -23,6 +23,7 @@ import { createDesktopWindow, hardenWebContents } from "./shell.ts";
 import { presentDesktopWindow } from "./window-lifecycle.ts";
 
 if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
+  process.stderr.write("Packaged sidecar proof stage: application_started\n");
   void app
     .whenReady()
     .then(runPackagedSidecarProof)

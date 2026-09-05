@@ -181,6 +181,7 @@ export function packagedProofFailureCode(cause: unknown): string {
 }
 
 export async function runPackagedSidecarProof(): Promise<void> {
+  process.stderr.write("Packaged sidecar proof stage: application_ready\n");
   try {
     await runPackagedSidecarProofInternal();
   } catch (cause) {
@@ -208,6 +209,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       : join(process.resourcesPath, "open-chords-analysis"),
     EXPECTED_SIDECAR_MANIFEST_SHA256,
   );
+  process.stderr.write("Packaged sidecar proof stage: runtime_verified\n");
   const containment = verifyContainmentRuntime(
     join(
       process.resourcesPath,
@@ -219,11 +221,13 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       ? join(process.resourcesPath, "..", "MacOS", "open-chords-containment-bridge")
       : undefined,
   );
+  process.stderr.write("Packaged sidecar proof stage: containment_verified\n");
   const prepared = preparePackagedWorkspace(
     platform,
     containment.helperPath,
     verifiedRuntime.runtimeRoot,
   );
+  process.stderr.write("Packaged sidecar proof stage: workspace_prepared\n");
   let proofFailure: { cause: unknown } | undefined;
   let stage: PackagedProofFailureCode = "setup_failed";
   try {
@@ -261,10 +265,13 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
         platform,
       );
     stage = "adversarial_probe_failed";
+    process.stderr.write("Packaged sidecar proof stage: adversarial_started\n");
     await runAdversarialContainmentProbe(createLauncher, workspace, platform);
     stage = "cancel_probe_failed";
+    process.stderr.write("Packaged sidecar proof stage: cancel_started\n");
     await runLifecycleContainmentProbe(createLauncher, workspace, "cancel");
     stage = "crash_probe_failed";
+    process.stderr.write("Packaged sidecar proof stage: crash_started\n");
     await runLifecycleContainmentProbe(createLauncher, workspace, "crash");
     stage = "session_probe_failed";
     const candidates: Buffer[] = [];
@@ -376,7 +383,9 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
   }
   const cleanupFailures: unknown[] = [];
   try {
+    process.stderr.write("Packaged sidecar proof stage: workspace_cleanup_started\n");
     prepared.cleanup();
+    process.stderr.write("Packaged sidecar proof stage: workspace_cleanup_completed\n");
   } catch {
     cleanupFailures.push(new PackagedProofFailure("cleanup_failed"));
   }
