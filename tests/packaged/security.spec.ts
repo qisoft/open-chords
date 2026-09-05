@@ -116,8 +116,9 @@ test("installed artifact runs contained analysis, publishes Revisions, and reaps
   proof.stdout.on("data", capture);
   proof.stderr.on("data", capture);
 
-  const exit = await waitForApplicationExit(proof, 290_000);
-  process.stdout.write(output);
+  const exit = await waitForApplicationExit(proof, 290_000).finally(() => {
+    process.stdout.write(output);
+  });
   expect(exit, output).toEqual({ code: 0, signal: null });
   expect(output).toContain("Packaged sidecar proof stage: publication_completed");
 });
