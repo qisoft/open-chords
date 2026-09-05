@@ -341,80 +341,8 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
     stage = "publication_probe_failed";
     process.stderr.write("Packaged sidecar proof stage: publication_started\n");
     await runPackagedAnalysisPublicationProof({
-      clientForWorkspace: (attemptWorkspace) => {
-        writeFileSync(join(attemptWorkspace, "preload-proof.json"), "[]");
-        process.stderr.write("Packaged publication proof stage: client_created\n");
-        const launcher = createLauncher([], [0], attemptWorkspace);
-        const client = createEffectSidecarClient({
-          async launch(request, signal) {
-            const startedAt = performance.now();
-            const mark = (name: string) =>
-              process.stderr.write(
-                `Packaged publication transport: ${name} elapsed_ms=${Math.round(performance.now() - startedAt)}\n`,
-              );
-            mark("launch_started");
-            const launched = await launcher.launch(request, signal);
-            mark("launch_completed");
-            let chunks = 0;
-            return {
-              stdout: (async function* () {
-                for await (const chunk of launched.stdout) {
-                  chunks += 1;
-                  if (chunks === 1) mark("first_output");
-                  yield chunk;
-                }
-                mark(`output_completed_chunks_${chunks}`);
-              })(),
-              async stop(reason) {
-                mark(`stop_${reason}_chunks_${chunks}`);
-                process.stderr.write(
-                  `Packaged publication workspace: path_length=${attemptWorkspace.length} canonical=${existsSync(join(attemptWorkspace, "artifacts", "canonical.wav"))} decode_manifest=${existsSync(join(attemptWorkspace, "artifacts", "decode-manifest.json"))} result=${existsSync(join(attemptWorkspace, "artifacts", "analysis-result.json"))} cache=${existsSync(join(attemptWorkspace, "checkpoints", "numba-cache"))}\n`,
-                );
-                await launched.stop(reason);
-                const preloadModules = z
-                  .array(
-                    z
-                      .string()
-                      .max(200)
-                      .regex(/^[A-Za-z_][A-Za-z0-9_.]*:[0-9]{1,6}$/u),
-                  )
-                  .max(128)
-                  .parse(
-                    JSON.parse(readFileSync(join(attemptWorkspace, "preload-proof.json"), "utf8")),
-                  );
-                process.stderr.write(
-                  `Packaged publication execution scopes: ${preloadModules.join(",")}\n`,
-                );
-                mark("stop_completed");
-              },
-              async write(frame) {
-                mark("write_started");
-                await launched.write(frame);
-                mark("write_completed");
-              },
-            };
-          },
-        });
-        return {
-          async dispose() {
-            process.stderr.write("Packaged publication proof stage: dispose_started\n");
-            await client.dispose();
-            process.stderr.write("Packaged publication proof stage: dispose_completed\n");
-          },
-          async runSession(request) {
-            process.stderr.write("Packaged publication proof stage: session_started\n");
-            try {
-              const result = await client.runSession(request);
-              process.stderr.write("Packaged publication proof stage: session_completed\n");
-              return result;
-            } catch (cause) {
-              const failure = cause instanceof SidecarSessionError ? cause.code : "unknown";
-              process.stderr.write(`Packaged publication proof session failure: ${failure}\n`);
-              throw cause;
-            }
-          },
-        };
-      },
+      clientForWorkspace: (attemptWorkspace) =>
+        createEffectSidecarClient(createLauncher([], [0], attemptWorkspace)),
       fixture: canonicalWavFixture(),
       recipe: AnalysisRecipeSchema.parse(packagedAnalysisRecipe()),
       runtimeManifestHash: containedRuntime.manifestHash,
