@@ -366,6 +366,9 @@ function DraftSession({
   onClose: () => void;
 }) {
   const state = useStore(draft.store);
+  const minimumDuration = Math.min(
+    ...state.events.map((entry) => Math.max(1, entry.endSample - entry.startSample)),
+  );
   const [baseRevision] = useState(snapshot.projectRevisionId);
   const [baseProjectId] = useState(snapshot.project.id);
   const [picker, setPicker] = useState<string | null>(null);
@@ -437,6 +440,7 @@ function DraftSession({
               key={event.id}
               event={event}
               events={state.events}
+              minimumDuration={minimumDuration}
               draft={draft}
               disabled={busy || state.stale}
               onChoose={() => setPicker(event.id)}
@@ -493,6 +497,7 @@ function DraftSession({
 function EditorEvent({
   event,
   events,
+  minimumDuration,
   draft,
   disabled,
   onChoose,
@@ -500,6 +505,7 @@ function EditorEvent({
 }: {
   event: DraftEvent;
   events: DraftEvent[];
+  minimumDuration: number;
   draft: ReturnType<typeof createEditorDraft>;
   disabled: boolean;
   onChoose: () => void;
@@ -560,6 +566,9 @@ function EditorEvent({
     <li
       ref={element}
       className="editor-event"
+      style={{
+        flexBasis: `${(Math.max(1, event.endSample - event.startSample) / minimumDuration) * 224}px`,
+      }}
       data-event-id={event.id}
       data-drop-side={indicator ?? undefined}
     >
@@ -571,7 +580,7 @@ function EditorEvent({
       >
         ⋮⋮
       </button>
-      <strong>{chordLabel(event.value)}</strong>
+      <strong title={chordLabel(event.value)}>{chordLabel(event.value)}</strong>
       <button type="button" className="secondary-button" ref={buttonRef} onClick={onChoose}>
         Choose chord
       </button>

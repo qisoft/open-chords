@@ -248,6 +248,11 @@ test("editor reorders first and last events with keyboard and pointer without ov
           elements.map((element) => element.getAttribute("data-event-id")),
         );
     const first = editor.locator('[data-event-id="chord_am7_e"]');
+    const initialFirstWidth = (await first.boundingBox())!.width;
+    const initialSecondWidth = (await editor
+      .locator('[data-event-id="chord_c_sharp"]')
+      .boundingBox())!.width;
+    expect(initialSecondWidth / initialFirstWidth).toBeCloseTo(1.5, 2);
     await first.getByLabel("Move target").selectOption("chord_g7");
     await first.getByRole("button", { name: "Move after", exact: true }).focus();
     await page.keyboard.press("Enter");
@@ -256,7 +261,7 @@ test("editor reorders first and last events with keyboard and pointer without ov
     await first.getByLabel("Move target").selectOption("chord_c_sharp");
     await first.getByRole("button", { name: "Move before", exact: true }).click();
     await expect.poll(ids).toEqual(["chord_am7_e", "chord_c_sharp", "chord_n", "chord_g7"]);
-    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.setViewportSize({ width: 1800, height: 900 });
     const source = first.getByRole("button", { name: "Drag chord", exact: true });
     const last = editor.locator('[data-event-id="chord_g7"]');
     const sourceBox = (await source.boundingBox())!;
@@ -268,8 +273,8 @@ test("editor reorders first and last events with keyboard and pointer without ov
       sourceBox.y + sourceBox.height / 2,
       { steps: 3 },
     );
-    await page.mouse.move(targetBox.x + 200, targetBox.y + 30, { steps: 6 });
-    await page.mouse.move(targetBox.x + 201, targetBox.y + 30);
+    await page.mouse.move(targetBox.x + targetBox.width - 20, targetBox.y + 30, { steps: 6 });
+    await page.mouse.move(targetBox.x + targetBox.width - 19, targetBox.y + 30);
     await expect(last).toHaveAttribute("data-drop-side", "after");
     await expect(last.locator(".drop-indicator")).toHaveText("Insert after");
     await page.mouse.up();

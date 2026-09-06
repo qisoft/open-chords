@@ -754,3 +754,9 @@ button:disabled {
   display: flex;
   align-items: center;
 }
+.editor-event > strong {
+  height: 1.5em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

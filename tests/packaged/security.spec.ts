@@ -158,7 +158,9 @@ test("installed editor saves and undoes through named IPC with a durable reopene
         { timeout: 15_000 },
       )
       .toBe(true);
+    process.stdout.write("Packaged editor stage: connecting\n");
     browser = await chromium.connectOverCDP(endpoint);
+    process.stdout.write("Packaged editor stage: connected\n");
     const context = browser.contexts()[0]!;
     const page = context.pages()[0] ?? (await context.waitForEvent("page"));
     const pickup = page.getByRole("button", { name: /Pickup, 4\/4/ });
@@ -173,9 +175,13 @@ test("installed editor saves and undoes through named IPC with a durable reopene
     await expect(pickup).toHaveAttribute("aria-label", /Chords: N/);
     await page.getByRole("button", { name: "Undo edit", exact: true }).click();
     await expect(pickup).toHaveAttribute("aria-label", before!);
+    process.stdout.write("Packaged editor stage: undo_verified\n");
   } finally {
-    await browser?.close();
+    process.stdout.write("Packaged editor stage: stopping\n");
+    // Reopen after abrupt termination to verify that Save/Undo already reached durable storage.
+    if (process.platform !== "win32") application.kill("SIGKILL");
     await stopApplication(application);
+    process.stdout.write("Packaged editor stage: stopped\n");
   }
   const reopened = await openProjectLibrary({ stateRoot });
   const saved = (await reopened.getSnapshot("project_golden"))!.project;
