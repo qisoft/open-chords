@@ -17,6 +17,7 @@ import {
 type CommandType = DesktopCommand["type"];
 
 const commandChannels = [
+  [DESKTOP_IPC_CHANNELS.projectChangePractice, "project.change_practice"],
   [DESKTOP_IPC_CHANNELS.projectChangeEditHistory, "project.change_edit_history"],
   [DESKTOP_IPC_CHANNELS.mediaCreateProject, "media.create_project"],
   [DESKTOP_IPC_CHANNELS.mediaOpenPlayback, "media.open_playback"],

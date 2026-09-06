@@ -394,6 +394,22 @@ export const ActiveViewSchema = z
   })
   .meta({ id: "ActiveView" });
 
+export const PracticeStateSchema = z.strictObject({
+  speed: z.number().min(0.5).max(1.5),
+  countInBars: z.number().int().min(0).max(2),
+  metronome: z.boolean(),
+  autoscroll: z.boolean(),
+  instrument: z.enum(["guitar", "ukulele", "piano"]),
+  loop: z
+    .strictObject({
+      analysisRevisionId: StableIdSchema,
+      firstBarId: StableIdSchema,
+      lastBarId: StableIdSchema,
+      status: z.enum(["ready", "needs_review"]),
+    })
+    .nullable(),
+});
+
 export const ProjectContractSchema = z
   .strictObject({
     activeView: ActiveViewSchema.nullable(),
@@ -405,6 +421,7 @@ export const ProjectContractSchema = z
     id: StableIdSchema,
     lyricsAlignments: z.array(LyricsAlignmentSchema),
     lyricsDocuments: z.array(LyricsDocumentSchema),
+    practice: PracticeStateSchema.optional(),
     sampleRate: z.number().int().positive().max(384_000),
     schemaVersion: z.string().regex(/^\d+\.\d+$/),
     supportClaims: z.array(SupportClaimSchema),

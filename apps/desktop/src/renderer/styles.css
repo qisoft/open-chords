@@ -556,7 +556,7 @@ button:disabled {
 .workspace {
   height: 100dvh;
   min-height: 760px;
-  grid-template-rows: auto auto auto minmax(280px, 1fr);
+  grid-template-rows: auto auto auto auto minmax(280px, 1fr);
 }
 .content-section {
   display: flex;
@@ -766,4 +766,82 @@ button:disabled {
 /* Expanded editing controls need unobstructed space in the document flow. */
 .workspace:has(.chord-editor) .transport {
   position: static;
+}
+
+.practice-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  border: 0;
+  padding: 8px 0;
+  min-width: 0;
+}
+.practice-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.practice-controls select {
+  color: inherit;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 4px;
+  padding: 5px;
+}
+.practice-panel {
+  border-top: 1px solid var(--color-border-subtle);
+  margin-top: 8px;
+}
+.practice-panel p,
+.chord-diagram span {
+  font-size: 12px;
+}
+.chord-diagram {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  min-height: 110px;
+}
+.chord-diagram svg {
+  width: 220px;
+  max-width: 100%;
+  height: 110px;
+}
+
+.practice-navigation {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.practice-navigation span {
+  display: inline-flex;
+}
+.practice-navigation button {
+  padding: 5px;
+  font-size: 11px;
+}
+
+.workspace:has(.practice-panel) .transport {
+  position: static;
+}
+.practice-panel {
+  padding: 0 20px 12px;
+  margin-top: 0;
+}
+.transport .source-status {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+}
+@media (max-width: 720px) {
+  .practice-panel {
+    padding-inline: 12px;
+  }
 }

@@ -22,6 +22,9 @@ import {
   ProjectEnvelopeSchema,
 } from "@open-chords/contracts";
 import {
+  applyPracticeAction,
+  reconcilePracticeState,
+  type PracticeAction,
   canonicalSerialize,
   EditHistoryActionSchema,
   reviewEditMapping,
@@ -324,6 +327,16 @@ export class ProjectLibrary {
           return envelope;
         },
       },
+      {
+        fromVersion: "1.1",
+        toVersion: "1.2",
+        migrate: (input) => {
+          const envelope = structuredClone(ProjectEnvelopeSchema.parse(input));
+          envelope.schemaVersion = "1.2";
+          envelope.payload.schemaVersion = "1.2";
+          return envelope;
+        },
+      },
     ];
     validateMigrationGraph(this.#migrations);
     this.#now = options.now ?? (() => new Date());
@@ -558,6 +571,44 @@ export class ProjectLibrary {
     return input.modelStore.resolveBlockedRecipeArtifacts(input.recipe);
   }
 
+  async changePractice(input: {
+    expectedProjectRevisionId: string;
+    projectId: string;
+    action: PracticeAction;
+  }): Promise<
+    { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
+  > {
+    return this.#serializeMutation(async () => {
+      const entry = this.#entries.get(input.projectId);
+      if (entry === undefined || entry.location === "trashed") return { notFound: true };
+      if (entry.status === "damaged" || entry.revision === undefined)
+        throw new ProjectLibraryDamagedError(input.projectId);
+      if (entry.compatibility === "read_only") return { readOnly: true };
+      if (entry.revision.revision.projectRevisionId !== input.expectedProjectRevisionId)
+        return { stale: true };
+      const project = applyPracticeAction(entry.revision.payload.envelope.payload, input.action);
+      const payload = buildStoredPayload({
+        envelope: {
+          ...entry.revision.payload.envelope,
+          payload: parseProjectContract(
+            reconcilePracticeState(entry.revision.payload.envelope.payload, project),
+          ),
+        },
+        records: entry.revision.payload.records,
+      });
+      const next = await this.#commitPayload(
+        input.projectId,
+        payload,
+        entry.revision.revision.projectRevisionId,
+        entry.revision.pointer.sequence + 1,
+        // Preserve the Library revision-record vocabulary; practice is a Project mutation,
+        // and does not append an Edit Layer transaction.
+        "edit_transaction",
+      );
+      return { projectRevisionId: next.revision.projectRevisionId };
+    });
+  }
+
   async commitEditTransaction(input: {
     expectedProjectRevisionId: string;
     projectId: string;
@@ -588,7 +639,12 @@ export class ProjectLibrary {
       activeLayer.transactions.push(transaction);
       activeView.editHistoryPosition = activeLayer.transactions.length;
       const payload = buildStoredPayload({
-        envelope: { ...entry.revision.payload.envelope, payload: parseProjectContract(project) },
+        envelope: {
+          ...entry.revision.payload.envelope,
+          payload: parseProjectContract(
+            reconcilePracticeState(entry.revision.payload.envelope.payload, project),
+          ),
+        },
         records: entry.revision.payload.records,
       });
       const next = await this.#commitPayload(
@@ -661,7 +717,9 @@ export class ProjectLibrary {
         delete active.lyricsAlignmentId;
         delete active.lyricsDocumentId;
         try {
-          parseProjectContract(project);
+          parseProjectContract(
+            reconcilePracticeState(entry.revision.payload.envelope.payload, project),
+          );
         } catch {
           return {
             conflicts: [
@@ -684,7 +742,12 @@ export class ProjectLibrary {
         active.editHistoryPosition = 0;
       }
       const payload = buildStoredPayload({
-        envelope: { ...entry.revision.payload.envelope, payload: parseProjectContract(project) },
+        envelope: {
+          ...entry.revision.payload.envelope,
+          payload: parseProjectContract(
+            reconcilePracticeState(entry.revision.payload.envelope.payload, project),
+          ),
+        },
         records: entry.revision.payload.records,
       });
       const next = await this.#commitPayload(
@@ -790,7 +853,9 @@ export class ProjectLibrary {
       const payload = buildStoredPayload({
         envelope: {
           ...entry.revision.payload.envelope,
-          payload: parseProjectContract(project),
+          payload: parseProjectContract(
+            reconcilePracticeState(entry.revision.payload.envelope.payload, project),
+          ),
         },
         records,
       });
@@ -1612,6 +1677,16 @@ export class ProjectLibrary {
     sequence: number,
     reason: ProjectRevisionRecord["reason"],
   ): Promise<RevisionSnapshot> {
+    const previous = this.#entries.get(projectId)?.revision?.payload.envelope.payload;
+    if (previous !== undefined) {
+      rawPayload = buildStoredPayload({
+        ...rawPayload,
+        envelope: {
+          ...rawPayload.envelope,
+          payload: reconcilePracticeState(previous, rawPayload.envelope.payload),
+        },
+      });
+    }
     try {
       return await this.#commitPayloadAttempt(
         projectId,

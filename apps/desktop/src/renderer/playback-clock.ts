@@ -21,6 +21,7 @@ type PlaybackClockOptions = {
 
 export function createPlaybackClock(options: PlaybackClockOptions) {
   const listeners = new Set<() => void>();
+  const seekListeners = new Set<(positionSamples: number) => void>();
   const startSourceSample = options.startSourceSample ?? 0;
   let frameHandle: number | null = null;
   let snapshot = readSnapshot();
@@ -86,6 +87,7 @@ export function createPlaybackClock(options: PlaybackClockOptions) {
       options.source.removeEventListener("seeked", onPosition);
       options.source.removeEventListener("timeupdate", onPosition);
       listeners.clear();
+      seekListeners.clear();
     },
     getSnapshot: () => snapshot,
     seek(positionSamples: number) {
@@ -95,6 +97,13 @@ export function createPlaybackClock(options: PlaybackClockOptions) {
       );
       options.source.currentTime = (startSourceSample + bounded) / options.sampleRate;
       publish();
+      for (const listener of seekListeners) listener(snapshot.positionSamples);
+    },
+    subscribeSeek(listener: (positionSamples: number) => void) {
+      seekListeners.add(listener);
+      return () => {
+        seekListeners.delete(listener);
+      };
     },
     subscribe(listener: () => void) {
       listeners.add(listener);

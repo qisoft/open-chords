@@ -125,7 +125,7 @@ test("installed artifact runs contained analysis, publishes Revisions, and reaps
   expect(output).toContain("Packaged sidecar proof stage: publication_completed");
 });
 
-test("installed editor saves and undoes through named IPC with a durable reopened result", async () => {
+test("installed editor and practice save through named IPC with a durable reopened result", async () => {
   const stateRoot = join(packageRoot, "editor-user-data");
   const envelope = ProjectEnvelopeSchema.parse(
     JSON.parse(
@@ -167,6 +167,7 @@ test("installed editor saves and undoes through named IPC with a durable reopene
     expect(await evaluatePackagedEditor(target.webSocketDebuggerUrl)).toEqual({
       saved: true,
       undone: true,
+      practiceSaved: true,
     });
     process.stdout.write("Packaged editor stage: save_and_undo_verified\n");
   } finally {
@@ -181,6 +182,11 @@ test("installed editor saves and undoes through named IPC with a durable reopene
   expect(saved.activeView!.editHistoryPosition).toBe(0);
   expect(saved.editLayers[0]!.transactions).toHaveLength(2);
   expect(saved.analysisRevisions).toEqual(envelope.payload.analysisRevisions);
+  expect(saved.practice).toMatchObject({
+    speed: 0.75,
+    instrument: "piano",
+    loop: { firstBarId: "bar_pickup", lastBarId: "bar_pickup", status: "ready" },
+  });
 });
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {
@@ -272,6 +278,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       popupDenied: true,
       projectKeys: [
         "changeEditHistory",
+        "changePractice",
         "commitEditTransaction",
         "getSnapshot",
         "list",
@@ -538,7 +545,19 @@ async function evaluatePackagedEditor(webSocketUrl: string): Promise<unknown> {
     button("Undo edit").click();
     await waitFor(() => pickup.getAttribute("aria-label") === originalLabel, "undo");
     const undone = await window.openChords.project.getSnapshot("project_golden");
-    return { saved: saved.type === "project.snapshot" && saved.project.activeView.editHistoryPosition === 2, undone: undone.type === "project.snapshot" && undone.project.activeView.editHistoryPosition === 0 };
+    (await waitFor(() => button("Set loop from selection"), "practice_loop_ready")).click();
+    await waitFor(() => document.querySelector('.loop-status').textContent.includes("Pickup"), "practice_loop_saved");
+    const choose = async (label, value) => {
+      const select = await waitFor(() => { const element = document.querySelector('select[aria-label="' + label + '"]'); return element && !element.disabled && !element.closest('fieldset:disabled') ? element : null; }, "practice_setting_ready");
+      select.value = value;
+      select.dispatchEvent(new Event("change", {bubbles: true}));
+      await new Promise(resolve => setTimeout(resolve, 0));
+      await waitFor(() => select.value === value && document.querySelector('[aria-label="Practice settings status"]').textContent === "Practice saved" && !select.disabled && !select.closest('fieldset:disabled'), "practice_setting_saved");
+    };
+    await choose("Playback speed", "0.75");
+    await choose("Instrument", "piano");
+    const practiced = await window.openChords.project.getSnapshot("project_golden");
+    return { saved: saved.type === "project.snapshot" && saved.project.activeView.editHistoryPosition === 2, undone: undone.type === "project.snapshot" && undone.project.activeView.editHistoryPosition === 0, practiceSaved: practiced.type === "project.snapshot" && practiced.project.practice.speed === 0.75 && practiced.project.practice.instrument === "piano" && practiced.project.practice.loop.firstBarId === "bar_pickup" };
   })()`;
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);

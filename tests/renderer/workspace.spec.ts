@@ -577,6 +577,7 @@ function revisedSnapshot(
   eventSequence: number,
 ): ProjectSnapshotResponse {
   const project = structuredClone(snapshot.project);
+  if (project.practice?.loop) project.practice.loop.status = "needs_review";
   const activeAnalysis = project.analysisRevisions.find(
     ({ id }) => id === project.activeView?.analysisRevisionId,
   );
@@ -590,7 +591,7 @@ function revisedSnapshot(
   );
   const response = DesktopResponseSchema.parse({
     ...snapshot,
-    eventSequence,
+    eventSequence: Math.max(eventSequence, snapshot.eventSequence + 1),
     project,
     projectRevisionId: `projectrevision_${eventSequence.toString(16).padStart(32, "0")}`,
   });
@@ -856,6 +857,222 @@ test("lyrics follow stays inside its viewport and manual scrolling retains focus
     await position.press("End");
     await expect(position).toHaveValue("48000");
     await expect(position).toHaveAttribute("aria-valuetext", "1.00 of 1.00 seconds");
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
+
+test("practice settings and explicit loops survive reopening without following selection", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-practice-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  await library.createProject({ envelope, records: goldenRecords() });
+  let application = await launch(stateRoot);
+  try {
+    let page = await application.firstWindow();
+    await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
+    await page.getByRole("button", { name: "Set loop from selection" }).click();
+    await expect(page.locator(".loop-status")).toContainText("Pickup");
+    await page.getByRole("combobox", { name: "Loop end Bar" }).selectOption("bar_three_four");
+    await page.getByRole("button", { name: "Set loop from selection" }).click();
+    await expect(page.locator(".loop-status")).toContainText("through Complete");
+    await page.locator('[data-region-id="bar_three_four"]').focus();
+    await page.locator('[data-region-id="bar_three_four"]').press("Enter");
+    await expect(page.locator(".loop-status")).toContainText("Pickup");
+    await page.getByRole("combobox", { name: "Playback speed" }).selectOption("0.75");
+    await expect(page.getByRole("combobox", { name: "Playback speed" })).toHaveValue("0.75");
+    await expect(page.getByRole("status", { name: "Practice settings status" })).toHaveText(
+      "Practice saved",
+    );
+    await application.close();
+    application = await launch(stateRoot);
+    page = await application.firstWindow();
+    await expect(page.locator(".loop-status")).toContainText("Pickup");
+    await expect(page.getByRole("combobox", { name: "Playback speed" })).toHaveValue("0.75");
+    await page.getByRole("combobox", { name: "Transpose" }).selectOption("-2");
+    await expect(page.getByRole("combobox", { name: "Transpose" })).toHaveValue("-2");
+    await page.getByRole("checkbox", { name: "Beginner View" }).click();
+    await expect(page.getByRole("checkbox", { name: "Beginner View" })).toBeChecked();
+    await expect(page.locator('[data-region-id="bar_pickup"]')).toContainText("Gm/D");
+    await page.getByRole("combobox", { name: "Instrument" }).selectOption("piano");
+    await expect(page.getByRole("img", { name: /Piano diagram/ })).toBeVisible();
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
+
+test("practice Play starts at the loop boundary and count-in is cancellable by keyboard", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-practice-play-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const mediaPath = join(stateRoot, "practice.wav");
+  await writeFile(
+    mediaPath,
+    monoPcmWav(
+      Array.from({ length: 576000 }, (_, i) =>
+        Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / 48000)),
+      ),
+    ),
+  );
+  const media = new LocalMediaService({ library, pickFile: async () => mediaPath });
+  media.activateGeneration("generation_practice_seed");
+  const picked = await media.pickLocalFile("generation_practice_seed");
+  if (picked.kind !== "selected") throw new Error("Fixture media is unavailable");
+  const created = await media.createProject({
+    capabilityId: picked.capabilityId,
+    startSourceSample: 0,
+    endSourceSample: 576000,
+    generationId: "generation_practice_seed",
+  });
+  const sourceProject = await library.readProject(created.projectId);
+  const raw = JSON.parse(
+    readFileSync(
+      join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+      "utf8",
+    ),
+  );
+  const scale = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(scale);
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        ["atSample", "startSample", "endSample", "durationSamples"].includes(key) &&
+        typeof child === "number"
+          ? child * 12
+          : scale(child),
+      ]),
+    );
+  };
+  const envelope = ProjectEnvelopeSchema.parse(scale(raw));
+  const records = sourceProject.records;
+  records.legacyManifestlessAnalysisRevisionIds = envelope.payload.analysisRevisions.map(
+    ({ id }) => id,
+  );
+  await library.createProject({ envelope, records });
+  await media.dispose();
+  // The fixture Project sorts first in the workspace's Project list.
+  await library.trashProject(created.projectId);
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await expect(page.getByText("Verified local playback", { exact: true })).toBeVisible();
+    await page.locator('[data-region-id="bar_three_four"]').focus();
+    await page.locator('[data-region-id="bar_three_four"]').press("Enter");
+    await page.getByRole("button", { name: "Set loop from selection" }).click();
+    await expect(page.locator(".loop-status")).toContainText("Complete");
+    await page.getByRole("combobox", { name: "Count-in" }).selectOption("1");
+    await expect(page.getByRole("combobox", { name: "Count-in" })).toHaveValue("1");
+    await page.getByRole("checkbox", { name: "Metronome", exact: true }).click();
+    await expect(page.getByRole("checkbox", { name: "Metronome", exact: true })).toBeChecked();
+    await page.evaluate(() => {
+      const stops: number[] = [];
+      Object.defineProperty(window, "practiceAudioStops", { value: stops, configurable: true });
+      // oxlint-disable-next-line typescript/unbound-method -- The native prototype method is deliberately rebound with call(this) below.
+      const create = AudioContext.prototype.createOscillator;
+      AudioContext.prototype.createOscillator = function () {
+        const node = create.call(this);
+        const index = stops.length;
+        stops.push(0);
+        const stop = node.stop.bind(node);
+        node.stop = (when?: number) => {
+          stops[index] = (stops[index] ?? 0) + 1;
+          stop(when);
+        };
+        return node;
+      };
+    });
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Cancel count-in" })).toBeVisible();
+    const scheduledStops = await page.evaluate(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      return Object.getOwnPropertyDescriptor(window, "practiceAudioStops")?.value;
+    });
+    expect(scheduledStops).toEqual([1, 1, 1]);
+    await page.locator("main.workspace").focus();
+    await page.locator("main.workspace").press("Space");
+    await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Cancel count-in" })).toBeVisible();
+    await page.getByRole("combobox", { name: "Playback speed" }).selectOption("0.75");
+    await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+    await page.getByRole("combobox", { name: "Playback speed" }).selectOption("1");
+    await expect(page.getByRole("combobox", { name: "Playback speed" })).toHaveValue("1");
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Cancel count-in" })).toBeVisible();
+    expect(await page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.paused)).toBe(
+      true,
+    );
+    await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible({
+      timeout: 10000,
+    });
+    await page.getByRole("button", { name: "Pause", exact: true }).click();
+    await page.getByRole("combobox", { name: "Count-in" }).selectOption("0");
+    await expect(page.getByRole("combobox", { name: "Count-in" })).toHaveValue("0");
+    const position = page.getByRole("slider", { name: "Project position", exact: true });
+    await position.fill("240000");
+    await page.locator("main.workspace").focus();
+    await page.locator("main.workspace").press("Space");
+    await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Pause", exact: true }).click();
+    expect(Number(await position.inputValue())).toBeGreaterThanOrEqual(96000);
+    expect(Number(await position.inputValue())).toBeLessThan(144000);
+    await page.getByRole("button", { name: "Next chord", exact: true }).click();
+    await expect(position).toHaveValue("240000");
+    await page.getByRole("checkbox", { name: "Timeline autoscroll" }).click();
+    await expect(page.getByRole("checkbox", { name: "Timeline autoscroll" })).not.toBeChecked();
+    await position.fill("96000");
+    const trackStyle = await page.locator(".timeline-track").getAttribute("style");
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await expect.poll(async () => Number(await position.inputValue())).toBeGreaterThan(100000);
+    expect(await page.locator(".timeline-track").getAttribute("style")).toBe(trackStyle);
+    await page.getByRole("button", { name: "Next chord", exact: true }).click();
+    await expect(page.locator(".timeline-track")).not.toHaveAttribute("style", trackStyle!);
+    const navigatedStyle = await page.locator(".timeline-track").getAttribute("style");
+    await position.fill("192000");
+    await expect(page.locator(".timeline-track")).not.toHaveAttribute("style", navigatedStyle!);
+    await page.getByRole("button", { name: "Pause", exact: true }).click();
+    await page.getByRole("combobox", { name: "Playback speed" }).selectOption("0.75");
+    await expect(page.getByRole("combobox", { name: "Playback speed" })).toHaveValue("0.75");
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    const renderedAudio = await page.evaluate(async () => {
+      const source = document.querySelector("audio");
+      if (source === null) throw new Error("Workspace media element is missing");
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 8192;
+      context.createMediaElementSource(source).connect(analyser).connect(context.destination);
+      await context.resume();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const spectrum = new Float32Array(analyser.frequencyBinCount);
+      analyser.getFloatFrequencyData(spectrum);
+      let peak = 1;
+      for (let bin = 2; bin < spectrum.length; bin += 1)
+        if (spectrum[bin]! > spectrum[peak]!) peak = bin;
+      const result = {
+        rate: source.playbackRate,
+        preservesPitch: source.preservesPitch,
+        frequency: (peak * context.sampleRate) / analyser.fftSize,
+        level: spectrum[peak],
+      };
+      await context.close();
+      return result;
+    });
+    expect(renderedAudio.rate).toBe(0.75);
+    expect(renderedAudio.preservesPitch).toBe(true);
+    expect(renderedAudio.frequency).toBeGreaterThan(432);
+    expect(renderedAudio.frequency).toBeLessThan(448);
+    expect(renderedAudio.level).toBeGreaterThan(-60);
   } finally {
     await application.close();
     await rm(stateRoot, { force: true, recursive: true });

@@ -1,4 +1,8 @@
-import { materializeEffectiveTimeline, type ProjectContract } from "@open-chords/domain";
+import {
+  presentChord,
+  materializeEffectiveTimeline,
+  type ProjectContract,
+} from "@open-chords/domain";
 
 export type WorkspaceTimelineRegion = {
   chordLabels: string[];
@@ -92,7 +96,9 @@ export function buildWorkspaceTimeline(project: ProjectContract): WorkspaceTimel
           (event) => event.startSample < region.endSample && event.endSample > region.startSample,
         )
         .map(({ value, assertion }) =>
-          assertion.state === "abstained" ? "Unknown chord" : chordLabel(value),
+          assertion.state === "abstained"
+            ? "Unknown chord"
+            : chordLabel(presentChord(value, project.activeView!.presentation)),
         ),
     }));
   return {
@@ -103,7 +109,10 @@ export function buildWorkspaceTimeline(project: ProjectContract): WorkspaceTimel
       id: event.id,
       startSample: event.startSample,
       endSample: event.endSample,
-      label: event.assertion.state === "abstained" ? "Unknown chord" : chordLabel(event.value),
+      label:
+        event.assertion.state === "abstained"
+          ? "Unknown chord"
+          : chordLabel(presentChord(event.value, project.activeView!.presentation)),
       state: event.assertion.state,
     })),
     sections: timeline.sectionRegions,
