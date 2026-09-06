@@ -323,6 +323,7 @@ test("editor reorders first and last events with keyboard and pointer without ov
     await expect(last.locator(".drop-indicator")).toHaveText("Insert after");
     await page.mouse.up();
     await expect.poll(ids).toEqual(["chord_c_sharp", "chord_n", "chord_g7", "chord_am7_e"]);
+    await page.setViewportSize({ width: 1400, height: 1100 });
     await first.getByRole("button", { name: "Choose chord" }).click();
     await editor.getByLabel("Root").selectOption("D");
     await page.keyboard.press("Escape");
@@ -360,6 +361,7 @@ test("editor Save, Cancel, draft Reset and durable history stay separate", async
   const application = await launch(stateRoot);
   try {
     const page = await application.firstWindow();
+    await page.setViewportSize({ width: 1400, height: 1100 });
     const opener = page.getByRole("button", { name: "Edit chords", exact: true });
     await expect(opener).toBeVisible();
     await expect(page.getByRole("region", { name: "Chord Editor" })).toHaveCount(0);
@@ -369,6 +371,13 @@ test("editor Save, Cancel, draft Reset and durable history stay separate", async
     const editor = page.getByRole("region", { name: "Chord Editor" });
     const first = editor.locator('[data-event-id="chord_am7_e"]');
     await first.getByRole("button", { name: "Choose chord" }).click();
+    await expect(editor.getByLabel("Root")).toBeFocused();
+    const pickerBounds = (await editor.getByRole("group", { name: "Chord picker" }).boundingBox())!;
+    const transportBounds = (await page.locator(".transport").boundingBox())!;
+    expect(
+      pickerBounds.y + pickerBounds.height <= transportBounds.y ||
+        pickerBounds.y >= transportBounds.y + transportBounds.height,
+    ).toBe(true);
     await editor.getByLabel("Root").selectOption("N");
     await editor.getByRole("button", { name: "Done", exact: true }).click();
     await expect(pickup).toHaveAttribute("aria-label", before!);

@@ -763,3 +763,7 @@ button:disabled {
 .editor-review-action {
   height: 42px;
 }
+/* Expanded editing controls need unobstructed space in the document flow. */
+.workspace:has(.chord-editor) .transport {
+  position: static;
+}
