@@ -129,9 +129,14 @@ export function TimelineSurface({
     };
     render();
     const unsubscribe = clock?.subscribe(render);
+    const unsubscribeSeek = clock?.subscribeSeek((position) => {
+      visualPositionRef.current = position;
+      render();
+    });
     motion.addEventListener("change", render);
     return () => {
       unsubscribe?.();
+      unsubscribeSeek?.();
       motion.removeEventListener("change", render);
       previousRegion?.removeAttribute("data-current");
       previousRegion?.removeAttribute("aria-current");

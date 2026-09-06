@@ -785,13 +785,13 @@ button:disabled {
 }
 .practice-controls select {
   color: inherit;
-  background: var(--surface, #191b21);
-  border: 1px solid #454954;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 4px;
   padding: 5px;
 }
 .practice-panel {
-  border-top: 1px solid #353840;
+  border-top: 1px solid var(--color-border-subtle);
   margin-top: 8px;
 }
 .practice-panel p,

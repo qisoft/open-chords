@@ -1004,6 +1004,12 @@ test("practice Play starts at the loop boundary and count-in is cancellable by k
     await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Play", exact: true }).click();
     await expect(page.getByRole("button", { name: "Cancel count-in" })).toBeVisible();
+    await page.getByRole("combobox", { name: "Playback speed" }).selectOption("0.75");
+    await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+    await page.getByRole("combobox", { name: "Playback speed" }).selectOption("1");
+    await expect(page.getByRole("combobox", { name: "Playback speed" })).toHaveValue("1");
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Cancel count-in" })).toBeVisible();
     expect(await page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.paused)).toBe(
       true,
     );
@@ -1030,6 +1036,11 @@ test("practice Play starts at the loop boundary and count-in is cancellable by k
     await page.getByRole("button", { name: "Play", exact: true }).click();
     await expect.poll(async () => Number(await position.inputValue())).toBeGreaterThan(100000);
     expect(await page.locator(".timeline-track").getAttribute("style")).toBe(trackStyle);
+    await page.getByRole("button", { name: "Next chord", exact: true }).click();
+    await expect(page.locator(".timeline-track")).not.toHaveAttribute("style", trackStyle!);
+    const navigatedStyle = await page.locator(".timeline-track").getAttribute("style");
+    await position.fill("192000");
+    await expect(page.locator(".timeline-track")).not.toHaveAttribute("style", navigatedStyle!);
     await page.getByRole("button", { name: "Pause", exact: true }).click();
     await page.getByRole("combobox", { name: "Playback speed" }).selectOption("0.75");
     await expect(page.getByRole("combobox", { name: "Playback speed" })).toHaveValue("0.75");

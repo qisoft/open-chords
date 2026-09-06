@@ -6,11 +6,11 @@ export const stringDiagramPacks = {
     root: 4,
     tuning: [40, 45, 50, 55, 59, 64],
     shapes: {
-      major: [0, 2, 2, 1, 0, 0],
-      minor: [0, 2, 2, 0, 0, 0],
-      major7: [0, 2, 1, 1, 0, 0],
-      minor7: [0, 2, 0, 0, 0, 0],
-      dominant7: [0, 2, 0, 1, 0, 0],
+      major: { frets: [0, 2, 2, 1, 0, 0], barre: 0 },
+      minor: { frets: [0, 2, 2, 0, 0, 0], barre: 0 },
+      major7: { frets: [0, 2, 1, 1, 0, 0], barre: 0 },
+      minor7: { frets: [0, 2, 0, 0, 0, 0], barre: 0 },
+      dominant7: { frets: [0, 2, 0, 1, 0, 0], barre: 0 },
     },
   },
   ukulele: {
@@ -18,11 +18,11 @@ export const stringDiagramPacks = {
     root: 0,
     tuning: [67, 60, 64, 69],
     shapes: {
-      major: [0, 0, 0, 3],
-      minor: [0, 3, 3, 3],
-      major7: [0, 0, 0, 2],
-      minor7: [3, 3, 3, 3],
-      dominant7: [0, 0, 0, 1],
+      major: { frets: [0, 0, 0, 3], barre: 0 },
+      minor: { frets: [0, 3, 3, 3], barre: 3 },
+      major7: { frets: [0, 0, 0, 2], barre: 0 },
+      minor7: { frets: [3, 3, 3, 3], barre: 3 },
+      dominant7: { frets: [0, 0, 0, 1], barre: 0 },
     },
   },
 } as const;

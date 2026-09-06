@@ -207,3 +207,21 @@ it("rejects a ready loop with missing anchors at the persisted Project boundary"
   project.practice!.loop!.status = "needs_review";
   expect(parseProjectContract(project).practice?.loop?.status).toBe("needs_review");
 });
+
+it("uses each ukulele voicing's actual barre rather than its root transpose offset", async () => {
+  const { chordDiagram } = await import("@open-chords/domain");
+  const chord = {
+    kind: "chord" as const,
+    root: "D" as const,
+    quality: "minor" as const,
+    extensions: [],
+    additions: [],
+    alterations: [],
+    omissions: [],
+  };
+  expect(chordDiagram(chord, "ukulele")).toMatchObject({ frets: [2, 5, 5, 5], barre: 5 });
+  expect(chordDiagram({ ...chord, root: "C", quality: "minor7" }, "ukulele")).toMatchObject({
+    frets: [3, 3, 3, 3],
+    barre: 3,
+  });
+});

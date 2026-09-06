@@ -44,7 +44,7 @@ export function chordDiagram(
     return unavailable;
   const shape = pack.shapes[quality];
   const offset = (root - pack.root + 12) % 12;
-  const frets = shape.map((fret) => fret + offset);
+  const frets = shape.frets.map((fret) => fret + offset);
   if (
     value.bass !== undefined &&
     Math.min(...frets.map((fret, index) => pack.tuning[index]! + fret)) % 12 !==
@@ -56,6 +56,6 @@ export function chordDiagram(
     packId: pack.id,
     tuning: [...pack.tuning],
     frets,
-    barre: offset === 0 ? null : offset,
+    barre: shape.barre + offset === 0 ? null : shape.barre + offset,
   };
 }
