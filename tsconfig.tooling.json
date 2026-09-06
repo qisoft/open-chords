@@ -13,6 +13,8 @@
     "apps/desktop/src/renderer/playback-clock.ts",
     "apps/desktop/src/renderer/workspace-playback.ts",
     "apps/desktop/src/renderer/workspace-timeline.ts",
+    "apps/desktop/src/renderer/workspace-content.ts",
+    "apps/desktop/src/renderer/workspace-geometry.ts",
     "packages/contracts/src/**/*.ts",
     "packages/domain/src/**/*.ts",
     "packages/testkit/src/**/*.ts",

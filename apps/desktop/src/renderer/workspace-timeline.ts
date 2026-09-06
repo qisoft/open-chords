@@ -12,6 +12,9 @@ export type WorkspaceTimelineRegion = {
 export type WorkspaceTimeline = {
   durationSamples: number;
   regions: WorkspaceTimelineRegion[];
+  beats: ProjectContract["analysisRevisions"][number]["timeline"]["bars"][number]["beats"];
+  chords: { id: string; startSample: number; endSample: number; label: string; state: string }[];
+  sections: ProjectContract["analysisRevisions"][number]["timeline"]["sectionRegions"];
 };
 
 export type WorkspaceRegionState = {
@@ -47,6 +50,9 @@ export function shouldRestoreRegionFocus(
 export function buildWorkspaceTimeline(project: ProjectContract): WorkspaceTimeline {
   if (project.activeView === null) {
     return {
+      beats: [],
+      chords: [],
+      sections: [],
       durationSamples: project.durationSamples,
       regions: [
         {
@@ -85,15 +91,29 @@ export function buildWorkspaceTimeline(project: ProjectContract): WorkspaceTimel
         .filter(
           (event) => event.startSample < region.endSample && event.endSample > region.startSample,
         )
-        .map(({ value }) => chordLabel(value)),
+        .map(({ value, assertion }) =>
+          assertion.state === "abstained" ? "Unknown chord" : chordLabel(value),
+        ),
     }));
-  return { durationSamples: project.durationSamples, regions };
+  return {
+    durationSamples: project.durationSamples,
+    regions,
+    beats: timeline.bars.flatMap((bar) => bar.beats),
+    chords: timeline.chordEvents.map((event) => ({
+      id: event.id,
+      startSample: event.startSample,
+      endSample: event.endSample,
+      label: event.assertion.state === "abstained" ? "Unknown chord" : chordLabel(event.value),
+      state: event.assertion.state,
+    })),
+    sections: timeline.sectionRegions,
+  };
 }
 
 type ChordValue =
   ProjectContract["analysisRevisions"][number]["timeline"]["chordEvents"][number]["value"];
 
-function chordLabel(value: ChordValue): string {
+export function chordLabel(value: ChordValue): string {
   if (value.kind === "no_chord") return "N";
   const quality = {
     augmented: "aug",
