@@ -443,6 +443,7 @@ function DraftSession({
               minimumDuration={minimumDuration}
               draft={draft}
               disabled={busy || state.stale}
+              reviewed={state.reviewedIds.includes(event.id)}
               onChoose={() => setPicker(event.id)}
               buttonRef={(element) => {
                 if (element === null) buttons.current.delete(event.id);
@@ -498,6 +499,7 @@ function EditorEvent({
   event,
   events,
   minimumDuration,
+  reviewed,
   draft,
   disabled,
   onChoose,
@@ -506,6 +508,7 @@ function EditorEvent({
   event: DraftEvent;
   events: DraftEvent[];
   minimumDuration: number;
+  reviewed: boolean;
   draft: ReturnType<typeof createEditorDraft>;
   disabled: boolean;
   onChoose: () => void;
@@ -584,6 +587,19 @@ function EditorEvent({
       <button type="button" className="secondary-button" ref={buttonRef} onClick={onChoose}>
         Choose chord
       </button>
+      <div className="editor-review-action">
+        {draft.isAbstained(event.id) && !reviewed && <span>Unasserted candidate</span>}
+        {draft.needsReview(event.id) && (
+          <button
+            type="button"
+            className="quiet-button"
+            disabled={reviewed}
+            onClick={() => draft.markReviewed(event.id)}
+          >
+            {reviewed ? "Reviewed in draft" : "Mark reviewed"}
+          </button>
+        )}
+      </div>
       <label>
         Duration{" "}
         <select

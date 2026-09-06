@@ -760,3 +760,6 @@ button:disabled {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.editor-review-action {
+  height: 42px;
+}

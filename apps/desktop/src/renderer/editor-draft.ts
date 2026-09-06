@@ -38,8 +38,26 @@ export function createEditorDraft(input: DraftInput) {
     errors: string[];
     key: string;
     stale: boolean;
-  }>(() => ({ dirty: false, events: structuredClone(base), errors: [], key, stale: false }));
-  const operationsFor = (events: DraftEvent[]): EditTransaction["operations"] => {
+    reviewedIds: string[];
+  }>(() => ({
+    dirty: false,
+    events: structuredClone(base),
+    errors: [],
+    key,
+    stale: false,
+    reviewedIds: [],
+  }));
+  const operationsFor = (
+    events: DraftEvent[],
+    reviewedIds = store.getState().reviewedIds,
+  ): EditTransaction["operations"] => {
+    const reviews: EditTransaction["operations"] = events
+      .filter(({ id }) => reviewedIds.includes(id))
+      .map(({ id, value }) => ({
+        type: "replace_chord_value",
+        eventId: id,
+        value: structuredClone(value),
+      }));
     if (
       events.some(
         (event, index) =>
@@ -54,10 +72,12 @@ export function createEditorDraft(input: DraftInput) {
           targetEventIds: base.map((event) => event.id),
           events: structuredClone(events),
         },
+        ...reviews,
       ];
     return events
       .filter(
         (event, index) =>
+          reviewedIds.includes(event.id) ||
           canonicalSerialize(event.value) !== canonicalSerialize(base[index]?.value),
       )
       .map((event) => ({
@@ -80,8 +100,8 @@ export function createEditorDraft(input: DraftInput) {
         );
     }
   }
-  const update = (events: DraftEvent[]) => {
-    const dirty = canonicalSerialize(events) !== canonicalSerialize(base);
+  const update = (events: DraftEvent[], reviewedIds = store.getState().reviewedIds) => {
+    const dirty = reviewedIds.length > 0 || canonicalSerialize(events) !== canonicalSerialize(base);
     const errors: string[] = [];
     if (events.some(({ startSample, endSample }) => !grid.has(startSample) || !grid.has(endSample)))
       errors.push("New boundaries must snap to a quarter-beat subdivision.");
@@ -102,7 +122,7 @@ export function createEditorDraft(input: DraftInput) {
         candidateLayer.transactions.push({
           id,
           parentTransactionId,
-          operations: operationsFor(events),
+          operations: operationsFor(events, reviewedIds),
         });
         candidate.activeView!.editHistoryPosition = candidateLayer.transactions.length;
         parseProjectContract(candidate);
@@ -110,7 +130,7 @@ export function createEditorDraft(input: DraftInput) {
         errors.push("Durations must be positive and fill the saved span without gaps or overlap.");
       }
     }
-    store.setState({ events, dirty, errors });
+    store.setState({ events, dirty, errors, reviewedIds });
   };
   const reflow = (events: DraftEvent[]) => {
     let startSample = base[0]!.startSample;
@@ -148,13 +168,33 @@ export function createEditorDraft(input: DraftInput) {
         }))
         .concat([{ label: "Whole bar", samples: bar.endSample - bar.startSample }]);
     },
+    isAbstained(eventId: string) {
+      return (
+        effective.chordEvents.find(({ id }) => id === eventId)?.assertion.state === "abstained"
+      );
+    },
+    needsReview(eventId: string) {
+      return (
+        effective.chordEvents.find(({ id }) => id === eventId)?.assertion.state === "low_confidence"
+      );
+    },
+    markReviewed(eventId: string) {
+      const state = store.getState();
+      if (!state.events.some(({ id }) => id === eventId))
+        throw new Error("Review target is unavailable");
+      update(state.events, [...new Set([...state.reviewedIds, eventId])]);
+    },
     setChord(eventId: string, value: DraftEvent["value"]) {
+      const reviewedIds = new Set(store.getState().reviewedIds);
+      if (effective.chordEvents.find(({ id }) => id === eventId)?.assertion.state !== "asserted")
+        reviewedIds.add(eventId);
       update(
         store
           .getState()
           .events.map((event) =>
             event.id === eventId ? { ...event, value: structuredClone(value) } : event,
           ),
+        [...reviewedIds],
       );
     },
     setDuration(eventId: string, durationSamples: number) {
@@ -185,7 +225,7 @@ export function createEditorDraft(input: DraftInput) {
       update(reflow(remaining));
     },
     reset() {
-      store.setState({ events: structuredClone(base), dirty: false, errors: [] });
+      store.setState({ events: structuredClone(base), dirty: false, errors: [], reviewedIds: [] });
     },
     transaction(id: string): EditTransaction {
       if (store.getState().stale || !store.getState().dirty || store.getState().errors.length > 0)

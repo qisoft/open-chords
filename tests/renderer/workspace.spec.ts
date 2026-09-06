@@ -135,6 +135,50 @@ test("a durable local-media Project reopens into the centered workspace and play
   }
 });
 
+test("a low-confidence chord can be reviewed without changing its value and undone", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-editor-review-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    const editor = page.getByRole("region", { name: "Chord Editor" });
+    await editor
+      .locator('[data-event-id="chord_g7"]')
+      .getByRole("button", { name: "Mark reviewed", exact: true })
+      .click();
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    await expect(
+      editor
+        .locator('[data-event-id="chord_g7"]')
+        .getByRole("button", { name: "Mark reviewed", exact: true }),
+    ).toHaveCount(0);
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Undo edit", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Undo edit", exact: true })).toBeDisabled();
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    await expect(
+      editor
+        .locator('[data-event-id="chord_g7"]')
+        .getByRole("button", { name: "Mark reviewed", exact: true }),
+    ).toBeEnabled();
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
+
 test("an external committed revision invalidates an open draft even after draft Reset", async () => {
   const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-editor-stale-")));
   const library = await openProjectLibrary({ stateRoot });

@@ -122,3 +122,44 @@ it("rejects off-subdivision boundaries even when durations fill the saved span",
     type: "replace_chord_sequence",
   });
 });
+
+it("explicitly reviews an unchanged chord without overwriting machine evidence", () => {
+  const project = projectFixture();
+  const before = materializeEffectiveTimeline(project);
+  const draft = createEditorDraft({
+    project,
+    projectRevisionId: "projectrevision_base",
+    targetIds: ["chord_g7"],
+  });
+  draft.markReviewed("chord_g7");
+  expect(draft.store.getState().dirty).toBe(true);
+  const transaction = draft.transaction("transaction_reviewed");
+  const edited = structuredClone(project);
+  edited.editLayers[0]!.transactions.push(transaction);
+  edited.activeView!.editHistoryPosition = edited.editLayers[0]!.transactions.length;
+  const result = materializeEffectiveTimeline(parseProjectContract(edited));
+  expect(result.chordEvents[3]!.value).toEqual(before.chordEvents[3]!.value);
+  expect(result.chordEvents[3]!.assertion).toMatchObject({
+    state: "asserted",
+    reasonCodes: ["user_authored"],
+  });
+  expect(edited.analysisRevisions).toEqual(project.analysisRevisions);
+  draft.reset();
+  expect(draft.store.getState().dirty).toBe(false);
+});
+
+it("treats choosing an abstained candidate as an explicit user assertion", () => {
+  const project = projectFixture();
+  const candidate = materializeEffectiveTimeline(project).chordEvents[1]!;
+  expect(candidate.assertion.state).toBe("abstained");
+  const draft = createEditorDraft({
+    project,
+    projectRevisionId: "projectrevision_base",
+    targetIds: [candidate.id],
+  });
+  draft.setChord(candidate.id, candidate.value);
+  expect(draft.store.getState().dirty).toBe(true);
+  expect(draft.transaction("transaction_asserted").operations).toEqual([
+    { type: "replace_chord_value", eventId: candidate.id, value: candidate.value },
+  ]);
+});
