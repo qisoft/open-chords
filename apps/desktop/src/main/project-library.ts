@@ -21,6 +21,7 @@ import {
   parseContractEnvelope,
   ProjectEnvelopeSchema,
 } from "@open-chords/contracts";
+import { addLyricsDocument, type LyricsInput, type LyricsOrigin } from "@open-chords/domain";
 import {
   applyPracticeAction,
   reconcilePracticeState,
@@ -569,6 +570,54 @@ export class ProjectLibrary {
       return [{ id: input.sourceSnapshotId, kind: "media" }];
     }
     return input.modelStore.resolveBlockedRecipeArtifacts(input.recipe);
+  }
+
+  async addLyrics(input: {
+    expectedProjectRevisionId: string;
+    projectId: string;
+    input: LyricsInput;
+    origin?: LyricsOrigin;
+  }): Promise<
+    { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
+  > {
+    return this.#serializeMutation(async () => {
+      const entry = this.#entries.get(input.projectId);
+      if (entry === undefined || entry.location === "trashed") return { notFound: true };
+      if (entry.status === "damaged" || entry.revision === undefined)
+        throw new ProjectLibraryDamagedError(input.projectId);
+      if (entry.compatibility === "read_only") return { readOnly: true };
+      if (entry.revision.revision.projectRevisionId !== input.expectedProjectRevisionId)
+        return { stale: true };
+      const project = addLyricsDocument(
+        entry.revision.payload.envelope.payload,
+        input.input,
+        `lyrics_${randomUUID().replaceAll("-", "")}`,
+        input.origin,
+        input.origin?.provenance.provider !== undefined &&
+          input.origin.provenance.provider !== "user"
+          ? entry.revision.payload.records.projectRange.startSourceSample
+          : undefined,
+      );
+      const payload = buildStoredPayload({
+        envelope: {
+          ...entry.revision.payload.envelope,
+          payload: parseProjectContract(
+            reconcilePracticeState(entry.revision.payload.envelope.payload, project),
+          ),
+        },
+        records: entry.revision.payload.records,
+      });
+      const next = await this.#commitPayload(
+        input.projectId,
+        payload,
+        entry.revision.revision.projectRevisionId,
+        entry.revision.pointer.sequence + 1,
+        // Preserve the Library revision-record vocabulary; lyrics selection is a Project mutation,
+        // and does not append an Edit Layer transaction.
+        "edit_transaction",
+      );
+      return { projectRevisionId: next.revision.projectRevisionId };
+    });
   }
 
   async changePractice(input: {

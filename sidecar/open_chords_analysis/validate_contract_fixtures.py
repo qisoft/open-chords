@@ -354,12 +354,13 @@ def validate_domain(envelope: dict[str, Any]) -> None:
     documents = {item["id"]: item for item in project["lyricsDocuments"]}
     alignments = {item["id"]: item for item in project["lyricsAlignments"]}
     for document in documents.values():
+        text_utf16 = document["text"].encode("utf-16-le", errors="surrogatepass")
         unique_ids(document["lines"], "Lyrics lines")
         unique_ids(document["tokens"], "Lyrics tokens")
         line_ids = {line["id"] for line in document["lines"]}
         line_cursor = 0
         for line in document["lines"]:
-            if line["startOffset"] < line_cursor or line["endOffset"] <= line["startOffset"] or line["endOffset"] > len(document["text"]):
+            if line["startOffset"] < line_cursor or line["endOffset"] <= line["startOffset"] or line["endOffset"] > (len(text_utf16) // 2):
                 raise ContractError("invalid Lyrics Line Occurrence")
             line_cursor = line["endOffset"]
         cursor = 0
@@ -368,8 +369,8 @@ def validate_domain(envelope: dict[str, Any]) -> None:
                 token["lineId"] not in line_ids
                 or token["startOffset"] < cursor
                 or token["endOffset"] <= token["startOffset"]
-                or token["endOffset"] > len(document["text"])
-                or document["text"][token["startOffset"]:token["endOffset"]] != token["text"]
+                or token["endOffset"] > (len(text_utf16) // 2)
+                or text_utf16[token["startOffset"] * 2:token["endOffset"] * 2] != token["text"].encode("utf-16-le", errors="surrogatepass")
             ):
                 raise ContractError("invalid Lyrics Token Occurrence")
             cursor = token["endOffset"]

@@ -9,7 +9,8 @@ import {
   type DesktopCommand,
   type DesktopResponse,
 } from "@open-chords/contracts";
-import type { PracticeAction } from "@open-chords/domain";
+import type { LyricsOrigin } from "@open-chords/domain";
+import type { LyricsInput, PracticeAction } from "@open-chords/domain";
 import {
   parseProjectContract,
   type EditHistoryAction,
@@ -24,6 +25,7 @@ import type {
   LocalMediaRelinkResult,
   LocalMediaSelection,
 } from "./local-media.ts";
+import type { LyricsDiscovery } from "./lyrics-discovery.ts";
 import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
 
 const MAX_COMMAND_BYTES = 256 * 1024;
@@ -45,6 +47,14 @@ export type DesktopSenderContext = {
 };
 
 export type ProjectAuthority = {
+  addLyrics?(input: {
+    expectedProjectRevisionId: string;
+    projectId: string;
+    input: LyricsInput;
+    origin?: LyricsOrigin;
+  }): Promise<
+    { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
+  >;
   changePractice(input: {
     expectedProjectRevisionId: string;
     projectId: string;
@@ -109,12 +119,21 @@ export class DesktopCommandGateway {
   readonly #mediaAuthority: LocalMediaAuthority | undefined;
   readonly #mutationDepths = new Map<string, number>();
   readonly #mutationQueues = new Map<string, Promise<void>>();
+  readonly #lyrics:
+    | { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> }
+    | undefined;
+  #lyricsBusy = false;
   #activeMediaCommands = 0;
   #activeReads = 0;
   #pendingMutations = 0;
 
-  constructor(authority: ProjectAuthority, mediaAuthority?: LocalMediaAuthority) {
+  constructor(
+    authority: ProjectAuthority,
+    mediaAuthority?: LocalMediaAuthority,
+    lyrics?: { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> },
+  ) {
     this.#authority = authority;
+    this.#lyrics = lyrics;
     this.#mediaAuthority = mediaAuthority;
   }
 
@@ -170,12 +189,14 @@ export class DesktopCommandGateway {
       };
     }
 
+    if (command.type === "lyrics.perform") return this.#performLyrics(command);
     if (command.type === "project.list") return this.#listProjects(command);
     if (command.type === "project.get_snapshot") return this.#readSnapshot(command);
     if (
       command.type === "project.commit_edit_transaction" ||
       command.type === "project.change_edit_history" ||
-      command.type === "project.change_practice"
+      command.type === "project.change_practice" ||
+      command.type === "project.add_lyrics"
     )
       return this.#enqueueMutation(command);
     return this.#executeMedia(command);
@@ -358,7 +379,8 @@ export class DesktopCommandGateway {
         type:
           | "project.commit_edit_transaction"
           | "project.change_edit_history"
-          | "project.change_practice";
+          | "project.change_practice"
+          | "project.add_lyrics";
       }
     >,
   ): Promise<DesktopGatewayResult> {
@@ -397,6 +419,118 @@ export class DesktopCommandGateway {
     }
   }
 
+  async #performLyrics(
+    command: Extract<DesktopCommand, { type: "lyrics.perform" }>,
+  ): Promise<DesktopGatewayResult> {
+    const lyrics = this.#lyrics;
+    if (!lyrics)
+      return {
+        action: "none",
+        response: errorResponse(
+          "capability_unavailable",
+          "Lyrics discovery unavailable",
+          false,
+          command,
+        ),
+      };
+    const action = command.action;
+    const result = (extra = {}) => ({
+      action: "none" as const,
+      response: DesktopResponseSchema.parse({
+        ...responseEnvelope(command),
+        type: "lyrics.result",
+        offline: lyrics.discovery.offline,
+        ...extra,
+      }),
+    });
+    const control = ["status", "cancel", "set_offline"].includes(action.type);
+    if (!control && this.#lyricsBusy)
+      return {
+        action: "none",
+        response: errorResponse("busy", "A lyrics request is already running", true, command),
+      };
+    if (!control) this.#lyricsBusy = true;
+    try {
+      if (action.type === "status") return result();
+      if (action.type === "cancel") {
+        lyrics.discovery.cancel();
+        return result();
+      }
+      if (action.type === "set_offline") {
+        await lyrics.discovery.setOffline(action.offline);
+        return result();
+      }
+      if (lyrics.discovery.offline) throw new Error("Offline Mode");
+      if (action.type === "open_genius") {
+        const url = new URL("https://genius.com/search");
+        url.searchParams.set("q", action.query);
+        await lyrics.openExternal(url.href);
+        return result();
+      }
+      const snapshot = await this.#authority.getSnapshot(action.projectId);
+      if (!snapshot)
+        return {
+          action: "none",
+          response: errorResponse("project_not_found", "Project was not found", false, command),
+        };
+      if (action.type === "search")
+        return result({
+          candidates: await lyrics.discovery.search(
+            { provider: action.provider, query: action.query },
+            command.generationId,
+            action.projectId,
+          ),
+        });
+      if (snapshot.projectRevisionId !== action.expectedProjectRevisionId)
+        return {
+          action: "none",
+          response: errorResponse(
+            "stale_revision",
+            "Project changed; choose lyrics again",
+            true,
+            command,
+          ),
+        };
+      const selection = await lyrics.discovery.select(
+        action.candidateId,
+        command.generationId,
+        action.projectId,
+      );
+      const saved = await this.#authority.addLyrics!({
+        projectId: action.projectId,
+        expectedProjectRevisionId: action.expectedProjectRevisionId,
+        input: { ...selection.input, language: action.language },
+        origin: selection.origin,
+      });
+      if (!("projectRevisionId" in saved))
+        return {
+          action: "none",
+          response: errorResponse(
+            "stale_revision",
+            "Project is no longer writable; choose lyrics again",
+            true,
+            command,
+          ),
+        };
+      return result({ projectRevisionId: saved.projectRevisionId });
+    } catch {
+      lyrics.discovery.cancel();
+      return {
+        action: "none",
+        response: errorResponse(
+          "capability_unavailable",
+          lyrics.discovery.offline
+            ? "Offline Mode is enabled"
+            : "Lyrics unavailable. Try again or paste local text.",
+          true,
+          command,
+        ),
+      };
+    } finally {
+      if (!control) this.#lyricsBusy = false;
+    }
+  }
+
   async #commitMutation(
     command: Extract<
       DesktopCommand,
@@ -404,21 +538,24 @@ export class DesktopCommandGateway {
         type:
           | "project.commit_edit_transaction"
           | "project.change_edit_history"
-          | "project.change_practice";
+          | "project.change_practice"
+          | "project.add_lyrics";
       }
     >,
   ): Promise<DesktopGatewayResult> {
     try {
       const result =
-        command.type === "project.change_practice"
-          ? await this.#authority.changePractice(command)
-          : command.type === "project.change_edit_history"
-            ? await this.#authority.changeEditHistory(command)
-            : await this.#authority.commitEditTransaction({
-                expectedProjectRevisionId: command.expectedProjectRevisionId,
-                projectId: command.projectId,
-                transaction: command.transaction,
-              });
+        command.type === "project.add_lyrics"
+          ? await this.#authority.addLyrics!(command)
+          : command.type === "project.change_practice"
+            ? await this.#authority.changePractice(command)
+            : command.type === "project.change_edit_history"
+              ? await this.#authority.changeEditHistory(command)
+              : await this.#authority.commitEditTransaction({
+                  expectedProjectRevisionId: command.expectedProjectRevisionId,
+                  projectId: command.projectId,
+                  transaction: command.transaction,
+                });
       if ("conflicts" in result)
         return {
           action: "none",
@@ -466,9 +603,11 @@ export class DesktopCommandGateway {
             ? { transactionId: command.transaction.id, type: "project.committed" }
             : {
                 type:
-                  command.type === "project.change_practice"
-                    ? "project.practice_changed"
-                    : "project.history_changed",
+                  command.type === "project.add_lyrics"
+                    ? "project.lyrics_added"
+                    : command.type === "project.change_practice"
+                      ? "project.practice_changed"
+                      : "project.history_changed",
               }),
         }),
       };

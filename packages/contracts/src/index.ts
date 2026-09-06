@@ -56,3 +56,4 @@ export function generateContractJsonSchema(): z.core.JSONSchema.BaseSchema {
     title: `Open Chords project contract envelope v${CONTRACT_VERSION}`,
   };
 }
+export * from "./lyrics.ts";
