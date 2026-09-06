@@ -118,7 +118,7 @@ function importLines(
   const cues: { text: string; startSample: number }[] = [];
   for (const line of input.text.split(/\r\n|\r|\n/)) {
     if (line.trim() === "" || /^\[(?:ar|al|ti|au|by|re|ve|length):[^\]]*\]$/.test(line)) continue;
-    const match = /^\[(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?\](.+)$/.exec(line);
+    const match = /^\[(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?\](.*)$/.exec(line);
     if (match === null) throw new Error("Invalid LRC line");
     if (/\[\d{1,3}:\d{2}/.test(match[4]!) || /<\d{1,3}:\d{2}/.test(match[4]!))
       throw new Error("Unsupported LRC timing");
@@ -132,7 +132,10 @@ function importLines(
       throw new Error("Invalid supplied timing");
     return { startSample: cue.startSample, endSample };
   });
-  return { text: cues.map((cue) => cue.text).join("\n"), timings };
+  return {
+    text: cues.map((cue) => cue.text).join("\n"),
+    timings: timings.filter((_timing, index) => cues[index]!.text.length > 0),
+  };
 }
 
 function importSubtitles(raw: string, sampleRate: number, durationSamples: number) {

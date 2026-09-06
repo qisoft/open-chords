@@ -147,3 +147,19 @@ it("rejects unsupported repeated and enhanced LRC timestamps instead of storing 
       addLyricsDocument(fixture(), { text, language: "en", format: "lrc" }, "lyrics_unsupported"),
     ).toThrow("Unsupported LRC timing");
 });
+
+it("retains empty LRC cues as gaps instead of extending lyrics across instrumental time", () => {
+  const project = addLyricsDocument(
+    fixture(),
+    { text: "[00:00.10]Hello\n[00:00.30]\n[00:00.50]Again", language: "en", format: "lrc" },
+    "lyrics_gaps",
+  );
+  expect(project.lyricsDocuments.at(-1)!.text).toBe("Hello\n\nAgain");
+  expect(
+    project.lyricsAlignments.at(-1)!.lineOccurrences.map(({ timing }) => timing),
+  ).toMatchObject([
+    { startSample: 4800, endSample: 14400 },
+    { startSample: 24000, endSample: 48000 },
+  ]);
+  expect(() => parseProjectContract(project)).not.toThrow();
+});
