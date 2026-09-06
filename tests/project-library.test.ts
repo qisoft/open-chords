@@ -2753,3 +2753,162 @@ it("durably saves practice without changing analysis or edit history and rejects
     (await reopened.readProject(envelope.payload.id)).envelope.payload.practice?.loop?.status,
   ).toBe("needs_review");
 });
+
+it("durably selects immutable lyrics, rejects stale correction, and reopens selected text", async () => {
+  const stateRoot = await temporaryDirectory("open-chords-lyrics-");
+  const library = await openProjectLibrary({ stateRoot });
+  const created = await library.createProject({
+    envelope: goldenEnvelope(),
+    records: ownedRecords(),
+  });
+  const result = await library.addLyrics({
+    projectId: "project_golden",
+    expectedProjectRevisionId: created.projectRevisionId,
+    input: { text: "One one\nOne one", language: "en", format: "text" },
+  });
+  expect(result).toHaveProperty("projectRevisionId");
+  expect(
+    await library.addLyrics({
+      projectId: "project_golden",
+      expectedProjectRevisionId: created.projectRevisionId,
+      input: { text: "Stale", language: "en", format: "text" },
+    }),
+  ).toEqual({ stale: true });
+  const reopened = await openProjectLibrary({ stateRoot });
+  const snapshot = await reopened.getSnapshot("project_golden");
+  expect(
+    snapshot!.project.lyricsDocuments.find(
+      ({ id }) => id === snapshot!.project.activeView!.lyricsDocumentId,
+    )!.text,
+  ).toBe("One one\nOne one");
+  expect(snapshot!.project.editLayers).toEqual(goldenEnvelope().payload.editLayers);
+});
+
+it("accepts local lyrics only through the named validated desktop mutation", async () => {
+  const { DesktopCommandGateway } =
+    await import("../apps/desktop/src/main/desktop-command-gateway.ts");
+  const library = await openProjectLibrary({
+    stateRoot: await temporaryDirectory("open-chords-lyrics-ipc-"),
+  });
+  const created = await library.createProject({
+    envelope: goldenEnvelope(),
+    records: ownedRecords(),
+  });
+  const gateway = new DesktopCommandGateway(library);
+  const sender = {
+    frameUrl: "open-chords://app/index.html",
+    generationId: "generation_fixture",
+    isMainFrame: true,
+    senderId: 1,
+    security: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      persistentSession: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  } as const;
+  const command = {
+    protocol: "open-chords/desktop-ipc",
+    protocolVersion: "1.0",
+    generationId: sender.generationId,
+    requestId: "request_lyrics",
+    type: "project.add_lyrics",
+    projectId: "project_golden",
+    expectedProjectRevisionId: created.projectRevisionId,
+    input: { text: "Only local words", language: "en", format: "text" },
+  };
+  expect(
+    (
+      await gateway.execute(
+        { ...command, input: { ...command.input, provenance: { provider: "LRCLIB" } } },
+        sender,
+      )
+    ).response,
+  ).toMatchObject({ code: "invalid_command" });
+  expect((await gateway.execute(command, sender)).response.type).toBe("project.lyrics_added");
+});
+
+it("searches and selects lyrics through bounded IPC while Offline Mode denies lookup", async () => {
+  const { DesktopCommandGateway } =
+    await import("../apps/desktop/src/main/desktop-command-gateway.ts");
+  const { openLyricsDiscovery } = await import("../apps/desktop/src/main/lyrics-discovery.ts");
+  const stateRoot = await temporaryDirectory("open-chords-lyrics-network-");
+  const library = await openProjectLibrary({ stateRoot });
+  const created = await library.createProject({
+    envelope: goldenEnvelope(),
+    records: ownedRecords(),
+  });
+  let requests = 0;
+  const record = {
+    id: 12,
+    trackName: "Example",
+    artistName: "Artist",
+    albumName: null,
+    duration: 1,
+    plainLyrics: "Chosen provider words",
+    syncedLyrics: null,
+    instrumental: false,
+  };
+  const discovery = await openLyricsDiscovery({
+    stateRoot,
+    fetch: async () => Response.json(++requests === 1 ? [record] : record),
+  });
+  const gateway = new DesktopCommandGateway(library, undefined, {
+    discovery,
+    openExternal: async () => {},
+  });
+  const sender = {
+    frameUrl: "open-chords://app/index.html",
+    generationId: "generation_fixture",
+    isMainFrame: true,
+    senderId: 1,
+    security: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      persistentSession: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  } as const;
+  const command = {
+    protocol: "open-chords/desktop-ipc",
+    protocolVersion: "1.0",
+    generationId: sender.generationId,
+    requestId: "request_lyrics",
+    type: "lyrics.perform",
+    action: { type: "search", projectId: "project_golden", provider: "lrclib", query: "Example" },
+  };
+  const found = (await gateway.execute(command, sender)).response;
+  expect(found.type).toBe("lyrics.result");
+  if (found.type !== "lyrics.result") throw new Error("No candidates");
+  expect(
+    (
+      await gateway.execute(
+        {
+          ...command,
+          action: {
+            type: "select",
+            projectId: "project_golden",
+            expectedProjectRevisionId: created.projectRevisionId,
+            candidateId: found.candidates![0]!.id,
+            language: "en",
+          },
+        },
+        sender,
+      )
+    ).response.type,
+  ).toBe("lyrics.result");
+  const snapshot = await library.getSnapshot("project_golden");
+  expect(snapshot!.project.lyricsDocuments.at(-1)!).toMatchObject({
+    text: "Chosen provider words",
+    language: "en",
+    provenance: { provider: "lrclib" },
+  });
+  await gateway.execute({ ...command, action: { type: "set_offline", offline: true } }, sender);
+  expect((await gateway.execute(command, sender)).response).toMatchObject({
+    type: "desktop.error",
+    code: "capability_unavailable",
+  });
+  expect(requests).toBe(2);
+});

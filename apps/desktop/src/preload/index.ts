@@ -1,4 +1,6 @@
 import {
+  LyricsCommandSchema,
+  AddLyricsCommandSchema,
   CommitEditTransactionCommandSchema,
   ChangeEditHistoryCommandSchema,
   ChangePracticeCommandSchema,
@@ -138,6 +140,32 @@ async function changeEditHistory(
   );
 }
 
+async function performLyrics(action: Parameters<OpenChordsDesktopApi["lyrics"]["perform"]>[0]) {
+  const command = LyricsCommandSchema.parse({ ...envelope(), action, type: "lyrics.perform" });
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.lyricsPerform,
+    command,
+    (response): response is Extract<DesktopResponse, { type: "lyrics.result" }> =>
+      response.type === "lyrics.result",
+    "Unexpected lyrics discovery response",
+  );
+}
+
+async function addLyrics(input: Parameters<OpenChordsDesktopApi["project"]["addLyrics"]>[0]) {
+  const command = AddLyricsCommandSchema.parse({
+    ...envelope(),
+    ...input,
+    type: "project.add_lyrics",
+  });
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.projectAddLyrics,
+    command,
+    (response): response is Extract<DesktopResponse, { type: "project.lyrics_added" }> =>
+      response.type === "project.lyrics_added",
+    "Unexpected lyrics response",
+  );
+}
+
 async function changePractice(
   input: Parameters<OpenChordsDesktopApi["project"]["changePractice"]>[0],
 ) {
@@ -254,6 +282,7 @@ function reportDispatchError(error: unknown): void {
 }
 
 const api: OpenChordsDesktopApi = {
+  lyrics: Object.freeze({ perform: performLyrics }),
   media: {
     createProject: createMediaProject,
     openPlayback: openMediaPlayback,
@@ -262,6 +291,7 @@ const api: OpenChordsDesktopApi = {
   },
   project: {
     changePractice,
+    addLyrics,
     changeEditHistory,
     commitEditTransaction,
     getSnapshot: async (projectId) => {

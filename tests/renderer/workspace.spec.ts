@@ -1078,3 +1078,112 @@ test("practice Play starts at the loop boundary and count-in is cancellable by k
     await rm(stateRoot, { force: true, recursive: true });
   }
 });
+
+test("lyrics text selection and correction persist through the actual desktop capability", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-lyrics-ui-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  await library.createProject({ envelope, records: goldenRecords() });
+  let application = await launch(stateRoot);
+  try {
+    let page = await application.firstWindow();
+    await page.getByRole("button", { name: "Choose lyrics" }).click();
+    await page.getByRole("checkbox", { name: "Offline Mode" }).check();
+    await expect(page.getByRole("button", { name: "Search LRCLIB" })).toBeDisabled();
+    await page
+      .getByRole("textbox", { name: "Lyrics text" })
+      .fill("Only these words\nOnly these words");
+    await page.getByRole("button", { name: "Save new Lyrics Document" }).click();
+    await expect(page.getByRole("status", { name: "Lyrics selection status" })).toHaveText(
+      "Lyrics saved",
+    );
+    await expect(page.locator(".lyrics-viewport")).toContainText("Only these words");
+    await application.close();
+    application = await launch(stateRoot);
+    page = await application.firstWindow();
+    await expect(page.locator(".lyrics-viewport")).toContainText("Only these words");
+    await expect(page.getByRole("checkbox", { name: "Offline Mode" })).toBeChecked();
+    await page.getByRole("button", { name: "Choose lyrics" }).click();
+    await page.getByRole("textbox", { name: "Lyrics text" }).fill("Corrected words");
+    await page.getByRole("button", { name: "Save new Lyrics Document" }).click();
+    await expect(page.getByRole("status", { name: "Lyrics selection status" })).toHaveText(
+      "Lyrics saved",
+    );
+    const response = await page.evaluate(() =>
+      window.openChords!.project.getSnapshot("project_golden"),
+    );
+    expect(response.type).toBe("project.snapshot");
+    if (response.type === "project.snapshot") {
+      expect(response.project.lyricsDocuments.slice(-2).map(({ text }) => text)).toEqual([
+        "Only these words\nOnly these words",
+        "Corrected words",
+      ]);
+    }
+  } finally {
+    await application.close();
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+for (const failure of ["response", "rejection"] as const) {
+  test(`lyrics status ${failure} is visible while local document selection remains available`, async () => {
+    const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-lyrics-status-")));
+    const library = await openProjectLibrary({ stateRoot });
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(
+        readFileSync(
+          join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+          "utf8",
+        ),
+      ),
+    );
+    await library.createProject({ envelope, records: goldenRecords() });
+    const application = await launch(stateRoot);
+    try {
+      const page = await application.firstWindow();
+      await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
+      // Inject the response at the native IPC boundary; local Project mutations retain real main ownership.
+      await application.evaluate(({ ipcMain }, mode) => {
+        const channel = "open-chords:lyrics:perform";
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, (_event, command: Record<string, unknown>) => {
+          if (mode === "rejection") throw new Error("Synthetic lyrics status failure");
+          return {
+            protocol: command.protocol,
+            protocolVersion: command.protocolVersion,
+            generationId: command.generationId,
+            requestId: command.requestId,
+            type: "desktop.error",
+            code: "capability_unavailable",
+            message: "Lyrics discovery is unavailable",
+            retryable: true,
+          };
+        });
+      }, failure);
+      await application.evaluate(async ({ BrowserWindow }) => {
+        await BrowserWindow.getAllWindows()[0]!.loadURL("open-chords://app/index.html");
+      });
+      await expect(page.getByRole("status", { name: "Lyrics selection status" })).toContainText(
+        "Lyrics discovery is unavailable",
+      );
+      await expect(page.getByRole("checkbox", { name: "Offline Mode" })).toBeDisabled();
+      await page.getByRole("button", { name: "Choose lyrics" }).click();
+      await page.getByRole("textbox", { name: "Lyrics text" }).fill("Local words still work");
+      await page.getByRole("button", { name: "Save new Lyrics Document" }).click();
+      await expect(page.getByRole("status", { name: "Lyrics selection status" })).toHaveText(
+        "Lyrics saved",
+      );
+      await expect(page.locator(".lyrics-viewport")).toContainText("Local words still work");
+    } finally {
+      await application.close();
+      await rm(stateRoot, { force: true, recursive: true });
+    }
+  });
+}

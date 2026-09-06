@@ -86,3 +86,9 @@ export { reconcilePracticeState } from "./practice.ts";
 export { presentChord, capoGuidance, pitchClassNumber } from "./presentation.ts";
 export { chordDiagram, type ChordDiagram } from "./diagrams.ts";
 export { practiceCountIn, practiceNavigation } from "./practice.ts";
+export {
+  addLyricsDocument,
+  LyricsInputSchema,
+  type LyricsInput,
+  type LyricsOrigin,
+} from "./lyrics.ts";

@@ -7,10 +7,11 @@ import {
   DESKTOP_IPC_VERSION,
   ProjectEventSchema,
 } from "@open-chords/contracts";
-import { app, dialog, type BrowserWindow, type WebContents } from "electron";
+import { app, dialog, shell, type BrowserWindow, type WebContents } from "electron";
 
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
+import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-constants.ts";
 import { packagedProofFailureCode, runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
@@ -75,6 +76,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
 
   const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
   const ownsSingleInstance = app.requestSingleInstanceLock();
+  let lyricsDiscovery: LyricsDiscovery | null = null;
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
   const rendererContexts = new Map<
@@ -107,6 +109,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
     });
 
     app.on("window-all-closed", () => {
+      lyricsDiscovery?.cancel();
       if (process.platform !== "darwin") app.quit();
     });
 
@@ -114,6 +117,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
       .whenReady()
       .then(async () => {
         const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
+        lyricsDiscovery = await openLyricsDiscovery({ stateRoot: app.getPath("userData") });
         const localMedia = new LocalMediaService({
           library: projectLibrary,
           pickFile: async () => {
@@ -145,6 +149,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           );
         });
         installDesktopIpc(projectLibrary, {
+          lyrics: { discovery: lyricsDiscovery, openExternal: (url) => shell.openExternal(url) },
           mediaAuthority: localMedia,
           onSenderAction: (_action, sender) => replaceCompromisedRenderer(sender),
           rendererContextFor: (sender) => rendererContexts.get(sender.id) ?? null,
@@ -159,6 +164,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
 
   function getOrCreateWindow() {
     if (mainWindow === null || mainWindow.isDestroyed()) {
+      lyricsDiscovery?.cancel();
       const generationId = `generation_${randomUUID().replaceAll("-", "")}`;
       const window = createDesktopWindow(generationId);
       localMediaAuthority?.activateGeneration(generationId);
@@ -192,6 +198,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   }
 
   function revokeRendererGeneration(webContentsId: number): void {
+    lyricsDiscovery?.cancel();
     const context = rendererContexts.get(webContentsId);
     rendererContexts.delete(webContentsId);
     if (context !== undefined && localMediaAuthority !== null) {

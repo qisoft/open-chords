@@ -1,4 +1,5 @@
 import {
+  LyricsInputSchema,
   PracticeActionSchema,
   EditHistoryActionSchema,
   EditTransactionSchema,
@@ -6,9 +7,13 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
+import { LyricsCandidateSchema, LyricsSearchSchema } from "./lyrics.ts";
+
 export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
+  lyricsPerform: "open-chords:lyrics:perform",
+  projectAddLyrics: "open-chords:project:add-lyrics",
   projectChangePractice: "open-chords:project:change-practice",
   projectChangeEditHistory: "open-chords:project:change-edit-history",
   projectChanged: "open-chords:project:changed",
@@ -96,6 +101,14 @@ export const ChangePracticeCommandSchema = z.strictObject({
   type: z.literal("project.change_practice"),
 });
 
+export const AddLyricsCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  expectedProjectRevisionId: DesktopProjectRevisionIdSchema,
+  projectId: DesktopProjectIdSchema,
+  input: LyricsInputSchema,
+  type: z.literal("project.add_lyrics"),
+});
+
 export const PickLocalFileCommandSchema = z.strictObject({
   ...correlatedEnvelope,
   type: z.literal("media.pick_local_file"),
@@ -121,10 +134,35 @@ export const OpenMediaPlaybackCommandSchema = z.strictObject({
   type: z.literal("media.open_playback"),
 });
 
+export const LyricsActionSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("status") }),
+  z.strictObject({ type: z.literal("cancel") }),
+  z.strictObject({ type: z.literal("set_offline"), offline: z.boolean() }),
+  LyricsSearchSchema.extend({ type: z.literal("search"), projectId: DesktopProjectIdSchema }),
+  z.strictObject({
+    type: z.literal("select"),
+    projectId: DesktopProjectIdSchema,
+    expectedProjectRevisionId: DesktopProjectRevisionIdSchema,
+    candidateId: z.string().regex(/^candidate_[a-f0-9]{32}$/),
+    language: z
+      .string()
+      .regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/)
+      .max(35),
+  }),
+  z.strictObject({ type: z.literal("open_genius"), query: z.string().trim().min(1).max(200) }),
+]);
+export const LyricsCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  type: z.literal("lyrics.perform"),
+  action: LyricsActionSchema,
+});
+
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
+  LyricsCommandSchema,
   CommitEditTransactionCommandSchema,
   ChangeEditHistoryCommandSchema,
   ChangePracticeCommandSchema,
+  AddLyricsCommandSchema,
   CreateMediaProjectCommandSchema,
   OpenMediaPlaybackCommandSchema,
   PickLocalFileCommandSchema,
@@ -166,6 +204,19 @@ const mediaSelectionEnvelope = {
 };
 
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    ...correlatedEnvelope,
+    type: z.literal("lyrics.result"),
+    offline: z.boolean(),
+    candidates: z.array(LyricsCandidateSchema).max(20).optional(),
+    projectRevisionId: DesktopProjectRevisionIdSchema.optional(),
+  }),
+  z.strictObject({
+    ...correlatedEnvelope,
+    projectId: DesktopProjectIdSchema,
+    projectRevisionId: DesktopProjectRevisionIdSchema,
+    type: z.literal("project.lyrics_added"),
+  }),
   z.strictObject({
     ...correlatedEnvelope,
     security: z.strictObject({
@@ -301,6 +352,11 @@ export type MediaPlaybackResponse = Extract<
 >;
 
 export type OpenChordsDesktopApi = {
+  lyrics: {
+    perform(
+      action: z.input<typeof LyricsActionSchema>,
+    ): Promise<DesktopErrorResponse | Extract<DesktopResponse, { type: "lyrics.result" }>>;
+  };
   media: {
     createProject(input: {
       capabilityId: string;
@@ -316,6 +372,11 @@ export type OpenChordsDesktopApi = {
     relinkSource(sourceId: string): Promise<DesktopErrorResponse | MediaRelinkResponse>;
   };
   project: {
+    addLyrics(input: {
+      expectedProjectRevisionId: string;
+      projectId: string;
+      input: z.infer<typeof LyricsInputSchema>;
+    }): Promise<DesktopErrorResponse | Extract<DesktopResponse, { type: "project.lyrics_added" }>>;
     changePractice(input: {
       expectedProjectRevisionId: string;
       projectId: string;

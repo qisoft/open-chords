@@ -168,6 +168,7 @@ test("installed editor and practice save through named IPC with a durable reopen
       saved: true,
       undone: true,
       practiceSaved: true,
+      lyricsSaved: true,
     });
     process.stdout.write("Packaged editor stage: save_and_undo_verified\n");
   } finally {
@@ -179,6 +180,10 @@ test("installed editor and practice save through named IPC with a durable reopen
   }
   const reopened = await openProjectLibrary({ stateRoot });
   const saved = (await reopened.getSnapshot("project_golden"))!.project;
+  expect(
+    saved.lyricsDocuments.find((document) => document.id === saved.activeView!.lyricsDocumentId)!
+      .text,
+  ).toBe("Installed local words");
   expect(saved.activeView!.editHistoryPosition).toBe(0);
   expect(saved.editLayers[0]!.transactions).toHaveLength(2);
   expect(saved.analysisRevisions).toEqual(envelope.payload.analysisRevisions);
@@ -247,7 +252,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       });
     }
     expect(renderer).toMatchObject({
-      apiKeys: ["media", "project", "shell"],
+      apiKeys: ["lyrics", "media", "project", "shell"],
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },
       externalFetch: "rejected",
@@ -277,6 +282,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       permissionDenied: true,
       popupDenied: true,
       projectKeys: [
+        "addLyrics",
         "changeEditHistory",
         "changePractice",
         "commitEditTransaction",
@@ -557,7 +563,14 @@ async function evaluatePackagedEditor(webSocketUrl: string): Promise<unknown> {
     await choose("Playback speed", "0.75");
     await choose("Instrument", "piano");
     const practiced = await window.openChords.project.getSnapshot("project_golden");
-    return { saved: saved.type === "project.snapshot" && saved.project.activeView.editHistoryPosition === 2, undone: undone.type === "project.snapshot" && undone.project.activeView.editHistoryPosition === 0, practiceSaved: practiced.type === "project.snapshot" && practiced.project.practice.speed === 0.75 && practiced.project.practice.instrument === "piano" && practiced.project.practice.loop.firstBarId === "bar_pickup" };
+    button("Choose lyrics").click();
+    const lyrics = await waitFor(() => document.querySelector('.lyrics-selection textarea'), "lyrics_open");
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(lyrics, "Installed local words");
+    lyrics.dispatchEvent(new Event("input", { bubbles: true }));
+    (await waitFor(() => button("Save new Lyrics Document"), "lyrics_valid")).click();
+    await waitFor(() => document.querySelector('[aria-label="Lyrics selection status"]').textContent === "Lyrics saved", "lyrics_saved");
+    const withLyrics = await window.openChords.project.getSnapshot("project_golden");
+    return { lyricsSaved: withLyrics.type === "project.snapshot" && withLyrics.project.lyricsDocuments.some(document => document.id === withLyrics.project.activeView.lyricsDocumentId && document.text === "Installed local words"), saved: saved.type === "project.snapshot" && saved.project.activeView.editHistoryPosition === 2, undone: undone.type === "project.snapshot" && undone.project.activeView.editHistoryPosition === 0, practiceSaved: practiced.type === "project.snapshot" && practiced.project.practice.speed === 0.75 && practiced.project.practice.instrument === "piano" && practiced.project.practice.loop.firstBarId === "bar_pickup" };
   })()`;
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);

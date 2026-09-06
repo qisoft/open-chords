@@ -13,10 +13,13 @@ import {
   type LocalMediaAuthority,
   type ProjectAuthority,
 } from "./desktop-command-gateway.ts";
+import type { LyricsDiscovery } from "./lyrics-discovery.ts";
 
 type CommandType = DesktopCommand["type"];
 
 const commandChannels = [
+  [DESKTOP_IPC_CHANNELS.lyricsPerform, "lyrics.perform"],
+  [DESKTOP_IPC_CHANNELS.projectAddLyrics, "project.add_lyrics"],
   [DESKTOP_IPC_CHANNELS.projectChangePractice, "project.change_practice"],
   [DESKTOP_IPC_CHANNELS.projectChangeEditHistory, "project.change_edit_history"],
   [DESKTOP_IPC_CHANNELS.mediaCreateProject, "media.create_project"],
@@ -30,6 +33,7 @@ const commandChannels = [
 ] as const satisfies ReadonlyArray<readonly [string, CommandType]>;
 
 export type DesktopIpcOptions = {
+  lyrics?: { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> };
   mediaAuthority: LocalMediaAuthority;
   onSenderAction(action: Exclude<DesktopGatewayAction, "none">, sender: WebContents): void;
   rendererContextFor(
@@ -38,7 +42,7 @@ export type DesktopIpcOptions = {
 };
 
 export function installDesktopIpc(authority: ProjectAuthority, options: DesktopIpcOptions): void {
-  const gateway = new DesktopCommandGateway(authority, options.mediaAuthority);
+  const gateway = new DesktopCommandGateway(authority, options.mediaAuthority, options.lyrics);
 
   for (const [channel, expectedType] of commandChannels) {
     ipcMain.handle(channel, async (event, rawCommand: unknown) => {

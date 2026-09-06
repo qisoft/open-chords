@@ -556,7 +556,7 @@ button:disabled {
 .workspace {
   height: 100dvh;
   min-height: 760px;
-  grid-template-rows: auto auto auto auto minmax(280px, 1fr);
+  grid-template-rows: auto auto auto auto auto minmax(280px, 1fr);
 }
 .content-section {
   display: flex;
@@ -844,4 +844,74 @@ button:disabled {
   .practice-panel {
     padding-inline: 12px;
   }
+}
+
+.lyrics-selection {
+  margin: 0.75rem 20px;
+}
+.lyrics-selection fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--color-border-subtle);
+}
+.lyrics-selection label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.lyrics-selection label:has(textarea) {
+  width: 100%;
+}
+.lyrics-selection textarea {
+  width: 100%;
+  min-height: 8rem;
+  resize: vertical;
+}
+.lyrics-selection input,
+.lyrics-selection textarea,
+.lyrics-selection select {
+  color: inherit;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  padding: 0.5rem;
+}
+.lyrics-provenance {
+  overflow-wrap: anywhere;
+}
+
+.lyrics-selection .offline-control {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  margin-inline: 1rem;
+}
+.lyrics-selection fieldset,
+.lyrics-selection input {
+  min-width: 0;
+  max-width: 100%;
+}
+.lyrics-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  width: 100%;
+}
+.lyrics-search p {
+  flex-basis: 100%;
+}
+.lyrics-selection ul {
+  width: 100%;
+  padding-inline-start: 1.25rem;
+}
+.lyrics-selection li {
+  overflow-wrap: anywhere;
+  margin-block: 0.5rem;
+}
+.lyrics-selection li button {
+  max-width: 100%;
+  white-space: normal;
 }
