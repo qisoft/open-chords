@@ -62,7 +62,7 @@ export function addLyricsDocument(
   let offset = 0;
   for (const line of imported.text.split(/\r\n|\r|\n/)) {
     const lineId = `${id}_line_${document.lines.length}`;
-    if (line.length > 0) {
+    if (line.trim().length > 0) {
       document.lines.push({ id: lineId, startOffset: offset, endOffset: offset + line.length });
       for (const match of line.matchAll(
         /[\p{L}\p{N}][\p{L}\p{M}\p{N}]*(?:['’][\p{L}\p{M}\p{N}]+)*/gu,
@@ -134,14 +134,14 @@ function importLines(
   });
   return {
     text: cues.map((cue) => cue.text).join("\n"),
-    timings: timings.filter((_timing, index) => cues[index]!.text.length > 0),
+    timings: timings.filter((_timing, index) => cues[index]!.text.trim().length > 0),
   };
 }
 
 function importSubtitles(raw: string, sampleRate: number, durationSamples: number) {
   const blocks = raw
     .replace(/^\uFEFF/, "")
-    .replaceAll("\r\n", "\n")
+    .replaceAll(/\r\n?/g, "\n")
     .split(/\n\n+/);
   const texts: string[] = [];
   const timings: ({ startSample: number; endSample: number } | undefined)[] = [];
@@ -180,7 +180,11 @@ function importSubtitles(raw: string, sampleRate: number, durationSamples: numbe
     if (!text.trim()) throw new Error("Empty subtitle cue");
     texts.push(text);
     timings.push({ startSample, endSample });
-    for (let index = 1; index < text.split("\n").filter((line) => line.length > 0).length; index++)
+    for (
+      let index = 1;
+      index < text.split("\n").filter((line) => line.trim().length > 0).length;
+      index++
+    )
       timings.push(undefined);
     previousEnd = endSample;
   }

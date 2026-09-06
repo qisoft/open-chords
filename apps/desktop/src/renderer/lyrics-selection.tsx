@@ -32,10 +32,14 @@ export function LyricsSelection({
     void api.lyrics
       .perform({ type: "status" })
       .then((result) => {
-        if (live && result.type === "lyrics.result") setOffline(result.offline);
+        if (!live) return undefined;
+        if (result.type === "lyrics.result") setOffline(result.offline);
+        else setStatus(result.message);
         return undefined;
       })
-      .catch(() => {});
+      .catch(() => {
+        if (live) setStatus("Lyrics discovery is unavailable. You can paste local text.");
+      });
     return () => {
       live = false;
       void api.lyrics.perform({ type: "cancel" }).catch(() => {});

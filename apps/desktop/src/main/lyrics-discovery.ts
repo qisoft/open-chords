@@ -242,7 +242,14 @@ export class LyricsDiscovery {
           .map((event, index) => {
             if (event.dDurationMs === undefined || event.dDurationMs <= 0)
               throw new Error("Subtitle timing unavailable");
-            return `${index + 1}\n${subtitleStamp(event.tStartMs)} --> ${subtitleStamp(event.tStartMs + event.dDurationMs)}\n${event.segs!.map((segment) => segment.utf8).join("")}`;
+            const text = event
+              .segs!.map((segment) => segment.utf8)
+              .join("")
+              .replaceAll(/\r\n?/g, "\n")
+              .split("\n")
+              .filter((line) => line.trim().length > 0)
+              .join("\n");
+            return `${index + 1}\n${subtitleStamp(event.tStartMs)} --> ${subtitleStamp(event.tStartMs + event.dDurationMs)}\n${text}`;
           });
         return {
           input: { text: cues.join("\n\n"), language: subtitle.language, format: "srt" },

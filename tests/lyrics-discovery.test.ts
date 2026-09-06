@@ -156,3 +156,48 @@ it("cancels in-flight bodies in Offline Mode and refuses off-policy subtitle URL
     hostile.search({ provider: "youtube", query: "abcdefghijk" }, "generation_one", "project_one"),
   ).rejects.toThrow("endpoint unavailable");
 });
+
+it("imports json3 cues with leading and repeated newlines without splitting their timing blocks", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { addLyricsDocument, parseProjectContract } = await import("@open-chords/domain");
+  const discovery = await openLyricsDiscovery({
+    stateRoot: await root(),
+    fetch: async (url) => {
+      const parsed = new URL(url instanceof Request ? url.url : url);
+      return parsed.pathname === "/watch"
+        ? new Response(
+            `ytInitialPlayerResponse = ${JSON.stringify({ captions: { playerCaptionsTracklistRenderer: { captionTracks: [{ baseUrl: "https://www.youtube.com/api/timedtext?v=abcdefghijk", languageCode: "en", name: { simpleText: "English" } }] } } })};`,
+          )
+        : Response.json({
+            events: [
+              { tStartMs: 100, dDurationMs: 200, segs: [{ utf8: "\n First \r\n\r\n Second \n" }] },
+              { tStartMs: 500, dDurationMs: 300, segs: [{ utf8: "Last" }] },
+            ],
+          });
+    },
+  });
+  const [candidate] = await discovery.search(
+    { provider: "youtube", query: "abcdefghijk" },
+    "generation_one",
+    "project_one",
+  );
+  const selected = await discovery.select(candidate!.id, "generation_one", "project_one");
+  const fixture = parseProjectContract(
+    JSON.parse(
+      readFileSync(
+        new URL("../packages/testkit/contracts/v1/valid/project-envelope.json", import.meta.url),
+        "utf8",
+      ),
+    ).payload,
+  );
+  const project = addLyricsDocument(fixture, selected.input, "lyrics_newlines", selected.origin);
+  expect(project.lyricsDocuments.at(-1)!.text).toBe(" First \n Second \nLast");
+  expect(
+    project.lyricsAlignments.at(-1)!.lineOccurrences.map(({ timing }) => timing),
+  ).toMatchObject([
+    { startSample: 4800, endSample: 14400 },
+    { state: "unmatched" },
+    { startSample: 24000, endSample: 38400 },
+  ]);
+  expect(() => parseProjectContract(project)).not.toThrow();
+});

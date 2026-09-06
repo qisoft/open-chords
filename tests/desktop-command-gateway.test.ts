@@ -85,6 +85,7 @@ function mutationCommand({
 
 function createAuthority(overrides: Partial<ProjectAuthority> = {}): ProjectAuthority {
   return {
+    addLyrics: async () => ({ projectRevisionId: "projectrevision_next" }),
     changePractice: async () => ({ projectRevisionId: "projectrevision_next" }),
     changeEditHistory: async () => ({ projectRevisionId: "projectrevision_next" }),
     commitEditTransaction: async () => ({ projectRevisionId: "projectrevision_next" }),

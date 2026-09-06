@@ -163,3 +163,44 @@ it("retains empty LRC cues as gaps instead of extending lyrics across instrument
   ]);
   expect(() => parseProjectContract(project)).not.toThrow();
 });
+
+it("keeps later subtitle timing attached to its own line after a lone carriage return", () => {
+  const project = addLyricsDocument(
+    fixture(),
+    {
+      text: "1\n00:00:00,100 --> 00:00:00,300\nFirst\rContinuation\n\n2\n00:00:00,500 --> 00:00:00,900\nLast",
+      language: "en",
+      format: "srt",
+    },
+    "lyrics_carriage",
+  );
+  expect(project.lyricsDocuments.at(-1)!.text).toBe("First\nContinuation\nLast");
+  expect(
+    project.lyricsAlignments.at(-1)!.lineOccurrences.map(({ timing }) => timing),
+  ).toMatchObject([
+    { state: "matched", startSample: 4800, endSample: 14400 },
+    { state: "unmatched" },
+    { state: "matched", startSample: 24000, endSample: 43200 },
+  ]);
+  expect(() => parseProjectContract(project)).not.toThrow();
+});
+
+it("uses whitespace-only LRC cues as gaps without creating lyric line occurrences", () => {
+  const project = addLyricsDocument(
+    fixture(),
+    { text: "[00:00.10]Hello\n[00:00.30] \t\n[00:00.50]Again", language: "en", format: "lrc" },
+    "lyrics_whitespace",
+  );
+  const document = project.lyricsDocuments.at(-1)!;
+  expect(document.text).toBe("Hello\n \t\nAgain");
+  expect(
+    document.lines.map((line) => document.text.slice(line.startOffset, line.endOffset)),
+  ).toEqual(["Hello", "Again"]);
+  expect(
+    project.lyricsAlignments.at(-1)!.lineOccurrences.map(({ timing }) => timing),
+  ).toMatchObject([
+    { startSample: 4800, endSample: 14400 },
+    { startSample: 24000, endSample: 48000 },
+  ]);
+  expect(() => parseProjectContract(project)).not.toThrow();
+});

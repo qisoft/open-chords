@@ -47,7 +47,7 @@ export type DesktopSenderContext = {
 };
 
 export type ProjectAuthority = {
-  addLyrics?(input: {
+  addLyrics(input: {
     expectedProjectRevisionId: string;
     projectId: string;
     input: LyricsInput;
@@ -496,7 +496,7 @@ export class DesktopCommandGateway {
         command.generationId,
         action.projectId,
       );
-      const saved = await this.#authority.addLyrics!({
+      const saved = await this.#authority.addLyrics({
         projectId: action.projectId,
         expectedProjectRevisionId: action.expectedProjectRevisionId,
         input: { ...selection.input, language: action.language },
@@ -546,7 +546,7 @@ export class DesktopCommandGateway {
     try {
       const result =
         command.type === "project.add_lyrics"
-          ? await this.#authority.addLyrics!(command)
+          ? await this.#authority.addLyrics(command)
           : command.type === "project.change_practice"
             ? await this.#authority.changePractice(command)
             : command.type === "project.change_edit_history"
