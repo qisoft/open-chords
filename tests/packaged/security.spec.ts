@@ -1,19 +1,21 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { extractFile } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
+import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { monoPcmWav } from "@open-chords/testkit/media";
-import { expect, test } from "@playwright/test";
+import { chromium, expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 import { z } from "zod";
 
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof-constants.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
+import { goldenRecords } from "../support/editor-fixture.ts";
 
 const PRODUCT_NAME = "Open Chords";
 const EXPECTED_RENDERER_CSP = [
@@ -123,6 +125,65 @@ test("installed artifact runs contained analysis, publishes Revisions, and reaps
   expect(output).toContain("Packaged sidecar proof stage: publication_completed");
 });
 
+test("installed editor saves and undoes through named IPC with a durable reopened result", async () => {
+  const stateRoot = join(packageRoot, "editor-user-data");
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(process.cwd(), "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const library = await openProjectLibrary({ stateRoot });
+  await library.createProject({ envelope, records: goldenRecords() });
+  const port = await reservePort();
+  const application = spawn(
+    executablePath,
+    [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
+    { stdio: "ignore" },
+  );
+  let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
+  try {
+    const endpoint = `http://127.0.0.1:${port}`;
+    await expect
+      .poll(
+        async () => {
+          try {
+            return (await fetch(`${endpoint}/json/version`)).ok;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+    browser = await chromium.connectOverCDP(endpoint);
+    const context = browser.contexts()[0]!;
+    const page = context.pages()[0] ?? (await context.waitForEvent("page"));
+    const pickup = page.getByRole("button", { name: /Pickup, 4\/4/ });
+    await expect(pickup).toBeVisible();
+    const before = await pickup.getAttribute("aria-label");
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    const editor = page.getByRole("region", { name: "Chord Editor" });
+    await editor.getByRole("button", { name: "Choose chord" }).first().click();
+    await editor.getByLabel("Root").selectOption("N");
+    await editor.getByRole("button", { name: "Done", exact: true }).click();
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(pickup).toHaveAttribute("aria-label", /Chords: N/);
+    await page.getByRole("button", { name: "Undo edit", exact: true }).click();
+    await expect(pickup).toHaveAttribute("aria-label", before!);
+  } finally {
+    await browser?.close();
+    await stopApplication(application);
+  }
+  const reopened = await openProjectLibrary({ stateRoot });
+  const saved = (await reopened.getSnapshot("project_golden"))!.project;
+  expect(saved.activeView!.editHistoryPosition).toBe(0);
+  expect(saved.editLayers[0]!.transactions).toHaveLength(2);
+  expect(saved.analysisRevisions).toEqual(envelope.payload.analysisRevisions);
+});
+
 test("installed shell exposes only named capabilities and manifest assets", async () => {
   const rawManifest: unknown = JSON.parse(
     extractFile(
@@ -210,7 +271,13 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       },
       permissionDenied: true,
       popupDenied: true,
-      projectKeys: ["commitEditTransaction", "getSnapshot", "list", "subscribe"],
+      projectKeys: [
+        "changeEditHistory",
+        "commitEditTransaction",
+        "getSnapshot",
+        "list",
+        "subscribe",
+      ],
       projectList: {
         projects: [expect.objectContaining({ projectId: packagedProjectId })],
         type: "project.list",

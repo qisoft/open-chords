@@ -221,7 +221,20 @@ def apply_operations(project: dict[str, Any], layer: dict[str, Any], history_pos
     for transaction in chain:
         for operation in transaction["operations"]:
             kind = operation["type"]
-            if kind == "replace_chord_value":
+            if kind == "replace_chord_sequence":
+                ids = operation["targetEventIds"]
+                index = next(index for index, event in enumerate(timeline["chordEvents"]) if event["id"] == ids[0])
+                previous = timeline["chordEvents"][index:index + len(ids)]
+                events = operation["events"]
+                if [event["id"] for event in previous] != ids:
+                    raise ContractError("Chord sequence targets must be contiguous and ordered")
+                if len(events) != len(previous) or len({event["id"] for event in events}) != len(previous) or {event["id"] for event in events} != set(ids):
+                    raise ContractError("Chord sequence must preserve identities exactly once")
+                if events[0]["startSample"] != previous[0]["startSample"] or events[-1]["endSample"] != previous[-1]["endSample"]:
+                    raise ContractError("Chord sequence must preserve the saved span")
+                originals = {event["id"]: event for event in previous}
+                timeline["chordEvents"][index:index + len(ids)] = [dict(copy.deepcopy(originals[event["id"]]), **copy.deepcopy(event)) for event in events]
+            elif kind == "replace_chord_value":
                 event = next(item for item in timeline["chordEvents"] if item["id"] == operation["eventId"])
                 event["value"] = operation["value"]
             elif kind == "move_chord_boundary":

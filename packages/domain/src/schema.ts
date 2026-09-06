@@ -271,6 +271,14 @@ export const LyricsAlignmentSchema = z
 export const EditOperationSchema = z
   .discriminatedUnion("type", [
     z.strictObject({
+      type: z.literal("replace_chord_sequence"),
+      targetEventIds: z.array(StableIdSchema).min(1).max(10000),
+      events: z
+        .array(z.strictObject({ ...intervalShape, id: StableIdSchema, value: ChordValueSchema }))
+        .min(1)
+        .max(10000),
+    }),
+    z.strictObject({
       eventId: StableIdSchema,
       type: z.literal("replace_chord_value"),
       value: ChordValueSchema,

@@ -249,6 +249,165 @@ function hashCanonical(value: unknown): string {
 const DURABILITY_TEST_TIMEOUT_MS = 15_000;
 
 describe("ProjectLibrary", () => {
+  it("requires explicit review mappings before publishing edits on another Analysis Revision", async () => {
+    const library = await openProjectLibrary({
+      stateRoot: await temporaryDirectory("open-chords-edit-mapping-"),
+    });
+    const envelope = goldenEnvelope();
+    envelope.payload.activeView!.editHistoryPosition = 1;
+    const created = await library.createProject({ envelope, records: ownedRecords() });
+    const input = {
+      projectId: "project_golden",
+      expectedProjectRevisionId: created.projectRevisionId,
+      action: {
+        type: "map_edits" as const,
+        sourceEditLayerId: "edit_original",
+        sourceHistoryPosition: 1,
+        targetAnalysisRevisionId: "revision_reviewable",
+        mappings: [] as Array<{ sourceId: string; targetId: string }>,
+      },
+    };
+    const unresolved = await library.changeEditHistory(input);
+    expect(unresolved).toMatchObject({
+      conflicts: [expect.objectContaining({ sourceId: "chord_am7_e" })],
+    });
+    expect((await library.getSnapshot("project_golden"))!.projectRevisionId).toBe(
+      created.projectRevisionId,
+    );
+    const mapped = await library.changeEditHistory({
+      ...input,
+      action: {
+        ...input.action,
+        mappings: [{ sourceId: "chord_am7_e", targetId: "chord_reviewable" }],
+      },
+    });
+    expect(mapped).toHaveProperty("projectRevisionId");
+    const saved = (await library.getSnapshot("project_golden"))!.project;
+    expect(saved.activeView!.analysisRevisionId).toBe("revision_reviewable");
+    expect(saved.analysisRevisions).toEqual(envelope.payload.analysisRevisions);
+    const layer = saved.editLayers.find(({ id }) => id === saved.activeView!.editLayerId)!;
+    expect(layer.transactions[0]!.operations).toEqual([
+      {
+        ...envelope.payload.editLayers[0]!.transactions[0]!.operations[0],
+        eventId: "chord_reviewable",
+      },
+    ]);
+  });
+
+  it("rejects saving against a different history branch without publishing a Head", async () => {
+    const library = await openProjectLibrary({
+      stateRoot: await temporaryDirectory("open-chords-edit-parent-"),
+    });
+    const created = await library.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const before = (await library.getSnapshot("project_golden"))!;
+    const layer = before.project.editLayers.find(
+      ({ id }) => id === before.project.activeView!.editLayerId,
+    )!;
+    const parent =
+      layer.transactions[before.project.activeView!.editHistoryPosition - 1]?.id ?? null;
+    const first = await library.commitEditTransaction({
+      projectId: "project_golden",
+      expectedProjectRevisionId: created.projectRevisionId,
+      transaction: { ...replacementTransaction("transaction_saved"), parentTransactionId: parent },
+    });
+    if (!("projectRevisionId" in first)) throw new Error("Save failed");
+    await expect(
+      library.commitEditTransaction({
+        projectId: "project_golden",
+        expectedProjectRevisionId: first.projectRevisionId,
+        transaction: {
+          ...replacementTransaction("transaction_wrong_branch"),
+          parentTransactionId: parent,
+        },
+      }),
+    ).rejects.toThrow(/selected history/);
+    expect((await library.getSnapshot("project_golden"))!.projectRevisionId).toBe(
+      first.projectRevisionId,
+    );
+  });
+
+  it("durably selects undo branches and resets without discarding machine observations", async () => {
+    const stateRoot = await temporaryDirectory("open-chords-edit-history-");
+    const library = await openProjectLibrary({ stateRoot });
+    const created = await library.createProject({
+      envelope: goldenEnvelope(),
+      records: ownedRecords(),
+    });
+    const base = (await library.getSnapshot("project_golden"))!;
+    const activeLayer = base.project.editLayers.find(
+      ({ id }) => id === base.project.activeView!.editLayerId,
+    )!;
+    const parent =
+      activeLayer.transactions[base.project.activeView!.editHistoryPosition - 1]?.id ?? null;
+    const first = await library.commitEditTransaction({
+      projectId: "project_golden",
+      expectedProjectRevisionId: created.projectRevisionId,
+      transaction: { ...replacementTransaction("transaction_first"), parentTransactionId: parent },
+    });
+    if (!("projectRevisionId" in first)) throw new Error("Save failed");
+    const undo = await library.changeEditHistory({
+      projectId: "project_golden",
+      expectedProjectRevisionId: first.projectRevisionId,
+      action: { type: "undo" },
+    });
+    if (!("projectRevisionId" in undo)) throw new Error("Undo failed");
+    const branch = await library.commitEditTransaction({
+      projectId: "project_golden",
+      expectedProjectRevisionId: undo.projectRevisionId,
+      transaction: { ...replacementTransaction("transaction_branch"), parentTransactionId: parent },
+    });
+    if (!("projectRevisionId" in branch)) throw new Error("Branch failed");
+    const branchUndo = await library.changeEditHistory({
+      projectId: "project_golden",
+      expectedProjectRevisionId: branch.projectRevisionId,
+      action: { type: "undo" },
+    });
+    if (!("projectRevisionId" in branchUndo)) throw new Error("Undo failed");
+    const redo = await library.changeEditHistory({
+      projectId: "project_golden",
+      expectedProjectRevisionId: branchUndo.projectRevisionId,
+      action: { type: "redo", transactionId: "transaction_first" },
+    });
+    if (!("projectRevisionId" in redo)) throw new Error("Redo failed");
+    const selected = (await library.getSnapshot("project_golden"))!;
+    expect(selected.project.activeView!.editHistoryPosition).toBe(
+      activeLayer.transactions.length + 1,
+    );
+    expect(
+      selected.project.editLayers
+        .find(({ id }) => id === activeLayer.id)!
+        .transactions.slice(-2)
+        .map(({ id }) => id),
+    ).toEqual(["transaction_first", "transaction_branch"]);
+    expect(
+      await library.changeEditHistory({
+        projectId: "project_golden",
+        expectedProjectRevisionId: branchUndo.projectRevisionId,
+        action: { type: "reset" },
+      }),
+    ).toEqual({ stale: true });
+    const reset = await library.changeEditHistory({
+      projectId: "project_golden",
+      expectedProjectRevisionId: redo.projectRevisionId,
+      action: { type: "reset" },
+    });
+    if (!("projectRevisionId" in reset)) throw new Error("Reset failed");
+    const reopened = await openProjectLibrary({ stateRoot });
+    const restored = (await reopened.getSnapshot("project_golden"))!;
+    expect(restored.project.analysisRevisions).toEqual(base.project.analysisRevisions);
+    expect(restored.project.activeView).toMatchObject({
+      analysisRevisionId: base.project.activeView!.analysisRevisionId,
+      editHistoryPosition: 0,
+    });
+    expect(restored.project.activeView!.editLayerId).not.toBe(activeLayer.id);
+    expect(
+      restored.project.editLayers.find(({ id }) => id === activeLayer.id)!.transactions,
+    ).toHaveLength(activeLayer.transactions.length + 2);
+  });
+
   it("rejects Analysis Revisions without a Manifest or explicit legacy provenance", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-manifest-provenance-");
     const library = await openProjectLibrary({ stateRoot });

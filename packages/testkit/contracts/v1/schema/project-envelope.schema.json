@@ -459,6 +459,58 @@
         {
           "additionalProperties": false,
           "properties": {
+            "events": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "endSample": {
+                    "$ref": "#/$defs/PositiveSampleFrame"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StableId"
+                  },
+                  "startSample": {
+                    "$ref": "#/$defs/SampleFrame"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/ChordValue"
+                  }
+                },
+                "required": [
+                  "endSample",
+                  "startSample",
+                  "id",
+                  "value"
+                ],
+                "type": "object"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            },
+            "targetEventIds": {
+              "items": {
+                "$ref": "#/$defs/StableId"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            },
+            "type": {
+              "const": "replace_chord_sequence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "targetEventIds",
+            "events"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "eventId": {
               "$ref": "#/$defs/StableId"
             },

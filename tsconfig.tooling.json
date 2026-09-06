@@ -9,6 +9,7 @@
     "apps/desktop/src/main/**/*.ts",
     "apps/desktop/src/preload/**/*.ts",
     "apps/desktop/src/renderer/committed-project-store.ts",
+    "apps/desktop/src/renderer/editor-draft.ts",
     "apps/desktop/src/renderer/**/*.d.ts",
     "apps/desktop/src/renderer/playback-clock.ts",
     "apps/desktop/src/renderer/workspace-playback.ts",

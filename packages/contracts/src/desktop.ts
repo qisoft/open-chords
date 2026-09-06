@@ -1,9 +1,14 @@
-import { EditTransactionSchema, ProjectContractSchema } from "@open-chords/domain";
+import {
+  EditHistoryActionSchema,
+  EditTransactionSchema,
+  ProjectContractSchema,
+} from "@open-chords/domain";
 import { z } from "zod";
 
 export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
+  projectChangeEditHistory: "open-chords:project:change-edit-history",
   projectChanged: "open-chords:project:changed",
   projectCommitEditTransaction: "open-chords:project:commit-edit-transaction",
   projectGetSnapshot: "open-chords:project:get-snapshot",
@@ -73,6 +78,14 @@ export const CommitEditTransactionCommandSchema = z.strictObject({
   type: z.literal("project.commit_edit_transaction"),
 });
 
+export const ChangeEditHistoryCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  expectedProjectRevisionId: DesktopProjectRevisionIdSchema,
+  projectId: DesktopProjectIdSchema,
+  action: EditHistoryActionSchema,
+  type: z.literal("project.change_edit_history"),
+});
+
 export const PickLocalFileCommandSchema = z.strictObject({
   ...correlatedEnvelope,
   type: z.literal("media.pick_local_file"),
@@ -100,6 +113,7 @@ export const OpenMediaPlaybackCommandSchema = z.strictObject({
 
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
   CommitEditTransactionCommandSchema,
+  ChangeEditHistoryCommandSchema,
   CreateMediaProjectCommandSchema,
   OpenMediaPlaybackCommandSchema,
   PickLocalFileCommandSchema,
@@ -178,6 +192,17 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
     projectRevisionId: DesktopProjectRevisionIdSchema,
     transactionId: DesktopTransactionIdSchema,
     type: z.literal("project.committed"),
+  }),
+  z.strictObject({
+    ...correlatedEnvelope,
+    projectId: DesktopProjectIdSchema,
+    projectRevisionId: DesktopProjectRevisionIdSchema,
+    type: z.literal("project.history_changed"),
+  }),
+  z.strictObject({
+    ...correlatedEnvelope,
+    conflicts: z.array(z.strictObject({ sourceId: z.string(), message: z.string() })),
+    type: z.literal("project.edit_conflicts"),
   }),
   z.strictObject({
     ...correlatedEnvelope,
@@ -274,6 +299,14 @@ export type OpenChordsDesktopApi = {
     relinkSource(sourceId: string): Promise<DesktopErrorResponse | MediaRelinkResponse>;
   };
   project: {
+    changeEditHistory(input: {
+      expectedProjectRevisionId: string;
+      projectId: string;
+      action: z.infer<typeof EditHistoryActionSchema>;
+    }): Promise<
+      | DesktopErrorResponse
+      | Extract<DesktopResponse, { type: "project.history_changed" | "project.edit_conflicts" }>
+    >;
     commitEditTransaction(input: {
       expectedProjectRevisionId: string;
       projectId: string;

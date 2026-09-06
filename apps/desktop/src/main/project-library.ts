@@ -23,6 +23,10 @@ import {
 } from "@open-chords/contracts";
 import {
   canonicalSerialize,
+  EditHistoryActionSchema,
+  reviewEditMapping,
+  type EditHistoryAction,
+  type EditMappingConflict,
   EditTransactionSchema,
   parseProjectContract,
   StableIdSchema,
@@ -564,8 +568,110 @@ export class ProjectLibrary {
       if (activeView === null) throw new Error("Project has no Analysis Revision to edit");
       const activeLayer = project.editLayers.find(({ id }) => id === activeView.editLayerId);
       if (activeLayer === undefined) throw new Error("Active Edit Layer is missing");
-      activeLayer.transactions.push(EditTransactionSchema.parse(input.transaction));
+      const transaction = EditTransactionSchema.parse(input.transaction);
+      if (
+        transaction.parentTransactionId !==
+        (activeLayer.transactions[activeView.editHistoryPosition - 1]?.id ?? null)
+      )
+        throw new Error("Save must extend the selected history branch");
+      activeLayer.transactions.push(transaction);
       activeView.editHistoryPosition = activeLayer.transactions.length;
+      const payload = buildStoredPayload({
+        envelope: { ...entry.revision.payload.envelope, payload: parseProjectContract(project) },
+        records: entry.revision.payload.records,
+      });
+      const next = await this.#commitPayload(
+        input.projectId,
+        payload,
+        entry.revision.revision.projectRevisionId,
+        entry.revision.pointer.sequence + 1,
+        "edit_transaction",
+      );
+      return { projectRevisionId: next.revision.projectRevisionId };
+    });
+  }
+
+  async changeEditHistory(input: {
+    expectedProjectRevisionId: string;
+    projectId: string;
+    action: EditHistoryAction;
+  }): Promise<
+    | { conflicts: EditMappingConflict[] }
+    | { notFound: true }
+    | { projectRevisionId: string }
+    | { readOnly: true }
+    | { stale: true }
+  > {
+    return this.#serializeMutation(async () => {
+      const entry = this.#entries.get(input.projectId);
+      if (entry === undefined || entry.location === "trashed") return { notFound: true };
+      if (entry.status === "damaged" || entry.revision === undefined)
+        throw new ProjectLibraryDamagedError(input.projectId);
+      if (entry.compatibility === "read_only") return { readOnly: true };
+      if (entry.revision.revision.projectRevisionId !== input.expectedProjectRevisionId)
+        return { stale: true };
+      const action = EditHistoryActionSchema.parse(input.action);
+      const project = structuredClone(entry.revision.payload.envelope.payload);
+      const active = project.activeView;
+      if (active === null) throw new Error("Project has no Analysis Revision to edit");
+      const layer = project.editLayers.find(({ id }) => id === active.editLayerId)!;
+      const current = layer.transactions[active.editHistoryPosition - 1];
+      if (action.type === "undo") {
+        if (current === undefined) throw new Error("There is no edit to undo");
+        active.editHistoryPosition =
+          current.parentTransactionId === null
+            ? 0
+            : layer.transactions.findIndex(({ id }) => id === current.parentTransactionId) + 1;
+      } else if (action.type === "redo") {
+        const targetId = action.transactionId;
+        const index = layer.transactions.findIndex(({ id }) => id === targetId);
+        const target = layer.transactions[index];
+        if (target === undefined || target.parentTransactionId !== (current?.id ?? null))
+          throw new Error("Redo must select a direct history branch");
+        active.editHistoryPosition = index + 1;
+      } else if (action.type === "map_edits") {
+        const review = reviewEditMapping(project, action);
+        if (review.conflicts.length > 0) return { conflicts: review.conflicts };
+        const id = `editlayer_${randomUUID().replaceAll("-", "")}`;
+        project.editLayers.push({
+          id,
+          analysisRevisionId: action.targetAnalysisRevisionId,
+          transactions: [
+            {
+              id: `transaction_${randomUUID().replaceAll("-", "")}`,
+              parentTransactionId: null,
+              operations: review.operations,
+            },
+          ],
+        });
+        active.editLayerId = id;
+        active.analysisRevisionId = action.targetAnalysisRevisionId;
+        active.editHistoryPosition = 1;
+        delete active.lyricsAlignmentId;
+        delete active.lyricsDocumentId;
+        try {
+          parseProjectContract(project);
+        } catch {
+          return {
+            conflicts: [
+              {
+                sourceId: action.sourceEditLayerId,
+                message:
+                  "Mapped edits conflict with the target timeline. Review boundaries and entity order.",
+              },
+            ],
+          };
+        }
+      } else {
+        const id = `editlayer_${randomUUID().replaceAll("-", "")}`;
+        project.editLayers.push({
+          id,
+          analysisRevisionId: active.analysisRevisionId,
+          transactions: [],
+        });
+        active.editLayerId = id;
+        active.editHistoryPosition = 0;
+      }
       const payload = buildStoredPayload({
         envelope: { ...entry.revision.payload.envelope, payload: parseProjectContract(project) },
         records: entry.revision.payload.records,

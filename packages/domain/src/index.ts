@@ -1,3 +1,10 @@
+export {
+  EditHistoryActionSchema,
+  EditMappingActionSchema,
+  reviewEditMapping,
+  type EditHistoryAction,
+  type EditMappingConflict,
+} from "./edit-history.ts";
 export { canonicalSerialize } from "./canonical.ts";
 export {
   ANALYSIS_CAPABILITY_STAGES,
