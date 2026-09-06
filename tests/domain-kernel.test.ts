@@ -424,9 +424,9 @@ describe("canonical domain kernel", () => {
 
   it("opens newer minor contracts read-only, preserves namespaced extensions, and rejects newer majors", () => {
     const newerMinor = readGoldenEnvelope();
-    newerMinor.payload.schemaVersion = "1.1";
+    newerMinor.payload.schemaVersion = "1.2";
     expect(parseContractEnvelope(newerMinor).compatibility).toBe("read_only");
-    newerMinor.schemaVersion = "1.1";
+    newerMinor.schemaVersion = "1.2";
     expect(parseContractEnvelope(newerMinor)).toMatchObject({
       compatibility: "read_only",
       envelope: {

@@ -313,7 +313,18 @@ export class ProjectLibrary {
     this.#currentSchemaVersion = options.currentSchemaVersion ?? CONTRACT_VERSION;
     parseSchemaVersion(this.#currentSchemaVersion);
     this.#faultInjector = options.faultInjector ?? (() => undefined);
-    this.#migrations = options.migrations ?? [];
+    this.#migrations = options.migrations ?? [
+      {
+        fromVersion: "1.0",
+        toVersion: "1.1",
+        migrate: (input) => {
+          const envelope = structuredClone(ProjectEnvelopeSchema.parse(input));
+          envelope.schemaVersion = "1.1";
+          envelope.payload.schemaVersion = "1.1";
+          return envelope;
+        },
+      },
+    ];
     validateMigrationGraph(this.#migrations);
     this.#now = options.now ?? (() => new Date());
     this.#pathPolicy = options.pathPolicy ?? classifyLibraryPath;

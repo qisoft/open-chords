@@ -1,6 +1,6 @@
 {
   "protocol": "open-chords/contracts",
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "type": "project_snapshot",
   "extensions": {
     "org.openchords.fixture": {
@@ -9,7 +9,7 @@
   },
   "payload": {
     "format": "open-chords/project",
-    "schemaVersion": "1.0",
+    "schemaVersion": "1.1",
     "id": "project_golden",
     "sampleRate": 48000,
     "durationSamples": 48000,

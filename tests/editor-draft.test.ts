@@ -163,3 +163,22 @@ it("treats choosing an abstained candidate as an explicit user assertion", () =>
     { type: "replace_chord_value", eventId: candidate.id, value: candidate.value },
   ]);
 });
+
+it("invalidates a dirty draft when the active view disappears", () => {
+  const project = projectFixture();
+  const draft = createEditorDraft({
+    project,
+    projectRevisionId: "projectrevision_base",
+    targetIds: ["chord_am7_e"],
+  });
+  draft.setChord("chord_am7_e", { kind: "no_chord" });
+  const next = structuredClone(project);
+  next.activeView = null;
+  expect(() =>
+    draft.reconcile({ project: next, projectRevisionId: "projectrevision_changed", targetIds: [] }),
+  ).not.toThrow();
+  expect(draft.store.getState().stale).toBe(true);
+  expect(() => draft.transaction("transaction_stale")).toThrow("Draft is not ready to save");
+  draft.reset();
+  expect(draft.store.getState().stale).toBe(true);
+});

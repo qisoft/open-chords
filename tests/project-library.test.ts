@@ -46,8 +46,11 @@ async function temporaryDirectory(prefix: string): Promise<string> {
   return root;
 }
 
-function goldenEnvelope() {
-  return ProjectEnvelopeSchema.parse(JSON.parse(readFileSync(fixturePath, "utf8")));
+function goldenEnvelope(version = "1.1") {
+  const envelope = ProjectEnvelopeSchema.parse(JSON.parse(readFileSync(fixturePath, "utf8")));
+  envelope.schemaVersion = version;
+  envelope.payload.schemaVersion = version;
+  return envelope;
 }
 
 function ownedRecords(): ProjectOwnedRecords {
@@ -1043,8 +1046,8 @@ describe("ProjectLibrary", () => {
     const stateRoot = await temporaryDirectory("open-chords-library-schema-");
     const library = await openProjectLibrary({ stateRoot });
     const newer = structuredClone(goldenEnvelope());
-    newer.schemaVersion = "1.1";
-    newer.payload.schemaVersion = "1.1";
+    newer.schemaVersion = "1.2";
+    newer.payload.schemaVersion = "1.2";
     await expect(
       library.createProject({ envelope: newer, records: ownedRecords() }),
     ).rejects.toBeInstanceOf(ProjectLibraryReadOnlyError);
@@ -1091,7 +1094,7 @@ describe("ProjectLibrary", () => {
       records: ownedRecords(),
     });
 
-    const olderApplication = await openProjectLibrary({ stateRoot });
+    const olderApplication = await openProjectLibrary({ currentSchemaVersion: "1.0", stateRoot });
     expect((await olderApplication.readProject("project_golden")).compatibility).toBe("read_only");
     expect(
       await olderApplication.commitEditTransaction({
@@ -1123,7 +1126,7 @@ describe("ProjectLibrary", () => {
     await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
     rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
       addFutureCoreField: true,
-      version: "1.1",
+      version: "1.2",
     });
     const headPath = join(library.activeRoot, "projects", "project_golden", "HEAD.json");
     const headBeforeOpen = readFileSync(headPath, "utf8");
@@ -1153,7 +1156,7 @@ describe("ProjectLibrary", () => {
       stateRoot,
     });
     const migrated = await library.restoreProjectRevision({
-      envelope: goldenEnvelope(),
+      envelope: goldenEnvelope("1.0"),
       records: ownedRecords(),
     });
     const afterMigration = await library.readProject("project_golden");
@@ -1179,8 +1182,11 @@ describe("ProjectLibrary", () => {
 
   it("automatically migrates an existing older Library when it opens", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-open-migration-");
-    const olderApplication = await openProjectLibrary({ stateRoot });
-    await olderApplication.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+    const olderApplication = await openProjectLibrary({ currentSchemaVersion: "1.0", stateRoot });
+    await olderApplication.createProject({
+      envelope: goldenEnvelope("1.0"),
+      records: ownedRecords(),
+    });
     const migration: ProjectMigration = {
       fromVersion: "1.0",
       migrate: (rawEnvelope) => {
@@ -1205,9 +1211,9 @@ describe("ProjectLibrary", () => {
 
   it("keeps an existing older revision read-only when automatic migration fails", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-open-migration-failure-");
-    const olderApplication = await openProjectLibrary({ stateRoot });
+    const olderApplication = await openProjectLibrary({ currentSchemaVersion: "1.0", stateRoot });
     const created = await olderApplication.createProject({
-      envelope: goldenEnvelope(),
+      envelope: goldenEnvelope("1.0"),
       records: ownedRecords(),
     });
 
@@ -1233,9 +1239,9 @@ describe("ProjectLibrary", () => {
 
   it("opens the original read-only after migration publication runs out of space", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-migration-io-failure-");
-    const olderApplication = await openProjectLibrary({ stateRoot });
+    const olderApplication = await openProjectLibrary({ currentSchemaVersion: "1.0", stateRoot });
     const created = await olderApplication.createProject({
-      envelope: goldenEnvelope(),
+      envelope: goldenEnvelope("1.0"),
       records: ownedRecords(),
     });
     let injected = false;
@@ -1270,9 +1276,9 @@ describe("ProjectLibrary", () => {
 
   it("keeps errno-shaped migration callback failures readable and read-only", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-migration-errno-");
-    const olderApplication = await openProjectLibrary({ stateRoot });
+    const olderApplication = await openProjectLibrary({ currentSchemaVersion: "1.0", stateRoot });
     const created = await olderApplication.createProject({
-      envelope: goldenEnvelope(),
+      envelope: goldenEnvelope("1.0"),
       records: ownedRecords(),
     });
     const currentApplication = await openProjectLibrary({
@@ -1296,9 +1302,9 @@ describe("ProjectLibrary", () => {
 
   it("does not publish an intermediate revision when a later migration step fails", async () => {
     const stateRoot = await temporaryDirectory("open-chords-library-migration-chain-failure-");
-    const olderApplication = await openProjectLibrary({ stateRoot });
+    const olderApplication = await openProjectLibrary({ currentSchemaVersion: "1.0", stateRoot });
     const created = await olderApplication.createProject({
-      envelope: goldenEnvelope(),
+      envelope: goldenEnvelope("1.0"),
       records: ownedRecords(),
     });
     const currentApplication = await openProjectLibrary({
@@ -2659,3 +2665,41 @@ function rewriteStoredProjectEnvelope(
 function hashFixtureContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
+
+it("upgrades persisted 1.0 projects before saving a versioned chord sequence", async () => {
+  const stateRoot = await temporaryDirectory("open-chords-library-sequence-version-");
+  const legacy = goldenEnvelope();
+  legacy.schemaVersion = "1.0";
+  legacy.payload.schemaVersion = "1.0";
+  const older = await openProjectLibrary({ currentSchemaVersion: "1.0", stateRoot });
+  await older.createProject({ envelope: legacy, records: ownedRecords() });
+  const library = await openProjectLibrary({ stateRoot });
+  const migrated = await library.readProject("project_golden");
+  expect(migrated.envelope.schemaVersion).toBe("1.1");
+  expect(migrated.envelope.payload.schemaVersion).toBe("1.1");
+  expect(migrated.compatibility).toBe("writable");
+  expect(migrated.revisions.map(({ reason }) => reason)).toEqual(["created", "migration"]);
+  expect(migrated.envelope.payload.analysisRevisions).toEqual(legacy.payload.analysisRevisions);
+  const { createEditorDraft } = await import("../apps/desktop/src/renderer/editor-draft.ts");
+  const project = migrated.envelope.payload;
+  const draft = createEditorDraft({
+    project,
+    projectRevisionId: migrated.projectRevisionId,
+    targetIds: project.analysisRevisions[0]!.timeline.chordEvents.map(({ id }) => id),
+  });
+  draft.move("chord_am7_e", "chord_g7", "after");
+  await library.commitEditTransaction({
+    projectId: project.id,
+    expectedProjectRevisionId: migrated.projectRevisionId,
+    transaction: draft.transaction("transaction_versioned_sequence"),
+  });
+  const reopened = await openProjectLibrary({ stateRoot });
+  const saved = await reopened.readProject(project.id);
+  expect(saved.envelope.schemaVersion).toBe("1.1");
+  expect(saved.envelope.payload.schemaVersion).toBe("1.1");
+  expect(saved.envelope.payload.editLayers[0]!.transactions.at(-1)!.operations[0]!.type).toBe(
+    "replace_chord_sequence",
+  );
+  const olderReader = await openProjectLibrary({ currentSchemaVersion: "1.0", stateRoot });
+  expect((await olderReader.readProject(project.id)).compatibility).toBe("read_only");
+});

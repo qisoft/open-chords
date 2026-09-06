@@ -15,7 +15,7 @@ const draftKey = (input: DraftInput) =>
   canonicalSerialize([
     input.project.id,
     input.projectRevisionId,
-    input.project.activeView?.analysisRevisionId,
+    input.project.activeView?.analysisRevisionId ?? null,
     input.targetIds,
   ]);
 
