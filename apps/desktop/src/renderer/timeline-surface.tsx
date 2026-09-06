@@ -6,15 +6,24 @@ import type { WorkspaceTimeline } from "./workspace-timeline.ts";
 
 export function TimelineSurface({
   children,
+  autoscroll = true,
+  onSeek,
   clock,
   sampleRate,
   timeline,
 }: {
   children: ReactNode;
+  autoscroll?: boolean;
+  onSeek?: () => void;
   clock: PlaybackClock | null;
   sampleRate: number;
   timeline: WorkspaceTimeline;
 }) {
+  const visualPositionRef = useRef(0);
+  const seek = (position: number) => {
+    onSeek?.();
+    clock?.seek(position);
+  };
   const [zoom, setZoom] = useState(1);
   const [width, setWidth] = useState(1);
   const [selectedChordId, setSelectedChordId] = useState<string | null>(null);
@@ -82,7 +91,8 @@ export function TimelineSurface({
               (region) => position >= region.startSample && position < region.endSample,
             )?.startSample ?? position)
           : position;
-      track.style.transform = `translateX(${String(frameGeometry.xAt(0, visualPosition))}px)`;
+      if (autoscroll || !playing) visualPositionRef.current = visualPosition;
+      track.style.transform = `translateX(${String(frameGeometry.xAt(0, visualPositionRef.current))}px)`;
       track.dataset.positionSamples = String(position);
       const currentRegion = timeline.regions.find(
         (region) => position >= region.startSample && position < region.endSample,
@@ -127,7 +137,7 @@ export function TimelineSurface({
       previousRegion?.removeAttribute("aria-current");
       previousChord?.removeAttribute("aria-current");
     };
-  }, [clock, sampleRate, timeline, width, zoom]);
+  }, [autoscroll, clock, sampleRate, timeline, width, zoom]);
 
   return (
     <>
@@ -173,7 +183,7 @@ export function TimelineSurface({
           if (Math.abs(event.clientX - start.x) > 3) start.moved = true;
           if (start.moved) {
             suppressClick.current = true;
-            clock?.seek(geometry.scrub(start.position, event.clientX - start.x));
+            seek(geometry.scrub(start.position, event.clientX - start.x));
           }
         }}
         onPointerUp={(event) => {
@@ -182,7 +192,7 @@ export function TimelineSurface({
           if (!start.moved) {
             const left =
               event.currentTarget.getBoundingClientRect().left + event.currentTarget.clientLeft;
-            clock?.seek(geometry.sampleAt(event.clientX - left, start.position));
+            seek(geometry.sampleAt(event.clientX - left, start.position));
           }
           drag.current = null;
         }}
@@ -223,7 +233,7 @@ export function TimelineSurface({
               onFocus={() => setSelectedChordId(chord.id)}
               onClick={(event) => {
                 setSelectedChordId(chord.id);
-                if (event.detail === 0) clock?.seek(chord.startSample);
+                if (event.detail === 0) seek(chord.startSample);
               }}
               onKeyDown={(event) => {
                 const nextIndex =
@@ -240,7 +250,7 @@ export function TimelineSurface({
                 if (next !== undefined) {
                   event.preventDefault();
                   setSelectedChordId(next.id);
-                  clock?.seek(next.startSample);
+                  seek(next.startSample);
                   chordRefs.current.get(next.id)?.focus({ preventScroll: true });
                 }
               }}
@@ -264,7 +274,7 @@ export function TimelineSurface({
           max={timeline.durationSamples}
           step="1"
           defaultValue="0"
-          onChange={(event) => clock?.seek(Number(event.target.value))}
+          onChange={(event) => seek(Number(event.target.value))}
           onKeyDown={(event) => {
             const position = clock?.getSnapshot().positionSamples ?? 0;
             const step = sampleRate * (event.shiftKey ? 5 : 0.1);
@@ -280,7 +290,7 @@ export function TimelineSurface({
             }[event.key];
             if (next !== undefined) {
               event.preventDefault();
-              clock?.seek(next);
+              seek(next);
             }
           }}
         />

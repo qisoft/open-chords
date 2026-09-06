@@ -85,6 +85,7 @@ function mutationCommand({
 
 function createAuthority(overrides: Partial<ProjectAuthority> = {}): ProjectAuthority {
   return {
+    changePractice: async () => ({ projectRevisionId: "projectrevision_next" }),
     changeEditHistory: async () => ({ projectRevisionId: "projectrevision_next" }),
     commitEditTransaction: async () => ({ projectRevisionId: "projectrevision_next" }),
     getSnapshot: async () => null,
@@ -576,4 +577,20 @@ describe("DesktopCommandGateway", () => {
     release();
     await Promise.all(accepted);
   });
+});
+
+it("accepts bounded practice commands and rejects an out-of-range playback rate", async () => {
+  const gateway = new DesktopCommandGateway(createAuthority());
+  const command = {
+    ...commandEnvelope("request_practice"),
+    type: "project.change_practice",
+    projectId: "project_fixture",
+    expectedProjectRevisionId: "projectrevision_current",
+    action: { type: "settings", speed: 0.75 },
+  };
+  expect((await gateway.execute(command, sender)).response.type).toBe("project.practice_changed");
+  expect(
+    (await gateway.execute({ ...command, action: { type: "settings", speed: 10 } }, sender))
+      .response,
+  ).toMatchObject({ type: "desktop.error", code: "invalid_command" });
 });

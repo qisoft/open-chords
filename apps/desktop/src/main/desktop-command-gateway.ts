@@ -9,6 +9,7 @@ import {
   type DesktopCommand,
   type DesktopResponse,
 } from "@open-chords/contracts";
+import type { PracticeAction } from "@open-chords/domain";
 import {
   parseProjectContract,
   type EditHistoryAction,
@@ -44,6 +45,13 @@ export type DesktopSenderContext = {
 };
 
 export type ProjectAuthority = {
+  changePractice(input: {
+    expectedProjectRevisionId: string;
+    projectId: string;
+    action: PracticeAction;
+  }): Promise<
+    { notFound: true } | { projectRevisionId: string } | { readOnly: true } | { stale: true }
+  >;
   changeEditHistory(input: {
     expectedProjectRevisionId: string;
     projectId: string;
@@ -166,7 +174,8 @@ export class DesktopCommandGateway {
     if (command.type === "project.get_snapshot") return this.#readSnapshot(command);
     if (
       command.type === "project.commit_edit_transaction" ||
-      command.type === "project.change_edit_history"
+      command.type === "project.change_edit_history" ||
+      command.type === "project.change_practice"
     )
       return this.#enqueueMutation(command);
     return this.#executeMedia(command);
@@ -345,7 +354,12 @@ export class DesktopCommandGateway {
   async #enqueueMutation(
     command: Extract<
       DesktopCommand,
-      { type: "project.commit_edit_transaction" | "project.change_edit_history" }
+      {
+        type:
+          | "project.commit_edit_transaction"
+          | "project.change_edit_history"
+          | "project.change_practice";
+      }
     >,
   ): Promise<DesktopGatewayResult> {
     if (this.#pendingMutations >= MAX_PENDING_MUTATIONS) {
@@ -386,18 +400,25 @@ export class DesktopCommandGateway {
   async #commitMutation(
     command: Extract<
       DesktopCommand,
-      { type: "project.commit_edit_transaction" | "project.change_edit_history" }
+      {
+        type:
+          | "project.commit_edit_transaction"
+          | "project.change_edit_history"
+          | "project.change_practice";
+      }
     >,
   ): Promise<DesktopGatewayResult> {
     try {
       const result =
-        command.type === "project.change_edit_history"
-          ? await this.#authority.changeEditHistory(command)
-          : await this.#authority.commitEditTransaction({
-              expectedProjectRevisionId: command.expectedProjectRevisionId,
-              projectId: command.projectId,
-              transaction: command.transaction,
-            });
+        command.type === "project.change_practice"
+          ? await this.#authority.changePractice(command)
+          : command.type === "project.change_edit_history"
+            ? await this.#authority.changeEditHistory(command)
+            : await this.#authority.commitEditTransaction({
+                expectedProjectRevisionId: command.expectedProjectRevisionId,
+                projectId: command.projectId,
+                transaction: command.transaction,
+              });
       if ("conflicts" in result)
         return {
           action: "none",
@@ -443,7 +464,12 @@ export class DesktopCommandGateway {
           projectRevisionId: result.projectRevisionId,
           ...(command.type === "project.commit_edit_transaction"
             ? { transactionId: command.transaction.id, type: "project.committed" }
-            : { type: "project.history_changed" }),
+            : {
+                type:
+                  command.type === "project.change_practice"
+                    ? "project.practice_changed"
+                    : "project.history_changed",
+              }),
         }),
       };
     } catch {

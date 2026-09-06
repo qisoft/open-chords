@@ -1,6 +1,7 @@
 import {
   CommitEditTransactionCommandSchema,
   ChangeEditHistoryCommandSchema,
+  ChangePracticeCommandSchema,
   CreateMediaProjectCommandSchema,
   DESKTOP_IPC_CHANNELS,
   DESKTOP_IPC_PROTOCOL,
@@ -137,6 +138,23 @@ async function changeEditHistory(
   );
 }
 
+async function changePractice(
+  input: Parameters<OpenChordsDesktopApi["project"]["changePractice"]>[0],
+) {
+  const command = ChangePracticeCommandSchema.parse({
+    ...envelope(),
+    ...input,
+    type: "project.change_practice",
+  });
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.projectChangePractice,
+    command,
+    (response): response is Extract<DesktopResponse, { type: "project.practice_changed" }> =>
+      response.type === "project.practice_changed",
+    "Unexpected practice response",
+  );
+}
+
 async function pickLocalFile() {
   const command = PickLocalFileCommandSchema.parse({
     ...envelope(),
@@ -243,6 +261,7 @@ const api: OpenChordsDesktopApi = {
     relinkSource: relinkMediaSource,
   },
   project: {
+    changePractice,
     changeEditHistory,
     commitEditTransaction,
     getSnapshot: async (projectId) => {

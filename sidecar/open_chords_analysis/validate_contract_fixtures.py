@@ -204,7 +204,7 @@ def validate_alignment(alignment: dict[str, Any], document: dict[str, Any], dura
     validate_timing_sequence(alignment["lineOccurrences"], duration, "Lyrics line")
 
 
-def apply_operations(project: dict[str, Any], layer: dict[str, Any], history_position: int) -> None:
+def apply_operations(project: dict[str, Any], layer: dict[str, Any], history_position: int) -> dict[str, Any]:
     revision = next(item for item in project["analysisRevisions"] if item["id"] == layer["analysisRevisionId"])
     timeline = copy.deepcopy(revision["timeline"])
     alignments = copy.deepcopy([
@@ -293,6 +293,7 @@ def apply_operations(project: dict[str, Any], layer: dict[str, Any], history_pos
     for alignment in alignments:
         validate_alignment(alignment, documents[alignment["lyricsDocumentId"]], project["durationSamples"])
 
+    return timeline
 
 def validate_domain(envelope: dict[str, Any]) -> None:
     major = int(envelope["schemaVersion"].split(".")[0])
@@ -330,6 +331,9 @@ def validate_domain(envelope: dict[str, Any]) -> None:
             except (KeyError, StopIteration) as error:
                 raise ContractError("Edit operation has an unstable reference") from error
     active = project["activeView"]
+    loop = project.get("practice", {}).get("loop")
+    if loop is not None and loop["status"] == "ready" and (active is None or loop["analysisRevisionId"] != active["analysisRevisionId"]):
+        raise ContractError("invalid ready practice loop Analysis Revision")
     if active is None:
         if project["supportClaims"] or project["analysisRevisions"] or project["editLayers"] or project["lyricsDocuments"] or project["lyricsAlignments"]:
             raise ContractError("unanalyzed Project contains analysis-owned records")
@@ -339,6 +343,14 @@ def validate_domain(envelope: dict[str, Any]) -> None:
         raise ContractError("invalid Active View reference")
     if active["editHistoryPosition"] > len(layer["transactions"]):
         raise ContractError("invalid committed history position")
+    if loop is not None and loop["status"] == "ready":
+        bars = apply_operations(project, layer, active["editHistoryPosition"])["bars"]
+        ids = [bar["id"] for bar in bars]
+        if loop["firstBarId"] not in ids or loop["lastBarId"] not in ids:
+            raise ContractError("ready practice loop anchor is missing")
+        first, last = ids.index(loop["firstBarId"]), ids.index(loop["lastBarId"])
+        if last < first or any(bars[index]["endSample"] != bars[index + 1]["startSample"] for index in range(first, last)):
+            raise ContractError("ready practice loop Bars are not contiguous")
     documents = {item["id"]: item for item in project["lyricsDocuments"]}
     alignments = {item["id"]: item for item in project["lyricsAlignments"]}
     for document in documents.values():

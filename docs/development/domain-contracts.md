@@ -6,7 +6,7 @@ Issue [#35](https://github.com/qisoft/open-chords/issues/35) establishes one pur
 
 - `parseProjectContract(value)` performs strict Zod shape validation, schema-major compatibility checks, stable-reference checks, complete timeline invariant validation, and validation of every committed Edit Layer projection.
 - `materializeEffectiveTimeline(project)` selects exactly the Analysis Revision, Edit Layer, and committed history position named by Active View. It returns a fresh derived timeline and never mutates machine output.
-- `parseContractEnvelope(value)` validates the named `project_snapshot` envelope. Contract `1.0` is writable; structurally understood later `1.x` envelopes are read-only; another major is rejected.
+- `parseContractEnvelope(value)` validates the named `project_snapshot` envelope. Contract `1.2` is writable; structurally understood later `1.x` envelopes are read-only; another major is rejected.
 - `canonicalSerialize(value)` recursively orders object keys by Unicode code-unit order, preserves already validated semantic array order, normalizes negative zero, rejects sparse arrays and non-finite/unsupported values, uses two-space JSON indentation, and ends with one LF.
 
 ## Time, identity, and ordering
@@ -44,3 +44,5 @@ pnpm test:fixtures
 pnpm test:python
 pnpm contracts:schema:check
 ```
+
+Contract 1.2 adds optional Project-owned practice state. Default migrations advance both envelope and Project versions through 1.1 to 1.2 in a new revision. A ready loop must name ordered, contiguous Bars in its active Analysis Revision; `needs_review` retains invalidated anchors for an explicit user decision. The TypeScript and Python corpus includes valid persisted practice and a rejected missing-anchor loop.

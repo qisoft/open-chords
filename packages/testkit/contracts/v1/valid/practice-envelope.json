@@ -368,69 +368,6 @@
                 }
               }
             ]
-          },
-          {
-            "id": "transaction_reordered",
-            "parentTransactionId": null,
-            "operations": [
-              {
-                "type": "replace_chord_sequence",
-                "targetEventIds": ["chord_am7_e", "chord_c_sharp", "chord_n", "chord_g7"],
-                "events": [
-                  {
-                    "id": "chord_c_sharp",
-                    "startSample": 0,
-                    "endSample": 12000,
-                    "value": {
-                      "kind": "chord",
-                      "root": "C#",
-                      "quality": "major7",
-                      "extensions": ["13"],
-                      "additions": [],
-                      "alterations": ["#11"],
-                      "omissions": ["no5"]
-                    }
-                  },
-                  {
-                    "id": "chord_n",
-                    "startSample": 12000,
-                    "endSample": 24000,
-                    "value": {
-                      "kind": "no_chord"
-                    }
-                  },
-                  {
-                    "id": "chord_g7",
-                    "startSample": 24000,
-                    "endSample": 40000,
-                    "value": {
-                      "kind": "chord",
-                      "root": "G",
-                      "quality": "major",
-                      "extensions": ["7"],
-                      "additions": [],
-                      "alterations": [],
-                      "omissions": []
-                    }
-                  },
-                  {
-                    "id": "chord_c_sharp",
-                    "startSample": 40000,
-                    "endSample": 48000,
-                    "value": {
-                      "kind": "chord",
-                      "root": "A",
-                      "quality": "minor7",
-                      "extensions": ["9"],
-                      "additions": ["add11", "add9"],
-                      "alterations": [],
-                      "omissions": [],
-                      "bass": "E"
-                    }
-                  }
-                ]
-              }
-            ]
           }
         ]
       },
@@ -586,13 +523,26 @@
     "activeView": {
       "analysisRevisionId": "revision_original",
       "editLayerId": "edit_original",
-      "editHistoryPosition": 2,
+      "editHistoryPosition": 0,
       "lyricsDocumentId": "lyrics_repeated",
       "lyricsAlignmentId": "alignment_repeated",
       "presentation": {
         "transposeSemitones": 0,
         "beginnerView": false,
         "enharmonicPreference": "contextual"
+      }
+    },
+    "practice": {
+      "speed": 0.75,
+      "countInBars": 1,
+      "metronome": true,
+      "autoscroll": false,
+      "instrument": "guitar",
+      "loop": {
+        "analysisRevisionId": "revision_original",
+        "firstBarId": "bar_pickup",
+        "lastBarId": "bar_three_four",
+        "status": "ready"
       }
     }
   }

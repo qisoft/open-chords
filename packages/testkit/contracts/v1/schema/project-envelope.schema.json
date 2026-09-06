@@ -1318,6 +1318,79 @@
           },
           "type": "array"
         },
+        "practice": {
+          "additionalProperties": false,
+          "properties": {
+            "autoscroll": {
+              "type": "boolean"
+            },
+            "countInBars": {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instrument": {
+              "enum": [
+                "guitar",
+                "ukulele",
+                "piano"
+              ],
+              "type": "string"
+            },
+            "loop": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "analysisRevisionId": {
+                      "$ref": "#/$defs/StableId"
+                    },
+                    "firstBarId": {
+                      "$ref": "#/$defs/StableId"
+                    },
+                    "lastBarId": {
+                      "$ref": "#/$defs/StableId"
+                    },
+                    "status": {
+                      "enum": [
+                        "ready",
+                        "needs_review"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "analysisRevisionId",
+                    "firstBarId",
+                    "lastBarId",
+                    "status"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "metronome": {
+              "type": "boolean"
+            },
+            "speed": {
+              "maximum": 1.5,
+              "minimum": 0.5,
+              "type": "number"
+            }
+          },
+          "required": [
+            "speed",
+            "countInBars",
+            "metronome",
+            "autoscroll",
+            "instrument",
+            "loop"
+          ],
+          "type": "object"
+        },
         "sampleRate": {
           "exclusiveMinimum": 0,
           "maximum": 384000,
@@ -1698,6 +1771,6 @@
     "schemaVersion",
     "type"
   ],
-  "title": "Open Chords project contract envelope v1.1",
+  "title": "Open Chords project contract envelope v1.2",
   "type": "object"
 }

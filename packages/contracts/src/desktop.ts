@@ -1,4 +1,5 @@
 import {
+  PracticeActionSchema,
   EditHistoryActionSchema,
   EditTransactionSchema,
   ProjectContractSchema,
@@ -8,6 +9,7 @@ import { z } from "zod";
 export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
+  projectChangePractice: "open-chords:project:change-practice",
   projectChangeEditHistory: "open-chords:project:change-edit-history",
   projectChanged: "open-chords:project:changed",
   projectCommitEditTransaction: "open-chords:project:commit-edit-transaction",
@@ -86,6 +88,14 @@ export const ChangeEditHistoryCommandSchema = z.strictObject({
   type: z.literal("project.change_edit_history"),
 });
 
+export const ChangePracticeCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  expectedProjectRevisionId: DesktopProjectRevisionIdSchema,
+  projectId: DesktopProjectIdSchema,
+  action: PracticeActionSchema,
+  type: z.literal("project.change_practice"),
+});
+
 export const PickLocalFileCommandSchema = z.strictObject({
   ...correlatedEnvelope,
   type: z.literal("media.pick_local_file"),
@@ -114,6 +124,7 @@ export const OpenMediaPlaybackCommandSchema = z.strictObject({
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
   CommitEditTransactionCommandSchema,
   ChangeEditHistoryCommandSchema,
+  ChangePracticeCommandSchema,
   CreateMediaProjectCommandSchema,
   OpenMediaPlaybackCommandSchema,
   PickLocalFileCommandSchema,
@@ -198,6 +209,12 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
     projectId: DesktopProjectIdSchema,
     projectRevisionId: DesktopProjectRevisionIdSchema,
     type: z.literal("project.history_changed"),
+  }),
+  z.strictObject({
+    ...correlatedEnvelope,
+    projectId: DesktopProjectIdSchema,
+    projectRevisionId: DesktopProjectRevisionIdSchema,
+    type: z.literal("project.practice_changed"),
   }),
   z.strictObject({
     ...correlatedEnvelope,
@@ -299,6 +316,13 @@ export type OpenChordsDesktopApi = {
     relinkSource(sourceId: string): Promise<DesktopErrorResponse | MediaRelinkResponse>;
   };
   project: {
+    changePractice(input: {
+      expectedProjectRevisionId: string;
+      projectId: string;
+      action: z.infer<typeof PracticeActionSchema>;
+    }): Promise<
+      DesktopErrorResponse | Extract<DesktopResponse, { type: "project.practice_changed" }>
+    >;
     changeEditHistory(input: {
       expectedProjectRevisionId: string;
       projectId: string;

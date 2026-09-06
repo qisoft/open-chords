@@ -1,4 +1,8 @@
-import { materializeEffectiveTimeline, type ProjectContract } from "@open-chords/domain";
+import {
+  presentChord,
+  materializeEffectiveTimeline,
+  type ProjectContract,
+} from "@open-chords/domain";
 
 import { chordLabel } from "./workspace-timeline.ts";
 
@@ -56,7 +60,9 @@ export function buildWorkspaceContent(project: ProjectContract) {
                       chord.startSample < timing.endSample &&
                       chord.endSample > timing.startSample,
                   )
-                  .map((chord) => chordLabel(chord.value))
+                  .map((chord) =>
+                    chordLabel(presentChord(chord.value, project.activeView!.presentation)),
+                  )
               : [],
         };
       }),
@@ -89,7 +95,9 @@ export function buildWorkspaceContent(project: ProjectContract) {
           (chord) => chord.startSample < section.endSample && chord.endSample > section.startSample,
         )
         .map((chord) =>
-          chord.assertion.state === "abstained" ? "Unknown chord" : chordLabel(chord.value),
+          chord.assertion.state === "abstained"
+            ? "Unknown chord"
+            : chordLabel(presentChord(chord.value, project.activeView!.presentation)),
         ),
     }));
   return { lines, instrumentals };

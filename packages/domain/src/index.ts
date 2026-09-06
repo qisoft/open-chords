@@ -1,3 +1,4 @@
+import { resolvePracticeLoop } from "./practice.ts";
 export {
   EditHistoryActionSchema,
   EditMappingActionSchema,
@@ -69,5 +70,19 @@ export function parseProjectContract(input: unknown): ProjectContract {
   validateProjectInvariants(project);
   validateCommittedEditLayerProjections(project);
   if (project.activeView !== null) materializeEffectiveTimeline(project);
+  if (project.practice?.loop?.status === "ready" && resolvePracticeLoop(project) === null)
+    throw new Error("Ready practice loop must reference contiguous active Bars");
   return project;
 }
+export {
+  applyPracticeAction,
+  getPracticeState,
+  resolvePracticeLoop,
+  PracticeActionSchema,
+  type PracticeAction,
+  type PracticeState,
+} from "./practice.ts";
+export { reconcilePracticeState } from "./practice.ts";
+export { presentChord, capoGuidance, pitchClassNumber } from "./presentation.ts";
+export { chordDiagram, type ChordDiagram } from "./diagrams.ts";
+export { practiceCountIn, practiceNavigation } from "./practice.ts";
