@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { extractFile } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
+import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { monoPcmWav } from "@open-chords/testkit/media";
 import { expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
@@ -14,6 +15,7 @@ import { z } from "zod";
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof-constants.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
+import { goldenRecords } from "../support/editor-fixture.ts";
 
 const PRODUCT_NAME = "Open Chords";
 const EXPECTED_RENDERER_CSP = [
@@ -123,6 +125,64 @@ test("installed artifact runs contained analysis, publishes Revisions, and reaps
   expect(output).toContain("Packaged sidecar proof stage: publication_completed");
 });
 
+test("installed editor saves and undoes through named IPC with a durable reopened result", async () => {
+  const stateRoot = join(packageRoot, "editor-user-data");
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(process.cwd(), "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const library = await openProjectLibrary({ stateRoot });
+  await library.createProject({ envelope, records: goldenRecords() });
+  const port = await reservePort();
+  const application = spawn(
+    executablePath,
+    [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
+    { stdio: "ignore" },
+  );
+  try {
+    const endpoint = `http://127.0.0.1:${port}`;
+    let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
+    await expect
+      .poll(
+        async () => {
+          try {
+            const response = await fetch(`${endpoint}/json/list`);
+            target = CdpTargetsSchema.parse(await response.json()).find(
+              (candidate) =>
+                candidate.type === "page" && candidate.url.startsWith("open-chords://"),
+            );
+            return target !== undefined;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+    if (target === undefined) throw new Error("Packaged editor target is unavailable");
+    expect(await evaluatePackagedEditor(target.webSocketDebuggerUrl)).toEqual({
+      saved: true,
+      undone: true,
+    });
+    process.stdout.write("Packaged editor stage: save_and_undo_verified\n");
+  } finally {
+    process.stdout.write("Packaged editor stage: stopping\n");
+    // Reopen after abrupt termination to verify that Save/Undo already reached durable storage.
+    if (process.platform !== "win32") application.kill("SIGKILL");
+    await stopApplication(application);
+    process.stdout.write("Packaged editor stage: stopped\n");
+  }
+  const reopened = await openProjectLibrary({ stateRoot });
+  const saved = (await reopened.getSnapshot("project_golden"))!.project;
+  expect(saved.activeView!.editHistoryPosition).toBe(0);
+  expect(saved.editLayers[0]!.transactions).toHaveLength(2);
+  expect(saved.analysisRevisions).toEqual(envelope.payload.analysisRevisions);
+});
+
 test("installed shell exposes only named capabilities and manifest assets", async () => {
   const rawManifest: unknown = JSON.parse(
     extractFile(
@@ -210,7 +270,13 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       },
       permissionDenied: true,
       popupDenied: true,
-      projectKeys: ["commitEditTransaction", "getSnapshot", "list", "subscribe"],
+      projectKeys: [
+        "changeEditHistory",
+        "commitEditTransaction",
+        "getSnapshot",
+        "list",
+        "subscribe",
+      ],
       projectList: {
         projects: [expect.objectContaining({ projectId: packagedProjectId })],
         type: "project.list",
@@ -438,6 +504,110 @@ async function inspectPackagedRenderer(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Could not inspect packaged renderer", { cause: lastError });
+}
+
+async function evaluatePackagedEditor(webSocketUrl: string): Promise<unknown> {
+  // Use the same page-level CDP boundary as the installed security/playback probes.
+  // Browser-level target discovery stalled this installed Electron probe in native CI.
+  const expression = `(async () => {
+    const deadline = Date.now() + 10000;
+    const waitFor = async (read, stage) => {
+      while (Date.now() < deadline) {
+        const value = read();
+        if (value) return value;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      throw new Error("Packaged editor stage timed out: " + stage);
+    };
+    const button = (label, parent = document) => [...parent.querySelectorAll("button")].find(element => element.textContent.trim() === label && !element.disabled);
+    await waitFor(() => window.openChords && button("Edit chords"), "ready");
+    const pickup = await waitFor(() => document.querySelector('[data-region-id="bar_pickup"]'), "timeline");
+    const originalLabel = pickup.getAttribute("aria-label");
+    button("Edit chords").click();
+    const editor = await waitFor(() => document.querySelector('[aria-label="Chord Editor"]'), "opened");
+    button("Choose chord", editor).click();
+    const picker = await waitFor(() => editor.querySelector('[aria-label="Chord picker"]'), "picker");
+    const root = picker.querySelector("select");
+    root.value = "N";
+    root.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor(() => picker.querySelectorAll("select").length === 1, "no_chord");
+    button("Done", picker).click();
+    (await waitFor(() => button("Save", editor), "valid_draft")).click();
+    await waitFor(() => !document.querySelector('[aria-label="Chord Editor"]') && pickup.getAttribute("aria-label").includes("Chords: N"), "saved");
+    const saved = await window.openChords.project.getSnapshot("project_golden");
+    button("Undo edit").click();
+    await waitFor(() => pickup.getAttribute("aria-label") === originalLabel, "undo");
+    const undone = await window.openChords.project.getSnapshot("project_golden");
+    return { saved: saved.type === "project.snapshot" && saved.project.activeView.editHistoryPosition === 2, undone: undone.type === "project.snapshot" && undone.project.activeView.editHistoryPosition === 0 };
+  })()`;
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(webSocketUrl);
+    let requestId = 0;
+    let settled = false;
+    const finish = (error: Error | null, value?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.close();
+      if (error !== null) reject(error);
+      else resolve(value);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error("Packaged editor CDP evaluation timed out")),
+      15_000,
+    );
+    const evaluate = () => {
+      if (settled) return;
+      requestId += 1;
+      socket.send(
+        JSON.stringify({
+          id: requestId,
+          method: "Runtime.evaluate",
+          params: { awaitPromise: true, expression, returnByValue: true, userGesture: true },
+        }),
+      );
+    };
+    socket.addEventListener("open", evaluate);
+    socket.addEventListener("error", () =>
+      finish(new Error("Packaged editor CDP connection failed")),
+    );
+    socket.addEventListener("close", () =>
+      finish(new Error("Packaged editor CDP connection closed before completion")),
+    );
+    socket.addEventListener("message", (message) => {
+      void handle(message.data);
+    });
+    async function handle(data: unknown) {
+      try {
+        const text = await decodeWebSocketMessage(data);
+        if (text === null) return;
+        const raw: unknown = JSON.parse(text);
+        if (!z.object({ id: z.literal(requestId) }).safeParse(raw).success) return;
+        const protocolError = z
+          .object({ error: z.object({ code: z.number(), message: z.string() }) })
+          .safeParse(raw);
+        if (protocolError.success) {
+          if (
+            protocolError.data.error.code === -32000 &&
+            protocolError.data.error.message === "Cannot find default execution context"
+          ) {
+            setTimeout(evaluate, 50);
+            return;
+          }
+          finish(new Error("Packaged editor CDP protocol failed"));
+          return;
+        }
+        const response = CdpEvaluationResponseSchema.parse(raw);
+        if (response.result.exceptionDetails !== undefined) {
+          finish(new Error("Packaged editor journey failed"));
+          return;
+        }
+        finish(null, response.result.result.value);
+      } catch {
+        finish(new Error("Packaged editor response was invalid"));
+      }
+    }
+  });
 }
 
 async function evaluateRendererTarget(webSocketUrl: string) {

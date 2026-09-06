@@ -13,8 +13,8 @@ import { monoPcmWav } from "@open-chords/testkit/media";
 import { _electron as electron, expect, test } from "@playwright/test";
 
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
-import type { ProjectOwnedRecords } from "../../apps/desktop/src/main/project-library-records.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
+import { goldenRecords } from "../support/editor-fixture.ts";
 
 const repositoryRoot = join(import.meta.dirname, "../..");
 
@@ -132,6 +132,281 @@ test("a durable local-media Project reopens into the centered workspace and play
   } finally {
     await application.close();
     await rm(userDataDirectory, { force: true, recursive: true });
+  }
+});
+
+test("a low-confidence chord can be reviewed without changing its value and undone", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-editor-review-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    const editor = page.getByRole("region", { name: "Chord Editor" });
+    await editor
+      .locator('[data-event-id="chord_g7"]')
+      .getByRole("button", { name: "Mark reviewed", exact: true })
+      .click();
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    await expect(
+      editor
+        .locator('[data-event-id="chord_g7"]')
+        .getByRole("button", { name: "Mark reviewed", exact: true }),
+    ).toHaveCount(0);
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Undo edit", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Undo edit", exact: true })).toBeDisabled();
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    await expect(
+      editor
+        .locator('[data-event-id="chord_g7"]')
+        .getByRole("button", { name: "Mark reviewed", exact: true }),
+    ).toBeEnabled();
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
+
+test("an external committed revision invalidates an open draft even after draft Reset", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-editor-stale-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    const editor = page.getByRole("region", { name: "Chord Editor" });
+    await editor.getByRole("button", { name: "Choose chord" }).first().click();
+    await editor.getByLabel("Root").selectOption("N");
+    await editor.getByRole("button", { name: "Done", exact: true }).click();
+    const response = await page.evaluate(async () => {
+      const saved = await window.openChords!.project.getSnapshot("project_golden");
+      if (saved.type !== "project.snapshot") throw new Error("Snapshot unavailable");
+      return window.openChords!.project.commitEditTransaction({
+        projectId: saved.project.id,
+        expectedProjectRevisionId: saved.projectRevisionId,
+        transaction: {
+          id: "transaction_external",
+          parentTransactionId: null,
+          operations: [
+            { type: "replace_chord_value", eventId: "chord_g7", value: { kind: "no_chord" } },
+          ],
+        },
+      });
+    });
+    expect(response.type).toBe("project.committed");
+    await expect(editor.getByRole("alert")).toContainText("revision changed");
+    await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await editor.getByRole("button", { name: "Reset draft", exact: true }).click();
+    await expect(editor.getByRole("alert")).toContainText("revision changed");
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Edit chords", exact: true }).click();
+    await expect(editor.getByRole("alert")).toHaveCount(0);
+    await expect(editor.locator('[data-event-id="chord_g7"] strong')).toHaveText("N");
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
+
+test("review mappings retain conflicts until every event is explicitly matched", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-editor-map-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  envelope.payload.activeView!.editHistoryPosition = 1;
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await page
+      .getByRole("button", { name: "Review edits on another analysis", exact: true })
+      .click();
+    const review = page.getByRole("region", { name: "Review edit mappings" });
+    await review.getByLabel("Target analysis").selectOption("revision_reviewable");
+    await expect(review.getByRole("button", { name: "Apply reviewed edits" })).toBeDisabled();
+    await expect(review.getByRole("alert")).toContainText("Choose a matching entity");
+    await review.getByLabel("Match chord_am7_e").selectOption("chord_reviewable");
+    await review.getByRole("button", { name: "Apply reviewed edits" }).click();
+    await expect(review).toHaveCount(0);
+    const snapshot = await page.evaluate(async () =>
+      window.openChords!.project.getSnapshot("project_golden"),
+    );
+    if (snapshot.type !== "project.snapshot") throw new Error("Snapshot unavailable");
+    expect(snapshot.project.activeView!.analysisRevisionId).toBe("revision_reviewable");
+    expect(snapshot.project.analysisRevisions).toEqual(envelope.payload.analysisRevisions);
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
+
+test("editor reorders first and last events with keyboard and pointer without overflowing the page", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-editor-reorder-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    const opener = page.getByRole("button", { name: "Edit chords", exact: true });
+    await opener.click();
+    const editor = page.getByRole("region", { name: "Chord Editor" });
+    const ids = () =>
+      editor
+        .locator("[data-event-id]")
+        .evaluateAll((elements) =>
+          elements.map((element) => element.getAttribute("data-event-id")),
+        );
+    const first = editor.locator('[data-event-id="chord_am7_e"]');
+    const initialFirstWidth = (await first.boundingBox())!.width;
+    const initialSecondWidth = (await editor
+      .locator('[data-event-id="chord_c_sharp"]')
+      .boundingBox())!.width;
+    expect(initialSecondWidth / initialFirstWidth).toBeCloseTo(1.5, 2);
+    await first.getByLabel("Move target").selectOption("chord_g7");
+    await first.getByRole("button", { name: "Move after", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(ids).toEqual(["chord_c_sharp", "chord_n", "chord_g7", "chord_am7_e"]);
+    await expect(first.getByRole("button", { name: "Move after", exact: true })).toBeFocused();
+    await first.getByLabel("Move target").selectOption("chord_c_sharp");
+    await first.getByRole("button", { name: "Move before", exact: true }).click();
+    await expect.poll(ids).toEqual(["chord_am7_e", "chord_c_sharp", "chord_n", "chord_g7"]);
+    await page.setViewportSize({ width: 1800, height: 900 });
+    const source = first.getByRole("button", { name: "Drag chord", exact: true });
+    const last = editor.locator('[data-event-id="chord_g7"]');
+    const sourceBox = (await source.boundingBox())!;
+    const targetBox = (await last.boundingBox())!;
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      sourceBox.x + sourceBox.width / 2 + 10,
+      sourceBox.y + sourceBox.height / 2,
+      { steps: 3 },
+    );
+    await page.mouse.move(targetBox.x + targetBox.width - 20, targetBox.y + 30, { steps: 6 });
+    await page.mouse.move(targetBox.x + targetBox.width - 19, targetBox.y + 30);
+    await expect(last).toHaveAttribute("data-drop-side", "after");
+    await expect(last.locator(".drop-indicator")).toHaveText("Insert after");
+    await page.mouse.up();
+    await expect.poll(ids).toEqual(["chord_c_sharp", "chord_n", "chord_g7", "chord_am7_e"]);
+    await page.setViewportSize({ width: 1400, height: 1100 });
+    await first.getByRole("button", { name: "Choose chord" }).click();
+    await editor.getByLabel("Root").selectOption("D");
+    await page.keyboard.press("Escape");
+    await expect(first.getByRole("button", { name: "Choose chord" })).toBeFocused();
+    await expect(editor.getByRole("group", { name: "Chord picker" })).toHaveCount(0);
+    await page.setViewportSize({ width: 360, height: 720 });
+    const overflow = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth > innerWidth,
+      rail:
+        document.querySelector(".editor-rail")!.scrollWidth >
+        document.querySelector(".editor-rail")!.clientWidth,
+    }));
+    expect(overflow).toEqual({ page: false, rail: true });
+    await page.keyboard.press("Escape");
+    await expect(editor).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
+
+test("editor Save, Cancel, draft Reset and durable history stay separate", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-editor-")));
+  const library = await openProjectLibrary({ stateRoot });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await page.setViewportSize({ width: 1400, height: 1100 });
+    const opener = page.getByRole("button", { name: "Edit chords", exact: true });
+    await expect(opener).toBeVisible();
+    await expect(page.getByRole("region", { name: "Chord Editor" })).toHaveCount(0);
+    const pickup = page.getByRole("button", { name: /Pickup, 4\/4/ });
+    const before = await pickup.getAttribute("aria-label");
+    await opener.click();
+    const editor = page.getByRole("region", { name: "Chord Editor" });
+    const first = editor.locator('[data-event-id="chord_am7_e"]');
+    await first.getByRole("button", { name: "Choose chord" }).click();
+    await expect(editor.getByLabel("Root")).toBeFocused();
+    const pickerBounds = (await editor.getByRole("group", { name: "Chord picker" }).boundingBox())!;
+    const transportBounds = (await page.locator(".transport").boundingBox())!;
+    expect(
+      pickerBounds.y + pickerBounds.height <= transportBounds.y ||
+        pickerBounds.y >= transportBounds.y + transportBounds.height,
+    ).toBe(true);
+    await editor.getByLabel("Root").selectOption("N");
+    await editor.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(pickup).toHaveAttribute("aria-label", before!);
+    await editor.getByRole("button", { name: "Reset draft", exact: true }).click();
+    await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await first.getByRole("button", { name: "Choose chord" }).click();
+    await editor.getByLabel("Root").selectOption("N");
+    await editor.getByRole("button", { name: "Done", exact: true }).click();
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(pickup).toHaveAttribute("aria-label", /Chords: N/);
+    await page.getByRole("button", { name: "Undo edit", exact: true }).click();
+    await expect(pickup).toHaveAttribute("aria-label", before!);
+    await page.getByLabel("Redo branch").selectOption({ index: 2 });
+    await page.getByRole("button", { name: "Redo edit", exact: true }).click();
+    await expect(pickup).toHaveAttribute("aria-label", /Chords: N/);
+    await opener.click();
+    await first.getByLabel("Duration").selectOption("4000");
+    await expect(editor.getByRole("alert")).toContainText("Durations");
+    await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(opener).toBeFocused();
+    await expect(pickup).toHaveAttribute("aria-label", /Chords: N/);
+    await page.getByRole("button", { name: "Reset saved edits", exact: true }).click();
+    await expect(pickup).toHaveAttribute("aria-label", before!);
+  } finally {
+    await application.close();
+    await rm(stateRoot, { force: true, recursive: true });
   }
 });
 
@@ -294,61 +569,6 @@ async function launch(userDataDirectory: string) {
     args: [repositoryRoot, `--user-data-dir=${userDataDirectory}`],
     env: environment,
   });
-}
-
-function goldenRecords(): ProjectOwnedRecords {
-  const fingerprint = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
-  return {
-    analysisManifests: [],
-    exportReceipts: [],
-    extensions: {},
-    legacyManifestlessAnalysisRevisionIds: ["revision_original", "revision_reviewable"],
-    projectRange: { endSourceSample: 48_000, sourceId: "source_fixture", startSourceSample: 0 },
-    sources: [
-      {
-        id: "source_fixture",
-        identity: { fingerprint, kind: "local_file" },
-        locators: [
-          {
-            fingerprint,
-            id: "locator_fixture",
-            kind: "local_file",
-            path: "/unavailable/golden-fixture.wav",
-            status: "unavailable",
-            verifiedAt: "2026-08-21T08:00:00Z",
-          },
-        ],
-        metadataObservations: [],
-        snapshots: [
-          {
-            byteFingerprint: fingerprint,
-            byteSize: 96_044,
-            canonicalAudioFingerprint:
-              "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-            durationSamples: 48_000,
-            id: "snapshot_fixture",
-            metadataObservationIds: [],
-            observedAt: "2026-08-21T08:00:00Z",
-            provenance: {
-              components: [
-                {
-                  hash: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-                  id: "media-probe",
-                  version: "1.0.0",
-                },
-              ],
-              kind: "local_file",
-            },
-            selectedFormat: {
-              audioCodec: "pcm_s16le",
-              container: "wav",
-              mimeType: "audio/wav",
-            },
-          },
-        ],
-      },
-    ],
-  };
 }
 
 function revisedSnapshot(

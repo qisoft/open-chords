@@ -1,3 +1,4 @@
+import { canonicalSerialize } from "./canonical.ts";
 import { validateLyricsAlignmentInvariants, validateTimelineInvariants } from "./invariants.ts";
 import type { LyricsAlignment, MusicalTimeline, ProjectContract } from "./schema.ts";
 
@@ -15,7 +16,47 @@ function applyOperation(
   lyricsAlignment: LyricsAlignment | undefined,
   operation: EditOperation,
 ): void {
-  if (operation.type === "replace_chord_value") {
+  if (operation.type === "replace_chord_sequence") {
+    const index = timeline.chordEvents.findIndex(
+      (event) => event.id === operation.targetEventIds[0],
+    );
+    const previous = timeline.chordEvents.slice(index, index + operation.targetEventIds.length);
+    if (
+      index < 0 ||
+      previous.length !== operation.targetEventIds.length ||
+      previous.some((event, offset) => event.id !== operation.targetEventIds[offset])
+    )
+      throw new Error("Chord sequence must name one contiguous saved span");
+    if (
+      new Set(operation.events.map((event) => event.id)).size !== previous.length ||
+      operation.events.length !== previous.length ||
+      operation.events.some((event) => !operation.targetEventIds.includes(event.id))
+    )
+      throw new Error("Chord sequence must preserve stable identities");
+    if (
+      operation.events[0]?.startSample !== previous[0]?.startSample ||
+      operation.events.at(-1)?.endSample !== previous.at(-1)?.endSample
+    )
+      throw new Error("Chord sequence must preserve its outer boundaries");
+    const originals = new Map(previous.map((event) => [event.id, event]));
+    timeline.chordEvents.splice(
+      index,
+      previous.length,
+      ...operation.events.map((event) => {
+        const original = originals.get(event.id)!;
+        const changed =
+          original.startSample !== event.startSample ||
+          original.endSample !== event.endSample ||
+          canonicalSerialize(original.value) !== canonicalSerialize(event.value);
+        return {
+          ...structuredClone(event),
+          assertion: changed
+            ? { evidence: [], reasonCodes: ["user_authored"], state: "asserted" as const }
+            : structuredClone(original.assertion),
+        };
+      }),
+    );
+  } else if (operation.type === "replace_chord_value") {
     const event = timeline.chordEvents.find(({ id }) => id === operation.eventId);
     if (event === undefined)
       throw new Error(`Edit references unknown Chord Event ${operation.eventId}`);

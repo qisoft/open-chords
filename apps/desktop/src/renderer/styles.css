@@ -556,7 +556,7 @@ button:disabled {
 .workspace {
   height: 100dvh;
   min-height: 760px;
-  grid-template-rows: auto auto auto minmax(180px, 1fr);
+  grid-template-rows: auto auto auto minmax(280px, 1fr);
 }
 .content-section {
   display: flex;
@@ -645,4 +645,125 @@ button:disabled {
   margin: 0;
   padding: 0;
   min-width: 0;
+}
+
+.editor-section {
+  min-width: 0;
+}
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+.editor-actions label,
+.chord-picker label,
+.editor-event label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.editor-section select {
+  max-width: 100%;
+  background: var(--color-surface-raised);
+  color: inherit;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.35rem;
+  padding: 0.5rem;
+}
+.chord-editor {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.6rem;
+  min-width: 0;
+}
+.editor-fields {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1rem;
+  min-width: 0;
+}
+.editor-rail {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding: 0.4rem 0.25rem 1rem;
+  max-width: 100%;
+}
+.editor-event {
+  display: flex;
+  flex: 0 0 14rem;
+  flex-direction: column;
+  gap: 0.7rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.4rem;
+  padding: 0.85rem;
+}
+.chord-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.7rem;
+  padding: 1rem 0;
+}
+.editor-event {
+  position: relative;
+}
+.editor-drag-handle {
+  cursor: grab;
+  align-self: start;
+}
+.editor-event[data-drop-side="before"] {
+  border-left: 4px solid #15704d;
+}
+.editor-event[data-drop-side="after"] {
+  border-right: 4px solid #15704d;
+}
+.drop-indicator {
+  position: absolute;
+  top: 0;
+  left: 0.3rem;
+  background: #15704d;
+  color: white;
+  padding: 0.2rem;
+  font-size: 0.75rem;
+}
+.editor-move-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.editor-rail {
+  list-style: none;
+  margin: 0;
+}
+.chord-picker {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.editor-section {
+  margin-top: 0.65rem;
+}
+.editor-actions button {
+  font-size: 0.8rem;
+}
+.editor-actions label {
+  display: flex;
+  align-items: center;
+}
+.editor-event > strong {
+  height: 1.5em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.editor-review-action {
+  height: 42px;
+}
+/* Expanded editing controls need unobstructed space in the document flow. */
+.workspace:has(.chord-editor) .transport {
+  position: static;
 }

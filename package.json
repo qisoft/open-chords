@@ -33,6 +33,7 @@
     "validate": "pnpm contracts:schema:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:fixtures && pnpm test:python && pnpm test:renderer"
   },
   "dependencies": {
+    "@atlaskit/pragmatic-drag-and-drop": "3.1.0",
     "@base-ui/react": "1.7.0",
     "effect": "3.22.1",
     "lucide-react": "1.31.0",

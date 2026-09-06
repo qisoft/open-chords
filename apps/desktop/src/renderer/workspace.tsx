@@ -16,6 +16,7 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { ChordEditor } from "./chord-editor.tsx";
 import { LyricsViewport } from "./lyrics-viewport.tsx";
 import { createPlaybackClock, type PlaybackClock } from "./playback-clock.ts";
 import { TimelineSurface } from "./timeline-surface.tsx";
@@ -315,6 +316,7 @@ export function ProjectWorkspace({
             {timeline.regions.find(({ id }) => id === regionState.loopRegionId)?.label ?? "Off"}
           </output>
         </div>
+        <ChordEditor api={api} snapshot={snapshot} />
       </section>
 
       <footer className="transport" aria-label="Playback controls">

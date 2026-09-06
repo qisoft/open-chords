@@ -1,11 +1,11 @@
 {
   "protocol": "open-chords/contracts",
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "type": "project_snapshot",
   "extensions": {},
   "payload": {
     "format": "open-chords/project",
-    "schemaVersion": "1.0",
+    "schemaVersion": "1.1",
     "id": "project_unanalyzed",
     "sampleRate": 48000,
     "durationSamples": 48000,

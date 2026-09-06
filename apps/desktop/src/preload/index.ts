@@ -1,5 +1,6 @@
 import {
   CommitEditTransactionCommandSchema,
+  ChangeEditHistoryCommandSchema,
   CreateMediaProjectCommandSchema,
   DESKTOP_IPC_CHANNELS,
   DESKTOP_IPC_PROTOCOL,
@@ -115,6 +116,27 @@ async function commitEditTransaction(
   );
 }
 
+async function changeEditHistory(
+  input: Parameters<OpenChordsDesktopApi["project"]["changeEditHistory"]>[0],
+) {
+  const command = ChangeEditHistoryCommandSchema.parse({
+    ...envelope(),
+    ...input,
+    type: "project.change_edit_history",
+  });
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.projectChangeEditHistory,
+    command,
+    (
+      response,
+    ): response is Extract<
+      DesktopResponse,
+      { type: "project.history_changed" | "project.edit_conflicts" }
+    > => response.type === "project.history_changed" || response.type === "project.edit_conflicts",
+    "Unexpected edit history response",
+  );
+}
+
 async function pickLocalFile() {
   const command = PickLocalFileCommandSchema.parse({
     ...envelope(),
@@ -221,6 +243,7 @@ const api: OpenChordsDesktopApi = {
     relinkSource: relinkMediaSource,
   },
   project: {
+    changeEditHistory,
     commitEditTransaction,
     getSnapshot: async (projectId) => {
       const response = await getProjectSnapshot(projectId);
