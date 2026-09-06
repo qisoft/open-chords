@@ -128,7 +128,9 @@ function importLines(
   if (cues.length === 0) throw new Error("No timed lyrics");
   const timings = cues.map((cue, index) => {
     const endSample = cues[index + 1]?.startSample ?? durationSamples;
-    if (cue.startSample >= endSample || endSample > durationSamples)
+    const terminalEmptyBoundary =
+      index === cues.length - 1 && cue.text.trim() === "" && cue.startSample === durationSamples;
+    if ((!terminalEmptyBoundary && cue.startSample >= endSample) || endSample > durationSamples)
       throw new Error("Invalid supplied timing");
     return { startSample: cue.startSample, endSample };
   });

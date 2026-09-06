@@ -204,3 +204,15 @@ it("uses whitespace-only LRC cues as gaps without creating lyric line occurrence
   ]);
   expect(() => parseProjectContract(project)).not.toThrow();
 });
+
+it("accepts a final empty LRC boundary exactly at the Project end", () => {
+  const project = addLyricsDocument(
+    fixture(),
+    { text: "[00:00.10]Hello\n[00:01.00]", language: "en", format: "lrc" },
+    "lyrics_final_boundary",
+  );
+  expect(
+    project.lyricsAlignments.at(-1)!.lineOccurrences.map(({ timing }) => timing),
+  ).toMatchObject([{ startSample: 4800, endSample: 48000 }]);
+  expect(() => parseProjectContract(project)).not.toThrow();
+});
