@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parseProjectContract } from "@open-chords/domain";
@@ -594,4 +596,77 @@ it("accepts bounded practice commands and rejects an out-of-range playback rate"
     (await gateway.execute({ ...command, action: { type: "settings", speed: 10 } }, sender))
       .response,
   ).toMatchObject({ type: "desktop.error", code: "invalid_command" });
+});
+
+it.each([
+  [{ notFound: true } as const, "project_not_found", false],
+  [{ readOnly: true } as const, "project_read_only", false],
+  [{ stale: true } as const, "stale_revision", true],
+])("preserves lyrics selection mutation outcome %j", async (outcome, code, retryable) => {
+  const { openLyricsDiscovery } = await import("../apps/desktop/src/main/lyrics-discovery.ts");
+  const stateRoot = await mkdtemp(join(tmpdir(), "open-chords-lyrics-outcome-"));
+  const record = {
+    id: 12,
+    trackName: "Example",
+    artistName: "Artist",
+    albumName: null,
+    duration: 1,
+    plainLyrics: "Selected words",
+    syncedLyrics: null,
+    instrumental: false,
+  };
+  let requests = 0;
+  const discovery = await openLyricsDiscovery({
+    stateRoot,
+    fetch: async () => Response.json(++requests === 1 ? [record] : record),
+  });
+  try {
+    const gateway = new DesktopCommandGateway(
+      createAuthority({
+        getSnapshot: async () => ({
+          eventSequence: 1,
+          project: readGoldenProject(),
+          projectRevisionId: "projectrevision_current",
+        }),
+        addLyrics: async () => outcome,
+      }),
+      undefined,
+      { discovery, openExternal: async () => {} },
+    );
+    const command = { ...commandEnvelope("request_lyrics_outcome"), type: "lyrics.perform" };
+    const found = (
+      await gateway.execute(
+        {
+          ...command,
+          action: {
+            type: "search",
+            projectId: "project_golden",
+            provider: "lrclib",
+            query: "Example",
+          },
+        },
+        sender,
+      )
+    ).response;
+    expect(found.type).toBe("lyrics.result");
+    if (found.type !== "lyrics.result") throw new Error("No candidates");
+    const selected = await gateway.execute(
+      {
+        ...command,
+        action: {
+          type: "select",
+          projectId: "project_golden",
+          expectedProjectRevisionId: "projectrevision_current",
+          candidateId: found.candidates![0]!.id,
+          language: "en",
+        },
+      },
+      sender,
+    );
+    expect(selected.response).toMatchObject({ type: "desktop.error", code, retryable });
+    expect(requests).toBe(2);
+  } finally {
+    discovery.cancel();
+    await rm(stateRoot, { recursive: true, force: true });
+  }
 });

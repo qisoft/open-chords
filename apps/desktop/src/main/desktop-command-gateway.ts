@@ -502,7 +502,22 @@ export class DesktopCommandGateway {
         input: { ...selection.input, language: action.language },
         origin: selection.origin,
       });
-      if (!("projectRevisionId" in saved))
+      if ("notFound" in saved)
+        return {
+          action: "none",
+          response: errorResponse("project_not_found", "Project was not found", false, command),
+        };
+      if ("readOnly" in saved)
+        return {
+          action: "none",
+          response: errorResponse(
+            "project_read_only",
+            "Project is read-only in this application",
+            false,
+            command,
+          ),
+        };
+      if ("stale" in saved)
         return {
           action: "none",
           response: errorResponse(
