@@ -8,10 +8,17 @@ import {
 import { z } from "zod";
 
 import { LyricsCandidateSchema, LyricsSearchSchema } from "./lyrics.ts";
+import {
+  ModelActionSchema,
+  ModelPackInfoSchema,
+  ModelRemovalImpactSchema,
+  ModelRuntimeInfoSchema,
+} from "./models.ts";
 
 export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
+  modelsPerform: "open-chords:models:perform",
   lyricsPerform: "open-chords:lyrics:perform",
   projectAddLyrics: "open-chords:project:add-lyrics",
   projectChangePractice: "open-chords:project:change-practice",
@@ -157,7 +164,14 @@ export const LyricsCommandSchema = z.strictObject({
   action: LyricsActionSchema,
 });
 
+export const ModelsCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  type: z.literal("models.perform"),
+  action: ModelActionSchema,
+});
+
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
+  ModelsCommandSchema,
   LyricsCommandSchema,
   CommitEditTransactionCommandSchema,
   ChangeEditHistoryCommandSchema,
@@ -204,6 +218,14 @@ const mediaSelectionEnvelope = {
 };
 
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    ...correlatedEnvelope,
+    type: z.literal("models.result"),
+    offline: z.boolean(),
+    packs: z.array(ModelPackInfoSchema).max(2),
+    runtime: ModelRuntimeInfoSchema,
+    removal: ModelRemovalImpactSchema.optional(),
+  }),
   z.strictObject({
     ...correlatedEnvelope,
     type: z.literal("lyrics.result"),
@@ -352,6 +374,11 @@ export type MediaPlaybackResponse = Extract<
 >;
 
 export type OpenChordsDesktopApi = {
+  models: {
+    perform(
+      action: z.infer<typeof ModelActionSchema>,
+    ): Promise<DesktopErrorResponse | Extract<DesktopResponse, { type: "models.result" }>>;
+  };
   lyrics: {
     perform(
       action: z.input<typeof LyricsActionSchema>,

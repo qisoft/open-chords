@@ -22,6 +22,7 @@ SPAWNED_HELPERS = ("open-chords-analysis", "tools/ffmpeg", "tools/ffprobe")
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime-root", type=Path, required=True)
+    parser.add_argument("--helper", action="append")
     arguments = parser.parse_args()
     runtime_root = arguments.runtime_root.resolve(strict=True)
     native_files = [
@@ -32,7 +33,7 @@ def main() -> None:
     for path in sorted(native_files, key=lambda item: len(item.parts), reverse=True):
         subprocess.run(["codesign", "--force", "--sign", "-", str(path)], check=True)
     entitlements = ROOT / "native/macos/analysis-helper.entitlements.plist"
-    for relative in SPAWNED_HELPERS:
+    for relative in arguments.helper or SPAWNED_HELPERS:
         helper = runtime_root / relative
         if not helper.is_file() or not is_mach_o(helper):
             raise FileNotFoundError(f"Required Mach-O helper is missing: {relative}")

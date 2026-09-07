@@ -7,6 +7,7 @@ import {
 } from "./committed-project-store.ts";
 
 import "./styles.css";
+import { ModelPacks } from "./model-packs.tsx";
 import { EmptyWorkspace, ProjectWorkspace } from "./workspace.tsx";
 
 const root = document.querySelector<HTMLElement>("#root");
@@ -81,11 +82,16 @@ function App() {
       />
     );
   return (
-    <EmptyWorkspace
-      busy={busy || committed.kind === "loading"}
-      error={committed.kind === "error" ? committed.message : error}
-      onChoose={() => void chooseLocalRecording()}
-    />
+    <>
+      <div className="empty-model-tools">
+        <ModelPacks api={api} />
+      </div>
+      <EmptyWorkspace
+        busy={busy || committed.kind === "loading"}
+        error={committed.kind === "error" ? committed.message : error}
+        onChoose={() => void chooseLocalRecording()}
+      />
+    </>
   );
 }
 

@@ -1115,3 +1115,44 @@ async function decodeWebSocketMessage(data: unknown): Promise<string | null> {
   }
   return null;
 }
+
+test("installed MFA runtime verifies its manifest and starts without system Python or Conda", async () => {
+  test.setTimeout(240_000);
+  const { inspectAlignmentRuntime } =
+    await import("../../apps/desktop/src/main/alignment-runtime.ts");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const root = join(resourcesPath, "open-chords-alignment");
+  const info = await inspectAlignmentRuntime(root);
+  expect(info.available).toBe(true);
+  expect(info.installedBytes).toBeGreaterThan(0);
+  const home = mkdtempSync(join(tmpdir(), "open-chords-mfa-installed-"));
+  try {
+    const env: Record<string, string> = {
+      HOME: home,
+      USERPROFILE: home,
+      MFA_ROOT_DIR: home,
+      APPDATA: home,
+      LOCALAPPDATA: home,
+      TEMP: home,
+      TMP: home,
+    };
+    if (process.platform === "win32") {
+      env.SystemRoot = process.env.SystemRoot!;
+      env.PATH = join(env.SystemRoot, "System32");
+    } else env.PATH = "/usr/bin:/bin";
+    const { stdout } = await promisify(execFile)(
+      join(root, `open-chords-alignment${process.platform === "win32" ? ".exe" : ""}`),
+      ["--probe"],
+      { env, timeout: 180_000, maxBuffer: 8192 },
+    );
+    expect(JSON.parse(stdout)).toEqual({
+      runtime: "mfa",
+      version: "3.4.1",
+      kalpy: "KalpyAligner",
+      fst: 0,
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

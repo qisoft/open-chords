@@ -36,7 +36,11 @@ module.exports = {
   packagerConfig: {
     appBundleId: "io.github.qisoft.open-chords",
     asar: true,
-    extraResource: ["dist/analysis-sidecar/open-chords-analysis", "dist/containment"],
+    extraResource: [
+      "dist/analysis-sidecar/open-chords-analysis",
+      "dist/containment",
+      "dist/alignment-runtime/open-chords-alignment",
+    ],
     osxSign: {
       identity: "-",
       identityValidation: false,

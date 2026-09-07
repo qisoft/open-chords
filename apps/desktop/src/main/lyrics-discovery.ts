@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import {
   LyricsSearchSchema,
@@ -9,6 +7,8 @@ import {
 } from "@open-chords/contracts";
 import type { LyricsInput, LyricsOrigin } from "@open-chords/domain";
 import { z } from "zod";
+
+import { openNetworkMode, type NetworkMode } from "./network-mode.ts";
 
 const recordSchema = z.object({
   id: z.number().int().positive(),
@@ -20,24 +20,19 @@ const recordSchema = z.object({
   syncedLyrics: z.string().max(64_000).nullable(),
   instrumental: z.boolean(),
 });
-export async function openLyricsDiscovery(options: { stateRoot: string; fetch?: typeof fetch }) {
-  await mkdir(options.stateRoot, { recursive: true });
-  const path = join(options.stateRoot, "network-mode.json");
-  let offline = false;
-  try {
-    offline = z
-      .strictObject({ offline: z.boolean() })
-      .parse(JSON.parse(await readFile(path, "utf8"))).offline;
-  } catch (error) {
-    if ((error instanceof Error && "code" in error ? error.code : undefined) !== "ENOENT")
-      offline = true;
-  }
-  return new LyricsDiscovery(path, offline, options.fetch ?? fetch);
+export async function openLyricsDiscovery(options: {
+  stateRoot: string;
+  fetch?: typeof fetch;
+  network?: NetworkMode;
+}) {
+  return new LyricsDiscovery(
+    options.network ?? (await openNetworkMode(options.stateRoot)),
+    options.fetch ?? fetch,
+  );
 }
 
 export class LyricsDiscovery {
-  #offline: boolean;
-  readonly #path: string;
+  readonly #network: NetworkMode;
   readonly #fetch: typeof fetch;
   #controller: AbortController | null = null;
   #candidates = new Map<
@@ -57,35 +52,17 @@ export class LyricsDiscovery {
       };
     }
   >();
-  #write: Promise<void> = Promise.resolve();
-  #pendingModeWrites = 0;
   #expiry: ReturnType<typeof setTimeout> | null = null;
-  constructor(path: string, offline: boolean, fetcher: typeof fetch) {
-    this.#path = path;
-    this.#offline = offline;
+  constructor(network: NetworkMode, fetcher: typeof fetch) {
+    this.#network = network;
     this.#fetch = fetcher;
+    network.subscribe(() => this.cancel());
   }
   get offline() {
-    return this.#offline;
+    return this.#network.offline;
   }
   async setOffline(value: boolean) {
-    if (this.#pendingModeWrites >= 32) throw new Error("Network settings are busy");
-    this.#pendingModeWrites++;
-    this.#offline = value;
-    this.cancel();
-    this.#write = this.#write
-      .catch(() => {})
-      .then(async () => {
-        const temp = `${this.#path}.tmp`;
-        await writeFile(temp, JSON.stringify({ offline: value }), { mode: 0o600 });
-        await rename(temp, this.#path);
-        return undefined;
-      });
-    try {
-      await this.#write;
-    } finally {
-      this.#pendingModeWrites--;
-    }
+    await this.#network.setOffline(value);
   }
   cancel() {
     if (this.#expiry) clearTimeout(this.#expiry);
@@ -95,7 +72,7 @@ export class LyricsDiscovery {
     this.#candidates.clear();
   }
   async #read(url: URL, signal: AbortSignal) {
-    if (this.#offline) throw new Error("Offline Mode is enabled");
+    if (this.#network.offline) throw new Error("Offline Mode is enabled");
     const response = await this.#fetch(url, {
       signal,
       redirect: "error",
@@ -133,7 +110,7 @@ export class LyricsDiscovery {
   ): Promise<LyricsCandidate[]> {
     const input = LyricsSearchSchema.parse(raw);
     this.cancel();
-    if (this.#offline) throw new Error("Offline Mode is enabled");
+    if (this.#network.offline) throw new Error("Offline Mode is enabled");
 
     const controller = new AbortController();
     this.#controller = controller;

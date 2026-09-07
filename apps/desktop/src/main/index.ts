@@ -9,10 +9,14 @@ import {
 } from "@open-chords/contracts";
 import { app, dialog, shell, type BrowserWindow, type WebContents } from "electron";
 
+import { ALIGNMENT_PACKS } from "./alignment-packs.ts";
+import { inspectAlignmentRuntime } from "./alignment-runtime.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
+import { openModelStore, type ModelStore } from "./model-store.ts";
+import { openNetworkMode } from "./network-mode.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-constants.ts";
 import { packagedProofFailureCode, runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
 import { openProjectLibrary } from "./project-library.ts";
@@ -76,6 +80,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
 
   const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
   const ownsSingleInstance = app.requestSingleInstanceLock();
+  let modelStore: ModelStore | null = null;
   let lyricsDiscovery: LyricsDiscovery | null = null;
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
@@ -110,6 +115,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
 
     app.on("window-all-closed", () => {
       lyricsDiscovery?.cancel();
+      modelStore?.cancel();
       if (process.platform !== "darwin") app.quit();
     });
 
@@ -117,7 +123,20 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
       .whenReady()
       .then(async () => {
         const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
-        lyricsDiscovery = await openLyricsDiscovery({ stateRoot: app.getPath("userData") });
+        const stateRoot = app.getPath("userData");
+        const network = await openNetworkMode(stateRoot);
+        lyricsDiscovery = await openLyricsDiscovery({ stateRoot, network });
+        const runtime = await inspectAlignmentRuntime(
+          app.isPackaged
+            ? join(process.resourcesPath, "open-chords-alignment")
+            : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
+        );
+        modelStore = await openModelStore({
+          stateRoot,
+          packs: ALIGNMENT_PACKS,
+          runtime: runtime.available ? runtime.id : "unavailable",
+          network,
+        });
         const localMedia = new LocalMediaService({
           library: projectLibrary,
           pickFile: async () => {
@@ -149,6 +168,12 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           );
         });
         installDesktopIpc(projectLibrary, {
+          models: {
+            store: modelStore,
+            network,
+            runtime,
+            references: () => projectLibrary.listModelReferences(),
+          },
           lyrics: { discovery: lyricsDiscovery, openExternal: (url) => shell.openExternal(url) },
           mediaAuthority: localMedia,
           onSenderAction: (_action, sender) => replaceCompromisedRenderer(sender),
@@ -165,6 +190,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   function getOrCreateWindow() {
     if (mainWindow === null || mainWindow.isDestroyed()) {
       lyricsDiscovery?.cancel();
+      modelStore?.cancel();
       const generationId = `generation_${randomUUID().replaceAll("-", "")}`;
       const window = createDesktopWindow(generationId);
       localMediaAuthority?.activateGeneration(generationId);
@@ -199,6 +225,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
 
   function revokeRendererGeneration(webContentsId: number): void {
     lyricsDiscovery?.cancel();
+    modelStore?.cancel();
     const context = rendererContexts.get(webContentsId);
     rendererContexts.delete(webContentsId);
     if (context !== undefined && localMediaAuthority !== null) {

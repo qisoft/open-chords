@@ -547,6 +547,23 @@ export class ProjectLibrary {
     return structuredClone(entry.revision.payload.records.projectRange);
   }
 
+  listModelReferences() {
+    return [...this.#entries.entries()].map(([projectId, entry]) => {
+      if (!entry.revision || entry.status === "damaged")
+        throw new Error("Model dependency impact unavailable for a damaged Project");
+      return {
+        projectId,
+        artifacts: entry.revision.payload.records.analysisManifests.flatMap(({ manifest }) =>
+          manifest.recipe.components.map((component) => ({
+            id: component.id,
+            version: component.version,
+            sha256: component.hash.slice(7),
+          })),
+        ),
+      };
+    });
+  }
+
   async resolveBlockedDependencies(input: {
     canonicalAudioFingerprint: string;
     modelStore: {

@@ -50,7 +50,7 @@ jobs:
             arch: x64
             profile: windows-server-2025-x64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -60,7 +60,11 @@ jobs:
         with:
           python-version: 3.13.11
           cache: pip
-          cache-dependency-path: sidecar/requirements-build.txt
+          cache-dependency-path: |
+            sidecar/requirements-build.txt
+            sidecar/alignment/requirements-builder.txt
+            sidecar/alignment/osx-arm64.json
+            sidecar/alignment/win-64.json
       - name: Activate exact pnpm
         run: |
           corepack enable
@@ -134,6 +138,15 @@ jobs:
         run: pnpm test:frozen-sidecar
       - name: Build native containment broker
         run: python tools/build-native-containment.py --output-root dist/containment
+      - name: Build and prove the exact self-contained MFA runtime
+        run: python tools/build-alignment-runtime.py --build-root build/alignment-runtime --output-root dist/alignment-runtime
+      - name: Upload alignment runtime measurement
+        uses: actions/upload-artifact@v4
+        with:
+          name: alignment-runtime-evidence-${{ matrix.profile }}
+          path: |
+            dist/alignment-runtime/measurement.json
+            dist/alignment-runtime/open-chords-alignment/runtime-info.json
       - name: Build installable Forge artifact
         run: pnpm make -- --arch=${{ matrix.arch }}
       - name: Verify installed trust boundary
