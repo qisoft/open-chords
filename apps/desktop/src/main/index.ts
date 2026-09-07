@@ -105,8 +105,11 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
       "before-quit",
       createMediaCleanupBeforeQuitHandler({
         dispose: async () => {
-          await alignmentService?.dispose();
-          await localMediaAuthority?.dispose();
+          try {
+            await alignmentService?.dispose();
+          } finally {
+            await localMediaAuthority?.dispose();
+          }
         },
         exitWithFailure: () => app.exit(1),
         quit: () => app.quit(),

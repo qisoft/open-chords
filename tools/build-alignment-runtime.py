@@ -92,7 +92,10 @@ def main() -> None:
     (soundfile_data / "__init__.py").write_text('"""Release-owned, hash-locked libsndfile payload."""\n', "utf8")
     shutil.copy2(sndfiles[0], soundfile_data / ("libsndfile_x64.dll" if os.name == "nt" else "libsndfile_arm64.dylib"))
     build_env["PYTHONPATH"] = str(soundfile_data.parent)
-    run([str(python), "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--name", "open-chords-alignment", "--paths", str(soundfile_data.parent), "--collect-all", "_soundfile_data", "--copy-metadata", "montreal_forced_aligner", "--copy-metadata", "kalpy-kaldi", "--collect-all", "montreal_forced_aligner", "--collect-all", "kalpy", "--collect-all", "pynini", "--distpath", str(output), "--workpath", str(build / "freeze"), "--specpath", str(build), str(ROOT / "sidecar/alignment/entry.py")], env=build_env)
+    # MFA's optional diarization plots are outside the fixed Kalpy alignment
+    # profile. Their Matplotlib hook eagerly creates a config directory before
+    # our entry point and fails inside Windows AppContainer.
+    run([str(python), "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--name", "open-chords-alignment", "--exclude-module", "matplotlib", "--paths", str(soundfile_data.parent), "--collect-all", "_soundfile_data", "--copy-metadata", "montreal_forced_aligner", "--copy-metadata", "kalpy-kaldi", "--collect-all", "montreal_forced_aligner", "--collect-all", "kalpy", "--collect-all", "pynini", "--distpath", str(output), "--workpath", str(build / "freeze"), "--specpath", str(build), str(ROOT / "sidecar/alignment/entry.py")], env=build_env)
     runtime = output / "open-chords-alignment"
     executable_name = "open-chords-alignment.exe" if os.name == "nt" else "open-chords-alignment"
     worker_name = "open-chords-alignment-worker.exe" if os.name == "nt" else "open-chords-alignment-worker"

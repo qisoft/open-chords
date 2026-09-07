@@ -102,7 +102,14 @@ export function createExecutableNativeContainmentBroker(
       // exit validation still report the failure through the public API.
       const onChildError = () => undefined;
       child.on("error", onChildError);
-      child.once("close", () => child.off("error", onChildError));
+      // A failed pipe write reports both its callback and a stream error event.
+      // The callback remains authoritative for the session; cancellation can
+      // close the native pipe before its cooperative cancel frame is written.
+      child.stdin?.on("error", onChildError);
+      child.once("close", () => {
+        child.off("error", onChildError);
+        child.stdin?.off("error", onChildError);
+      });
       const exited = new Promise<{
         code: number | null;
         signal: NodeJS.Signals | null;

@@ -624,6 +624,60 @@ it("starts and cancels through named desktop capabilities without accepting path
   );
 });
 
+it("waits for worker teardown on shutdown even when interruption state cannot be persisted", async () => {
+  const { openAlignmentService } = await import("../apps/desktop/src/main/alignment-service.ts");
+  const context = await runnableJob();
+  const entered = Promise.withResolvers<void>();
+  const aborted = Promise.withResolvers<void>();
+  const cleanup = Promise.withResolvers<void>();
+  const service = await openAlignmentService({
+    ...context.options,
+    library: context.library,
+    media: new LocalMediaService({ library: context.library, pickFile: async () => null }),
+    worker: async (input) => {
+      entered.resolve();
+      input.signal.addEventListener("abort", () => aborted.resolve(), { once: true });
+      await cleanup.promise;
+      return { ...context.output, recipeHash: input.recipeHash };
+    },
+  });
+  const snapshot = (await context.library.getSnapshot(context.original.id))!;
+  await service.perform({
+    type: "start",
+    projectId: context.original.id,
+    expectedProjectRevisionId: snapshot.projectRevisionId,
+  });
+  await entered.promise;
+  const root = join(context.options.stateRoot, "alignment-jobs");
+  const saved = `${root}-shutdown-fault`;
+  await rename(root, saved);
+  await writeFile(root, "unavailable storage");
+  let settled = false;
+  const disposal = service.dispose().then(
+    () => {
+      settled = true;
+      return null;
+    },
+    (error: unknown) => {
+      settled = true;
+      return error;
+    },
+  );
+  try {
+    await aborted.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+  } finally {
+    await rm(root);
+    await rename(saved, root);
+    cleanup.resolve();
+    expect(await disposal).toBeInstanceOf(Error);
+  }
+  expect(
+    (await context.library.getSnapshot(context.original.id))!.project.lyricsAlignments,
+  ).toEqual(context.original.lyricsAlignments);
+});
+
 it("serializes CPU-heavy Alignment execution across Projects and cancels queued work without starting a worker", async () => {
   const first = await runnableJob();
   const second = await runnableJob();

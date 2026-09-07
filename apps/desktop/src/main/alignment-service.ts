@@ -153,8 +153,11 @@ export async function openAlignmentService(options: Options) {
     async dispose() {
       closed = true;
       pending.clear();
-      await jobs.interrupt();
-      await Promise.all(running.values());
+      try {
+        await jobs.interrupt();
+      } finally {
+        await Promise.all(running.values());
+      }
     },
     async setSuspended(value: boolean) {
       suspended = value;

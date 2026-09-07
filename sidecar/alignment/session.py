@@ -51,10 +51,9 @@ def serve():
     def control():
         try:
             message = read_frame()
-            if set(message) != {"type", "sequence", *identity} or message["type"] != "cancel" or message["sequence"] != 1 or any(message[key] != value for key, value in identity.items()):
+            if set(message) != {"type", "sequence", *identity} or message["type"] != "cancel" or type(message["sequence"]) is not int or not 1 <= message["sequence"] <= 2**53 - 1 or any(message[key] != value for key, value in identity.items()):
                 raise ValueError("Invalid cancel")
-            cancelled.set()
-            events.put(("cancel", None))
+            events.put(("cancel", message["sequence"]))
         except Exception:
             invalid_control.set()
             cancelled.set()
@@ -77,10 +76,10 @@ def serve():
         except Exception:
             events.put(("finished" if cancelled.is_set() else "failure", None))
 
-    threading.Thread(target=control, daemon=True).start()
-    threading.Thread(target=execute, daemon=True).start()
     sequence = 1
     acknowledged = False
+    threading.Thread(target=control, daemon=True).start()
+    threading.Thread(target=execute, daemon=True).start()
     while True:
         try:
             kind, payload = events.get(timeout=5)
@@ -93,6 +92,10 @@ def serve():
             # error rather than acknowledging an invalid cancellation frame.
             continue
         if kind == "cancel":
+            cancelled.set()
+            if payload > sequence:
+                invalid_control.set()
+                continue
             write_frame({**identity, "type": "cancel_ack", "sequence": sequence})
             sequence += 1
             acknowledged = True
