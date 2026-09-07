@@ -123,6 +123,7 @@ export type ModelGatewayService = {
   references(): Array<{
     projectId: string;
     artifacts: Array<{ id: string; version: string; sha256: string }>;
+    impactUnknown?: boolean | undefined;
   }>;
 };
 
@@ -472,6 +473,16 @@ export class DesktopCommandGateway {
       if (action.type === "preview_removal" || action.type === "remove") {
         removal = models.store.previewRemoval(action.packId, models.references());
         if (action.type === "remove") {
+          if (removal.unknownProjectIds.length > 0)
+            return {
+              action: "none",
+              response: errorResponse(
+                "capability_unavailable",
+                "Repair damaged Projects before removing this pack; dependency impact is unknown.",
+                false,
+                command,
+              ),
+            };
           if (action.impactId !== removal.impactId)
             return {
               action: "none",

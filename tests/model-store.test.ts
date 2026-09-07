@@ -136,6 +136,25 @@ it("Offline Mode persists, cancels transfers, and denies model installation", as
   expect(requests).toBe(1);
 });
 
+it("keeps the committed network policy when an Offline Mode write fails", async () => {
+  const { mkdir } = await import("node:fs/promises");
+  const { openNetworkMode } = await import("../apps/desktop/src/main/network-mode.ts");
+  const stateRoot = await root();
+  const network = await openNetworkMode(stateRoot);
+  const store = await openModelStore({
+    stateRoot,
+    packs: [pack],
+    runtime: pack.runtime,
+    network,
+    fetch: async () => new Response(bytes),
+  });
+  await mkdir(join(stateRoot, "network-mode.json"));
+  await expect(network.setOffline(true)).rejects.toThrow();
+  expect(network.offline).toBe(false);
+  await store.install(pack.id);
+  expect(await store.list()).toMatchObject([{ installed: true }]);
+});
+
 it("never publishes a mismatched artifact and permits a clean retry", async () => {
   const stateRoot = await root();
   let valid = false;
@@ -285,6 +304,12 @@ it("keeps exact versions independent when removing a pack and reports referenced
   const references = [{ projectId: "project_one", artifacts: [pack.artifacts[0]!] }];
   const impact = store.previewRemoval(pack.id, references);
   expect(impact.affectedProjectIds).toEqual(["project_one"]);
+  const unknownImpact = store.previewRemoval(pack.id, [
+    ...references,
+    { projectId: "project_damaged", artifacts: [], impactUnknown: true },
+  ]);
+  expect(unknownImpact.unknownProjectIds).toEqual(["project_damaged"]);
+  expect(unknownImpact.impactId).not.toBe(impact.impactId);
   await store.remove(pack.id);
   expect(await store.resolve(pack.artifacts[0]!)).toBeNull();
   expect(await store.resolve(newer.artifacts[0]!)).not.toBeNull();

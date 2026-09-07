@@ -43,9 +43,14 @@ export class NetworkMode {
   async setOffline(offline: boolean) {
     if (this.#pending >= 32) throw new Error("Network settings are busy");
     this.#pending++;
-    this.#offline = offline;
-    for (const listener of this.#listeners) listener();
-    this.#write = this.#write.catch(() => {}).then(() => persistNetworkMode(this.#path, offline));
+    this.#write = this.#write
+      .catch(() => {})
+      .then(() =>
+        persistNetworkMode(this.#path, offline, () => {
+          this.#offline = offline;
+          for (const listener of this.#listeners) listener();
+        }),
+      );
     try {
       await this.#write;
     } finally {
@@ -54,18 +59,23 @@ export class NetworkMode {
   }
 }
 
-async function persistNetworkMode(path: string, offline: boolean) {
+async function persistNetworkMode(path: string, offline: boolean, published: () => void) {
   const temp = `${path}.${randomUUID()}.tmp`;
   const file = await open(temp, "wx", 0o600);
   try {
-    await file.writeFile(JSON.stringify({ offline }));
-    await file.sync();
-  } finally {
-    await file.close();
-  }
-  try {
+    try {
+      await file.writeFile(JSON.stringify({ offline }));
+      await file.sync();
+    } finally {
+      await file.close();
+    }
     await rename(temp, path);
-    await syncDirectory(dirname(path));
+    try {
+      await syncDirectory(dirname(path));
+    } finally {
+      // After rename, even a directory-sync failure must agree with the visible file.
+      published();
+    }
   } finally {
     await rm(temp, { force: true });
   }

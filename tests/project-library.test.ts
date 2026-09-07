@@ -1046,6 +1046,9 @@ describe("ProjectLibrary", () => {
     await expect(reopened.readProject("project_golden")).rejects.toBeInstanceOf(
       ProjectLibraryDamagedError,
     );
+    expect(reopened.listModelReferences()).toEqual([
+      { projectId: "project_golden", artifacts: [], impactUnknown: true },
+    ]);
   });
 
   it("refuses newer schema writes and leaves a failed legacy migration readable and unchanged", async () => {

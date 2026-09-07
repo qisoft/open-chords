@@ -550,7 +550,7 @@ export class ProjectLibrary {
   listModelReferences() {
     return [...this.#entries.entries()].map(([projectId, entry]) => {
       if (!entry.revision || entry.status === "damaged")
-        throw new Error("Model dependency impact unavailable for a damaged Project");
+        return { projectId, artifacts: [], impactUnknown: true as const };
       return {
         projectId,
         artifacts: entry.revision.payload.records.analysisManifests.flatMap(({ manifest }) =>

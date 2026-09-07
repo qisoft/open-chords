@@ -23,8 +23,13 @@ export function ModelPacks({ api }: { api: OpenChordsDesktopApi }) {
     try {
       const response = await api.models.perform(action);
       if (current !== version.current) return;
-      if (response.type === "desktop.error") setMessage(response.message);
-      else {
+      if (response.type === "desktop.error") {
+        setMessage(response.message);
+        if (action.type === "set_offline") {
+          const status = await api.models.perform({ type: "status" });
+          if (current === version.current && status.type === "models.result") setResult(status);
+        }
+      } else {
         setResult(response);
         setMessage(
           action.type === "install"
@@ -67,7 +72,6 @@ export function ModelPacks({ api }: { api: OpenChordsDesktopApi }) {
               disabled={!result || (pending && pendingAction !== "install")}
               onChange={(event) => {
                 const offline = event.target.checked;
-                setResult((previous) => (previous ? { ...previous, offline } : previous));
                 void perform({ type: "set_offline", offline });
               }}
             />{" "}
@@ -145,7 +149,7 @@ export function ModelPacks({ api }: { api: OpenChordsDesktopApi }) {
                   </p>
                   <button
                     type="button"
-                    disabled={pending}
+                    disabled={pending || result.removal.unknownProjectIds.length > 0}
                     onClick={() =>
                       void perform({
                         type: "remove",
@@ -156,6 +160,13 @@ export function ModelPacks({ api }: { api: OpenChordsDesktopApi }) {
                   >
                     Confirm pack removal
                   </button>
+                  {result.removal.unknownProjectIds.length > 0 && (
+                    <p>
+                      Dependency impact is unknown for damaged Projects:{" "}
+                      {result.removal.unknownProjectIds.join(", ")}. Repair these Projects before
+                      removing this pack.
+                    </p>
+                  )}
                 </section>
               )}
             </>

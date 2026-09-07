@@ -46,5 +46,6 @@ export const ModelRemovalImpactSchema = z.strictObject({
   packId: AlignmentPackIdSchema,
   impactId: z.string().regex(/^[a-f0-9]{64}$/),
   affectedProjectIds: z.array(z.string().max(128)).max(10000),
+  unknownProjectIds: z.array(z.string().max(128)).max(10000),
 });
 export type ModelRuntimeInfo = z.infer<typeof ModelRuntimeInfoSchema>;

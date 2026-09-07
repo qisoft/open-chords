@@ -83,7 +83,16 @@ def main() -> None:
     build_env["CONDA_PREFIX"] = str(environment)
     build_env["MFA_ROOT_DIR"] = str(build / "mfa")
     run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "--require-hashes", "--no-deps", "--only-binary=:all:", "-r", str(ROOT / "sidecar/alignment/requirements-builder.txt")], env=build_env)
-    run([str(python), "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--name", "open-chords-alignment", "--copy-metadata", "montreal_forced_aligner", "--copy-metadata", "kalpy-kaldi", "--collect-all", "montreal_forced_aligner", "--collect-all", "kalpy", "--collect-all", "pynini", "--distpath", str(output), "--workpath", str(build / "freeze"), "--specpath", str(build), str(ROOT / "sidecar/alignment/entry.py")], env=build_env)
+    sndfiles = list((environment / "Library/bin").glob("*sndfile*.dll")) if os.name == "nt" else [environment / "lib/libsndfile.dylib"]
+    if len(sndfiles) != 1 or not sndfiles[0].is_file():
+        raise RuntimeError("Locked libsndfile runtime is missing or ambiguous")
+    # Use SoundFile's supported packaged-library layout so it never searches Homebrew.
+    soundfile_data = build / "soundfile-data/_soundfile_data"
+    soundfile_data.mkdir(parents=True, exist_ok=True)
+    (soundfile_data / "__init__.py").write_text('"""Release-owned, hash-locked libsndfile payload."""\n', "utf8")
+    shutil.copy2(sndfiles[0], soundfile_data / ("libsndfile_x64.dll" if os.name == "nt" else "libsndfile_arm64.dylib"))
+    build_env["PYTHONPATH"] = str(soundfile_data.parent)
+    run([str(python), "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--name", "open-chords-alignment", "--paths", str(soundfile_data.parent), "--collect-all", "_soundfile_data", "--copy-metadata", "montreal_forced_aligner", "--copy-metadata", "kalpy-kaldi", "--collect-all", "montreal_forced_aligner", "--collect-all", "kalpy", "--collect-all", "pynini", "--distpath", str(output), "--workpath", str(build / "freeze"), "--specpath", str(build), str(ROOT / "sidecar/alignment/entry.py")], env=build_env)
     runtime = output / "open-chords-alignment"
     # Materialize aliases so artifact verification never follows a runtime symlink.
     for path in list(runtime.rglob("*")):
@@ -117,7 +126,14 @@ def main() -> None:
             clean_env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
         else:
             clean_env["PATH"] = "/usr/bin:/bin"
-        result = subprocess.run([str(executable), "--probe"], env=clean_env, capture_output=True, text=True, check=True, timeout=180)
+        probe_command = [str(executable), "--probe"]
+        if os.name != "nt":
+            probe_command = ["/usr/bin/sandbox-exec", "-p", '(version 1) (allow default) (deny file-read* (subpath "/opt/homebrew") (subpath "/usr/local"))', *probe_command]
+        result = subprocess.run(probe_command, env=clean_env, capture_output=True, text=True, timeout=180)
+        if result.returncode != 0:
+            # This release-owned probe processes no user data; keep build diagnostics bounded.
+            sys.stderr.write(result.stderr[-8192:])
+            raise RuntimeError(f"Alignment runtime probe exited with code {result.returncode}")
         proof = json.loads(result.stdout)
         if proof != {"runtime": "mfa", "version": "3.4.1", "kalpy": "KalpyAligner", "fst": 0}:
             raise RuntimeError("Alignment runtime proof failed")

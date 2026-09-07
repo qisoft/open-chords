@@ -1152,9 +1152,20 @@ test("installed MFA runtime verifies its manifest and starts without system Pyth
       env.SystemRoot = process.env.SystemRoot!;
       env.PATH = join(env.SystemRoot, "System32");
     } else env.PATH = "/usr/bin:/bin";
+    const executable = join(
+      root,
+      `open-chords-alignment${process.platform === "win32" ? ".exe" : ""}`,
+    );
     const { stdout } = await promisify(execFile)(
-      join(root, `open-chords-alignment${process.platform === "win32" ? ".exe" : ""}`),
-      ["--probe"],
+      process.platform === "darwin" ? "/usr/bin/sandbox-exec" : executable,
+      process.platform === "darwin"
+        ? [
+            "-p",
+            '(version 1) (allow default) (deny file-read* (subpath "/opt/homebrew") (subpath "/usr/local"))',
+            executable,
+            "--probe",
+          ]
+        : ["--probe"],
       { env, timeout: 180_000, maxBuffer: 8192 },
     );
     expect(JSON.parse(stdout)).toEqual({

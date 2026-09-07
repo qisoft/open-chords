@@ -239,6 +239,7 @@ export class ModelStore {
     references: Array<{
       projectId: string;
       artifacts: Array<{ id: string; version: string; sha256: string }>;
+      impactUnknown?: boolean | undefined;
     }>,
   ) {
     const pack = this.#packs.find((item) => item.id === id);
@@ -259,10 +260,18 @@ export class ModelStore {
           .map((reference) => reference.projectId),
       ),
     ].sort();
+    const unknownProjectIds = [
+      ...new Set(
+        references
+          .filter((reference) => reference.impactUnknown)
+          .map((reference) => reference.projectId),
+      ),
+    ].sort();
     return {
       packId: id,
       affectedProjectIds,
-      impactId: digest(JSON.stringify({ pack, affectedProjectIds })),
+      unknownProjectIds,
+      impactId: digest(JSON.stringify({ pack, affectedProjectIds, unknownProjectIds })),
     };
   }
   async remove(id: string) {
