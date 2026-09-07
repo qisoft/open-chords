@@ -226,9 +226,24 @@ export function createBoundedSidecarStderrCapture(onExceeded: () => void): {
 
 export function parseSidecarProcessFailure(value: string, exceeded = false): string | null {
   if (exceeded) return null;
-  return (
-    SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? ALIGNMENT_FAILURE_PATTERN.exec(value)?.[1] ?? null
-  );
+  const reported =
+    SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? ALIGNMENT_FAILURE_PATTERN.exec(value)?.[1] ?? null;
+  if (reported) return reported;
+  // Frozen bootloader/runtime-hook failures occur before the application's
+  // diagnostic handler. Expose only fixed scopes and exception classes.
+  const hook =
+    /Failed to execute script '(pyi_rth_(?:inspect|pkgutil|multiprocessing|_tkinter|mplconfig|setuptools)|entry)'/u.exec(
+      value,
+    )?.[1];
+  if (hook) {
+    const kind =
+      /(?:^|\n)(PermissionError|FileNotFoundError|ImportError|ModuleNotFoundError|OSError|RuntimeError|ValueError):/u.exec(
+        value,
+      )?.[1] ?? "unknown";
+    return `sidecar_bootstrap_${hook}_${kind}`;
+  }
+  if (value.includes("Failed to load Python DLL")) return "sidecar_bootstrap_python_library";
+  return null;
 }
 
 async function readEvidence(
