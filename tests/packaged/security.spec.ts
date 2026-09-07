@@ -135,6 +135,7 @@ test("installed artifact runs contained analysis, publishes Revisions, and reaps
 });
 
 test("installed editor and practice save through named IPC with a durable reopened result", async () => {
+  test.setTimeout(60_000);
   const stateRoot = join(packageRoot, "editor-user-data");
   const envelope = ProjectEnvelopeSchema.parse(
     JSON.parse(
@@ -169,7 +170,8 @@ test("installed editor and practice save through named IPC with a durable reopen
             return false;
           }
         },
-        { timeout: 10_000 },
+        // Startup verifies the bundled runtime before exposing desktop capabilities.
+        { timeout: 30_000 },
       )
       .toBe(true);
     if (target === undefined) throw new Error("Packaged editor target is unavailable");
