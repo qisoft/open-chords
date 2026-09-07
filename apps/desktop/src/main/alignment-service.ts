@@ -152,8 +152,8 @@ export async function openAlignmentService(options: Options) {
     },
     async dispose() {
       closed = true;
-      await Promise.all([...running.keys(), ...pending].map((jobId) => jobs.cancel(jobId)));
       pending.clear();
+      await jobs.interrupt();
       await Promise.all(running.values());
     },
     async setSuspended(value: boolean) {

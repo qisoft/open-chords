@@ -237,29 +237,39 @@ export async function openAlignmentJobs(options: Options) {
     },
     interrupt() {
       return serialize(async () => {
-        await persist(
-          jobs.map((job) =>
-            job.state === "running"
-              ? { ...job, state: "retryable", failure: "interrupted", finishedAt: Date.now() }
-              : job.state === "queued"
-                ? { ...job, state: "awaiting_confirmation" }
-                : job,
-          ),
-        );
-        for (const controller of controllers.values()) controller.abort();
+        try {
+          await persist(
+            jobs.map((job) =>
+              job.state === "running"
+                ? { ...job, state: "retryable", failure: "interrupted", finishedAt: Date.now() }
+                : job.state === "queued"
+                  ? { ...job, state: "awaiting_confirmation" }
+                  : job,
+            ),
+          );
+        } finally {
+          for (const controller of controllers.values()) controller.abort();
+        }
       });
     },
     cancel(jobId: string) {
       return serialize(async () => {
         const current = jobs.find((item) => item.id === jobId);
         if (!current) throw new Error("Alignment Job unavailable");
-        if (current.state === "succeeded" || current.state === "cancelled") return;
-        await persist(
-          jobs.map((item) =>
-            item.id === jobId ? { ...item, state: "cancelled", finishedAt: Date.now() } : item,
-          ),
-        );
-        controllers.get(jobId)?.abort();
+        if (current.state === "succeeded") return;
+        if (current.state === "cancelled") {
+          controllers.get(jobId)?.abort();
+          return;
+        }
+        try {
+          await persist(
+            jobs.map((item) =>
+              item.id === jobId ? { ...item, state: "cancelled", finishedAt: Date.now() } : item,
+            ),
+          );
+        } finally {
+          controllers.get(jobId)?.abort();
+        }
       });
     },
     async run(jobId: string, dependencies: { library: ProjectLibrary; worker: AlignmentWorker }) {
@@ -430,7 +440,10 @@ export async function openAlignmentJobs(options: Options) {
           lyricsAlignments: [...snapshot.project.lyricsAlignments, alignment],
         });
         return await serialize(async () => {
-          if (jobs.find((item) => item.id === job.id)?.state !== "running")
+          if (
+            jobs.find((item) => item.id === job.id)?.state !== "running" ||
+            controllers.get(job.id)!.signal.aborted
+          )
             throw new Error("Alignment Job cancelled");
           await dependencies.library.publishLyricsAlignment({
             projectId: job.recipe.projectId,

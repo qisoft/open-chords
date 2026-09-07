@@ -59,6 +59,8 @@ const MAX_ATTESTATION_BYTES = 4 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
 const SIDECAR_FAILURE_PATTERN =
   /(?:^|\n)Open Chords analysis sidecar failed safely: (sidecar_(?:broken_pipe|file_not_found|internal_error|os_error|protocol_error|runtime_error|runtime_entry_content_permission_denied|runtime_entry_metadata_permission_denied|runtime_file_permission_denied|runtime_inventory_permission_denied|runtime_manifest_permission_denied|runtime_root_permission_denied|runtime_tool_permission_denied|session_permission_denied|value_error))(?:\r?\n|$)/u;
+const ALIGNMENT_FAILURE_PATTERN =
+  /(?:^|\n)Open Chords Alignment worker failed safely: (alignment_(?:bootstrap|session)_(?:permission|missing_file|import|os|value|internal))(?:\r?\n|$)/u;
 
 export function createExecutableNativeContainmentBroker(
   options: NativeBrokerOptions,
@@ -101,11 +103,12 @@ export function createExecutableNativeContainmentBroker(
       const onChildError = () => undefined;
       child.on("error", onChildError);
       child.once("close", () => child.off("error", onChildError));
-      const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-        (resolveExit) => {
-          child.once("close", (code, exitSignal) => resolveExit({ code, signal: exitSignal }));
-        },
-      );
+      const exited = new Promise<{
+        code: number | null;
+        signal: NodeJS.Signals | null;
+      }>((resolveExit) => {
+        child.once("close", (code, exitSignal) => resolveExit({ code, signal: exitSignal }));
+      });
       try {
         await waitForSpawn(child);
         const evidence = await readEvidence(child, Math.min(request.timeoutMs, 60_000));
@@ -187,7 +190,7 @@ async function* containedProcessStdout(
   );
   throw new SidecarSessionError(
     "process_failure",
-    "Contained sidecar exited before completing its protocol",
+    `Contained sidecar exited before completing its protocol (exit=${status.code ?? "none"}, reason=${failureCode ?? "unclassified"})`,
     failureCode === null ? undefined : { remoteCode: failureCode },
   );
 }
@@ -223,7 +226,9 @@ export function createBoundedSidecarStderrCapture(onExceeded: () => void): {
 
 export function parseSidecarProcessFailure(value: string, exceeded = false): string | null {
   if (exceeded) return null;
-  return SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? null;
+  return (
+    SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? ALIGNMENT_FAILURE_PATTERN.exec(value)?.[1] ?? null
+  );
 }
 
 async function readEvidence(

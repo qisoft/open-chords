@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -234,6 +234,38 @@ it("persists cancellation before aborting the worker and never publishes its lat
   });
   release(context.output);
   expect(await terminal).toMatchObject({ message: "Alignment Job cancelled" });
+  expect(
+    (await context.library.getSnapshot(context.original.id))!.project.lyricsAlignments,
+  ).toEqual(context.original.lyricsAlignments);
+});
+
+it("stops execution without publishing even when cancel intent cannot be written", async () => {
+  const context = await runnableJob();
+  const entered = Promise.withResolvers<AbortSignal>();
+  const release = Promise.withResolvers<unknown>();
+  const execution = context.jobs
+    .run(context.job.id, {
+      library: context.library,
+      worker: async ({ signal }) => {
+        entered.resolve(signal);
+        return release.promise;
+      },
+    })
+    .catch((error: unknown) => error);
+  const signal = await entered.promise;
+  const root = join(context.options.stateRoot, "alignment-jobs");
+  const saved = `${root}-storage-fault`;
+  await rename(root, saved);
+  try {
+    await writeFile(root, "unavailable storage");
+    await expect(context.jobs.cancel(context.job.id)).rejects.toBeInstanceOf(Error);
+    expect(signal.aborted).toBe(true);
+  } finally {
+    await rm(root, { force: true });
+    await rename(saved, root);
+    release.resolve(context.output);
+  }
+  expect(await execution).toBeInstanceOf(Error);
   expect(
     (await context.library.getSnapshot(context.original.id))!.project.lyricsAlignments,
   ).toEqual(context.original.lyricsAlignments);

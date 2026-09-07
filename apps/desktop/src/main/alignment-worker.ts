@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { cp, lstat, mkdir, writeFile, open, readdir, rm } from "node:fs/promises";
+import { cp, lstat, mkdir, writeFile, open, opendir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { canonicalSerialize } from "@open-chords/domain";
@@ -258,7 +258,12 @@ export async function recoverAlignmentWorkspaces(
   >,
 ) {
   const root = await journalRoot(options.stateRoot);
-  const entries = await readdir(root);
+  const entries: string[] = [];
+  for await (const entry of await opendir(root)) {
+    if (entries.length >= 64 || !entry.isFile())
+      throw new Error("Invalid Alignment workspace journal");
+    entries.push(entry.name);
+  }
   if (entries.length === 0) return;
   if (entries.length > 64 || (process.platform !== "darwin" && process.platform !== "win32"))
     throw new Error("Alignment cleanup is unavailable");

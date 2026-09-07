@@ -391,6 +391,7 @@ function TimingCorrection({
       </button>
       <fieldset disabled={busy}>
         <legend>Anchor a lyric range for the next alignment</legend>
+        <p>Use the start and end above for this word range.</p>
         <label>
           First anchor word{" "}
           <select

@@ -246,6 +246,16 @@ it("surfaces bounded native containment failure reasons", () => {
 it("surfaces only allowlisted bounded sidecar crash reasons", () => {
   expect(
     parseSidecarProcessFailure(
+      "Open Chords Alignment worker failed safely: alignment_session_permission\n",
+    ),
+  ).toBe("alignment_session_permission");
+  expect(
+    parseSidecarProcessFailure(
+      "Open Chords Alignment worker failed safely: alignment_session_private_path\n",
+    ),
+  ).toBeNull();
+  expect(
+    parseSidecarProcessFailure(
       "Open Chords analysis sidecar failed safely: sidecar_protocol_error\n",
     ),
   ).toBe("sidecar_protocol_error");
