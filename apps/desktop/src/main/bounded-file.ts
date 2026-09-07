@@ -1,12 +1,20 @@
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 
 /** Read through one regular-file descriptor with a hard allocation ceiling. */
 export async function readBoundedFile(path: string, limit: number): Promise<Buffer> {
+  const original = await lstat(path);
+  if (!original.isFile() || original.size > limit) throw new Error("Invalid bounded file");
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > limit) throw new Error("Invalid bounded file");
+    if (
+      !stat.isFile() ||
+      stat.size > limit ||
+      stat.dev !== original.dev ||
+      stat.ino !== original.ino
+    )
+      throw new Error("Invalid bounded file");
     const buffer = Buffer.alloc(limit + 1);
     let length = 0;
     while (length < buffer.length) {

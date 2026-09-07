@@ -5,8 +5,11 @@ import { join } from "node:path";
 
 import { canonicalSerialize } from "@open-chords/domain";
 
+import { AlignmentExecutionError } from "./alignment-failure.ts";
 import type { AlignmentWorker } from "./alignment-jobs.ts";
 import { inspectAlignmentRuntime } from "./alignment-runtime.ts";
+import { readBoundedFile } from "./bounded-file.ts";
+import { CpuWorkCleanupFailure } from "./cpu-work.ts";
 import { syncDirectory } from "./filesystem-durability.ts";
 import type { LocalMediaService } from "./local-media.ts";
 import type { ModelStore } from "./model-store.ts";
@@ -17,7 +20,11 @@ import {
 import { verifyContainmentRuntime } from "./sidecar-containment-integrity.ts";
 import { createNativeContainmentLauncher } from "./sidecar-containment-launcher.ts";
 import { createExecutableNativeContainmentBroker } from "./sidecar-native-broker.ts";
-import { parseSidecarSessionRequest, type SidecarProcess } from "./sidecar-protocol.ts";
+import {
+  parseSidecarSessionRequest,
+  createPromiseSidecarClient,
+  type SidecarClient,
+} from "./sidecar-session.ts";
 
 type Options = {
   stateRoot: string;
@@ -33,21 +40,26 @@ type Options = {
 export function createContainedAlignmentWorker(options: Options): AlignmentWorker {
   return async (input) => {
     if (input.recipe.runtimeManifestHash !== options.runtimeManifestHash)
-      throw new Error("Exact Alignment runtime changed; request a new Job");
+      throw new AlignmentExecutionError("integrity");
     if (
       !(await inspectAlignmentRuntime(options.runtimeRoot, options.runtimeManifestHash)).available
     )
-      throw new Error("Alignment runtime is unavailable");
+      throw new AlignmentExecutionError("integrity");
     if (process.platform !== "darwin" && process.platform !== "win32")
       throw new Error("Native Alignment runtime is unsupported");
     const signal = AbortSignal.any([input.signal, AbortSignal.timeout(30 * 60 * 1000)]);
     signal.throwIfAborted();
-    const containment = verifyContainmentRuntime(
-      options.containmentRoot,
-      options.containmentManifestHash,
-      process.platform,
-      options.bridgePath,
-    );
+    let containment;
+    try {
+      containment = verifyContainmentRuntime(
+        options.containmentRoot,
+        options.containmentManifestHash,
+        process.platform,
+        options.bridgePath,
+      );
+    } catch {
+      throw new AlignmentExecutionError("integrity");
+    }
     const source = await options.media.getAnalysisSource(input.recipe.projectId);
     if (source.canonicalAudioFingerprint !== input.recipe.canonicalAudioFingerprint)
       throw new Error("Alignment Source identity changed");
@@ -80,13 +92,14 @@ export function createContainedAlignmentWorker(options: Options): AlignmentWorke
       options.runtimeRoot,
       identifier,
     );
-    let processHandle: SidecarProcess | undefined;
+    let client: SidecarClient | undefined;
+    let reaped = true;
     try {
       if (
         !(await inspectAlignmentRuntime(prepared.runtimeRoot, options.runtimeManifestHash))
           .available
       )
-        throw new Error("Staged Alignment runtime is invalid");
+        throw new AlignmentExecutionError("integrity");
       await mkdir(join(prepared.workspace, "temporary"), { recursive: true, mode: 0o700 });
       const dimensions = await options.media.stageAnalysisInput({
         projectId: input.recipe.projectId,
@@ -120,7 +133,7 @@ export function createContainedAlignmentWorker(options: Options): AlignmentWorke
             stat.size !== file.bytes ||
             (await digestFile(path)) !== file.sha256
           )
-            throw new Error("Staged Alignment artifact changed");
+            throw new AlignmentExecutionError("integrity");
         }
       }
       const request = canonicalSerialize({
@@ -151,47 +164,84 @@ export function createContainedAlignmentWorker(options: Options): AlignmentWorke
         }),
         process.platform,
       );
-      processHandle = await launcher.launch(
+      client = createPromiseSidecarClient({
+        launch: async (sessionRequest, launchSignal) => {
+          reaped = false;
+          const process = await launcher.launch(sessionRequest, launchSignal);
+          try {
+            await input.reportStage("aligning");
+          } catch (error) {
+            await process.stop("process_failure");
+            reaped = true;
+            throw error;
+          }
+          return {
+            stdout: process.stdout,
+            write: (frame) => process.write(frame),
+            stop: async (reason) => {
+              await process.stop(reason);
+              reaped = true;
+            },
+          };
+        },
+      });
+      const result = await client.runSession(
         parseSidecarSessionRequest({
-          jobId: "alignment-worker",
+          jobId: `alignment_${input.recipeHash.slice(7)}`,
           manifestHash: options.runtimeManifestHash,
           nonce: randomUUID(),
           requestId: randomUUID(),
           timeoutMs: 30 * 60 * 1000,
+          signal,
         }),
-        signal,
       );
-      await input.reportStage("aligning");
-      const abort = () => {
-        void processHandle?.stop("cancelled").catch(() => undefined);
-      };
-      signal.addEventListener("abort", abort, { once: true });
+      if (
+        result.artifact.path !== "alignment-result.json" ||
+        result.artifact.byteSize > 2 * 1024 * 1024
+      )
+        throw new AlignmentExecutionError("integrity");
+      const output = await readBoundedFile(
+        join(prepared.workspace, result.artifact.path),
+        2 * 1024 * 1024,
+      );
+      if (
+        output.byteLength !== result.artifact.byteSize ||
+        createHash("sha256").update(output).digest("hex") !== result.artifact.sha256
+      )
+        throw new AlignmentExecutionError("integrity");
+      signal.throwIfAborted();
       try {
-        let length = 0;
-        const chunks: Buffer[] = [];
-        for await (const bytes of processHandle.stdout) {
-          length += bytes.byteLength;
-          if (length > 2 * 1024 * 1024)
-            throw new Error("Alignment output exceeds the protocol bound");
-          chunks.push(Buffer.from(bytes));
-        }
-        signal.throwIfAborted();
-        return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-      } finally {
-        signal.removeEventListener("abort", abort);
+        return JSON.parse(output.toString("utf8")) as unknown;
+      } catch {
+        throw new AlignmentExecutionError("integrity");
       }
     } finally {
       // Cleanup is part of success: no result reaches publication before the domain is reaped.
       try {
         await input.reportStage("cleanup");
       } finally {
-        await processHandle?.stop(signal.aborted ? "cancelled" : "completed");
-        prepared.cleanup();
-        await rm(marker);
-        await syncDirectory(journal);
+        await cleanupAlignment(client, prepared, marker, journal, reaped);
       }
     }
   };
+}
+
+async function cleanupAlignment(
+  client: SidecarClient | undefined,
+  prepared: ReturnType<typeof preparePackagedWorkspace>,
+  marker: string,
+  journal: string,
+  reaped: boolean,
+) {
+  if (!reaped) throw new CpuWorkCleanupFailure();
+  try {
+    await client?.dispose();
+    prepared.cleanup();
+    await rm(marker);
+    await syncDirectory(journal);
+  } catch {
+    throw new CpuWorkCleanupFailure();
+  }
 }
 
 async function journalRoot(stateRoot: string) {

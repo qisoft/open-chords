@@ -250,8 +250,20 @@ it("rejects an invalid worker result without a partial Alignment and permits onl
   expect(
     (await context.library.getSnapshot(context.original.id))!.project.lyricsAlignments,
   ).toEqual(context.original.lyricsAlignments);
+  expect(await context.jobs.get(context.job.id)).toMatchObject({
+    state: "blocked",
+    failure: "integrity",
+    circuitOpen: true,
+  });
+  expect(await context.jobs.confirm(context.job.id)).toMatchObject({
+    state: "blocked",
+    blockedReasons: ["runtime_failure"],
+  });
   const reopened = await openAlignmentJobs(context.options);
-  expect(await reopened.get(context.job.id)).toMatchObject({ state: "retryable" });
+  expect(await reopened.get(context.job.id)).toMatchObject({
+    state: "awaiting_confirmation",
+    circuitOpen: false,
+  });
   await reopened.confirm(context.job.id);
   expect(
     await reopened.run(context.job.id, {
@@ -292,7 +304,7 @@ it("fails closed before reading media when the native Alignment runtime cannot b
   });
   await expect(
     context.jobs.run(context.job.id, { library: context.library, worker }),
-  ).rejects.toThrow("runtime");
+  ).rejects.toThrow("integrity");
   expect(
     (await context.library.getSnapshot(context.original.id))!.project.lyricsAlignments,
   ).toEqual(context.original.lyricsAlignments);
@@ -587,6 +599,124 @@ it("reconciles an already published result after a crash without executing the w
     }),
   ).toMatchObject({ state: "succeeded", alignmentId: completed.alignmentId });
   expect(executed).toBe(false);
+});
+
+it("invalidates an active session on system interruption and rejects its late output", async () => {
+  const context = await runnableJob();
+  const entered = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<unknown>();
+  let workerAborted = false;
+  const execution = context.jobs
+    .run(context.job.id, {
+      library: context.library,
+      worker: async ({ signal }) => {
+        entered.resolve();
+        await finish.promise;
+        workerAborted = signal.aborted;
+        return context.output;
+      },
+    })
+    .catch((error: unknown) => error);
+  await entered.promise;
+  await context.jobs.interrupt();
+  finish.resolve(undefined);
+  expect(await execution).toBeInstanceOf(Error);
+  expect(workerAborted).toBe(true);
+  expect(await context.jobs.get(context.job.id)).toMatchObject({
+    state: "retryable",
+    failure: "interrupted",
+  });
+  expect(
+    (await context.library.getSnapshot(context.original.id))!.project.lyricsAlignments,
+  ).toEqual(context.original.lyricsAlignments);
+});
+
+it("opens a runtime circuit for malformed sessions and repeated worker failures", async () => {
+  const { SidecarSessionError } = await import("../apps/desktop/src/main/sidecar-session.ts");
+  const context = await runnableJob();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await expect(
+      context.jobs.run(context.job.id, {
+        library: context.library,
+        worker: async () => {
+          throw new SidecarSessionError("heartbeat_timeout", "No heartbeat");
+        },
+      }),
+    ).rejects.toBeInstanceOf(SidecarSessionError);
+    if (attempt < 2) await context.jobs.confirm(context.job.id);
+  }
+  expect(await context.jobs.confirm(context.job.id)).toMatchObject({
+    state: "blocked",
+    circuitOpen: true,
+    failureCount: 3,
+  });
+  const restarted = await openAlignmentJobs(context.options);
+  await restarted.confirm(context.job.id);
+  await expect(
+    restarted.run(context.job.id, {
+      library: context.library,
+      worker: async () => {
+        throw new SidecarSessionError("protocol_violation", "Invalid session identity");
+      },
+    }),
+  ).rejects.toBeInstanceOf(SidecarSessionError);
+  expect(await restarted.get(context.job.id)).toMatchObject({
+    state: "blocked",
+    failure: "protocol",
+    circuitOpen: true,
+  });
+});
+
+it("retains cancellation and blocks other runtimes after unconfirmed teardown", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const context = await runnableJob();
+  const script = `
+    import assert from "node:assert/strict";
+    import { openAlignmentJobs } from "./apps/desktop/src/main/alignment-jobs.ts";
+    import { openModelStore } from "./apps/desktop/src/main/model-store.ts";
+    import { openProjectLibrary } from "./apps/desktop/src/main/project-library.ts";
+    import { CpuWorkCleanupFailure } from "./apps/desktop/src/main/cpu-work.ts";
+    const input = JSON.parse(process.argv[1]);
+    const modelStore = await openModelStore({ stateRoot: input.stateRoot, packs: input.packs, runtime: input.packs[0].runtime });
+    const library = await openProjectLibrary({ stateRoot: input.stateRoot });
+    const options = { stateRoot: input.stateRoot, packs: input.packs, modelStore, runtimeManifestHash: "a".repeat(64) };
+    const jobs = await openAlignmentJobs(options);
+    await jobs.confirm(input.jobId);
+    const entered = Promise.withResolvers();
+    const finish = Promise.withResolvers();
+    const execution = jobs.run(input.jobId, { library, worker: async () => { entered.resolve(); await finish.promise; throw new CpuWorkCleanupFailure(); } }).catch(error => error);
+    await entered.promise;
+    await jobs.cancel(input.jobId);
+    finish.resolve();
+    assert(await execution instanceof CpuWorkCleanupFailure);
+    const cancelled = await jobs.get(input.jobId);
+    assert.equal(cancelled.state, "cancelled");
+    assert.equal(cancelled.failure, "cleanup");
+    assert.equal(cancelled.circuitOpen, true);
+    const other = await openAlignmentJobs({ ...options, runtimeManifestHash: "b".repeat(64) });
+    const next = await other.request(input.request);
+    let executed = false;
+    await assert.rejects(other.run(next.id, { library, worker: async () => { executed = true; return {}; } }), CpuWorkCleanupFailure);
+    assert.equal(executed, false);
+    process.stdout.write("cancelled;other-runtime-blocked");
+  `;
+  const result = await promisify(execFile)(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      script,
+      JSON.stringify({
+        stateRoot: context.options.stateRoot,
+        packs: context.options.packs,
+        jobId: context.job.id,
+        request: context.request,
+      }),
+    ],
+    { cwd: new URL("..", import.meta.url), timeout: 15000 },
+  );
+  expect(result.stdout).toBe("cancelled;other-runtime-blocked");
 });
 
 it("keeps exact requests blocked and lyrics untimed when the required pack is absent, including after reopen", async () => {

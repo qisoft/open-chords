@@ -131,6 +131,12 @@ export function LyricsTiming({
                 {job.blockedReasons.includes("unsupported_language") && (
                   <p>Alignment is available for English and Russian lyrics.</p>
                 )}
+                {job.blockedReasons.includes("runtime_failure") && (
+                  <p>
+                    Alignment stopped after a runtime or validation failure. Restart the app before
+                    explicitly retrying; repair the installation if this repeats.
+                  </p>
+                )}
                 {job.state === "running" || job.state === "queued" ? (
                   <button
                     type="button"
@@ -145,7 +151,7 @@ export function LyricsTiming({
                   job.state !== "succeeded" && (
                     <button
                       type="button"
-                      disabled={pending || job.cleanupPending}
+                      disabled={pending || job.cleanupPending || job.circuitOpen}
                       onClick={() =>
                         void perform({ type: "retry", projectId: project.id, jobId: job.id })
                       }
@@ -185,7 +191,7 @@ export function LyricsTiming({
           </label>
           {document && active && (
             <TimingCorrection
-              key={`${project.id}:${document.id}:${active.lyricsAlignmentId ?? "untimed"}`}
+              key={`${project.id}:${document.id}:${active.analysisRevisionId}:${active.lyricsAlignmentId ?? "untimed"}`}
               api={api}
               snapshot={snapshot}
             />
@@ -303,6 +309,8 @@ function TimingCorrection({
           onChange={(event) => {
             setTarget(event.target.value);
             setBaseRevision(snapshot.projectRevisionId);
+            setFirst("");
+            setLast("");
             setMessage("");
             const timing = event.target.value.startsWith("word:")
               ? alignment?.occurrences.find((item) => item.tokenId === event.target.value.slice(5))
@@ -355,7 +363,6 @@ function TimingCorrection({
           disabled={busy}
           onChange={(event) => {
             setStart(event.target.value);
-            setBaseRevision(snapshot.projectRevisionId);
           }}
         />
       </label>
@@ -369,7 +376,6 @@ function TimingCorrection({
           disabled={busy}
           onChange={(event) => {
             setEnd(event.target.value);
-            setBaseRevision(snapshot.projectRevisionId);
           }}
         />
       </label>
@@ -391,7 +397,6 @@ function TimingCorrection({
             value={first}
             onChange={(event) => {
               setFirst(event.target.value);
-              setBaseRevision(snapshot.projectRevisionId);
             }}
           >
             <option value="">Choose first word</option>
@@ -408,7 +413,6 @@ function TimingCorrection({
             value={last}
             onChange={(event) => {
               setLast(event.target.value);
-              setBaseRevision(snapshot.projectRevisionId);
             }}
           >
             <option value="">Choose last word</option>
@@ -470,9 +474,22 @@ function TimingCorrection({
           ))}
         </ul>
       </fieldset>
-      {stale && (
-        <p>The Project changed. Reselect the occurrence before saving another correction.</p>
-      )}
+      {stale && <p>The Project changed. Reset this draft before saving another correction.</p>}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          setTarget("");
+          setFirst("");
+          setLast("");
+          setStart("");
+          setEnd("");
+          setMessage("");
+          setBaseRevision(snapshot.projectRevisionId);
+        }}
+      >
+        Reset timing draft
+      </button>
       <output>{message}</output>
     </section>
   );

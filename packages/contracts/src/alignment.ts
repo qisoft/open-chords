@@ -28,8 +28,8 @@ export const AlignmentJobSummarySchema = z.strictObject({
     "awaiting_confirmation",
   ]),
   blockedReasons: z
-    .array(z.enum(["missing_pack", "unsupported_language", "missing_runtime"]))
-    .max(3),
+    .array(z.enum(["missing_pack", "unsupported_language", "missing_runtime", "runtime_failure"]))
+    .max(4),
   alignmentId: id.optional(),
   stage: z
     .enum([
@@ -44,6 +44,8 @@ export const AlignmentJobSummarySchema = z.strictObject({
     .optional(),
   cleanupPending: z.boolean(),
   elapsedMs: z.number().int().nonnegative(),
+  failure: z.enum(["integrity", "protocol", "cleanup", "worker", "interrupted"]).optional(),
+  circuitOpen: z.boolean(),
 });
 export type AlignmentAction = z.infer<typeof AlignmentActionSchema>;
 export type AlignmentJobSummary = z.infer<typeof AlignmentJobSummarySchema>;

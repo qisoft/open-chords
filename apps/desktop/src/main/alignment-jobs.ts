@@ -14,6 +14,7 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
+import { alignmentFailureKind } from "./alignment-failure.ts";
 import { readBoundedFile } from "./bounded-file.ts";
 import { withCpuWork } from "./cpu-work.ts";
 import { syncDirectory } from "./filesystem-durability.ts";
@@ -40,6 +41,9 @@ const jobSchema = z.strictObject({
   alignmentId: id.optional(),
   startedAt: z.number().int().nonnegative().optional(),
   finishedAt: z.number().int().nonnegative().optional(),
+  failure: z.enum(["integrity", "protocol", "cleanup", "worker", "interrupted"]).optional(),
+  failureCount: z.number().int().nonnegative().max(3).default(0),
+  circuitOpen: z.boolean().default(false),
   stage: z
     .enum([
       "waiting_for_cpu",
@@ -52,8 +56,8 @@ const jobSchema = z.strictObject({
     ])
     .optional(),
   blockedReasons: z
-    .array(z.enum(["missing_pack", "unsupported_language", "missing_runtime"]))
-    .max(3),
+    .array(z.enum(["missing_pack", "unsupported_language", "missing_runtime", "runtime_failure"]))
+    .max(4),
 });
 type Job = z.infer<typeof jobSchema>;
 type Options = {
@@ -130,6 +134,7 @@ export async function openAlignmentJobs(options: Options) {
   let tail = Promise.resolve();
   let queuedMutations = 0;
   const controllers = new Map<string, AbortController>();
+  const workerFailures = new Map<string, number>();
   const serialize = <T>(operation: () => Promise<T>) => {
     if (queuedMutations >= 64)
       return Promise.reject<T>(new Error("Alignment mutation queue is full"));
@@ -164,14 +169,22 @@ export async function openAlignmentJobs(options: Options) {
     }
   }
   const recovered = jobs.map((job) =>
-    job.state === "running"
-      ? { ...job, state: "retryable" as const }
-      : job.state === "queued"
-        ? { ...job, state: "awaiting_confirmation" as const }
-        : job,
+    job.circuitOpen
+      ? { ...job, circuitOpen: false, failureCount: 0, state: "awaiting_confirmation" as const }
+      : job.state === "running"
+        ? { ...job, state: "retryable" as const }
+        : job.state === "queued"
+          ? { ...job, state: "awaiting_confirmation" as const }
+          : job,
   );
   if (recovered.some((job, index) => job.state !== jobs[index]!.state)) await persist(recovered);
   async function blockedReasons(recipe: AlignmentRecipe): Promise<Job["blockedReasons"]> {
+    if (
+      jobs.some(
+        (job) => job.circuitOpen && job.recipe.runtimeManifestHash === recipe.runtimeManifestHash,
+      )
+    )
+      return ["runtime_failure"];
     if (!options.packs.some((pack) => pack.id === recipe.packId)) return ["unsupported_language"];
     if (
       recipe.runtimeManifestHash === "unavailable" ||
@@ -222,6 +235,20 @@ export async function openAlignmentJobs(options: Options) {
       await tail;
       return structuredClone(jobs.find((job) => job.id === jobId) ?? null);
     },
+    interrupt() {
+      return serialize(async () => {
+        await persist(
+          jobs.map((job) =>
+            job.state === "running"
+              ? { ...job, state: "retryable", failure: "interrupted", finishedAt: Date.now() }
+              : job.state === "queued"
+                ? { ...job, state: "awaiting_confirmation" }
+                : job,
+          ),
+        );
+        for (const controller of controllers.values()) controller.abort();
+      });
+    },
     cancel(jobId: string) {
       return serialize(async () => {
         const current = jobs.find((item) => item.id === jobId);
@@ -262,14 +289,12 @@ export async function openAlignmentJobs(options: Options) {
           await persist(jobs.map((item) => (item.id === jobId ? completed : item)));
           return structuredClone(completed);
         }
-        if (
-          !(
-            await Promise.all(
-              current.recipe.artifacts.map((artifact) => options.modelStore.resolve(artifact)),
-            )
-          ).every(Boolean)
-        )
-          throw new Error("Exact Alignment pack is unavailable");
+        const reasons = await blockedReasons(current.recipe);
+        if (reasons.length > 0) {
+          const blocked = { ...current, state: "blocked" as const, blockedReasons: reasons };
+          await persist(jobs.map((item) => (item.id === jobId ? blocked : item)));
+          return structuredClone(blocked);
+        }
         const running = {
           ...current,
           startedAt: Date.now(),
@@ -280,12 +305,13 @@ export async function openAlignmentJobs(options: Options) {
         controllers.set(jobId, new AbortController());
         return structuredClone(running);
       });
-      if (job.state === "succeeded") return job;
+      if (job.state !== "running") return job;
       const reportStage = (stage: NonNullable<Job["stage"]>) =>
         serialize(async () => {
           if (jobs.find((item) => item.id === job.id)?.state !== "running") return;
           await persist(jobs.map((item) => (item.id === job.id ? { ...item, stage } : item)));
         });
+      let validating = false;
       try {
         const snapshot = await dependencies.library.getSnapshot(job.recipe.projectId);
         const document = snapshot?.project.lyricsDocuments.find(
@@ -302,18 +328,18 @@ export async function openAlignmentJobs(options: Options) {
           hash(revision) !== job.recipe.revisionHash
         )
           throw new Error("Alignment inputs changed");
-        const output = outputSchema.parse(
-          await withCpuWork(controllers.get(job.id)!.signal, async () => {
-            await reportStage("verifying_runtime");
-            return dependencies.worker({
-              recipe: job.recipe,
-              recipeHash: job.key,
-              document,
-              signal: controllers.get(job.id)!.signal,
-              reportStage,
-            });
-          }),
-        );
+        const candidate = await withCpuWork(controllers.get(job.id)!.signal, async () => {
+          await reportStage("verifying_runtime");
+          return dependencies.worker({
+            recipe: job.recipe,
+            recipeHash: job.key,
+            document,
+            signal: controllers.get(job.id)!.signal,
+            reportStage,
+          });
+        });
+        validating = true;
+        const output = outputSchema.parse(candidate);
         await reportStage("validating");
         if (
           output.recipeHash !== job.key ||
@@ -421,15 +447,35 @@ export async function openAlignmentJobs(options: Options) {
           return structuredClone(completed);
         });
       } catch (error) {
-        await serialize(() =>
-          persist(
+        await serialize(async () => {
+          const failure = validating ? "integrity" : alignmentFailureKind(error);
+          const current = jobs.find((item) => item.id === job.id);
+          if (!current || (current.state !== "running" && failure !== "cleanup")) return;
+          const failureCount = Math.min(3, job.failureCount + 1);
+          const runtimeFailures = (workerFailures.get(job.recipe.runtimeManifestHash) ?? 0) + 1;
+          workerFailures.set(job.recipe.runtimeManifestHash, runtimeFailures);
+          const circuitOpen = failure !== "worker" || runtimeFailures >= 3;
+          await persist(
             jobs.map((item) =>
-              item.id === job.id && item.state === "running"
-                ? { ...item, state: "retryable", finishedAt: Date.now() }
+              item.id === job.id
+                ? {
+                    ...item,
+                    state:
+                      item.state === "cancelled"
+                        ? "cancelled"
+                        : circuitOpen
+                          ? "blocked"
+                          : "retryable",
+                    failure,
+                    failureCount,
+                    circuitOpen,
+                    blockedReasons: circuitOpen ? ["runtime_failure"] : [],
+                    finishedAt: Date.now(),
+                  }
                 : item,
             ),
-          ),
-        );
+          );
+        });
         throw error;
       } finally {
         controllers.delete(job.id);

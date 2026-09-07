@@ -20,8 +20,8 @@ elif len(sys.argv) == 3 and sys.argv[1] == "--align":
         os.environ[key] = "1"
     os.environ["NUMBA_DISABLE_JIT"] = "1"
     try:
-        from worker import align
-        print(json.dumps(align(), ensure_ascii=True, allow_nan=False))
+        from session import serve
+        serve()
     except Exception:
         # No exception messages, paths, media or Reference Lyrics enter diagnostics.
         sys.stderr.write("Open Chords Alignment worker failed safely\n")

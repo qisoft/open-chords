@@ -30,13 +30,14 @@ export async function openAlignmentService(options: Options) {
   const running = new Map<string, Promise<void>>();
   const pending = new Set<string>();
   let closed = false;
+  let suspended = false;
   function launch(jobId: string) {
     if (running.has(jobId) || pending.has(jobId)) return;
     pending.add(jobId);
     pump();
   }
   function pump() {
-    if (closed || running.size > 0) return;
+    if (closed || suspended || running.size > 0) return;
     const jobId = pending.values().next().value;
     if (!jobId) return;
     pending.delete(jobId);
@@ -66,6 +67,8 @@ export async function openAlignmentService(options: Options) {
           ...(job.alignmentId ? { alignmentId: job.alignmentId } : {}),
           ...(job.stage ? { stage: job.stage } : {}),
           cleanupPending: job.state !== "running" && running.has(job.id),
+          ...(job.failure ? { failure: job.failure } : {}),
+          circuitOpen: job.circuitOpen,
           elapsedMs:
             job.startedAt === undefined
               ? 0
@@ -76,6 +79,8 @@ export async function openAlignmentService(options: Options) {
   }
   return {
     async perform(raw: AlignmentAction) {
+      if (suspended)
+        throw new AlignmentServiceError("busy", "Alignment is interrupted by system sleep");
       if (closed)
         throw new AlignmentServiceError("capability_unavailable", "Alignment service is closed");
       const action = AlignmentActionSchema.parse(raw);
@@ -150,6 +155,11 @@ export async function openAlignmentService(options: Options) {
       await Promise.all([...running.keys(), ...pending].map((jobId) => jobs.cancel(jobId)));
       pending.clear();
       await Promise.all(running.values());
+    },
+    async setSuspended(value: boolean) {
+      suspended = value;
+      pending.clear();
+      await jobs.interrupt();
     },
   };
 }

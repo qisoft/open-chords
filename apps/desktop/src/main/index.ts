@@ -7,7 +7,7 @@ import {
   DESKTOP_IPC_VERSION,
   ProjectEventSchema,
 } from "@open-chords/contracts";
-import { app, dialog, shell, type BrowserWindow, type WebContents } from "electron";
+import { app, dialog, shell, powerMonitor, type BrowserWindow, type WebContents } from "electron";
 
 import { EXPECTED_ALIGNMENT_MANIFEST_SHA256 } from "./alignment-build-metadata.ts";
 import { ALIGNMENT_PACKS } from "./alignment-packs.ts";
@@ -203,6 +203,12 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           }),
         });
         installRendererProtocol(join(__dirname, "../renderer"), localMedia);
+        powerMonitor.on("suspend", () => {
+          void alignmentService?.setSuspended(true).catch(() => app.exit(1));
+        });
+        powerMonitor.on("resume", () => {
+          void alignmentService?.setSuspended(false).catch(() => app.exit(1));
+        });
         projectLibrary.subscribe(({ projectId, projectRevisionId, sequence }) => {
           const window = mainWindow;
           if (window === null || window.isDestroyed()) return;

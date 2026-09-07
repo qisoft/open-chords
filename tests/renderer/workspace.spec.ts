@@ -1161,6 +1161,12 @@ test("lyric timing corrections use distinct occurrences and durable Undo/Redo wi
     await expect(panel.getByLabel("Timing occurrence").locator("option").nth(1)).not.toContainText(
       "user_marked_unmatched",
     );
+    await panel.getByLabel("Start seconds").fill("0.05");
+    await expect(panel.getByRole("button", { name: "Save timing", exact: true })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: "Mark untimed", exact: true })).toBeDisabled();
+    await panel.getByRole("button", { name: "Reset timing draft" }).click();
+    await expect(panel.getByLabel("Start seconds")).toHaveValue("");
+    await expect(panel.getByLabel("End seconds")).toHaveValue("");
     const redoBranch = page.getByLabel("Redo branch", { exact: true });
     await redoBranch.selectOption({ index: (await redoBranch.locator("option").count()) - 1 });
     await page.getByRole("button", { name: "Redo edit", exact: true }).click();
@@ -1182,6 +1188,64 @@ test("lyric timing corrections use distinct occurrences and durable Undo/Redo wi
         timing: { state: "unmatched" },
       });
     }
+  } finally {
+    await application.close();
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("untimed lyric anchor drafts reset when the Analysis Revision changes", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-anchor-draft-")));
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const untimed = envelope.payload.lyricsAlignments.find(
+    (item) => item.id === envelope.payload.activeView!.lyricsAlignmentId,
+  )!;
+  for (const occurrence of [...untimed.occurrences, ...untimed.lineOccurrences])
+    occurrence.timing = { state: "unmatched", reasonCode: "fixture_untimed" };
+  envelope.payload.activeView!.editHistoryPosition = 0;
+  const library = await openProjectLibrary({ stateRoot });
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await page.getByRole("button", { name: "Lyrics timing", exact: true }).click();
+    const panel = page.getByRole("region", { name: "Lyrics timing correction" });
+    await panel.getByLabel("First anchor word").selectOption({ index: 1 });
+    await panel.getByLabel("Last anchor word").selectOption({ index: 2 });
+    await panel.getByLabel("Start seconds").fill("0");
+    await panel.getByLabel("End seconds").fill("0.5");
+    await expect(panel.getByRole("button", { name: "Save anchor", exact: true })).toBeEnabled();
+    const snapshot = await page.evaluate(() =>
+      window.openChords!.project.getSnapshot("project_golden"),
+    );
+    if (snapshot.type !== "project.snapshot") throw new Error("Snapshot unavailable");
+    const changed = revisedSnapshot(snapshot, "anchor_revision", snapshot.eventSequence + 1);
+    changed.project.activeView = {
+      ...changed.project.activeView!,
+      analysisRevisionId: "revision_reviewable",
+      editLayerId: "edit_reviewable",
+      editHistoryPosition: 0,
+      lyricsAlignmentId: "alignment_anchor_reviewable",
+    };
+    changed.project.lyricsAlignments.push({
+      ...structuredClone(untimed),
+      id: "alignment_anchor_reviewable",
+      analysisRevisionId: "revision_reviewable",
+    });
+    await installSnapshotResponse(application, changed);
+    await publishProjectChange(application, changed);
+    await expect(panel.getByLabel("First anchor word")).toHaveValue("");
+    await expect(panel.getByLabel("Last anchor word")).toHaveValue("");
+    await expect(panel.getByLabel("Start seconds")).toHaveValue("");
+    await expect(panel.getByLabel("End seconds")).toHaveValue("");
+    await expect(panel.getByRole("button", { name: "Save anchor", exact: true })).toBeDisabled();
   } finally {
     await application.close();
     await rm(stateRoot, { recursive: true, force: true });

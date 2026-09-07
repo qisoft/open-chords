@@ -21,7 +21,11 @@ def bounded_file(name, limit):
     return value
 
 
-def align():
+def align(cancelled=None):
+    def check_cancelled():
+        if cancelled is not None and cancelled.is_set():
+            raise RuntimeError("Alignment cancelled")
+    check_cancelled()
     request = json.loads(bounded_file("request.json", 256 * 1024))
     recipe = request["recipe"]
     document = request["document"]
@@ -55,6 +59,7 @@ def align():
         raise ValueError("Invalid staged dictionary")
     with dictionary.open(encoding="utf8") as source, Path("temporary/selected.dict").open("w", encoding="utf8") as target:
         for line in iter(lambda: source.readline(16385), ""):
+            check_cancelled()
             if len(line) > 16384:
                 raise ValueError("Oversized dictionary record")
             parts = line.split()
@@ -83,6 +88,7 @@ def align():
         lexicon.load_pronunciations(Path("temporary/selected.dict"))
         engine = KalpyAligner(model, lexicon, beam=10, retry_beam=40)
         for first, last, start, end in windows:
+            check_cancelled()
             selected = [(token, text) for token, text in normalized[first:last] if token["lineId"] not in annotations and text in found]
             if not selected or end - start < recipe["sampleRate"] * .025:
                 continue
