@@ -45,6 +45,7 @@ def serve():
         return
     events = Queue(maxsize=4)
     cancelled = threading.Event()
+    invalid_control = threading.Event()
     identity = {key: start[key] for key in ("jobId", "nonce", "requestId")}
 
     def control():
@@ -55,6 +56,7 @@ def serve():
             cancelled.set()
             events.put(("cancel", None))
         except Exception:
+            invalid_control.set()
             cancelled.set()
             events.put(("control_error", None))
 
@@ -87,13 +89,18 @@ def serve():
             sequence += 1
             continue
         if kind == "control_error":
-            return
+            # Wait for the executing thread, then report a terminal protocol
+            # error rather than acknowledging an invalid cancellation frame.
+            continue
         if kind == "cancel":
             write_frame({**identity, "type": "cancel_ack", "sequence": sequence})
             sequence += 1
             acknowledged = True
             continue
         if cancelled.is_set():
+            if invalid_control.is_set():
+                write_frame({**identity, "type": "error", "sequence": sequence, "code": "alignment_control_failed", "message": "Alignment control failed safely"})
+                return
             if not acknowledged:
                 write_frame({**identity, "type": "cancel_ack", "sequence": sequence})
                 sequence += 1

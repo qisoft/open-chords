@@ -1,7 +1,13 @@
 import { CpuWorkCleanupFailure } from "./cpu-work.ts";
 import { SidecarSessionError } from "./sidecar-session.ts";
 
-export type AlignmentFailureKind = "integrity" | "protocol" | "cleanup" | "worker" | "interrupted";
+export type AlignmentFailureKind =
+  | "integrity"
+  | "protocol"
+  | "cleanup"
+  | "worker"
+  | "interrupted"
+  | "storage";
 export class AlignmentExecutionError extends Error {
   readonly kind: AlignmentFailureKind;
   constructor(kind: AlignmentFailureKind) {

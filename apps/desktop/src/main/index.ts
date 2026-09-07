@@ -15,6 +15,7 @@ import { inspectAlignmentRuntime, packagedAlignmentRuntimeRoot } from "./alignme
 import { openAlignmentService, type AlignmentService } from "./alignment-service.ts";
 import { createContainedAlignmentWorker, recoverAlignmentWorkspaces } from "./alignment-worker.ts";
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
+import { blockCpuWorkAfterIncompleteCleanup } from "./cpu-work.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
@@ -157,32 +158,9 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           },
         });
         localMediaAuthority = localMedia;
-        await recoverAlignmentWorkspaces({
-          stateRoot,
-          containmentRoot: app.isPackaged
-            ? join(
-                process.resourcesPath,
-                process.platform === "darwin" ? "../MacOS/containment" : "containment",
-              )
-            : join(app.getAppPath(), "dist/containment"),
-          containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
-          ...(app.isPackaged && process.platform === "darwin"
-            ? { bridgePath: join(process.resourcesPath, "../MacOS/open-chords-containment-bridge") }
-            : {}),
-        });
-        alignmentService = await openAlignmentService({
-          runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
-          stateRoot,
-          modelStore,
-          packs: ALIGNMENT_PACKS,
-          library: projectLibrary,
-          media: localMedia,
-          worker: createContainedAlignmentWorker({
+        try {
+          await recoverAlignmentWorkspaces({
             stateRoot,
-            runtimeRoot: app.isPackaged
-              ? packagedAlignmentRuntimeRoot(process.resourcesPath)
-              : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
-            runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
             containmentRoot: app.isPackaged
               ? join(
                   process.resourcesPath,
@@ -198,10 +176,45 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
                   ),
                 }
               : {}),
+          });
+          alignmentService = await openAlignmentService({
+            runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
+            stateRoot,
             modelStore,
+            packs: ALIGNMENT_PACKS,
+            library: projectLibrary,
             media: localMedia,
-          }),
-        });
+            worker: createContainedAlignmentWorker({
+              stateRoot,
+              runtimeRoot: app.isPackaged
+                ? packagedAlignmentRuntimeRoot(process.resourcesPath)
+                : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
+              runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
+              containmentRoot: app.isPackaged
+                ? join(
+                    process.resourcesPath,
+                    process.platform === "darwin" ? "../MacOS/containment" : "containment",
+                  )
+                : join(app.getAppPath(), "dist/containment"),
+              containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
+              ...(app.isPackaged && process.platform === "darwin"
+                ? {
+                    bridgePath: join(
+                      process.resourcesPath,
+                      "../MacOS/open-chords-containment-bridge",
+                    ),
+                  }
+                : {}),
+              modelStore,
+              media: localMedia,
+            }),
+          });
+        } catch {
+          // Preserve the desktop and project access, but never start another
+          // native workload when interrupted workspace cleanup is unverified.
+          blockCpuWorkAfterIncompleteCleanup();
+          alignmentService = null;
+        }
         installRendererProtocol(join(__dirname, "../renderer"), localMedia);
         powerMonitor.on("suspend", () => {
           void alignmentService?.setSuspended(true).catch(() => app.exit(1));
@@ -228,7 +241,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           );
         });
         installDesktopIpc(projectLibrary, {
-          alignment: alignmentService,
+          ...(alignmentService ? { alignment: alignmentService } : {}),
           models: {
             store: modelStore,
             network,

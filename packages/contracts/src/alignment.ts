@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-const id = z.string().min(1).max(160);
+import { DesktopMessageIdSchema } from "./identifiers.ts";
+
+const id = DesktopMessageIdSchema;
 export const AlignmentActionSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("status"), projectId: id }),
   z.strictObject({ type: z.literal("start"), projectId: id, expectedProjectRevisionId: id }),
@@ -44,7 +46,9 @@ export const AlignmentJobSummarySchema = z.strictObject({
     .optional(),
   cleanupPending: z.boolean(),
   elapsedMs: z.number().int().nonnegative(),
-  failure: z.enum(["integrity", "protocol", "cleanup", "worker", "interrupted"]).optional(),
+  failure: z
+    .enum(["integrity", "protocol", "cleanup", "worker", "interrupted", "storage"])
+    .optional(),
   circuitOpen: z.boolean(),
 });
 export type AlignmentAction = z.infer<typeof AlignmentActionSchema>;

@@ -27,6 +27,7 @@ export function LyricsTiming({
   const active = project.activeView;
   const document = project.lyricsDocuments.find((item) => item.id === active?.lyricsDocumentId);
   useEffect(() => {
+    if (!open) return undefined;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
@@ -48,7 +49,7 @@ export function LyricsTiming({
       live = false;
       clearTimeout(timer);
     };
-  }, [api, project.id]);
+  }, [api, open, project.id]);
   async function perform(action: AlignmentAction) {
     version.current++;
     setPending(true);

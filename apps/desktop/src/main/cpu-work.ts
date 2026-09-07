@@ -8,6 +8,11 @@ export class CpuWorkCleanupFailure extends Error {
   }
 }
 
+export function blockCpuWorkAfterIncompleteCleanup() {
+  blocked = true;
+  for (const queued of waiting.splice(0)) queued.block();
+}
+
 function pump() {
   if (active) return;
   waiting.shift()?.start();
@@ -41,8 +46,7 @@ export function withCpuWork<T>(signal: AbortSignal, operation: () => Promise<T>)
           })
           .then(resolve, (error) => {
             if (error instanceof CpuWorkCleanupFailure) {
-              blocked = true;
-              for (const queued of waiting.splice(0)) queued.block();
+              blockCpuWorkAfterIncompleteCleanup();
             }
             reject(error);
           })

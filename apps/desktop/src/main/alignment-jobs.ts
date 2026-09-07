@@ -41,7 +41,9 @@ const jobSchema = z.strictObject({
   alignmentId: id.optional(),
   startedAt: z.number().int().nonnegative().optional(),
   finishedAt: z.number().int().nonnegative().optional(),
-  failure: z.enum(["integrity", "protocol", "cleanup", "worker", "interrupted"]).optional(),
+  failure: z
+    .enum(["integrity", "protocol", "cleanup", "worker", "interrupted", "storage"])
+    .optional(),
   failureCount: z.number().int().nonnegative().max(3).default(0),
   circuitOpen: z.boolean().default(false),
   stage: z
@@ -321,7 +323,7 @@ export async function openAlignmentJobs(options: Options) {
           if (jobs.find((item) => item.id === job.id)?.state !== "running") return;
           await persist(jobs.map((item) => (item.id === job.id ? { ...item, stage } : item)));
         });
-      let validating = false;
+      let phase: "storage" | "worker" | "validation" = "storage";
       try {
         const snapshot = await dependencies.library.getSnapshot(job.recipe.projectId);
         const document = snapshot?.project.lyricsDocuments.find(
@@ -338,6 +340,7 @@ export async function openAlignmentJobs(options: Options) {
           hash(revision) !== job.recipe.revisionHash
         )
           throw new Error("Alignment inputs changed");
+        phase = "worker";
         const candidate = await withCpuWork(controllers.get(job.id)!.signal, async () => {
           await reportStage("verifying_runtime");
           return dependencies.worker({
@@ -348,9 +351,10 @@ export async function openAlignmentJobs(options: Options) {
             reportStage,
           });
         });
-        validating = true;
-        const output = outputSchema.parse(candidate);
+        phase = "storage";
         await reportStage("validating");
+        phase = "validation";
+        const output = outputSchema.parse(candidate);
         if (
           output.recipeHash !== job.key ||
           output.words.length !== document.tokens.length ||
@@ -439,6 +443,7 @@ export async function openAlignmentJobs(options: Options) {
           ...snapshot.project,
           lyricsAlignments: [...snapshot.project.lyricsAlignments, alignment],
         });
+        phase = "storage";
         return await serialize(async () => {
           if (
             jobs.find((item) => item.id === job.id)?.state !== "running" ||
@@ -461,13 +466,22 @@ export async function openAlignmentJobs(options: Options) {
         });
       } catch (error) {
         await serialize(async () => {
-          const failure = validating ? "integrity" : alignmentFailureKind(error);
+          const failure =
+            phase === "validation"
+              ? "integrity"
+              : phase === "storage"
+                ? "storage"
+                : alignmentFailureKind(error);
           const current = jobs.find((item) => item.id === job.id);
           if (!current || (current.state !== "running" && failure !== "cleanup")) return;
           const failureCount = Math.min(3, job.failureCount + 1);
-          const runtimeFailures = (workerFailures.get(job.recipe.runtimeManifestHash) ?? 0) + 1;
-          workerFailures.set(job.recipe.runtimeManifestHash, runtimeFailures);
-          const circuitOpen = failure !== "worker" || runtimeFailures >= 3;
+          const runtimeFailures =
+            (workerFailures.get(job.recipe.runtimeManifestHash) ?? 0) +
+            (failure === "storage" ? 0 : 1);
+          if (failure !== "storage")
+            workerFailures.set(job.recipe.runtimeManifestHash, runtimeFailures);
+          const circuitOpen =
+            failure !== "storage" && (failure !== "worker" || runtimeFailures >= 3);
           await persist(
             jobs.map((item) =>
               item.id === job.id

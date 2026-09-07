@@ -17,6 +17,11 @@ import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/pac
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 
+test.skip(
+  process.platform !== "darwin" && process.platform !== "win32",
+  "Installed native profiles support macOS and Windows only",
+);
+
 const PRODUCT_NAME = "Open Chords";
 const EXPECTED_RENDERER_CSP = [
   "default-src 'none'",
@@ -1245,7 +1250,7 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
     runtimeManifestHash: digestFile(join(runtimeRoot, "runtime-info.json")),
   });
   for (const [language, text] of [
-    ["en", "hello world"],
+    ["en", "hello world\n(ＣＡＮ’T hello)\n[chorus]"],
     ["ru", "привет мир"],
   ] as const) {
     const pack = ALIGNMENT_PACKS.find((item) => item.language === language)!;
@@ -1311,7 +1316,17 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
       recipeHash: job.key,
       qualityStatus: "benchmark_pending",
     });
-    expect(result.occurrences).toHaveLength(2);
+    expect(result.occurrences).toHaveLength(document.tokens.length);
+    if (language === "en") {
+      for (const occurrence of result.occurrences.slice(2, 4)) {
+        expect(occurrence.timing).not.toMatchObject({ reasonCode: "annotation" });
+        expect(occurrence.timing).not.toMatchObject({ reasonCode: "oov" });
+      }
+      expect(result.occurrences.at(-1)!.timing).toMatchObject({
+        state: "unmatched",
+        reasonCode: "annotation",
+      });
+    }
     if (language === "en")
       expect(result.occurrences.some((item) => item.timing.state === "matched")).toBe(true);
     expect(
@@ -1441,8 +1456,8 @@ async function inspectInstalled(stateRoot: string, expression: string) {
     [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
     { stdio: "ignore" },
   );
+  let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
   try {
-    let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
     await expect
       .poll(
         async () => {
@@ -1472,9 +1487,53 @@ async function inspectInstalled(stateRoot: string, expression: string) {
       60000,
     );
   } finally {
-    if (process.platform !== "win32") application.kill("SIGKILL");
-    await stopApplication(application);
+    try {
+      if (target) await quitInstalledApplication(application, target.webSocketDebuggerUrl);
+    } finally {
+      if (
+        process.platform !== "win32" &&
+        application.exitCode === null &&
+        application.signalCode === null
+      )
+        application.kill("SIGKILL");
+      await stopApplication(application);
+    }
   }
+}
+
+async function quitInstalledApplication(
+  application: ReturnType<typeof spawn>,
+  webSocketUrl: string,
+) {
+  if (application.exitCode !== null || application.signalCode !== null) return;
+  await new Promise<void>((resolve, reject) => {
+    const socket = new WebSocket(webSocketUrl);
+    const finish = (error?: Error) => {
+      clearTimeout(timeout);
+      application.off("exit", onExit);
+      socket.close();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onExit = (code: number | null) =>
+      finish(code === 0 ? undefined : new Error("Installed app did not quit cleanly"));
+    const timeout = setTimeout(
+      () => finish(new Error("Installed app quit lifecycle timed out")),
+      15000,
+    );
+    application.once("exit", onExit);
+    socket.addEventListener(
+      "error",
+      () => finish(new Error("Installed app quit connection failed")),
+      { once: true },
+    );
+    // Electron handles Browser.close by invoking Browser::Quit on its main thread.
+    socket.addEventListener(
+      "open",
+      () => socket.send(JSON.stringify({ id: 1, method: "Browser.close" })),
+      { once: true },
+    );
+  });
 }
 
 test("installed app installs an exact English pack, reopens, and removes it through named IPC", async () => {

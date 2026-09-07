@@ -305,6 +305,34 @@ it("rejects an invalid worker result without a partial Alignment and permits onl
   ).toMatchObject({ state: "succeeded" });
 });
 
+it("keeps publication failures retryable without blaming the runtime", async () => {
+  const context = await runnableJob();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await expect(
+      context.jobs.run(context.job.id, {
+        library: context.library,
+        worker: async () => {
+          await context.library.trashProject(context.original.id);
+          return context.output;
+        },
+      }),
+    ).rejects.toThrow("Project unavailable");
+    expect(await context.jobs.get(context.job.id)).toMatchObject({
+      state: "retryable",
+      failure: "storage",
+      circuitOpen: false,
+    });
+    await context.library.restoreTrashedProject(context.original.id);
+    await context.jobs.confirm(context.job.id);
+  }
+  expect(
+    await context.jobs.run(context.job.id, {
+      library: context.library,
+      worker: async () => context.output,
+    }),
+  ).toMatchObject({ state: "succeeded" });
+});
+
 it("requires confirmation for queued work after reopening and keeps different audio requests independent", async () => {
   const context = await runnableJob();
   const second = await context.jobs.request({
@@ -355,6 +383,17 @@ it("keeps user anchors in edit history and changes the immutable Recipe without 
     startSample: 12000,
     endSample: 24000,
   };
+  await expect(
+    context.library.commitEditTransaction({
+      projectId: context.original.id,
+      expectedProjectRevisionId: before.projectRevisionId,
+      transaction: {
+        id: "transaction_invalid_anchor",
+        parentTransactionId: null,
+        operations: [{ type: "set_lyrics_anchor", anchor: { ...anchor, id: "invalid" } }],
+      },
+    }),
+  ).rejects.toMatchObject({ name: "ZodError" });
   await context.library.commitEditTransaction({
     projectId: context.original.id,
     expectedProjectRevisionId: before.projectRevisionId,
@@ -511,6 +550,10 @@ it("starts and cancels through named desktop capabilities without accepting path
   };
   const snapshot = (await context.library.getSnapshot(context.original.id))!;
   try {
+    const poll = gateway.execute(
+      { ...command, action: { type: "status", projectId: context.original.id } },
+      sender,
+    );
     const result = await gateway.execute(
       {
         ...command,
@@ -523,6 +566,15 @@ it("starts and cancels through named desktop capabilities without accepting path
       sender,
     );
     expect(result.response).toMatchObject({ type: "alignment.result" });
+    expect((await poll).response).toMatchObject({ type: "alignment.result" });
+    expect(
+      (
+        await gateway.execute(
+          { ...command, action: { type: "status", projectId: "invalid" } },
+          sender,
+        )
+      ).response,
+    ).toMatchObject({ code: "invalid_command" });
     await started.promise;
     expect(
       (
@@ -548,6 +600,10 @@ it("starts and cancels through named desktop capabilities without accepting path
         )
       ).response,
     ).toMatchObject({ code: "invalid_command" });
+    const concurrentPoll = gateway.execute(
+      { ...command, action: { type: "status", projectId: context.original.id } },
+      sender,
+    );
     expect(
       (
         await gateway.execute(
@@ -559,6 +615,7 @@ it("starts and cancels through named desktop capabilities without accepting path
         )
       ).response,
     ).toMatchObject({ jobs: [{ state: "cancelled" }] });
+    expect((await concurrentPoll).response).toMatchObject({ type: "alignment.result" });
   } finally {
     await service.dispose();
   }

@@ -1,10 +1,8 @@
 import { z } from "zod";
 
 import { AlignmentProvenanceSchema, LyricsAnchorSchema } from "./alignment.ts";
-
-const identifierPattern = /^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$/;
-
-export const StableIdSchema = z.string().regex(identifierPattern).meta({ id: "StableId" });
+import { StableIdSchema } from "./identifiers.ts";
+export { StableIdSchema } from "./identifiers.ts";
 export const SampleFrameSchema = z.int().nonnegative().meta({ id: "SampleFrame" });
 export const PositiveSampleFrameSchema = z.int().positive().meta({ id: "PositiveSampleFrame" });
 const TextOffsetSchema = z.int().nonnegative().meta({ id: "TextOffset" });

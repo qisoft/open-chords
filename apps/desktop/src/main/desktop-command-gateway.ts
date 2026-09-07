@@ -144,6 +144,7 @@ export class DesktopCommandGateway {
   readonly #alignment: AlignmentService | undefined;
   #alignmentBusy = false;
   #alignmentControlBusy = false;
+  #alignmentStatusBusy = false;
   #activeMediaCommands = 0;
   #activeReads = 0;
   #pendingMutations = 0;
@@ -460,12 +461,20 @@ export class DesktopCommandGateway {
         ),
       };
     const control = command.action.type === "cancel";
-    if (control ? this.#alignmentControlBusy : this.#alignmentBusy)
+    const status = command.action.type === "status";
+    if (
+      status
+        ? this.#alignmentStatusBusy
+        : control
+          ? this.#alignmentControlBusy
+          : this.#alignmentBusy
+    )
       return {
         action: "none",
         response: errorResponse("busy", "An Alignment operation is running", true, command),
       };
-    if (control) this.#alignmentControlBusy = true;
+    if (status) this.#alignmentStatusBusy = true;
+    else if (control) this.#alignmentControlBusy = true;
     else this.#alignmentBusy = true;
     try {
       const result = await this.#alignment.perform(command.action);
@@ -490,7 +499,8 @@ export class DesktopCommandGateway {
         ),
       };
     } finally {
-      if (control) this.#alignmentControlBusy = false;
+      if (status) this.#alignmentStatusBusy = false;
+      else if (control) this.#alignmentControlBusy = false;
       else this.#alignmentBusy = false;
     }
   }

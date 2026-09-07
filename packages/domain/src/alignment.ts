@@ -1,25 +1,26 @@
 import { z } from "zod";
 
+import { StableIdSchema } from "./identifiers.ts";
 import type { ProjectContract } from "./schema.ts";
 
 const sha = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const id = z.string().min(1).max(160);
 export const LyricsAnchorSchema = z.strictObject({
-  id,
-  lyricsDocumentId: id,
-  analysisRevisionId: id,
-  firstTokenId: id,
-  lastTokenId: id,
+  id: StableIdSchema,
+  lyricsDocumentId: StableIdSchema,
+  analysisRevisionId: StableIdSchema,
+  firstTokenId: StableIdSchema,
+  lastTokenId: StableIdSchema,
   startSample: z.number().int().nonnegative(),
   endSample: z.number().int().positive(),
 });
 export type LyricsAnchor = z.infer<typeof LyricsAnchorSchema>;
 export const AlignmentRecipeSchema = z.strictObject({
   version: z.literal("1.0"),
-  projectId: id,
-  lyricsDocumentId: id,
+  projectId: StableIdSchema,
+  lyricsDocumentId: StableIdSchema,
   documentHash: sha,
-  analysisRevisionId: id,
+  analysisRevisionId: StableIdSchema,
   revisionHash: sha,
   canonicalAudioFingerprint: sha,
   durationSamples: z.number().int().positive(),

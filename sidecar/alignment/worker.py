@@ -21,6 +21,10 @@ def bounded_file(name, limit):
     return value
 
 
+def normalize(text):
+    return unicodedata.normalize("NFKC", text).lower().replace("’", "'")
+
+
 def align(cancelled=None):
     def check_cancelled():
         if cancelled is not None and cancelled.is_set():
@@ -50,8 +54,8 @@ def align(cancelled=None):
     from kalpy.utterance import Utterance
 
     utf16 = document["text"].encode("utf-16-le")
-    annotations = {line["id"] for line in document["lines"] if re.fullmatch(r"\s*[\[(].*[\])]\s*", utf16[2*line["startOffset"]:2*line["endOffset"]].decode("utf-16-le"))}
-    normalized = [(token, unicodedata.normalize("NFKC", token["text"]).lower().replace("’", "'")) for token in document["tokens"]]
+    annotations = {line["id"] for line in document["lines"] if re.fullmatch(r"\s*\[.*\]\s*", utf16[2*line["startOffset"]:2*line["endOffset"]].decode("utf-16-le"))}
+    normalized = [(token, normalize(token["text"])) for token in document["tokens"]]
     wanted = {text for token, text in normalized if token["lineId"] not in annotations}
     found = set()
     dictionary = Path("dictionary.dict")
@@ -63,9 +67,12 @@ def align(cancelled=None):
             if len(line) > 16384:
                 raise ValueError("Oversized dictionary record")
             parts = line.split()
-            if parts and parts[0].lower() in wanted:
-                found.add(parts[0].lower())
-                target.write(line)
+            if not parts:
+                continue
+            word = normalize(parts[0])
+            if word in wanted:
+                found.add(word)
+                target.write(" ".join([word, *parts[1:]]) + "\n")
     result = {"recipeHash": request["recipeHash"], "likelihood": 0, "words": []}
     alignable = [(token, text) for token, text in normalized if token["lineId"] not in annotations and text in found]
     positions = {token["id"]: index for index, (token, _) in enumerate(normalized)}

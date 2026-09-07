@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,6 +17,29 @@ import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.
 import { goldenRecords } from "../support/editor-fixture.ts";
 
 const repositoryRoot = join(import.meta.dirname, "../..");
+
+test("an invalid Alignment cleanup journal leaves the desktop available and preserves recovery evidence", async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "oc-alignment-recovery-"));
+  const journal = join(stateRoot, "alignment-workspaces");
+  await mkdir(journal);
+  const marker = join(journal, "invalid-marker");
+  await writeFile(marker, "interrupted");
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.openChords?.project.list())?.type))
+      .toBe("project.list");
+    const response = await page.evaluate(() =>
+      window.openChords!.alignment.perform({ type: "status", projectId: "project_missing" }),
+    );
+    expect(response).toMatchObject({ type: "desktop.error", code: "capability_unavailable" });
+    expect(await readFile(marker, "utf8")).toBe("interrupted");
+  } finally {
+    await application.close();
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
 
 test("a durable local-media Project reopens into the centered workspace and plays", async () => {
   const userDataDirectory = await realpath(

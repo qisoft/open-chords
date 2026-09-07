@@ -8,6 +8,8 @@ import {
 import { z } from "zod";
 
 import { AlignmentActionSchema, AlignmentJobSummarySchema } from "./alignment.ts";
+import { DesktopMessageIdSchema } from "./identifiers.ts";
+export { DesktopMessageIdSchema } from "./identifiers.ts";
 import { LyricsCandidateSchema, LyricsSearchSchema } from "./lyrics.ts";
 import {
   ModelActionSchema,
@@ -36,10 +38,6 @@ export const DESKTOP_IPC_CHANNELS = {
   shellGetSecuritySnapshot: "open-chords:shell:get-security-snapshot",
 } as const;
 
-export const DesktopMessageIdSchema = z
-  .string()
-  .max(128)
-  .regex(/^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$/);
 export const DesktopGenerationIdSchema = DesktopMessageIdSchema.brand<"DesktopGenerationId">();
 export const DesktopProjectIdSchema = DesktopMessageIdSchema.brand<"DesktopProjectId">();
 export const DesktopProjectRevisionIdSchema =

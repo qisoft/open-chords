@@ -398,6 +398,7 @@ function validateLyricsAnchors(
   revisionId: string,
   issues: string[],
 ): void {
+  if (anchors.length === 0) return;
   if (anchors.length > 1000) issues.push("Lyrics Anchor limit exceeded");
   for (const anchor of anchors) {
     const document = project.lyricsDocuments.find((item) => item.id === anchor.lyricsDocumentId);
@@ -412,7 +413,9 @@ function validateLyricsAnchors(
     )
       issues.push(`${anchor.id} Lyrics Anchor scope or interval is invalid`);
   }
+  const referenced = new Set(anchors.map((anchor) => anchor.lyricsDocumentId));
   for (const document of project.lyricsDocuments) {
+    if (!referenced.has(document.id)) continue;
     const positions = new Map(document.tokens.map((token, index) => [token.id, index]));
     const ordered = anchors
       .filter((anchor) => anchor.lyricsDocumentId === document.id)
