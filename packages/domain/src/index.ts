@@ -1,5 +1,13 @@
 import { resolvePracticeLoop } from "./practice.ts";
 export {
+  AlignmentRecipeSchema,
+  AlignmentProvenanceSchema,
+  LyricsAnchorSchema,
+  resolveLyricsAnchors,
+  type LyricsAnchor,
+  type AlignmentRecipe,
+} from "./alignment.ts";
+export {
   EditHistoryActionSchema,
   EditMappingActionSchema,
   reviewEditMapping,
@@ -38,6 +46,7 @@ export {
   type AnalysisRevision,
   type EditTransaction,
   type LyricsAlignment,
+  type LyricsDocument,
   type MusicalTimeline,
   type ProjectContract,
 } from "./schema.ts";

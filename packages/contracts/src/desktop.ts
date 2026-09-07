@@ -7,6 +7,7 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
+import { AlignmentActionSchema, AlignmentJobSummarySchema } from "./alignment.ts";
 import { LyricsCandidateSchema, LyricsSearchSchema } from "./lyrics.ts";
 import {
   ModelActionSchema,
@@ -18,6 +19,7 @@ import {
 export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
+  alignmentPerform: "open-chords:alignment:perform",
   modelsPerform: "open-chords:models:perform",
   lyricsPerform: "open-chords:lyrics:perform",
   projectAddLyrics: "open-chords:project:add-lyrics",
@@ -169,8 +171,14 @@ export const ModelsCommandSchema = z.strictObject({
   type: z.literal("models.perform"),
   action: ModelActionSchema,
 });
+export const AlignmentCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  type: z.literal("alignment.perform"),
+  action: AlignmentActionSchema,
+});
 
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
+  AlignmentCommandSchema,
   ModelsCommandSchema,
   LyricsCommandSchema,
   CommitEditTransactionCommandSchema,
@@ -218,6 +226,12 @@ const mediaSelectionEnvelope = {
 };
 
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    ...correlatedEnvelope,
+    type: z.literal("alignment.result"),
+    projectId: DesktopProjectIdSchema,
+    jobs: z.array(AlignmentJobSummarySchema).max(100),
+  }),
   z.strictObject({
     ...correlatedEnvelope,
     type: z.literal("models.result"),
@@ -374,6 +388,11 @@ export type MediaPlaybackResponse = Extract<
 >;
 
 export type OpenChordsDesktopApi = {
+  alignment: {
+    perform(
+      action: z.infer<typeof AlignmentActionSchema>,
+    ): Promise<DesktopErrorResponse | Extract<DesktopResponse, { type: "alignment.result" }>>;
+  };
   models: {
     perform(
       action: z.infer<typeof ModelActionSchema>,

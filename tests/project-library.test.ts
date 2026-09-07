@@ -46,7 +46,7 @@ async function temporaryDirectory(prefix: string): Promise<string> {
   return root;
 }
 
-function goldenEnvelope(version = "1.2") {
+function goldenEnvelope(version = "1.3") {
   const envelope = ProjectEnvelopeSchema.parse(JSON.parse(readFileSync(fixturePath, "utf8")));
   envelope.schemaVersion = version;
   envelope.payload.schemaVersion = version;
@@ -1055,8 +1055,8 @@ describe("ProjectLibrary", () => {
     const stateRoot = await temporaryDirectory("open-chords-library-schema-");
     const library = await openProjectLibrary({ stateRoot });
     const newer = structuredClone(goldenEnvelope());
-    newer.schemaVersion = "1.3";
-    newer.payload.schemaVersion = "1.3";
+    newer.schemaVersion = "1.4";
+    newer.payload.schemaVersion = "1.4";
     await expect(
       library.createProject({ envelope: newer, records: ownedRecords() }),
     ).rejects.toBeInstanceOf(ProjectLibraryReadOnlyError);
@@ -1135,7 +1135,7 @@ describe("ProjectLibrary", () => {
     await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
     rewriteStoredProjectEnvelope(library.activeRoot, "project_golden", {
       addFutureCoreField: true,
-      version: "1.3",
+      version: "1.4",
     });
     const headPath = join(library.activeRoot, "projects", "project_golden", "HEAD.json");
     const headBeforeOpen = readFileSync(headPath, "utf8");
@@ -2684,8 +2684,8 @@ it("upgrades persisted 1.0 projects before saving a versioned chord sequence", a
   await older.createProject({ envelope: legacy, records: ownedRecords() });
   const library = await openProjectLibrary({ stateRoot });
   const migrated = await library.readProject("project_golden");
-  expect(migrated.envelope.schemaVersion).toBe("1.2");
-  expect(migrated.envelope.payload.schemaVersion).toBe("1.2");
+  expect(migrated.envelope.schemaVersion).toBe("1.3");
+  expect(migrated.envelope.payload.schemaVersion).toBe("1.3");
   expect(migrated.compatibility).toBe("writable");
   expect(migrated.revisions.map(({ reason }) => reason)).toEqual(["created", "migration"]);
   expect(migrated.envelope.payload.analysisRevisions).toEqual(legacy.payload.analysisRevisions);
@@ -2704,8 +2704,8 @@ it("upgrades persisted 1.0 projects before saving a versioned chord sequence", a
   });
   const reopened = await openProjectLibrary({ stateRoot });
   const saved = await reopened.readProject(project.id);
-  expect(saved.envelope.schemaVersion).toBe("1.2");
-  expect(saved.envelope.payload.schemaVersion).toBe("1.2");
+  expect(saved.envelope.schemaVersion).toBe("1.3");
+  expect(saved.envelope.payload.schemaVersion).toBe("1.3");
   expect(saved.envelope.payload.editLayers[0]!.transactions.at(-1)!.operations[0]!.type).toBe(
     "replace_chord_sequence",
   );
@@ -2729,8 +2729,8 @@ it("durably saves practice without changing analysis or edit history and rejects
   expect(await library.changePractice(command)).toEqual({ stale: true });
   const reopened = await openProjectLibrary({ stateRoot });
   const snapshot = await reopened.readProject(envelope.payload.id);
-  expect(snapshot.envelope.schemaVersion).toBe("1.2");
-  expect(snapshot.envelope.payload.schemaVersion).toBe("1.2");
+  expect(snapshot.envelope.schemaVersion).toBe("1.3");
+  expect(snapshot.envelope.payload.schemaVersion).toBe("1.3");
   expect(snapshot.envelope.payload.practice?.loop).toMatchObject({
     firstBarId: bars[0]!.id,
     lastBarId: bars[1]!.id,

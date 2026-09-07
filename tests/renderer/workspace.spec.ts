@@ -1132,6 +1132,62 @@ test("lyrics text selection and correction persist through the actual desktop ca
   }
 });
 
+test("lyric timing corrections use distinct occurrences and durable Undo/Redo without changing raw lyrics", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-timing-ui-")));
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const library = await openProjectLibrary({ stateRoot });
+  await library.createProject({ envelope, records: goldenRecords() });
+  let application = await launch(stateRoot);
+  try {
+    let page = await application.firstWindow();
+    await page.getByRole("button", { name: "Lyrics timing" }).click();
+    const panel = page.getByRole("region", { name: "Lyrics timing correction" });
+    await expect(panel.getByLabel("Word coverage")).toContainText("/");
+    await expect(panel.getByLabel("Line coverage")).toContainText("/");
+    await panel.getByLabel("Timing occurrence").selectOption({ index: 1 });
+    await panel.getByRole("button", { name: "Mark untimed" }).click();
+    await expect(panel.getByRole("status")).toHaveText("Timing correction saved");
+    await expect(panel.getByLabel("Timing occurrence").locator("option").nth(1)).toContainText(
+      "user_marked_unmatched",
+    );
+    await page.getByRole("button", { name: "Undo edit", exact: true }).click();
+    await expect(panel.getByLabel("Timing occurrence").locator("option").nth(1)).not.toContainText(
+      "user_marked_unmatched",
+    );
+    const redoBranch = page.getByLabel("Redo branch", { exact: true });
+    await redoBranch.selectOption({ index: (await redoBranch.locator("option").count()) - 1 });
+    await page.getByRole("button", { name: "Redo edit", exact: true }).click();
+    await expect(panel.getByLabel("Timing occurrence").locator("option").nth(1)).toContainText(
+      "user_marked_unmatched",
+    );
+    await application.close();
+    application = await launch(stateRoot);
+    page = await application.firstWindow();
+    const saved = await page.evaluate(() =>
+      window.openChords!.project.getSnapshot("project_golden"),
+    );
+    expect(saved.type).toBe("project.snapshot");
+    if (saved.type === "project.snapshot") {
+      expect(saved.project.lyricsDocuments).toEqual(envelope.payload.lyricsDocuments);
+      expect(saved.project.lyricsAlignments).toEqual(envelope.payload.lyricsAlignments);
+      expect(saved.project.editLayers[0]!.transactions.at(-1)!.operations[0]).toMatchObject({
+        type: "set_lyrics_timing",
+        timing: { state: "unmatched" },
+      });
+    }
+  } finally {
+    await application.close();
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
 for (const failure of ["response", "rejection"] as const) {
   test(`lyrics status ${failure} is visible while local document selection remains available`, async () => {
     const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-lyrics-status-")));

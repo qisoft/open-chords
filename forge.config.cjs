@@ -43,7 +43,7 @@ module.exports = {
     extraResource: [
       "dist/analysis-sidecar/open-chords-analysis",
       "dist/containment",
-      "dist/alignment-runtime/open-chords-alignment",
+      ...(process.platform === "darwin" ? [] : ["dist/alignment-runtime/open-chords-alignment"]),
     ],
     osxSign: {
       identity: "-",
@@ -76,6 +76,8 @@ module.exports = {
         join(__dirname, "dist", "containment"),
         join(__dirname, "dist", "analysis-sidecar", "open-chords-analysis"),
         join(__dirname, "native", "macos", "analysis-service.entitlements.plist"),
+        undefined,
+        join(__dirname, "dist", "alignment-runtime", "open-chords-alignment"),
       );
     },
   },

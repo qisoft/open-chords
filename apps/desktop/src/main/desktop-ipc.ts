@@ -6,6 +6,7 @@ import {
 } from "@open-chords/contracts";
 import { ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
 
+import type { AlignmentService } from "./alignment-service.ts";
 import {
   DesktopCommandGateway,
   type ModelGatewayService,
@@ -19,6 +20,7 @@ import type { LyricsDiscovery } from "./lyrics-discovery.ts";
 type CommandType = DesktopCommand["type"];
 
 const commandChannels = [
+  [DESKTOP_IPC_CHANNELS.alignmentPerform, "alignment.perform"],
   [DESKTOP_IPC_CHANNELS.modelsPerform, "models.perform"],
   [DESKTOP_IPC_CHANNELS.lyricsPerform, "lyrics.perform"],
   [DESKTOP_IPC_CHANNELS.projectAddLyrics, "project.add_lyrics"],
@@ -35,6 +37,7 @@ const commandChannels = [
 ] as const satisfies ReadonlyArray<readonly [string, CommandType]>;
 
 export type DesktopIpcOptions = {
+  alignment?: AlignmentService;
   models?: ModelGatewayService;
   lyrics?: { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> };
   mediaAuthority: LocalMediaAuthority;
@@ -50,6 +53,7 @@ export function installDesktopIpc(authority: ProjectAuthority, options: DesktopI
     options.mediaAuthority,
     options.lyrics,
     options.models,
+    options.alignment,
   );
 
   for (const [channel, expectedType] of commandChannels) {

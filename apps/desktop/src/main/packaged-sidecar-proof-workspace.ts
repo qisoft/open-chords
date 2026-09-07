@@ -45,8 +45,10 @@ export function preparePackagedWorkspace(
   platform: "darwin" | "win32",
   helperPath: string,
   packagedRuntimeRoot: string,
+  identifier: string = randomUUID(),
 ): PreparedPackagedWorkspace {
-  const identifier = randomUUID();
+  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(identifier))
+    throw new Error("Invalid workspace identity");
   if (platform === "darwin") {
     const workspace = join(
       homedir(),
@@ -127,6 +129,38 @@ export function preparePackagedWorkspace(
     windowsProfile: profile,
     workspace,
   };
+}
+
+/** Recovery accepts only an opaque identity in the fixed native workspace namespace. */
+export function cleanupPackagedWorkspace(
+  platform: "darwin" | "win32",
+  helperPath: string,
+  identifier: string,
+) {
+  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(identifier))
+    throw new Error("Invalid workspace identity");
+  if (platform === "darwin") {
+    rmSync(
+      join(
+        homedir(),
+        "Library",
+        "Containers",
+        "io.github.qisoft.open-chords.analysis-service",
+        "Data",
+        "jobs",
+        identifier,
+      ),
+      { force: true, recursive: true },
+    );
+  } else {
+    throwCombinedFailures(
+      "AppContainer recovery cleanup failed",
+      undefined,
+      privateCleanupFailures(
+        destroyWindowsProfile(helperPath, `OpenChords.Analysis.${identifier}`),
+      ),
+    );
+  }
 }
 
 function canonicalWindowsLocalAppDataRoot(reportedRoot: string): string | null {

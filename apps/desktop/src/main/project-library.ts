@@ -40,6 +40,7 @@ import {
   type AnalysisManifest,
   type AnalysisRecipe,
   type ProjectContract,
+  type LyricsAlignment,
 } from "@open-chords/domain";
 import { z } from "zod";
 
@@ -338,6 +339,16 @@ export class ProjectLibrary {
           return envelope;
         },
       },
+      {
+        fromVersion: "1.2",
+        toVersion: "1.3",
+        migrate: (input) => {
+          const envelope = structuredClone(ProjectEnvelopeSchema.parse(input));
+          envelope.schemaVersion = "1.3";
+          envelope.payload.schemaVersion = "1.3";
+          return envelope;
+        },
+      },
     ];
     validateMigrationGraph(this.#migrations);
     this.#now = options.now ?? (() => new Date());
@@ -553,13 +564,18 @@ export class ProjectLibrary {
         return { projectId, artifacts: [], impactUnknown: true as const };
       return {
         projectId,
-        artifacts: entry.revision.payload.records.analysisManifests.flatMap(({ manifest }) =>
-          manifest.recipe.components.map((component) => ({
-            id: component.id,
-            version: component.version,
-            sha256: component.hash.slice(7),
-          })),
-        ),
+        artifacts: [
+          ...entry.revision.payload.records.analysisManifests.flatMap(({ manifest }) =>
+            manifest.recipe.components.map((component) => ({
+              id: component.id,
+              version: component.version,
+              sha256: component.hash.slice(7),
+            })),
+          ),
+          ...entry.revision.payload.envelope.payload.lyricsAlignments.flatMap(
+            (alignment) => alignment.provenance?.recipe.artifacts ?? [],
+          ),
+        ],
       };
     });
   }
@@ -587,6 +603,105 @@ export class ProjectLibrary {
       return [{ id: input.sourceSnapshotId, kind: "media" }];
     }
     return input.modelStore.resolveBlockedRecipeArtifacts(input.recipe);
+  }
+
+  async selectLyricsAlignment(input: {
+    projectId: string;
+    expectedProjectRevisionId: string;
+    alignmentId: string;
+  }) {
+    const candidate = structuredClone(input);
+    return this.#serializeMutation(async () => {
+      const entry = this.#entries.get(candidate.projectId);
+      if (!entry || entry.location === "trashed" || !entry.revision) return { notFound: true };
+      if (entry.compatibility === "read_only") return { readOnly: true };
+      if (entry.revision.revision.projectRevisionId !== candidate.expectedProjectRevisionId)
+        return { stale: true };
+      const original = entry.revision.payload.envelope.payload;
+      const alignment = original.lyricsAlignments.find((item) => item.id === candidate.alignmentId);
+      if (
+        !alignment ||
+        !original.activeView ||
+        alignment.lyricsDocumentId !== original.activeView.lyricsDocumentId ||
+        alignment.analysisRevisionId !== original.activeView.analysisRevisionId
+      )
+        throw new Error("Alignment does not belong to the active lyrics and Analysis Revision");
+      const project = parseProjectContract(
+        reconcilePracticeState(original, {
+          ...original,
+          activeView: { ...original.activeView, lyricsAlignmentId: alignment.id },
+        }),
+      );
+      const payload = buildStoredPayload({
+        envelope: { ...entry.revision.payload.envelope, payload: project },
+        records: entry.revision.payload.records,
+      });
+      const next = await this.#commitPayload(
+        candidate.projectId,
+        payload,
+        candidate.expectedProjectRevisionId,
+        entry.revision.pointer.sequence + 1,
+        "edit_transaction",
+      );
+      return { projectRevisionId: next.revision.projectRevisionId };
+    });
+  }
+
+  async publishLyricsAlignment(input: {
+    projectId: string;
+    alignment: LyricsAlignment;
+  }): Promise<void> {
+    const candidate = structuredClone(input);
+    return this.#serializeMutation(async () => {
+      const entry = this.#entries.get(candidate.projectId);
+      if (!entry || entry.location === "trashed" || !entry.revision)
+        throw new Error("Alignment Project unavailable");
+      if (entry.compatibility === "read_only")
+        throw new ProjectLibraryReadOnlyError(candidate.projectId);
+      const original = entry.revision.payload.envelope.payload;
+      const existing = original.lyricsAlignments.find((item) => item.id === candidate.alignment.id);
+      if (existing) {
+        if (canonicalSerialize(existing) !== canonicalSerialize(candidate.alignment))
+          throw new Error("Alignment publication conflict");
+        return;
+      }
+      const recipe = candidate.alignment.provenance?.recipe;
+      const document = original.lyricsDocuments.find(
+        (item) => item.id === recipe?.lyricsDocumentId,
+      );
+      const revision = original.analysisRevisions.find(
+        (item) => item.id === recipe?.analysisRevisionId,
+      );
+      const digest = (value: unknown) =>
+        `sha256:${createHash("sha256").update(canonicalSerialize(value)).digest("hex")}`;
+      if (
+        !recipe ||
+        recipe.projectId !== original.id ||
+        !document ||
+        !revision ||
+        digest(document) !== recipe.documentHash ||
+        digest(revision) !== recipe.revisionHash ||
+        digest(recipe) !== candidate.alignment.provenance?.recipeHash ||
+        original.durationSamples !== recipe.durationSamples ||
+        original.sampleRate !== recipe.sampleRate
+      )
+        throw new Error("Alignment publication inputs changed");
+      const project = parseProjectContract({
+        ...original,
+        lyricsAlignments: [...original.lyricsAlignments, candidate.alignment],
+      });
+      const payload = buildStoredPayload({
+        envelope: { ...entry.revision.payload.envelope, payload: project },
+        records: entry.revision.payload.records,
+      });
+      await this.#commitPayload(
+        candidate.projectId,
+        payload,
+        entry.revision.revision.projectRevisionId,
+        entry.revision.pointer.sequence + 1,
+        "edit_transaction",
+      );
+    });
   }
 
   async addLyrics(input: {

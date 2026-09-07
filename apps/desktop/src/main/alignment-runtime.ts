@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { ModelRuntimeInfoSchema } from "@open-chords/contracts";
 import { z } from "zod";
+
+import { readBoundedFile } from "./bounded-file.ts";
 
 const unavailable = () =>
   ModelRuntimeInfoSchema.parse({
@@ -14,6 +16,19 @@ const unavailable = () =>
     installedBytes: 0,
     transferBytes: 0,
   });
+export function packagedAlignmentRuntimeRoot(resourcesPath: string) {
+  return process.platform === "darwin"
+    ? join(
+        resourcesPath,
+        "..",
+        "XPCServices",
+        "OpenChordsAnalysisService.xpc",
+        "Contents",
+        "Resources",
+        "open-chords-alignment",
+      )
+    : join(resourcesPath, "open-chords-alignment");
+}
 const manifestSchema = z.strictObject({
   info: ModelRuntimeInfoSchema,
   platform: z.enum(["darwin-arm64", "win32-x64"]),
@@ -46,13 +61,19 @@ const manifestSchema = z.strictObject({
     .min(1)
     .max(10000),
 });
-export async function inspectAlignmentRuntime(root: string) {
+export async function inspectAlignmentRuntime(root: string, expectedManifestHash?: string) {
   try {
     if (!(await lstat(root)).isDirectory()) return unavailable();
     const manifestPath = join(root, "runtime-info.json");
     const stat = await lstat(manifestPath);
     if (!stat.isFile() || stat.size > 4 * 1024 * 1024) return unavailable();
-    const manifest = manifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
+    const manifestBytes = await readBoundedFile(manifestPath, 4 * 1024 * 1024);
+    if (
+      expectedManifestHash !== undefined &&
+      createHash("sha256").update(manifestBytes).digest("hex") !== expectedManifestHash
+    )
+      return unavailable();
+    const manifest = manifestSchema.parse(JSON.parse(manifestBytes.toString("utf8")));
     if (manifest.platform !== `${process.platform}-${process.arch}` || !manifest.info.available)
       return unavailable();
     const names = manifest.files.map((file) => file.path.toLowerCase());

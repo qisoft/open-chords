@@ -1,4 +1,5 @@
 import {
+  AlignmentCommandSchema,
   ModelsCommandSchema,
   LyricsCommandSchema,
   AddLyricsCommandSchema,
@@ -294,6 +295,22 @@ function reportDispatchError(error: unknown): void {
 }
 
 const api: OpenChordsDesktopApi = {
+  alignment: Object.freeze({
+    perform: async (action: Parameters<OpenChordsDesktopApi["alignment"]["perform"]>[0]) => {
+      const command = AlignmentCommandSchema.parse({
+        ...envelope(),
+        action,
+        type: "alignment.perform",
+      });
+      return invokeCapability(
+        DESKTOP_IPC_CHANNELS.alignmentPerform,
+        command,
+        (response): response is Extract<DesktopResponse, { type: "alignment.result" }> =>
+          response.type === "alignment.result",
+        "Unexpected Alignment response",
+      );
+    },
+  }),
   models: Object.freeze({ perform: performModels }),
   lyrics: Object.freeze({ perform: performLyrics }),
   media: {

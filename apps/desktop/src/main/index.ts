@@ -9,8 +9,12 @@ import {
 } from "@open-chords/contracts";
 import { app, dialog, shell, type BrowserWindow, type WebContents } from "electron";
 
+import { EXPECTED_ALIGNMENT_MANIFEST_SHA256 } from "./alignment-build-metadata.ts";
 import { ALIGNMENT_PACKS } from "./alignment-packs.ts";
-import { inspectAlignmentRuntime } from "./alignment-runtime.ts";
+import { inspectAlignmentRuntime, packagedAlignmentRuntimeRoot } from "./alignment-runtime.ts";
+import { openAlignmentService, type AlignmentService } from "./alignment-service.ts";
+import { createContainedAlignmentWorker, recoverAlignmentWorkspaces } from "./alignment-worker.ts";
+import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
@@ -81,6 +85,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
   const ownsSingleInstance = app.requestSingleInstanceLock();
   let modelStore: ModelStore | null = null;
+  let alignmentService: AlignmentService | null = null;
   let lyricsDiscovery: LyricsDiscovery | null = null;
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
@@ -98,7 +103,10 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
     app.on(
       "before-quit",
       createMediaCleanupBeforeQuitHandler({
-        dispose: () => localMediaAuthority?.dispose() ?? Promise.resolve(),
+        dispose: async () => {
+          await alignmentService?.dispose();
+          await localMediaAuthority?.dispose();
+        },
         exitWithFailure: () => app.exit(1),
         quit: () => app.quit(),
         timeoutMs: MEDIA_CLEANUP_TIMEOUT_MS,
@@ -128,8 +136,9 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
         lyricsDiscovery = await openLyricsDiscovery({ stateRoot, network });
         const runtime = await inspectAlignmentRuntime(
           app.isPackaged
-            ? join(process.resourcesPath, "open-chords-alignment")
+            ? packagedAlignmentRuntimeRoot(process.resourcesPath)
             : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
+          EXPECTED_ALIGNMENT_MANIFEST_SHA256,
         );
         modelStore = await openModelStore({
           stateRoot,
@@ -148,6 +157,51 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           },
         });
         localMediaAuthority = localMedia;
+        await recoverAlignmentWorkspaces({
+          stateRoot,
+          containmentRoot: app.isPackaged
+            ? join(
+                process.resourcesPath,
+                process.platform === "darwin" ? "../MacOS/containment" : "containment",
+              )
+            : join(app.getAppPath(), "dist/containment"),
+          containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
+          ...(app.isPackaged && process.platform === "darwin"
+            ? { bridgePath: join(process.resourcesPath, "../MacOS/open-chords-containment-bridge") }
+            : {}),
+        });
+        alignmentService = await openAlignmentService({
+          runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
+          stateRoot,
+          modelStore,
+          packs: ALIGNMENT_PACKS,
+          library: projectLibrary,
+          media: localMedia,
+          worker: createContainedAlignmentWorker({
+            stateRoot,
+            runtimeRoot: app.isPackaged
+              ? packagedAlignmentRuntimeRoot(process.resourcesPath)
+              : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
+            runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
+            containmentRoot: app.isPackaged
+              ? join(
+                  process.resourcesPath,
+                  process.platform === "darwin" ? "../MacOS/containment" : "containment",
+                )
+              : join(app.getAppPath(), "dist/containment"),
+            containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
+            ...(app.isPackaged && process.platform === "darwin"
+              ? {
+                  bridgePath: join(
+                    process.resourcesPath,
+                    "../MacOS/open-chords-containment-bridge",
+                  ),
+                }
+              : {}),
+            modelStore,
+            media: localMedia,
+          }),
+        });
         installRendererProtocol(join(__dirname, "../renderer"), localMedia);
         projectLibrary.subscribe(({ projectId, projectRevisionId, sequence }) => {
           const window = mainWindow;
@@ -168,6 +222,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           );
         });
         installDesktopIpc(projectLibrary, {
+          alignment: alignmentService,
           models: {
             store: modelStore,
             network,

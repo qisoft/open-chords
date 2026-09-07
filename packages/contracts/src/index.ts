@@ -8,7 +8,7 @@ import { z } from "zod";
 export * from "./desktop.ts";
 
 export const CONTRACT_MAJOR = 1;
-export const CONTRACT_MINOR = 2;
+export const CONTRACT_MINOR = 3;
 export const CONTRACT_VERSION = `${String(CONTRACT_MAJOR)}.${String(CONTRACT_MINOR)}`;
 
 export const ProjectEnvelopeSchema = z
@@ -59,3 +59,4 @@ export function generateContractJsonSchema(): z.core.JSONSchema.BaseSchema {
 export * from "./lyrics.ts";
 
 export * from "./models.ts";
+export * from "./alignment.ts";

@@ -849,6 +849,18 @@ button:disabled {
 .lyrics-selection {
   margin: 0.75rem 20px;
 }
+
+.lyrics-timing {
+  margin-top: 8px;
+  min-width: 0;
+}
+.lyrics-timing select {
+  max-width: 100%;
+}
+.lyrics-timing label {
+  display: block;
+  margin-block: 8px;
+}
 .lyrics-selection fieldset {
   display: flex;
   flex-wrap: wrap;

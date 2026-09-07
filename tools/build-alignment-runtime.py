@@ -94,6 +94,9 @@ def main() -> None:
     build_env["PYTHONPATH"] = str(soundfile_data.parent)
     run([str(python), "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--name", "open-chords-alignment", "--paths", str(soundfile_data.parent), "--collect-all", "_soundfile_data", "--copy-metadata", "montreal_forced_aligner", "--copy-metadata", "kalpy-kaldi", "--collect-all", "montreal_forced_aligner", "--collect-all", "kalpy", "--collect-all", "pynini", "--distpath", str(output), "--workpath", str(build / "freeze"), "--specpath", str(build), str(ROOT / "sidecar/alignment/entry.py")], env=build_env)
     runtime = output / "open-chords-alignment"
+    executable_name = "open-chords-alignment.exe" if os.name == "nt" else "open-chords-alignment"
+    worker_name = "open-chords-alignment-worker.exe" if os.name == "nt" else "open-chords-alignment-worker"
+    shutil.copy2(runtime / executable_name, runtime / worker_name)
     # Materialize aliases so artifact verification never follows a runtime symlink.
     for path in list(runtime.rglob("*")):
         if path.is_symlink():
@@ -116,7 +119,7 @@ def main() -> None:
     (notices / "native-package-lock.json").write_text(json.dumps(lock, indent=2) + "\n", "utf8")
     (notices / "freezer-requirements.txt").write_text((ROOT / "sidecar/alignment/requirements-builder.txt").read_text("utf8"), "utf8")
     if os.name != "nt":
-        run([sys.executable, str(ROOT / "tools/sign-macos-analysis-runtime.py"), "--runtime-root", str(runtime), "--helper", "open-chords-alignment", "--standalone"], env=build_env)
+        run([sys.executable, str(ROOT / "tools/sign-macos-analysis-runtime.py"), "--runtime-root", str(runtime), "--helper", "open-chords-alignment-worker"], env=build_env)
     # The probe is release-owned and imports the actual alignment/native interfaces.
     executable = runtime / ("open-chords-alignment.exe" if os.name == "nt" else "open-chords-alignment")
     with tempfile.TemporaryDirectory(prefix="open-chords-mfa-proof-") as temporary:
