@@ -356,6 +356,15 @@ it("exposes only named model operations through the real main gateway", async ()
       )
     ).response,
   ).toMatchObject({ type: "desktop.error", code: "invalid_command" });
+  const flooded = await Promise.all(
+    Array.from({ length: 40 }, () =>
+      gateway.execute({ ...command, action: { type: "cancel" } }, sender),
+    ),
+  );
+  expect(flooded.filter(({ response }) => response.type === "models.result")).toHaveLength(1);
+  expect(
+    flooded.filter(({ response }) => response.type === "desktop.error" && response.code === "busy"),
+  ).toHaveLength(39);
 });
 
 it("does not report a runtime available from metadata alone", async () => {

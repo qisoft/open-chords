@@ -23,6 +23,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--helper", action="append")
+    parser.add_argument("--standalone", action="store_true")
     arguments = parser.parse_args()
     runtime_root = arguments.runtime_root.resolve(strict=True)
     native_files = [
@@ -43,8 +44,7 @@ def main() -> None:
                 "--force",
                 "--sign",
                 "-",
-                "--entitlements",
-                str(entitlements),
+                *([] if arguments.standalone else ["--entitlements", str(entitlements)]),
                 str(helper),
             ],
             check=True,

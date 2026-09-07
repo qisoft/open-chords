@@ -107,7 +107,7 @@ def main() -> None:
     (notices / "native-package-lock.json").write_text(json.dumps(lock, indent=2) + "\n", "utf8")
     (notices / "freezer-requirements.txt").write_text((ROOT / "sidecar/alignment/requirements-builder.txt").read_text("utf8"), "utf8")
     if os.name != "nt":
-        run([sys.executable, str(ROOT / "tools/sign-macos-analysis-runtime.py"), "--runtime-root", str(runtime), "--helper", "open-chords-alignment"], env=build_env)
+        run([sys.executable, str(ROOT / "tools/sign-macos-analysis-runtime.py"), "--runtime-root", str(runtime), "--helper", "open-chords-alignment", "--standalone"], env=build_env)
     # The probe is release-owned and imports the actual alignment/native interfaces.
     executable = runtime / ("open-chords-alignment.exe" if os.name == "nt" else "open-chords-alignment")
     with tempfile.TemporaryDirectory(prefix="open-chords-mfa-proof-") as temporary:

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { z } from "zod";
@@ -183,18 +184,16 @@ export class ModelStore {
     try {
       const root = this.#path(pack);
       if (!(await lstat(root)).isDirectory()) return false;
-      if ((await readFile(join(root, "manifest.json"), "utf8")) !== JSON.stringify(pack))
-        return false;
-      if ((await readFile(join(root, "NOTICE.txt"), "utf8")) !== packNotice(pack)) return false;
+      if ((await readMetadata(join(root, "manifest.json"))) !== JSON.stringify(pack)) return false;
+      if ((await readMetadata(join(root, "NOTICE.txt"))) !== packNotice(pack)) return false;
       const receipt = installationSchema.safeParse(
-        JSON.parse(await readFile(join(root, "installation.json"), "utf8")),
+        JSON.parse(await readMetadata(join(root, "installation.json"))),
       );
       if (!receipt.success || receipt.data.packHash !== digest(JSON.stringify(pack))) return false;
       for (const artifact of pack.artifacts) {
         const path = join(root, artifact.sha256);
         if (artifact.format === "file") {
-          if (!(await lstat(path)).isFile() || digest(await readFile(path)) !== artifact.sha256)
-            return false;
+          if (!(await verifyFile(path, artifact.bytes, artifact.sha256))) return false;
         } else {
           if (!(await lstat(path)).isDirectory() || !artifact.files) return false;
           for (const file of artifact.files) {
@@ -203,11 +202,7 @@ export class ModelStore {
               parent = join(parent, part);
               if (!(await lstat(parent)).isDirectory()) return false;
             }
-            if (
-              !(await lstat(join(path, file.path))).isFile() ||
-              digest(await readFile(join(path, file.path))) !== file.sha256
-            )
-              return false;
+            if (!(await verifyFile(join(path, file.path), file.bytes, file.sha256))) return false;
           }
         }
       }
@@ -226,6 +221,7 @@ export class ModelStore {
     );
   }
   async resolve(reference: { id: string; version: string; sha256: string }) {
+    await assertStoreDirectories(this.#root);
     for (const pack of this.#packs) {
       const artifact = pack.artifacts.find(
         (item) =>
@@ -234,19 +230,7 @@ export class ModelStore {
           item.sha256 === reference.sha256,
       );
       if (!artifact || !(await this.#installed(pack))) continue;
-      const path = join(this.#path(pack), artifact.sha256);
-      if (artifact.format === "zip") {
-        if (!artifact.files) continue;
-        let valid = true;
-        for (const file of artifact.files) {
-          try {
-            if (digest(await readFile(join(path, file.path))) !== file.sha256) valid = false;
-          } catch {
-            valid = false;
-          }
-        }
-        if (valid) return path;
-      } else if (digest(await readFile(path)) === artifact.sha256) return path;
+      return join(this.#path(pack), artifact.sha256);
     }
     return null;
   }
@@ -414,6 +398,32 @@ async function writeSyncedFile(path: string, content: string | Uint8Array) {
   } finally {
     await file.close();
   }
+}
+
+async function readMetadata(path: string) {
+  const stat = await lstat(path);
+  if (!stat.isFile() || stat.size > 128 * 1024) throw new Error("Invalid model metadata");
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of createReadStream(path)) {
+    bytes += chunk.length;
+    if (bytes > 128 * 1024) throw new Error("Model metadata size exceeded");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function verifyFile(path: string, bytes: number, expectedHash: string) {
+  const stat = await lstat(path);
+  if (!stat.isFile() || stat.size !== bytes) return false;
+  const hash = createHash("sha256");
+  let observed = 0;
+  for await (const chunk of createReadStream(path)) {
+    observed += chunk.length;
+    if (observed > bytes) return false;
+    hash.update(chunk);
+  }
+  return observed === bytes && hash.digest("hex") === expectedHash;
 }
 
 async function syncDirectories(root: string): Promise<void> {

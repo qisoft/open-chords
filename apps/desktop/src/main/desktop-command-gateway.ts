@@ -137,6 +137,7 @@ export class DesktopCommandGateway {
     | undefined;
   readonly #models: ModelGatewayService | undefined;
   #modelsBusy = false;
+  #modelsControlBusy = false;
   #lyricsBusy = false;
   #activeMediaCommands = 0;
   #activeReads = 0;
@@ -452,12 +453,13 @@ export class DesktopCommandGateway {
         ),
       };
     const control = command.action.type === "cancel" || command.action.type === "set_offline";
-    if (this.#modelsBusy && !control)
+    if (control ? this.#modelsControlBusy : this.#modelsBusy)
       return {
         action: "none",
         response: errorResponse("busy", "A model operation is running", true, command),
       };
     if (!control) this.#modelsBusy = true;
+    else this.#modelsControlBusy = true;
     try {
       const action = command.action;
       let removal;
@@ -525,6 +527,7 @@ export class DesktopCommandGateway {
       };
     } finally {
       if (!control) this.#modelsBusy = false;
+      else this.#modelsControlBusy = false;
     }
   }
 

@@ -572,6 +572,14 @@ async function evaluatePackagedEditor(webSocketUrl: string): Promise<unknown> {
     const withLyrics = await window.openChords.project.getSnapshot("project_golden");
     return { lyricsSaved: withLyrics.type === "project.snapshot" && withLyrics.project.lyricsDocuments.some(document => document.id === withLyrics.project.activeView.lyricsDocumentId && document.text === "Installed local words"), saved: saved.type === "project.snapshot" && saved.project.activeView.editHistoryPosition === 2, undone: undone.type === "project.snapshot" && undone.project.activeView.editHistoryPosition === 0, practiceSaved: practiced.type === "project.snapshot" && practiced.project.practice.speed === 0.75 && practiced.project.practice.instrument === "piano" && practiced.project.practice.loop.firstBarId === "bar_pickup" };
   })()`;
+  return evaluatePackagedExpression(webSocketUrl, expression);
+}
+
+async function evaluatePackagedExpression(
+  webSocketUrl: string,
+  expression: string,
+  timeoutMs = 15_000,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
     let requestId = 0;
@@ -586,7 +594,7 @@ async function evaluatePackagedEditor(webSocketUrl: string): Promise<unknown> {
     };
     const timeout = setTimeout(
       () => finish(new Error("Packaged editor CDP evaluation timed out")),
-      15_000,
+      timeoutMs,
     );
     const evaluate = () => {
       if (settled) return;
@@ -1155,4 +1163,75 @@ test("installed MFA runtime verifies its manifest and starts without system Pyth
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("installed app installs an exact English pack, reopens, and removes it through named IPC", async () => {
+  test.setTimeout(480_000);
+  const stateRoot = join(packageRoot, "models-user-data");
+  const operate = async (body: string) => {
+    const port = await reservePort();
+    const application = spawn(
+      executablePath,
+      [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
+      { stdio: "ignore" },
+    );
+    try {
+      let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
+      await expect
+        .poll(
+          async () => {
+            try {
+              const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+              target = CdpTargetsSchema.parse(await response.json()).find(
+                (candidate) =>
+                  candidate.type === "page" && candidate.url.startsWith("open-chords://"),
+              );
+              return Boolean(target);
+            } catch {
+              return false;
+            }
+          },
+          { timeout: 30_000 },
+        )
+        .toBe(true);
+      if (!target) throw new Error("Installed model capability is unavailable");
+      return await evaluatePackagedExpression(
+        target.webSocketDebuggerUrl,
+        `(async () => {
+        const deadline = Date.now() + 10000;
+        while (!window.openChords && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+        const perform = action => window.openChords.models.perform(action);
+        ${body}
+      })()`,
+        330_000,
+      );
+    } finally {
+      if (process.platform !== "win32") application.kill("SIGKILL");
+      await stopApplication(application);
+    }
+  };
+  expect(
+    await operate(`
+    const before = await perform({type: "status"});
+    if (before.type !== "models.result" || !before.runtime.available || before.packs.some(pack => pack.installed)) return false;
+    const installed = await perform({type: "install", packId: "english_mfa-3.1.0"});
+    return installed.type === "models.result" && installed.packs.find(pack => pack.language === "en").installed;
+  `),
+  ).toBe(true);
+  expect(
+    await operate(`
+    const reopened = await perform({type: "status"});
+    if (reopened.type !== "models.result" || !reopened.packs.find(pack => pack.language === "en").installed) return false;
+    const preview = await perform({type: "preview_removal", packId: "english_mfa-3.1.0"});
+    if (preview.type !== "models.result" || preview.removal.affectedProjectIds.length !== 0) return false;
+    const removed = await perform({type: "remove", packId: preview.removal.packId, impactId: preview.removal.impactId});
+    return removed.type === "models.result" && removed.packs.every(pack => !pack.installed);
+  `),
+  ).toBe(true);
+  expect(
+    await operate(`
+    const reopened = await perform({type: "status"});
+    return reopened.type === "models.result" && reopened.packs.every(pack => !pack.installed);
+  `),
+  ).toBe(true);
 });
