@@ -8,7 +8,9 @@ Installed status and resolution revalidate the manifest, notice, receipt, direct
 
 When a release introduces a newer pack, retain supported older exact manifests in the release registry. The registry is the authority for trusted versions; arbitrary on-disk manifests never become trusted offerings. Keep the existing coexistence/removal test when changing that registry.
 
-Offline Mode is a single fail-closed, durable main-owned setting shared with lyrics discovery. Switching it on cancels an active transfer. The renderer updates its controlled checkbox immediately and then reconciles it with the authoritative response.
+Offline Mode is a single fail-closed, durable main-owned setting shared with lyrics discovery. Main publishes the setting before updating its shared policy and cancelling an active transfer. The renderer uses authoritative responses for the checkbox and installation availability, prevents overlapping control requests, and refreshes status after a failed setting change.
+
+Damaged Projects appear separately in removal previews as unknown dependency impact. Both the UI and main block removal until those Projects can be verified; a missing manifest never implies that a damaged Project is unaffected.
 
 The MFA/Kaldi executable environment is built separately from exact macOS arm64 and Windows x64 conda-forge package locks, frozen as a one-folder release runtime, and bundled in the application. Build automation verifies every native package record, copies dependency notices, runs a probe that imports MFA, Kalpy, and OpenFst, records every frozen file hash, and emits target-specific installed and compressed-payload measurements. Installed-artifact tests revalidate that inventory and run the probe with no system Python or Conda paths. Language-pack transfers therefore contain data only.
 
