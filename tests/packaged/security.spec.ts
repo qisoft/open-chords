@@ -1508,7 +1508,11 @@ async function quitInstalledApplication(
   if (application.exitCode !== null || application.signalCode !== null) return;
   await new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
+    let sent = false;
+    let settled = false;
     const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       application.off("exit", onExit);
       socket.close();
@@ -1524,13 +1528,20 @@ async function quitInstalledApplication(
     application.once("exit", onExit);
     socket.addEventListener(
       "error",
-      () => finish(new Error("Installed app quit connection failed")),
+      () => {
+        // Quit may close the debugging socket before the process exit event.
+        // Once sent, only a clean exit proves completion; the deadline remains active.
+        if (!sent) finish(new Error("Installed app quit connection failed"));
+      },
       { once: true },
     );
     // Electron handles Browser.close by invoking Browser::Quit on its main thread.
     socket.addEventListener(
       "open",
-      () => socket.send(JSON.stringify({ id: 1, method: "Browser.close" })),
+      () => {
+        socket.send(JSON.stringify({ id: 1, method: "Browser.close" }));
+        sent = true;
+      },
       { once: true },
     );
   });
