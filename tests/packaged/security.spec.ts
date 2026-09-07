@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { extractFile } from "@electron/asar";
+import { extractFile, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { monoPcmWav } from "@open-chords/testkit/media";
@@ -87,6 +87,13 @@ test.afterAll(() => {
 });
 
 test("packaged shell flips every security fuse explicitly", async () => {
+  const files = listPackage(join(resourcesPath, "app.asar"), { isPack: false });
+  expect(new Set(files.map((file) => file.split("/")[1]))).toEqual(
+    new Set(["LICENSE", "dist", "node_modules", "package.json"]),
+  );
+  expect(
+    new Set(files.filter((file) => file.startsWith("/dist/")).map((file) => file.split("/")[2])),
+  ).toEqual(new Set(["main", "preload", "renderer"]));
   const wire = await getCurrentFuseWire(executablePath);
 
   expect(wire).toMatchObject({

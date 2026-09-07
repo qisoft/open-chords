@@ -36,6 +36,10 @@ module.exports = {
   packagerConfig: {
     appBundleId: "io.github.qisoft.open-chords",
     asar: true,
+    ignore: [
+      /^\/(?!(?:dist|node_modules)(?:\/|$)|package\.json$|LICENSE$).+/,
+      /^\/dist\/(?!(?:main|preload|renderer)(?:\/|$)).+/,
+    ],
     extraResource: [
       "dist/analysis-sidecar/open-chords-analysis",
       "dist/containment",
