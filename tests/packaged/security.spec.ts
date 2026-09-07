@@ -87,7 +87,9 @@ test.afterAll(() => {
 });
 
 test("packaged shell flips every security fuse explicitly", async () => {
-  const files = listPackage(join(resourcesPath, "app.asar"), { isPack: false });
+  const files = listPackage(join(resourcesPath, "app.asar"), { isPack: false }).map((file) =>
+    file.replaceAll("\\", "/"),
+  );
   expect(new Set(files.map((file) => file.split("/")[1]))).toEqual(
     new Set(["LICENSE", "dist", "node_modules", "package.json"]),
   );

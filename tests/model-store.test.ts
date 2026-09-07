@@ -149,7 +149,7 @@ it("keeps the committed network policy when an Offline Mode write fails", async 
     fetch: async () => new Response(bytes),
   });
   await mkdir(join(stateRoot, "network-mode.json"));
-  await expect(network.setOffline(true)).rejects.toThrow(/EISDIR|EPERM|EACCES/);
+  await expect(network.setOffline(true)).rejects.toThrow(/EISDIR|EPERM|EACCES|EEXIST/);
   expect(network.offline).toBe(false);
   await store.install(pack.id);
   expect(await store.list()).toMatchObject([{ installed: true }]);
