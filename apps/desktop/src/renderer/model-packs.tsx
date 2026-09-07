@@ -45,7 +45,7 @@ export function ModelPacks({ api }: { api: OpenChordsDesktopApi }) {
   return (
     <Dialog.Root
       onOpenChange={(open) => {
-        if (open) void perform({ type: "status" });
+        if (open && !pending) void perform({ type: "status" });
       }}
     >
       <Dialog.Trigger>Alignment packs</Dialog.Trigger>

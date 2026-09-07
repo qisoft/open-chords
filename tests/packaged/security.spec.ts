@@ -252,7 +252,8 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       });
     }
     expect(renderer).toMatchObject({
-      apiKeys: ["lyrics", "media", "project", "shell"],
+      apiKeys: ["lyrics", "media", "models", "project", "shell"],
+      modelsKeys: ["perform"],
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },
       externalFetch: "rejected",
@@ -447,6 +448,7 @@ const OfflinePlaybackSchema = z.object({
 
 const RendererSnapshotSchema = z.object({
   apiKeys: z.array(z.string()),
+  modelsKeys: z.array(z.string()),
   contentSecurityPolicy: z.literal(EXPECTED_RENDERER_CSP),
   effectiveCsp: EffectiveCspProbeSchema,
   externalFetch: z.literal("rejected"),
@@ -733,6 +735,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       ]);
       resolve({
       apiKeys: Object.keys(window.openChords).sort(),
+      modelsKeys: Object.keys(window.openChords.models).sort(),
       externalFetch,
       heading: document.querySelector("h1")?.textContent ?? null,
       mediaKeys: Object.keys(window.openChords.media).sort(),
