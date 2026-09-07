@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { extractFile } from "@electron/asar";
+import { extractFile, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { monoPcmWav } from "@open-chords/testkit/media";
@@ -87,6 +87,15 @@ test.afterAll(() => {
 });
 
 test("packaged shell flips every security fuse explicitly", async () => {
+  const files = listPackage(join(resourcesPath, "app.asar"), { isPack: false }).map((file) =>
+    file.replaceAll("\\", "/"),
+  );
+  expect(new Set(files.map((file) => file.split("/")[1]))).toEqual(
+    new Set(["LICENSE", "dist", "node_modules", "package.json"]),
+  );
+  expect(
+    new Set(files.filter((file) => file.startsWith("/dist/")).map((file) => file.split("/")[2])),
+  ).toEqual(new Set(["main", "preload", "renderer"]));
   const wire = await getCurrentFuseWire(executablePath);
 
   expect(wire).toMatchObject({
@@ -126,6 +135,7 @@ test("installed artifact runs contained analysis, publishes Revisions, and reaps
 });
 
 test("installed editor and practice save through named IPC with a durable reopened result", async () => {
+  test.setTimeout(60_000);
   const stateRoot = join(packageRoot, "editor-user-data");
   const envelope = ProjectEnvelopeSchema.parse(
     JSON.parse(
@@ -160,7 +170,8 @@ test("installed editor and practice save through named IPC with a durable reopen
             return false;
           }
         },
-        { timeout: 10_000 },
+        // Startup verifies the bundled runtime before exposing desktop capabilities.
+        { timeout: 30_000 },
       )
       .toBe(true);
     if (target === undefined) throw new Error("Packaged editor target is unavailable");
@@ -252,7 +263,8 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       });
     }
     expect(renderer).toMatchObject({
-      apiKeys: ["lyrics", "media", "project", "shell"],
+      apiKeys: ["lyrics", "media", "models", "project", "shell"],
+      modelsKeys: ["perform"],
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },
       externalFetch: "rejected",
@@ -447,6 +459,7 @@ const OfflinePlaybackSchema = z.object({
 
 const RendererSnapshotSchema = z.object({
   apiKeys: z.array(z.string()),
+  modelsKeys: z.array(z.string()),
   contentSecurityPolicy: z.literal(EXPECTED_RENDERER_CSP),
   effectiveCsp: EffectiveCspProbeSchema,
   externalFetch: z.literal("rejected"),
@@ -572,6 +585,14 @@ async function evaluatePackagedEditor(webSocketUrl: string): Promise<unknown> {
     const withLyrics = await window.openChords.project.getSnapshot("project_golden");
     return { lyricsSaved: withLyrics.type === "project.snapshot" && withLyrics.project.lyricsDocuments.some(document => document.id === withLyrics.project.activeView.lyricsDocumentId && document.text === "Installed local words"), saved: saved.type === "project.snapshot" && saved.project.activeView.editHistoryPosition === 2, undone: undone.type === "project.snapshot" && undone.project.activeView.editHistoryPosition === 0, practiceSaved: practiced.type === "project.snapshot" && practiced.project.practice.speed === 0.75 && practiced.project.practice.instrument === "piano" && practiced.project.practice.loop.firstBarId === "bar_pickup" };
   })()`;
+  return evaluatePackagedExpression(webSocketUrl, expression);
+}
+
+async function evaluatePackagedExpression(
+  webSocketUrl: string,
+  expression: string,
+  timeoutMs = 15_000,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
     let requestId = 0;
@@ -586,7 +607,7 @@ async function evaluatePackagedEditor(webSocketUrl: string): Promise<unknown> {
     };
     const timeout = setTimeout(
       () => finish(new Error("Packaged editor CDP evaluation timed out")),
-      15_000,
+      timeoutMs,
     );
     const evaluate = () => {
       if (settled) return;
@@ -725,6 +746,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
       ]);
       resolve({
       apiKeys: Object.keys(window.openChords).sort(),
+      modelsKeys: Object.keys(window.openChords.models).sort(),
       externalFetch,
       heading: document.querySelector("h1")?.textContent ?? null,
       mediaKeys: Object.keys(window.openChords.media).sort(),
@@ -1115,3 +1137,126 @@ async function decodeWebSocketMessage(data: unknown): Promise<string | null> {
   }
   return null;
 }
+
+test("installed MFA runtime verifies its manifest and starts without system Python or Conda", async () => {
+  test.setTimeout(240_000);
+  const { inspectAlignmentRuntime } =
+    await import("../../apps/desktop/src/main/alignment-runtime.ts");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const root = join(resourcesPath, "open-chords-alignment");
+  const info = await inspectAlignmentRuntime(root);
+  expect(info.available).toBe(true);
+  expect(info.installedBytes).toBeGreaterThan(0);
+  const home = mkdtempSync(join(tmpdir(), "open-chords-mfa-installed-"));
+  try {
+    const env: Record<string, string> = {
+      HOME: home,
+      USERPROFILE: home,
+      MFA_ROOT_DIR: home,
+      APPDATA: home,
+      LOCALAPPDATA: home,
+      TEMP: home,
+      TMP: home,
+    };
+    if (process.platform === "win32") {
+      env.SystemRoot = process.env.SystemRoot!;
+      env.PATH = join(env.SystemRoot, "System32");
+    } else env.PATH = "/usr/bin:/bin";
+    const executable = join(
+      root,
+      `open-chords-alignment${process.platform === "win32" ? ".exe" : ""}`,
+    );
+    const { stdout } = await promisify(execFile)(
+      process.platform === "darwin" ? "/usr/bin/sandbox-exec" : executable,
+      process.platform === "darwin"
+        ? [
+            "-p",
+            '(version 1) (allow default) (deny file-read* (subpath "/opt/homebrew") (subpath "/usr/local"))',
+            executable,
+            "--probe",
+          ]
+        : ["--probe"],
+      { env, timeout: 180_000, maxBuffer: 8192 },
+    );
+    expect(JSON.parse(stdout)).toEqual({
+      runtime: "mfa",
+      version: "3.4.1",
+      kalpy: "KalpyAligner",
+      fst: 0,
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("installed app installs an exact English pack, reopens, and removes it through named IPC", async () => {
+  test.setTimeout(480_000);
+  const stateRoot = join(packageRoot, "models-user-data");
+  const operate = async (body: string) => {
+    const port = await reservePort();
+    const application = spawn(
+      executablePath,
+      [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
+      { stdio: "ignore" },
+    );
+    try {
+      let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
+      await expect
+        .poll(
+          async () => {
+            try {
+              const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+              target = CdpTargetsSchema.parse(await response.json()).find(
+                (candidate) =>
+                  candidate.type === "page" && candidate.url.startsWith("open-chords://"),
+              );
+              return Boolean(target);
+            } catch {
+              return false;
+            }
+          },
+          { timeout: 30_000 },
+        )
+        .toBe(true);
+      if (!target) throw new Error("Installed model capability is unavailable");
+      return await evaluatePackagedExpression(
+        target.webSocketDebuggerUrl,
+        `(async () => {
+        const deadline = Date.now() + 10000;
+        while (!window.openChords && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+        const perform = action => window.openChords.models.perform(action);
+        ${body}
+      })()`,
+        330_000,
+      );
+    } finally {
+      if (process.platform !== "win32") application.kill("SIGKILL");
+      await stopApplication(application);
+    }
+  };
+  expect(
+    await operate(`
+    const before = await perform({type: "status"});
+    if (before.type !== "models.result" || !before.runtime.available || before.packs.some(pack => pack.installed)) return false;
+    const installed = await perform({type: "install", packId: "english_mfa-3.1.0"});
+    return installed.type === "models.result" && installed.packs.find(pack => pack.language === "en").installed;
+  `),
+  ).toBe(true);
+  expect(
+    await operate(`
+    const reopened = await perform({type: "status"});
+    if (reopened.type !== "models.result" || !reopened.packs.find(pack => pack.language === "en").installed) return false;
+    const preview = await perform({type: "preview_removal", packId: "english_mfa-3.1.0"});
+    if (preview.type !== "models.result" || preview.removal.affectedProjectIds.length !== 0) return false;
+    const removed = await perform({type: "remove", packId: preview.removal.packId, impactId: preview.removal.impactId});
+    return removed.type === "models.result" && removed.packs.every(pack => !pack.installed);
+  `),
+  ).toBe(true);
+  expect(
+    await operate(`
+    const reopened = await perform({type: "status"});
+    return reopened.type === "models.result" && reopened.packs.every(pack => !pack.installed);
+  `),
+  ).toBe(true);
+});

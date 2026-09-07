@@ -1,0 +1,21 @@
+# Model Store and alignment language packs
+
+Main owns the global Model Store under application state. Renderers can only invoke the named `models.perform` capability; they cannot supply URLs, paths, hashes, versions, or executable commands. The v1 surface contains exactly the English and Russian MFA 3.1.0 language packs from the reviewed release manifest.
+
+Each pack is an immutable content-addressed directory. Installation starts only after an explicit user action, streams from its fixed GitHub release URL with credentials omitted, accepts one bounded redirect to GitHub's release-asset host, and enforces the declared transfer size before checking SHA-256. ZIP extraction accepts only the exact manifest file set and rejects links, duplicate paths, traversal, unknown files, and size or hash mismatches. Main fsyncs the unpacked data, deterministic `NOTICE.txt`, exact manifest, and install receipt before one atomic publish. Cancellation, Offline Mode, transfer failure, corruption, and startup cleanup leave no partial installed pack.
+
+Installed status and resolution revalidate the manifest, notice, receipt, directory shape, and every artifact hash. Analysis Recipes resolve only an exact artifact ID, version, and SHA-256; another installed version never substitutes. Removal first returns a content-bound impact preview containing the exact Project IDs whose retained Analysis Manifests reference the pack. Main rejects a stale confirmation and removal never deletes those immutable revisions; a future reanalysis that needs the removed artifact becomes blocked until the same pack is installed again.
+
+When a release introduces a newer pack, retain supported older exact manifests in the release registry. The registry is the authority for trusted versions; arbitrary on-disk manifests never become trusted offerings. Keep the existing coexistence/removal test when changing that registry.
+
+Offline Mode is a single fail-closed, durable main-owned setting shared with lyrics discovery. Main publishes the setting before updating its shared policy and cancelling an active transfer. The renderer uses authoritative responses for the checkbox and installation availability, prevents overlapping control requests, and refreshes status after a failed setting change.
+
+Damaged Projects appear separately in removal previews as unknown dependency impact. Both the UI and main block removal until those Projects can be verified; a missing manifest never implies that a damaged Project is unaffected.
+
+The MFA/Kaldi executable environment is built separately from exact macOS arm64 and Windows x64 conda-forge package locks, frozen as a one-folder release runtime, and bundled in the application. Build automation verifies every native package record, copies dependency notices, runs a probe that imports MFA, Kalpy, and OpenFst, records every frozen file hash, and emits target-specific installed and compressed-payload measurements. Installed-artifact tests revalidate that inventory and run the probe with no system Python or Conda paths. Language-pack transfers therefore contain data only.
+
+The current measured macOS arm64 runtime payload is 634,591,506 logical bytes and 256,229,299 compressed bytes. Payload measurements count the inventoried files, excluding the verification manifest itself; filesystem allocation and full installer size are separate measurements. The release UI obtains the current platform measurement from the verified installed manifest and presents it separately from the exact pack sizes.
+
+SoundFile receives libsndfile and its native dependencies from the exact Conda lock in its supported `_soundfile_data` layout. Both build and installed macOS probes deny reads from Homebrew and `/usr/local`; clearing `PATH` alone does not prevent dynamic libraries from being loaded there.
+
+This issue ships a probe-only runtime entry point. It accepts only `--probe` and no user media, model path, or alignment command. The macOS executable is signed before hashing without inherited-sandbox entitlements because the release closure probe runs directly. Alignment Jobs must add the contained worker entry point and prove it through the native containment boundary before accepting user inputs.

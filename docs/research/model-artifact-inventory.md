@@ -10,7 +10,7 @@ Open Chords v1 does **not** need a generic model downloader.
 - Reference-lyrics alignment is optional. Offer exactly two independently installable MFA language packs: English and Russian. Installing both downloads **210,109,660 bytes (200.38 MiB)** and stores **228,695,918 logical bytes (218.10 MiB)** after acoustic archives are extracted.
 - Do not bundle MFA language packs in the application installer. Download one only after the user chooses lyrics alignment for that language, showing the exact transfer and installed sizes below.
 - BeatNet, Chordino, All-In-One, and BTC remain benchmark-only or excluded. Their artifacts must not appear in the v1 Model Store or delivery UI.
-- The MFA/Kaldi execution environment and platform FFmpeg/Essentia binaries are part of the analysis sidecar, not model packs. Their installed footprint is target- and build-dependent and must be measured from the eventual frozen macOS arm64, Windows x64, and Linux x64 packages. Adding their dependency sizes to the model numbers would be misleading.
+- The MFA/Kaldi execution environment is a release-owned executable runtime, not a model pack. The exact macOS arm64 freeze built for this decision is **634,591,506 logical bytes** and **256,229,299 compressed payload bytes**, excluding its verification manifest. It is bundled with the application so Model Store downloads remain data-only and never introduce executable code. The Windows x64 measurement is produced by the native release job from its separate exact package lock. Adding either runtime size to the language-pack numbers would be misleading.
 
 ## Shipping inventory
 
@@ -65,7 +65,7 @@ The All-In-One model loader and exact filenames are in its [official source](htt
 1. The initial application install can perform automatic chord/beat/key/section baselines without a model-download prompt.
 2. “Install English lyrics alignment” must show **88.93 MiB download / 97.79 MiB installed**; Russian must show **111.45 MiB / 120.31 MiB**. The UI must also state that alignment is best-effort for singing and reference lyrics are required.
 3. Each MFA pack manifest records both artifact URLs, version `3.1.0`, SHA-256, CC BY 4.0 attribution/model-card URLs, logical installed bytes, compatible runtime range, and install timestamp. A newer model never substitutes silently.
-4. Runtime download policy is a different decision from model delivery. Prefer bundling a measured frozen sidecar; if the sidecar remains optional, disclose its target-specific size separately from the language pack.
+4. Runtime delivery is separate from model delivery. Bundle the hash-inventoried MFA 3.4.1 runtime in each native application artifact and disclose its measured target-specific payload separately from the language pack. The runtime must verify and execute from the installed artifact without system Python or Conda before that platform can ship.
 5. No candidate checkpoint becomes available through a hidden “advanced” toggle. BeatNet/BTC need a separate rights decision; All-In-One violates scope; Chordino needs a host/build decision. Benchmark tooling may fetch them only through explicit development manifests.
 
 ## Measurement method

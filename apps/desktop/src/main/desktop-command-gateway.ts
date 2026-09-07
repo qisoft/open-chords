@@ -9,6 +9,7 @@ import {
   type DesktopCommand,
   type DesktopResponse,
 } from "@open-chords/contracts";
+import type { ModelRuntimeInfo } from "@open-chords/contracts";
 import type { LyricsOrigin } from "@open-chords/domain";
 import type { LyricsInput, PracticeAction } from "@open-chords/domain";
 import {
@@ -26,6 +27,8 @@ import type {
   LocalMediaSelection,
 } from "./local-media.ts";
 import type { LyricsDiscovery } from "./lyrics-discovery.ts";
+import type { ModelStore } from "./model-store.ts";
+import type { NetworkMode } from "./network-mode.ts";
 import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
 
 const MAX_COMMAND_BYTES = 256 * 1024;
@@ -113,6 +116,17 @@ export type DesktopGatewayResult = {
   response: DesktopResponse;
 };
 
+export type ModelGatewayService = {
+  store: ModelStore;
+  network: NetworkMode;
+  runtime: ModelRuntimeInfo;
+  references(): Array<{
+    projectId: string;
+    artifacts: Array<{ id: string; version: string; sha256: string }>;
+    impactUnknown?: boolean | undefined;
+  }>;
+};
+
 export class DesktopCommandGateway {
   readonly #authority: ProjectAuthority;
   readonly #invalidCounts = new Map<string, number>();
@@ -122,6 +136,9 @@ export class DesktopCommandGateway {
   readonly #lyrics:
     | { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> }
     | undefined;
+  readonly #models: ModelGatewayService | undefined;
+  #modelsBusy = false;
+  #modelsControlBusy = false;
   #lyricsBusy = false;
   #activeMediaCommands = 0;
   #activeReads = 0;
@@ -131,8 +148,10 @@ export class DesktopCommandGateway {
     authority: ProjectAuthority,
     mediaAuthority?: LocalMediaAuthority,
     lyrics?: { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> },
+    models?: ModelGatewayService,
   ) {
     this.#authority = authority;
+    this.#models = models;
     this.#lyrics = lyrics;
     this.#mediaAuthority = mediaAuthority;
   }
@@ -189,6 +208,7 @@ export class DesktopCommandGateway {
       };
     }
 
+    if (command.type === "models.perform") return this.#performModels(command);
     if (command.type === "lyrics.perform") return this.#performLyrics(command);
     if (command.type === "project.list") return this.#listProjects(command);
     if (command.type === "project.get_snapshot") return this.#readSnapshot(command);
@@ -416,6 +436,109 @@ export class DesktopCommandGateway {
       if (this.#mutationQueues.get(command.projectId) === queueTail) {
         this.#mutationQueues.delete(command.projectId);
       }
+    }
+  }
+
+  async #performModels(
+    command: Extract<DesktopCommand, { type: "models.perform" }>,
+  ): Promise<DesktopGatewayResult> {
+    const models = this.#models;
+    if (!models)
+      return {
+        action: "none",
+        response: errorResponse(
+          "capability_unavailable",
+          "Alignment packs unavailable",
+          false,
+          command,
+        ),
+      };
+    const control = command.action.type === "cancel" || command.action.type === "set_offline";
+    if (control ? this.#modelsControlBusy : this.#modelsBusy)
+      return {
+        action: "none",
+        response: errorResponse("busy", "A model operation is running", true, command),
+      };
+    if (!control) this.#modelsBusy = true;
+    else this.#modelsControlBusy = true;
+    try {
+      const action = command.action;
+      let removal;
+      if (action.type === "cancel") models.store.cancel();
+      if (action.type === "set_offline") await models.network.setOffline(action.offline);
+      if (action.type === "install") {
+        if (!models.runtime.available) throw new Error("Runtime unavailable");
+        await models.store.install(action.packId);
+      }
+      if (action.type === "preview_removal" || action.type === "remove") {
+        removal = models.store.previewRemoval(action.packId, models.references());
+        if (action.type === "remove") {
+          if (removal.unknownProjectIds.length > 0)
+            return {
+              action: "none",
+              response: errorResponse(
+                "capability_unavailable",
+                "Repair damaged Projects before removing this pack; dependency impact is unknown.",
+                false,
+                command,
+              ),
+            };
+          if (action.impactId !== removal.impactId)
+            return {
+              action: "none",
+              response: errorResponse(
+                "stale_revision",
+                "Affected Projects changed; review removal again",
+                true,
+                command,
+              ),
+            };
+          await models.store.remove(action.packId);
+        }
+      }
+      const packs = (await models.store.list()).map((pack) => ({
+        id: pack.id,
+        language: pack.language,
+        version: pack.version,
+        installed: pack.installed,
+        transferBytes: pack.artifacts.reduce((sum, artifact) => sum + artifact.bytes, 0),
+        installedBytes: pack.artifacts.reduce((sum, artifact) => sum + artifact.installedBytes, 0),
+        artifacts: pack.artifacts.map((artifact) => ({
+          id: artifact.id,
+          version: artifact.version,
+          sha256: artifact.sha256,
+          source: artifact.url,
+          license: artifact.license,
+          attribution: artifact.attribution,
+          modelCard: artifact.modelCard,
+        })),
+      }));
+      return {
+        action: "none",
+        response: DesktopResponseSchema.parse({
+          ...responseEnvelope(command),
+          type: "models.result",
+          offline: models.network.offline,
+          runtime: models.runtime,
+          packs,
+          ...(removal ? { removal } : {}),
+        }),
+      };
+    } catch {
+      return {
+        action: "none",
+        response: errorResponse(
+          "capability_unavailable",
+          models.network.offline
+            ? "Offline Mode is enabled"
+            : "Model operation failed. Check the runtime and connection, then retry.",
+          true,
+          command,
+        ),
+      };
+    } finally {
+      if (!control) this.#modelsBusy = false;
+      else this.#modelsControlBusy = false;
     }
   }
 

@@ -915,3 +915,56 @@ button:disabled {
   max-width: 100%;
   white-space: normal;
 }
+
+.empty-model-tools {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+}
+.model-packs {
+  position: fixed;
+  z-index: 101;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(40rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border: 1px solid #aaa;
+  border-radius: 12px;
+  padding: 1.25rem;
+  color: #1f2937;
+  background: #fff;
+}
+.model-packs-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  background: rgb(0 0 0 / 45%);
+}
+.model-packs header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.model-packs h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.model-packs section {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+}
+.model-packs button {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+}
+.model-reference {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}

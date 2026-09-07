@@ -26,6 +26,7 @@ import {
 import { ChordEditor } from "./chord-editor.tsx";
 import { LyricsSelection } from "./lyrics-selection.tsx";
 import { LyricsViewport } from "./lyrics-viewport.tsx";
+import { ModelPacks } from "./model-packs.tsx";
 import { createPlaybackClock, type PlaybackClock } from "./playback-clock.ts";
 import { usePracticeAudio } from "./practice-audio.ts";
 import { PracticeControls } from "./practice-controls.tsx";
@@ -287,6 +288,7 @@ export function ProjectWorkspace({
             {snapshot.project.activeView === null ? "Awaiting analysis" : "Analysis ready"}
           </span>
         </div>
+        <ModelPacks api={api} />
       </header>
 
       <section className="timeline-section" aria-labelledby="timeline-heading">

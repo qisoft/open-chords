@@ -615,6 +615,12 @@ describe("ProjectLibrary", () => {
     );
     const first = await library.publishAnalysisRevision(firstPublication);
     expect(first).toHaveProperty("projectRevisionId");
+    expect(library.listModelReferences()).toEqual([
+      {
+        projectId: "project_golden",
+        artifacts: [{ id: "rhythm-model", version: "1.0.0", sha256: "1".repeat(64) }],
+      },
+    ]);
     if (!("projectRevisionId" in first)) throw new Error("First analysis was not published");
     const afterFirst = await library.getSnapshot("project_golden");
     expect(afterFirst?.project.activeView).toMatchObject({
@@ -1040,6 +1046,9 @@ describe("ProjectLibrary", () => {
     await expect(reopened.readProject("project_golden")).rejects.toBeInstanceOf(
       ProjectLibraryDamagedError,
     );
+    expect(reopened.listModelReferences()).toEqual([
+      { projectId: "project_golden", artifacts: [], impactUnknown: true },
+    ]);
   });
 
   it("refuses newer schema writes and leaves a failed legacy migration readable and unchanged", async () => {

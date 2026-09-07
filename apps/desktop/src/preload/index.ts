@@ -1,4 +1,5 @@
 import {
+  ModelsCommandSchema,
   LyricsCommandSchema,
   AddLyricsCommandSchema,
   CommitEditTransactionCommandSchema,
@@ -137,6 +138,17 @@ async function changeEditHistory(
       { type: "project.history_changed" | "project.edit_conflicts" }
     > => response.type === "project.history_changed" || response.type === "project.edit_conflicts",
     "Unexpected edit history response",
+  );
+}
+
+async function performModels(action: Parameters<OpenChordsDesktopApi["models"]["perform"]>[0]) {
+  const command = ModelsCommandSchema.parse({ ...envelope(), action, type: "models.perform" });
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.modelsPerform,
+    command,
+    (response): response is Extract<DesktopResponse, { type: "models.result" }> =>
+      response.type === "models.result",
+    "Unexpected model operation response",
   );
 }
 
@@ -282,6 +294,7 @@ function reportDispatchError(error: unknown): void {
 }
 
 const api: OpenChordsDesktopApi = {
+  models: Object.freeze({ perform: performModels }),
   lyrics: Object.freeze({ perform: performLyrics }),
   media: {
     createProject: createMediaProject,

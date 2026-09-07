@@ -1187,3 +1187,28 @@ for (const failure of ["response", "rejection"] as const) {
     }
   });
 }
+
+test("alignment packs disclose exact EN/RU sizes and share Offline Mode without starting transfers", async () => {
+  const userDataDirectory = await realpath(await mkdtemp(join(tmpdir(), "open-chords-model-ui-")));
+  const application = await launch(userDataDirectory);
+  try {
+    const page = await application.firstWindow();
+    await page.getByRole("button", { name: "Alignment packs", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Alignment language packs" })).toBeVisible();
+    await expect(
+      page.getByText("88.93 MiB download · 97.79 MiB installed", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("111.45 MiB download · 120.31 MiB installed", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("checkbox", { name: "Offline Mode for all network operations" }).click();
+    await expect(
+      page.getByRole("checkbox", { name: "Offline Mode for all network operations" }),
+    ).toBeChecked();
+    await expect(page.getByRole("button", { name: "Install English" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Install Russian" })).toBeDisabled();
+  } finally {
+    await application.close();
+    await rm(userDataDirectory, { recursive: true, force: true });
+  }
+});

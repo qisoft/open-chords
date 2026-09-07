@@ -57,3 +57,5 @@ export function generateContractJsonSchema(): z.core.JSONSchema.BaseSchema {
   };
 }
 export * from "./lyrics.ts";
+
+export * from "./models.ts";

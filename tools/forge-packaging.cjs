@@ -56,6 +56,7 @@ function needsUnsignedLibraryValidationEntitlement(path) {
 function isPreverifiedContainmentPath(path) {
   return (
     path.includes("/Contents/Resources/open-chords-analysis/") ||
+    path.includes("/Contents/Resources/open-chords-alignment/") ||
     path.includes("/Contents/Resources/containment/") ||
     path.includes("/Contents/MacOS/containment/") ||
     path.endsWith("/Contents/MacOS/open-chords-containment-bridge") ||
