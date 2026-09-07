@@ -1198,7 +1198,7 @@ test("installed MFA runtime verifies its manifest and starts without system Pyth
 test("installed native Alignment worker runs exact EN/RU packs offline and publishes only verified occurrences", async () => {
   test.setTimeout(600_000);
   const { createHash, randomUUID } = await import("node:crypto");
-  const { readdir, writeFile, stat } = await import("node:fs/promises");
+  const { readdir, writeFile, stat, rename, rm } = await import("node:fs/promises");
   const { addLyricsDocument } = await import("@open-chords/domain");
   const { openAlignmentJobs } = await import("../../apps/desktop/src/main/alignment-jobs.ts");
   const { createContainedAlignmentWorker } =
@@ -1371,6 +1371,35 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
         analysisRevisionId: active.analysisRevisionId,
         ...(await media.getAnalysisSource(before.project.id)),
       });
+      const jobsRoot = join(userDataDirectory, "alignment-jobs");
+      const savedJobsRoot = `${jobsRoot}-stage-fault`;
+      await expect(
+        jobs.run(cancelJob.id, {
+          library,
+          worker: (input) =>
+            worker({
+              ...input,
+              reportStage: async (stage) => {
+                if (stage !== "aligning") return input.reportStage(stage);
+                await rename(jobsRoot, savedJobsRoot);
+                await writeFile(jobsRoot, "unavailable storage");
+                try {
+                  await input.reportStage(stage);
+                } finally {
+                  await rm(jobsRoot);
+                  await rename(savedJobsRoot, jobsRoot);
+                }
+              },
+            }),
+        }),
+      ).rejects.toBeInstanceOf(Error);
+      expect(await jobs.get(cancelJob.id)).toMatchObject({
+        state: "retryable",
+        failure: "storage",
+        circuitOpen: false,
+      });
+      expect(await readdir(join(userDataDirectory, "alignment-workspaces"))).toEqual([]);
+      await jobs.confirm(cancelJob.id);
       const execution = jobs.run(cancelJob.id, { library, worker }).then(
         (value) => value,
         (error: unknown) => error,
