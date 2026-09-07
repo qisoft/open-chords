@@ -333,6 +333,42 @@ it("keeps publication failures retryable without blaming the runtime", async () 
   ).toMatchObject({ state: "succeeded" });
 });
 
+it("keeps stage persistence failures retryable without opening the runtime circuit", async () => {
+  const context = await runnableJob();
+  const root = join(context.options.stateRoot, "alignment-jobs");
+  const saved = `${root}-stage-fault`;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await expect(
+      context.jobs.run(context.job.id, {
+        library: context.library,
+        worker: async ({ reportStage }) => {
+          await rename(root, saved);
+          await writeFile(root, "unavailable storage");
+          try {
+            await reportStage("aligning");
+            return context.output;
+          } finally {
+            await rm(root);
+            await rename(saved, root);
+          }
+        },
+      }),
+    ).rejects.toBeInstanceOf(Error);
+    expect(await context.jobs.get(context.job.id)).toMatchObject({
+      state: "retryable",
+      failure: "storage",
+      circuitOpen: false,
+    });
+    await context.jobs.confirm(context.job.id);
+  }
+  expect(
+    await context.jobs.run(context.job.id, {
+      library: context.library,
+      worker: async () => context.output,
+    }),
+  ).toMatchObject({ state: "succeeded" });
+});
+
 it("requires confirmation for queued work after reopening and keeps different audio requests independent", async () => {
   const context = await runnableJob();
   const second = await context.jobs.request({

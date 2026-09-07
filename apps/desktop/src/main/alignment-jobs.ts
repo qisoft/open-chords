@@ -14,7 +14,7 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
-import { alignmentFailureKind } from "./alignment-failure.ts";
+import { AlignmentExecutionError, alignmentFailureKind } from "./alignment-failure.ts";
 import { readBoundedFile } from "./bounded-file.ts";
 import { withCpuWork } from "./cpu-work.ts";
 import { syncDirectory } from "./filesystem-durability.ts";
@@ -322,6 +322,8 @@ export async function openAlignmentJobs(options: Options) {
         serialize(async () => {
           if (jobs.find((item) => item.id === job.id)?.state !== "running") return;
           await persist(jobs.map((item) => (item.id === job.id ? { ...item, stage } : item)));
+        }).catch(() => {
+          throw new AlignmentExecutionError("storage");
         });
       let phase: "storage" | "worker" | "validation" = "storage";
       try {
