@@ -100,7 +100,7 @@ export function buildWorkspaceContent(project: ProjectContract) {
             : chordLabel(presentChord(chord.value, project.activeView!.presentation)),
         ),
     }));
-  return { lines, instrumentals };
+  return { lines, instrumentals, lyricsLanguage: document?.language };
 }
 
 export type WorkspaceContent = ReturnType<typeof buildWorkspaceContent>;

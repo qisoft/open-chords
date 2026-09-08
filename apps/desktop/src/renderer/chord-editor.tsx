@@ -9,7 +9,7 @@ import {
   reviewEditMapping,
   type EditHistoryAction,
 } from "@open-chords/domain";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import { createEditorDraft, type DraftEvent } from "./editor-draft.ts";
@@ -366,6 +366,7 @@ function DraftSession({
   onClose: () => void;
 }) {
   const state = useStore(draft.store);
+  const validationId = useId();
   const minimumDuration = Math.min(
     ...state.events.map((entry) => Math.max(1, entry.endSample - entry.startSample)),
   );
@@ -426,13 +427,17 @@ function DraftSession({
           saved version.
         </p>
       )}
-      {state.errors.map((message) => (
-        <p role="alert" key={message}>
-          {message}
-        </p>
-      ))}
+      <div id={validationId} role={state.errors.length > 0 ? "alert" : undefined}>
+        {state.errors.map((message) => (
+          <p key={message}>{message}</p>
+        ))}
+      </div>
       {error !== null && <p role="alert">{error}</p>}
-      <fieldset disabled={busy || state.stale} className="editor-fields">
+      <fieldset
+        disabled={busy || state.stale}
+        className="editor-fields"
+        aria-describedby={state.errors.length > 0 ? validationId : undefined}
+      >
         <legend className="sr-only">Draft events</legend>
         <ul className="editor-rail" aria-label="Draft chord events">
           {state.events.map((event) => (

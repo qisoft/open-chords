@@ -10,7 +10,9 @@ Validate the complete committed workspace as one accessible desktop workflow bef
 
 The target is the applicable WCAG 2.2 Level A and AA requirements recorded in `docs/research/workspace-accessibility.md`. Automated audits support this gate but do not replace keyboard or native assistive-technology evidence. Performance observations are tied to declared hardware, OS, Electron/Chromium versions, fixture density and run conditions; they do not authorize unrelated product or analysis-quality claims.
 
-## Proposed public test seams
+## Confirmed public test seams
+
+The user confirmed all three seams on 2026-09-08.
 
 1. **Critical renderer journeys and accessibility tree.** Drive the real renderer/preload/main path for project open, timeline selection and seek, chord edit/validation/save/reset/Undo/Redo, practice loop/count-in, lyrics selection/alignment correction and error recovery. Run an automated WCAG audit in every representative state. Verify keyboard equivalents, logical focus order and restoration, stable names/roles/values, field-associated errors, bounded live announcements with no playback-tick spam, language metadata and equivalent text for diagrams and uncertainty states. The tests use public DOM/accessibility behavior and committed Project snapshots rather than component internals.
 2. **Visual resilience and representative performance.** Exercise 200% text scaling, the 320 CSS-pixel reflow equivalent, prescribed text-spacing overrides, Reduced Motion, forced colors and supported narrow/zoomed desktop sizes. Assert that non-timeline controls remain reachable, focused controls are not obscured, required targets meet 24×24 CSS pixels or a documented WCAG exception, and no state depends on color alone. Profile production renderer builds with long-song, many-event and dense-lyrics fixtures on declared macOS arm64 and Windows x64 environments. Record startup, DOM/AX size and seek-to-two-frames median/P95. Keep semantic DOM unless a measured case crosses the existing 50 ms investigation trigger; any virtualization decision must preserve current, focused, selected, loop-edge and adjacent identities.
