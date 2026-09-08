@@ -61,3 +61,11 @@ On macOS, use VoiceOver with Accessibility Inspector from Xcode. On Windows 11 x
 | Visual settings | Repeat critical controls at 200% and narrow width, OS Reduce Motion and Windows contrast themes; focus/current/loop remain distinguishable | Not run | Not run |
 
 Attach platform AX/UIA captures and screen-reader observations for the same commit. Review all axe `incomplete` entries and forced-color screenshots. Keep issue acceptance boxes unchecked until each native row has observations or an explicitly resolved defect; a prepared runbook alone does not pass this gate. On 2026-09-08 the user confirmed that no interactive Windows machine/VM is currently available. The Narrator gate therefore remains pending even if hosted CI passes.
+
+### macOS attempt, 2026-09-08
+
+The archive built from `da05fa9f39fda1df2e13404a067f315f4351de91` was extracted into a fresh temporary directory and launched with the isolated synthetic Library. Archive SHA-256: `5dd83e524b26f3562be12b1ddc9672bf17ba05d01e661256db93fc7d015b2b9d`. Host: macOS 26.6.2, build 25G83; installed VoiceOver version 10 and Accessibility Inspector version 5.0.
+
+All seven installed-artifact automated tests passed against this archive: security fuses, contained analysis/publication/cleanup, durable editor/practice IPC, named capability boundaries, standalone MFA startup, offline EN/RU alignment with cancellation/recovery, and exact English pack installation/reopen/removal. This verifies the automated installed-app seam; it supplies no native screen-reader verdict.
+
+Computer Use timed out while obtaining the application window. Subsequent window access to Accessibility Inspector, VoiceOver Utility and Finder returned `cgWindowNotFound`; this does not establish an application-specific defect. A process sample showed the AppKit event loop servicing accessibility attribute requests, but supplied no screen-reader observations. The test application was stopped. VoiceOver was never enabled, no spoken phrases were captured, and all native rows remain **not run**. Resume this gate when interactive window access works, using the exact artifact under review.
