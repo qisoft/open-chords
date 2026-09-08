@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,6 +32,7 @@ for (const profile of [
   },
 ]) {
   test(`workspace controls remain accessible and reflow at ${profile.name}`, async () => {
+    test.setTimeout(60_000);
     const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-accessibility-")));
     const envelope = ProjectEnvelopeSchema.parse(
       JSON.parse(
@@ -54,16 +55,49 @@ for (const profile of [
     try {
       const page = await application.firstWindow();
       const tabTo = async (target: Locator) => {
+        await expect(target).toBeVisible();
+        await expect(target).toBeEnabled();
         for (let attempt = 0; attempt < 160; attempt++) {
           if (await target.evaluate((element) => element === document.activeElement)) break;
           await page.keyboard.press("Tab");
         }
         await expect(target).toBeFocused();
-        await expect(target).toBeInViewport();
+        const bounds = await target.evaluate((element) => ({
+          rect: element.getBoundingClientRect().toJSON(),
+          width: innerWidth,
+          height: innerHeight,
+        }));
+        await expect(target, JSON.stringify(bounds)).toBeInViewport({ ratio: 1 });
+        expect(
+          await target.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            const center = document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            );
+            return center !== null && element.contains(center);
+          }),
+          "Focused control must not be covered",
+        ).toBe(true);
       };
       const activate = async (target: Locator) => {
         await tabTo(target);
         await page.keyboard.press("Enter");
+      };
+      const selectIndex = async (target: Locator, index: number) => {
+        await tabTo(target);
+        const selectedIndex = () =>
+          target.evaluate((element) => {
+            if (!(element instanceof HTMLSelectElement)) throw new Error("Expected native select");
+            return element.selectedIndex;
+          });
+        const initial = (await target.locator("option").nth(index).textContent())!.trim()[0]!;
+        for (let attempt = 0; attempt < 20 && (await selectedIndex()) !== index; attempt++) {
+          const before = await selectedIndex();
+          await page.keyboard.press(initial);
+          await expect.poll(selectedIndex).not.toBe(before);
+        }
+        expect(await selectedIndex()).toBe(index);
       };
       await page.setViewportSize({ width: profile.width, height: 900 });
       await application.evaluate(({ BrowserWindow }, zoom) => {
@@ -72,12 +106,8 @@ for (const profile of [
       if (profile.contrast)
         await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
       await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
+      const captureSession = await page.context().newCDPSession(page);
       const audit = async (name: string) => {
-        if (profile.contrast)
-          await test.info().attach(`${name}-forced-colors.png`, {
-            body: await page.screenshot({ fullPage: true }),
-            contentType: "image/png",
-          });
         if (profile.spacing)
           await page.evaluate(() => {
             for (const element of document.querySelectorAll<HTMLElement>("body *")) {
@@ -88,6 +118,43 @@ for (const profile of [
                 element.style.setProperty("margin-bottom", "2em", "important");
             }
           });
+        const screenshotPath = test.info().outputPath(`${name}.png`);
+        if (profile.zoom === 1) await page.screenshot({ path: screenshotPath, fullPage: true });
+        else {
+          // Electron zoom changes CSS pixels; CDP screenshot clips use unzoomed DIP coordinates.
+          const size = await page.evaluate(() => ({
+            width: document.documentElement.scrollWidth,
+            height: document.documentElement.scrollHeight,
+          }));
+          const capture = await captureSession.send("Page.captureScreenshot", {
+            format: "png",
+            captureBeyondViewport: true,
+            clip: {
+              x: 0,
+              y: 0,
+              width: size.width * profile.zoom,
+              height: size.height * profile.zoom,
+              scale: 1,
+            },
+          });
+          await writeFile(screenshotPath, Buffer.from(capture.data, "base64"));
+        }
+        await test.info().attach(`${name}.png`, { path: screenshotPath, contentType: "image/png" });
+        expect(
+          await page
+            .locator("button, .lyric-line")
+            .evaluateAll((elements) =>
+              elements
+                .filter(
+                  (element) =>
+                    !element.closest(".timeline-viewport") &&
+                    element.getBoundingClientRect().width > 0 &&
+                    element.scrollWidth > element.clientWidth + 1,
+                )
+                .map((element) => element.getAttribute("aria-label") ?? element.textContent),
+            ),
+          `${name} control/lyric text must not be clipped`,
+        ).toEqual([]);
         const overflow = await page.evaluate(() =>
           [...document.querySelectorAll("button, input, select, fieldset, label")]
             .filter(
@@ -122,8 +189,10 @@ for (const profile of [
             },
           });
         }, profile.contrast);
+        const resultPath = test.info().outputPath(`${name}-axe.json`);
+        await writeFile(resultPath, JSON.stringify(result, null, 2));
         await test.info().attach(`${name}-axe.json`, {
-          body: JSON.stringify(result),
+          path: resultPath,
           contentType: "application/json",
         });
         expect(
@@ -151,10 +220,15 @@ for (const profile of [
         await expect(
           editor.getByRole("group", { name: "Draft events", exact: true }),
         ).toHaveAccessibleDescription(/fill the saved span/);
+        const duration = editor.getByRole("combobox", { name: "Duration", exact: true }).first();
+        await expect(duration).toHaveAttribute("aria-invalid", "true");
+        await expect(duration).toHaveAccessibleDescription(/fill the saved span/);
         await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
         await audit("invalid-draft");
         await activate(editor.getByRole("button", { name: "Reset draft", exact: true }));
         await expect(editor.getByRole("alert")).toHaveCount(0);
+        await expect(duration).not.toHaveAttribute("aria-invalid", "true");
+        await expect(duration).toHaveAccessibleDescription("");
         await expect(
           editor.getByRole("group", { name: "Draft events", exact: true }),
         ).toHaveAccessibleDescription("");
@@ -164,6 +238,58 @@ for (const profile of [
         await page.keyboard.press("Escape");
         await expect(page.getByRole("button", { name: "Edit chords", exact: true })).toBeFocused();
         await page.keyboard.press("Enter");
+        const pickup = page.getByRole("button", { name: /Pickup, 4\/4/ });
+        const originalLabel = await pickup.getAttribute("aria-label");
+        const moved = editor.locator('[data-event-id="chord_am7_e"]');
+        await selectIndex(moved.getByRole("combobox", { name: "Move target", exact: true }), 3);
+        const moveAfter = moved.getByRole("button", { name: "Move after", exact: true });
+        await activate(moveAfter);
+        await expect(moveAfter).toBeFocused();
+        await expect(moved.getByRole("status")).toContainText("Chord moved after");
+        await expect(editor.getByRole("listitem").last()).toHaveAttribute(
+          "data-event-id",
+          "chord_am7_e",
+        );
+        await audit("reordered-draft");
+        await activate(editor.getByRole("button", { name: "Reset draft", exact: true }));
+        await expect(editor.getByRole("listitem").first()).toHaveAttribute(
+          "data-event-id",
+          "chord_am7_e",
+        );
+        await activate(editor.getByRole("button", { name: "Mark reviewed", exact: true }));
+        await expect(
+          editor.getByRole("button", { name: "Reviewed in draft", exact: true }),
+        ).toBeDisabled();
+        await activate(choose);
+        await expect(editor.getByRole("combobox", { name: "Root", exact: true })).toBeFocused();
+        await page.keyboard.press("n");
+        await page.keyboard.press("Enter");
+        await expect(editor.getByRole("combobox", { name: "Root", exact: true })).toHaveValue("N");
+        await activate(editor.getByRole("button", { name: "Done", exact: true }));
+        await expect(choose).toBeFocused();
+        await audit("changed-draft");
+        await activate(editor.getByRole("button", { name: "Save", exact: true }));
+        await expect(page.getByRole("button", { name: "Edit chords", exact: true })).toBeFocused();
+        await expect(pickup).toHaveAttribute("aria-label", /Chords: N/);
+        await audit("saved-edit");
+        await activate(page.getByRole("button", { name: "Undo edit", exact: true }));
+        await expect(pickup).toHaveAttribute("aria-label", originalLabel!);
+        await selectIndex(page.getByLabel("Redo branch", { exact: true }), 2);
+        await activate(page.getByRole("button", { name: "Redo edit", exact: true }));
+        await expect(pickup).toHaveAttribute("aria-label", /Chords: N/);
+        await activate(page.getByRole("button", { name: "Reset saved edits", exact: true }));
+        await expect(pickup).toHaveAttribute("aria-label", originalLabel!);
+        await activate(page.getByRole("button", { name: "Set loop from selection", exact: true }));
+        await selectIndex(page.getByRole("combobox", { name: "Count-in", exact: true }), 1);
+        await expect(page.getByRole("combobox", { name: "Count-in", exact: true })).toHaveValue(
+          "1",
+        );
+        await tabTo(page.getByRole("checkbox", { name: "Metronome", exact: true }));
+        await page.keyboard.press("Space");
+        await expect(page.getByRole("checkbox", { name: "Metronome", exact: true })).toBeChecked();
+        await audit("practice-settings");
+        await activate(page.getByRole("button", { name: "Clear loop", exact: true }));
+        await activate(page.getByRole("button", { name: "Edit chords", exact: true }));
       }
       await activate(page.getByRole("button", { name: "Cancel", exact: true }));
       await expect(page.getByRole("button", { name: "Edit chords", exact: true })).toBeFocused();
@@ -172,6 +298,28 @@ for (const profile of [
       await activate(page.getByRole("button", { name: "Choose lyrics", exact: true }));
       await activate(page.getByRole("button", { name: "Lyrics timing", exact: true }));
       await audit("lyrics-timing");
+      if (profile.name === "1080 CSS pixels") {
+        const panel = page.getByRole("region", { name: "Lyrics timing correction", exact: true });
+        const occurrence = panel.getByRole("combobox", { name: "Timing occurrence", exact: true });
+        await selectIndex(occurrence, 1);
+        await activate(panel.getByRole("button", { name: "Mark untimed", exact: true }));
+        await expect(panel.getByRole("status")).toHaveText("Timing correction saved");
+        await audit("timing-corrected");
+        await activate(page.getByRole("button", { name: "Undo edit", exact: true }));
+        await expect(occurrence.locator("option").nth(1)).not.toContainText(
+          "user_marked_unmatched",
+        );
+        const redo = page.getByLabel("Redo branch", { exact: true });
+        await selectIndex(redo, (await redo.locator("option").count()) - 1);
+        await activate(page.getByRole("button", { name: "Redo edit", exact: true }));
+        await expect(occurrence.locator("option").nth(1)).toContainText("user_marked_unmatched");
+        const snapshot = await page.evaluate(() =>
+          window.openChords!.project.getSnapshot("project_golden"),
+        );
+        if (snapshot.type !== "project.snapshot") throw new Error("Snapshot unavailable");
+        expect(snapshot.project.lyricsDocuments).toEqual(envelope.payload.lyricsDocuments);
+        expect(snapshot.project.analysisRevisions).toEqual(envelope.payload.analysisRevisions);
+      }
       await activate(page.getByRole("button", { name: "Lyrics timing", exact: true }));
       await activate(page.getByRole("button", { name: "Alignment packs", exact: true }));
       await expect(page.getByRole("dialog")).toBeVisible();

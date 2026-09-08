@@ -144,6 +144,7 @@ export function LyricsSelection({
             <textarea
               maxLength={64000}
               value={text}
+              onFocus={(event) => event.currentTarget.scrollIntoView({ block: "nearest" })}
               onChange={(event) => setText(event.target.value)}
             />
           </label>

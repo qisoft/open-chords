@@ -57,6 +57,12 @@ body {
 button {
   font: inherit;
 }
+button,
+input,
+select,
+textarea {
+  scroll-margin: 12px;
+}
 button:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 3px;

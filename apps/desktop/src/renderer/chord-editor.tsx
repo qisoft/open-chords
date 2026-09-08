@@ -437,6 +437,9 @@ function DraftSession({
         disabled={busy || state.stale}
         className="editor-fields"
         aria-describedby={state.errors.length > 0 ? validationId : undefined}
+        onFocusCapture={(event) =>
+          event.target.scrollIntoView({ block: "nearest", inline: "nearest" })
+        }
       >
         <legend className="sr-only">Draft events</legend>
         <ul className="editor-rail" aria-label="Draft chord events">
@@ -446,6 +449,7 @@ function DraftSession({
               event={event}
               events={state.events}
               minimumDuration={minimumDuration}
+              durationErrorId={state.errors.length > 0 ? validationId : undefined}
               draft={draft}
               disabled={busy || state.stale}
               reviewed={state.reviewedIds.includes(event.id)}
@@ -504,6 +508,7 @@ function EditorEvent({
   event,
   events,
   minimumDuration,
+  durationErrorId,
   reviewed,
   draft,
   disabled,
@@ -513,6 +518,7 @@ function EditorEvent({
   event: DraftEvent;
   events: DraftEvent[];
   minimumDuration: number;
+  durationErrorId: string | undefined;
   reviewed: boolean;
   draft: ReturnType<typeof createEditorDraft>;
   disabled: boolean;
@@ -609,6 +615,8 @@ function EditorEvent({
         Duration{" "}
         <select
           aria-label="Duration"
+          aria-invalid={durationErrorId === undefined ? undefined : true}
+          aria-describedby={durationErrorId}
           value={event.endSample - event.startSample}
           onChange={(change) => draft.setDuration(event.id, Number(change.target.value))}
         >

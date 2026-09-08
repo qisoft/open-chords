@@ -843,8 +843,10 @@ test("profile committed timeline density before choosing virtualization", async 
         seekPaintP95Ms: ordered[18],
       };
       console.log(JSON.stringify(result));
+      const resultPath = test.info().outputPath(`${fixture.name}-performance.json`);
+      await writeFile(resultPath, JSON.stringify(result, null, 2));
       await test.info().attach(`${fixture.name}-performance.json`, {
-        body: JSON.stringify(result, null, 2),
+        path: resultPath,
         contentType: "application/json",
       });
     } finally {
