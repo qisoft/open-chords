@@ -106,6 +106,13 @@ for (const profile of [
       if (profile.contrast)
         await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
       await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
+      for (const name of [
+        "Project facts",
+        "Timeline state legend",
+        "Timeline selection actions",
+        "Practice settings",
+      ])
+        await expect(page.getByRole("group", { name, exact: true })).toHaveCount(1);
       const captureSession = await page.context().newCDPSession(page);
       const audit = async (name: string) => {
         if (profile.spacing)
@@ -201,6 +208,7 @@ for (const profile of [
             nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })),
           })),
         ).toEqual([]);
+        expect(result.incomplete.filter(({ id }) => id === "aria-prohibited-attr")).toEqual([]);
       };
       await audit("workspace");
       await activate(page.getByRole("button", { name: "Edit chords", exact: true }));
@@ -298,6 +306,8 @@ for (const profile of [
       await activate(page.getByRole("button", { name: "Choose lyrics", exact: true }));
       await activate(page.getByRole("button", { name: "Lyrics timing", exact: true }));
       await audit("lyrics-timing");
+      for (const name of ["Word coverage", "Line coverage"])
+        await expect(page.getByRole("group", { name, exact: true })).toContainText(/\d+\/\d+/);
       if (profile.name === "1080 CSS pixels") {
         const panel = page.getByRole("region", { name: "Lyrics timing correction", exact: true });
         const occurrence = panel.getByRole("combobox", { name: "Timing occurrence", exact: true });
@@ -324,6 +334,14 @@ for (const profile of [
       await activate(page.getByRole("button", { name: "Alignment packs", exact: true }));
       await expect(page.getByRole("dialog")).toBeVisible();
       await audit("alignment-packs");
+      for (let step = 0; step < 12; step++) {
+        await page.keyboard.press("Tab");
+        await expect
+          .poll(() =>
+            page.getByRole("dialog").evaluate((dialog) => dialog.contains(document.activeElement)),
+          )
+          .toBe(true);
+      }
       await activate(page.getByRole("button", { name: "Close", exact: true }));
       await expect(
         page.getByRole("button", { name: "Alignment packs", exact: true }),

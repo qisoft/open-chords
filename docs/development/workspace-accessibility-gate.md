@@ -21,17 +21,19 @@ In forced colors only, axe's `color-contrast` rule is disabled because its origi
 
 Observed fixes: the pickup label contrast was 4.4:1; the subtle-text token now meets 4.5:1 on that selected background. Opening timing controls at 320 CSS pixels stretched the document to 375 pixels; grid minimum sizing and timing-label bounds now preserve reflow. Original lyric groups expose their document language while the UI stays English. Aggregate duration errors now describe both the Draft events group and its Duration controls, which expose `aria-invalid`; reset clears both. Focus scrolls the complete lyrics textarea and the focused editor control into view, including the horizontal event rail; controls reserve space around their focus outlines.
 
+Reviewing `incomplete` results exposed unsupported labels on generic containers. Project facts, timeline legend/selection, practice settings and both coverage summaries now have explicit group roles; the audit rejects remaining `aria-prohibited-attr` review items. A 12-Tab cycle verifies that the Alignment packs dialog contains focus. The remaining review items are dialog focus guards and contrast calculations on gradients, offscreen scroll content, overlapping capture regions and short/non-text symbols. The muted text `#94949f` measures 5.03:1 against the brightest canvas gradient endpoint `#25243a`; secondary, focus, error and loop text tokens measure at least 6.47:1 against that endpoint. These palette calculations do not automatically clear every offscreen/symbol review item. Keep their JSON targets available during native visual review.
+
 ## Local performance observation, 2026-09-08
 
-Mac M4 Pro, 14 logical CPUs, 48 GiB RAM, Darwin 25.6.0 arm64; Electron 43.4.0, Chromium 150.0.7871.224. Vite production renderer in the development Electron shell, synthetic unavailable Source, no playback or native screen reader. Accessibility was enabled after startup and before 20 evenly spaced DOM-input seeks; each measurement ends after two animation frames. Other desktop applications remained open. These are investigation measurements, not release support claims or physical-input latency measurements.
+Mac M4 Pro, 14 logical CPUs, 48 GiB RAM, macOS 26.6.2 (Darwin 25.6.0) arm64; Electron 43.4.0, Chromium 150.0.7871.224. Vite production renderer in the development Electron shell with assembled analysis/alignment/containment runtime directories present, synthetic unavailable Source, no playback or native screen reader. Accessibility was enabled after startup and before 20 evenly spaced DOM-input seeks; each measurement ends after two animation frames. Other desktop applications remained open. These are investigation measurements, not release support claims or physical-input latency measurements.
 
 | Fixture | Duration | Chords | Lyric lines / tokens | DOM | Exposed AX | Startup ms | Seek median / P95 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Short | 30 s | 120 | 0 / 0 | 521 | 961 | 492 | 12.1 / 13.6 |
-| Many events | 5 min | 1,200 | 0 / 0 | 3,761 | 7,441 | 645 | 12.1 / 12.2 |
-| Dense events | 20 min | 4,800 | 0 / 0 | 14,561 | 29,041 | 941 | 23.8 / 24.3 |
-| Long song | 45 min | 1,200 | 0 / 0 | 3,761 | 7,441 | 671 | 12.1 / 12.5 |
-| Dense lyrics | 20 min | 4,800 | 600 / 4,800 | 31,359 | 60,846 | 1,406 | 30.3 / 32.9 |
+| Short | 30 s | 120 | 0 / 0 | 521 | 961 | 2,118 | 12.2 / 13.6 |
+| Many events | 5 min | 1,200 | 0 / 0 | 3,761 | 7,441 | 2,067 | 12.1 / 14.4 |
+| Dense events | 20 min | 4,800 | 0 / 0 | 14,561 | 29,041 | 2,959 | 23.9 / 24.3 |
+| Long song | 45 min | 1,200 | 0 / 0 | 3,761 | 7,441 | 2,261 | 12.1 / 13.6 |
+| Dense lyrics | 20 min | 4,800 | 600 / 4,800 | 31,359 | 60,846 | 3,478 | 30.3 / 31.2 |
 
 Raw samples and versions: [local performance JSON](evidence/workspace-performance-macos-2026-09-08.json). No case crossed the existing 50 ms investigation trigger, so this change retains the semantic DOM. The large AX tree still requires native navigation observations. Windows and installed/native-AT performance remain separate evidence.
 
