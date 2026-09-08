@@ -7,10 +7,15 @@ import {
   DESKTOP_IPC_VERSION,
   ProjectEventSchema,
 } from "@open-chords/contracts";
-import { app, dialog, shell, type BrowserWindow, type WebContents } from "electron";
+import { app, dialog, shell, powerMonitor, type BrowserWindow, type WebContents } from "electron";
 
+import { EXPECTED_ALIGNMENT_MANIFEST_SHA256 } from "./alignment-build-metadata.ts";
 import { ALIGNMENT_PACKS } from "./alignment-packs.ts";
-import { inspectAlignmentRuntime } from "./alignment-runtime.ts";
+import { inspectAlignmentRuntime, packagedAlignmentRuntimeRoot } from "./alignment-runtime.ts";
+import { openAlignmentService, type AlignmentService } from "./alignment-service.ts";
+import { createContainedAlignmentWorker, recoverAlignmentWorkspaces } from "./alignment-worker.ts";
+import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
+import { blockCpuWorkAfterIncompleteCleanup } from "./cpu-work.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
@@ -81,6 +86,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
   const ownsSingleInstance = app.requestSingleInstanceLock();
   let modelStore: ModelStore | null = null;
+  let alignmentService: AlignmentService | null = null;
   let lyricsDiscovery: LyricsDiscovery | null = null;
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
@@ -98,7 +104,13 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
     app.on(
       "before-quit",
       createMediaCleanupBeforeQuitHandler({
-        dispose: () => localMediaAuthority?.dispose() ?? Promise.resolve(),
+        dispose: async () => {
+          try {
+            await alignmentService?.dispose();
+          } finally {
+            await localMediaAuthority?.dispose();
+          }
+        },
         exitWithFailure: () => app.exit(1),
         quit: () => app.quit(),
         timeoutMs: MEDIA_CLEANUP_TIMEOUT_MS,
@@ -128,8 +140,9 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
         lyricsDiscovery = await openLyricsDiscovery({ stateRoot, network });
         const runtime = await inspectAlignmentRuntime(
           app.isPackaged
-            ? join(process.resourcesPath, "open-chords-alignment")
+            ? packagedAlignmentRuntimeRoot(process.resourcesPath)
             : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
+          EXPECTED_ALIGNMENT_MANIFEST_SHA256,
         );
         modelStore = await openModelStore({
           stateRoot,
@@ -148,7 +161,70 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           },
         });
         localMediaAuthority = localMedia;
+        try {
+          await recoverAlignmentWorkspaces({
+            stateRoot,
+            containmentRoot: app.isPackaged
+              ? join(
+                  process.resourcesPath,
+                  process.platform === "darwin" ? "../MacOS/containment" : "containment",
+                )
+              : join(app.getAppPath(), "dist/containment"),
+            containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
+            ...(app.isPackaged && process.platform === "darwin"
+              ? {
+                  bridgePath: join(
+                    process.resourcesPath,
+                    "../MacOS/open-chords-containment-bridge",
+                  ),
+                }
+              : {}),
+          });
+          alignmentService = await openAlignmentService({
+            runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
+            stateRoot,
+            modelStore,
+            packs: ALIGNMENT_PACKS,
+            library: projectLibrary,
+            media: localMedia,
+            worker: createContainedAlignmentWorker({
+              stateRoot,
+              runtimeRoot: app.isPackaged
+                ? packagedAlignmentRuntimeRoot(process.resourcesPath)
+                : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
+              runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
+              containmentRoot: app.isPackaged
+                ? join(
+                    process.resourcesPath,
+                    process.platform === "darwin" ? "../MacOS/containment" : "containment",
+                  )
+                : join(app.getAppPath(), "dist/containment"),
+              containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
+              ...(app.isPackaged && process.platform === "darwin"
+                ? {
+                    bridgePath: join(
+                      process.resourcesPath,
+                      "../MacOS/open-chords-containment-bridge",
+                    ),
+                  }
+                : {}),
+              modelStore,
+              media: localMedia,
+            }),
+          });
+        } catch {
+          // Preserve the desktop and project access, but never start another
+          // native workload when interrupted workspace cleanup is unverified.
+          blockCpuWorkAfterIncompleteCleanup();
+          alignmentService = null;
+        }
         installRendererProtocol(join(__dirname, "../renderer"), localMedia);
+        powerMonitor.on("suspend", () => {
+          void alignmentService?.setSuspended(true).catch(() => app.exit(1));
+        });
+        powerMonitor.on("resume", () => {
+          void alignmentService?.setSuspended(false).catch(() => app.exit(1));
+        });
         projectLibrary.subscribe(({ projectId, projectRevisionId, sequence }) => {
           const window = mainWindow;
           if (window === null || window.isDestroyed()) return;
@@ -168,6 +244,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           );
         });
         installDesktopIpc(projectLibrary, {
+          ...(alignmentService ? { alignment: alignmentService } : {}),
           models: {
             store: modelStore,
             network,

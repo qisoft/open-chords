@@ -459,6 +459,77 @@
         {
           "additionalProperties": false,
           "properties": {
+            "anchor": {
+              "additionalProperties": false,
+              "properties": {
+                "analysisRevisionId": {
+                  "$ref": "#/$defs/StableId"
+                },
+                "endSample": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "firstTokenId": {
+                  "$ref": "#/$defs/StableId"
+                },
+                "id": {
+                  "$ref": "#/$defs/StableId"
+                },
+                "lastTokenId": {
+                  "$ref": "#/$defs/StableId"
+                },
+                "lyricsDocumentId": {
+                  "$ref": "#/$defs/StableId"
+                },
+                "startSample": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "lyricsDocumentId",
+                "analysisRevisionId",
+                "firstTokenId",
+                "lastTokenId",
+                "startSample",
+                "endSample"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "set_lyrics_anchor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "anchor"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "anchorId": {
+              "$ref": "#/$defs/StableId"
+            },
+            "type": {
+              "const": "remove_lyrics_anchor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "anchorId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "events": {
               "items": {
                 "additionalProperties": false,
@@ -956,6 +1027,192 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "provenance": {
+          "additionalProperties": false,
+          "properties": {
+            "qualityStatus": {
+              "const": "benchmark_pending",
+              "type": "string"
+            },
+            "recipe": {
+              "additionalProperties": false,
+              "properties": {
+                "analysisRevisionId": {
+                  "$ref": "#/$defs/StableId"
+                },
+                "anchors": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "analysisRevisionId": {
+                        "$ref": "#/$defs/StableId"
+                      },
+                      "endSample": {
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991,
+                        "type": "integer"
+                      },
+                      "firstTokenId": {
+                        "$ref": "#/$defs/StableId"
+                      },
+                      "id": {
+                        "$ref": "#/$defs/StableId"
+                      },
+                      "lastTokenId": {
+                        "$ref": "#/$defs/StableId"
+                      },
+                      "lyricsDocumentId": {
+                        "$ref": "#/$defs/StableId"
+                      },
+                      "startSample": {
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "lyricsDocumentId",
+                      "analysisRevisionId",
+                      "firstTokenId",
+                      "lastTokenId",
+                      "startSample",
+                      "endSample"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 1000,
+                  "type": "array"
+                },
+                "artifacts": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "sha256": {
+                        "pattern": "^[a-f0-9]{64}$",
+                        "type": "string"
+                      },
+                      "version": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "version",
+                      "sha256"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 2,
+                  "type": "array"
+                },
+                "canonicalAudioFingerprint": {
+                  "pattern": "^sha256:[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "documentHash": {
+                  "pattern": "^sha256:[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "durationSamples": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "lyricsDocumentId": {
+                  "$ref": "#/$defs/StableId"
+                },
+                "normalization": {
+                  "const": "unicode_nfkc_lower_v1",
+                  "type": "string"
+                },
+                "packId": {
+                  "maxLength": 160,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "projectId": {
+                  "$ref": "#/$defs/StableId"
+                },
+                "revisionHash": {
+                  "pattern": "^sha256:[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "runtimeId": {
+                  "maxLength": 160,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "runtimeManifestHash": {
+                  "anyOf": [
+                    {
+                      "pattern": "^[a-f0-9]{64}$",
+                      "type": "string"
+                    },
+                    {
+                      "const": "unavailable",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "sampleRate": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "version": {
+                  "const": "1.0",
+                  "type": "string"
+                },
+                "workerProfile": {
+                  "const": "kalpy_single_primary_v1_beam10_retry40",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version",
+                "projectId",
+                "lyricsDocumentId",
+                "documentHash",
+                "analysisRevisionId",
+                "revisionHash",
+                "canonicalAudioFingerprint",
+                "durationSamples",
+                "sampleRate",
+                "normalization",
+                "anchors",
+                "packId",
+                "runtimeId",
+                "runtimeManifestHash",
+                "workerProfile",
+                "artifacts"
+              ],
+              "type": "object"
+            },
+            "recipeHash": {
+              "pattern": "^sha256:[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "resultHash": {
+              "pattern": "^sha256:[a-f0-9]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "recipe",
+            "recipeHash",
+            "resultHash",
+            "qualityStatus"
+          ],
+          "type": "object"
         }
       },
       "required": [
@@ -1771,6 +2028,6 @@
     "schemaVersion",
     "type"
   ],
-  "title": "Open Chords project contract envelope v1.2",
+  "title": "Open Chords project contract envelope v1.3",
   "type": "object"
 }

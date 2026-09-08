@@ -14,6 +14,7 @@ import {
 import { z } from "zod";
 
 import { AnalysisJobs, AnalysisRunError, type AnalysisJobSnapshot } from "./analysis-jobs.ts";
+import { withCpuWork } from "./cpu-work.ts";
 import {
   LocalMediaCapabilityUnavailableError,
   LocalMediaChangedError,
@@ -68,53 +69,55 @@ export function createSidecarContainedAnalyzer(options: {
   const idFactory = options.idFactory ?? (() => randomUUID().replaceAll("-", ""));
   return {
     async analyze(input) {
-      const startedAt = Date.now();
-      const workspace = dirname(dirname(input.inputPath));
-      const recipePath = join(workspace, "input", "analysis-recipe.json");
-      await writeFile(recipePath, canonicalSerialize(input.recipe), {
-        encoding: "utf8",
-        flag: "wx",
-        mode: 0o600,
-      });
-      const client = await options.clientForWorkspace(workspace);
-      let finish!: () => void;
-      const finished = new Promise<void>((resolve) => {
-        finish = resolve;
-      });
-      active.set(input.attemptId, { client, finished });
-      let candidate: AnalyzerResult | undefined;
-      let failure: AnalysisRunError | undefined;
-      try {
-        const identity = idFactory();
-        const result = await client.runSession(
-          parseSidecarSessionRequest({
-            jobId: input.jobId,
-            manifestHash: options.runtimeManifestHash,
-            nonce: `nonce-${identity}`,
-            requestId: `request-${identity}`,
-            signal: input.signal,
-            timeoutMs: 30 * 60 * 1_000,
-          }),
-        );
-        candidate = await readAnalysisResult(workspace, result.artifact);
-        await input.reportProgress({
-          completedFraction: 0.9,
-          elapsedMs: Date.now() - startedAt,
-          stage: "assemble",
+      return withCpuWork(input.signal, async () => {
+        const startedAt = Date.now();
+        const workspace = dirname(dirname(input.inputPath));
+        const recipePath = join(workspace, "input", "analysis-recipe.json");
+        await writeFile(recipePath, canonicalSerialize(input.recipe), {
+          encoding: "utf8",
+          flag: "wx",
+          mode: 0o600,
         });
-      } catch (error) {
-        failure = normalizeAnalyzerFailure(error, input.signal);
-      }
-      try {
-        await client.dispose();
-      } catch (error) {
-        if (failure === undefined) failure = normalizeAnalyzerFailure(error, input.signal);
-      }
-      active.delete(input.attemptId);
-      finish();
-      if (failure !== undefined) throw failure;
-      if (candidate === undefined) throw new Error("Contained analyzer produced no candidate");
-      return candidate;
+        const client = await options.clientForWorkspace(workspace);
+        let finish!: () => void;
+        const finished = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        active.set(input.attemptId, { client, finished });
+        let candidate: AnalyzerResult | undefined;
+        let failure: AnalysisRunError | undefined;
+        try {
+          const identity = idFactory();
+          const result = await client.runSession(
+            parseSidecarSessionRequest({
+              jobId: input.jobId,
+              manifestHash: options.runtimeManifestHash,
+              nonce: `nonce-${identity}`,
+              requestId: `request-${identity}`,
+              signal: input.signal,
+              timeoutMs: 30 * 60 * 1_000,
+            }),
+          );
+          candidate = await readAnalysisResult(workspace, result.artifact);
+          await input.reportProgress({
+            completedFraction: 0.9,
+            elapsedMs: Date.now() - startedAt,
+            stage: "assemble",
+          });
+        } catch (error) {
+          failure = normalizeAnalyzerFailure(error, input.signal);
+        }
+        try {
+          await client.dispose();
+        } catch (error) {
+          if (failure === undefined) failure = normalizeAnalyzerFailure(error, input.signal);
+        }
+        active.delete(input.attemptId);
+        finish();
+        if (failure !== undefined) throw failure;
+        if (candidate === undefined) throw new Error("Contained analyzer produced no candidate");
+        return candidate;
+      });
     },
     async terminateAndWait(input) {
       const running = active.get(input.attemptId);

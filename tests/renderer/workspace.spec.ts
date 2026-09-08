@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,6 +17,29 @@ import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.
 import { goldenRecords } from "../support/editor-fixture.ts";
 
 const repositoryRoot = join(import.meta.dirname, "../..");
+
+test("an invalid Alignment cleanup journal leaves the desktop available and preserves recovery evidence", async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "oc-alignment-recovery-"));
+  const journal = join(stateRoot, "alignment-workspaces");
+  await mkdir(journal);
+  const marker = join(journal, "invalid-marker");
+  await writeFile(marker, "interrupted");
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.openChords?.project.list())?.type))
+      .toBe("project.list");
+    const response = await page.evaluate(() =>
+      window.openChords!.alignment.perform({ type: "status", projectId: "project_missing" }),
+    );
+    expect(response).toMatchObject({ type: "desktop.error", code: "capability_unavailable" });
+    expect(await readFile(marker, "utf8")).toBe("interrupted");
+  } finally {
+    await application.close();
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
 
 test("a durable local-media Project reopens into the centered workspace and plays", async () => {
   const userDataDirectory = await realpath(
@@ -1126,6 +1149,126 @@ test("lyrics text selection and correction persist through the actual desktop ca
         "Corrected words",
       ]);
     }
+  } finally {
+    await application.close();
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("lyric timing corrections use distinct occurrences and durable Undo/Redo without changing raw lyrics", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-timing-ui-")));
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const library = await openProjectLibrary({ stateRoot });
+  await library.createProject({ envelope, records: goldenRecords() });
+  let application = await launch(stateRoot);
+  try {
+    let page = await application.firstWindow();
+    await page.getByRole("button", { name: "Lyrics timing" }).click();
+    const panel = page.getByRole("region", { name: "Lyrics timing correction" });
+    await expect(panel.getByLabel("Word coverage")).toContainText("/");
+    await expect(panel.getByLabel("Line coverage")).toContainText("/");
+    await panel.getByLabel("Timing occurrence").selectOption({ index: 1 });
+    await panel.getByRole("button", { name: "Mark untimed" }).click();
+    await expect(panel.getByRole("status")).toHaveText("Timing correction saved");
+    await expect(panel.getByLabel("Timing occurrence").locator("option").nth(1)).toContainText(
+      "user_marked_unmatched",
+    );
+    await page.getByRole("button", { name: "Undo edit", exact: true }).click();
+    await expect(panel.getByLabel("Timing occurrence").locator("option").nth(1)).not.toContainText(
+      "user_marked_unmatched",
+    );
+    await panel.getByLabel("Start seconds").fill("0.05");
+    await expect(panel.getByRole("button", { name: "Save timing", exact: true })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: "Mark untimed", exact: true })).toBeDisabled();
+    await panel.getByRole("button", { name: "Reset timing draft" }).click();
+    await expect(panel.getByLabel("Start seconds")).toHaveValue("");
+    await expect(panel.getByLabel("End seconds")).toHaveValue("");
+    const redoBranch = page.getByLabel("Redo branch", { exact: true });
+    await redoBranch.selectOption({ index: (await redoBranch.locator("option").count()) - 1 });
+    await page.getByRole("button", { name: "Redo edit", exact: true }).click();
+    await expect(panel.getByLabel("Timing occurrence").locator("option").nth(1)).toContainText(
+      "user_marked_unmatched",
+    );
+    await application.close();
+    application = await launch(stateRoot);
+    page = await application.firstWindow();
+    const saved = await page.evaluate(() =>
+      window.openChords!.project.getSnapshot("project_golden"),
+    );
+    expect(saved.type).toBe("project.snapshot");
+    if (saved.type === "project.snapshot") {
+      expect(saved.project.lyricsDocuments).toEqual(envelope.payload.lyricsDocuments);
+      expect(saved.project.lyricsAlignments).toEqual(envelope.payload.lyricsAlignments);
+      expect(saved.project.editLayers[0]!.transactions.at(-1)!.operations[0]).toMatchObject({
+        type: "set_lyrics_timing",
+        timing: { state: "unmatched" },
+      });
+    }
+  } finally {
+    await application.close();
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("untimed lyric anchor drafts reset when the Analysis Revision changes", async () => {
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-anchor-draft-")));
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(
+      readFileSync(
+        join(repositoryRoot, "packages/testkit/contracts/v1/valid/project-envelope.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const untimed = envelope.payload.lyricsAlignments.find(
+    (item) => item.id === envelope.payload.activeView!.lyricsAlignmentId,
+  )!;
+  for (const occurrence of [...untimed.occurrences, ...untimed.lineOccurrences])
+    occurrence.timing = { state: "unmatched", reasonCode: "fixture_untimed" };
+  envelope.payload.activeView!.editHistoryPosition = 0;
+  const library = await openProjectLibrary({ stateRoot });
+  await library.createProject({ envelope, records: goldenRecords() });
+  const application = await launch(stateRoot);
+  try {
+    const page = await application.firstWindow();
+    await page.getByRole("button", { name: "Lyrics timing", exact: true }).click();
+    const panel = page.getByRole("region", { name: "Lyrics timing correction" });
+    await panel.getByLabel("First anchor word").selectOption({ index: 1 });
+    await panel.getByLabel("Last anchor word").selectOption({ index: 2 });
+    await panel.getByLabel("Start seconds").fill("0");
+    await panel.getByLabel("End seconds").fill("0.5");
+    await expect(panel.getByRole("button", { name: "Save anchor", exact: true })).toBeEnabled();
+    const snapshot = await page.evaluate(() =>
+      window.openChords!.project.getSnapshot("project_golden"),
+    );
+    if (snapshot.type !== "project.snapshot") throw new Error("Snapshot unavailable");
+    const changed = revisedSnapshot(snapshot, "anchor_revision", snapshot.eventSequence + 1);
+    changed.project.activeView = {
+      ...changed.project.activeView!,
+      analysisRevisionId: "revision_reviewable",
+      editLayerId: "edit_reviewable",
+      editHistoryPosition: 0,
+      lyricsAlignmentId: "alignment_anchor_reviewable",
+    };
+    changed.project.lyricsAlignments.push({
+      ...structuredClone(untimed),
+      id: "alignment_anchor_reviewable",
+      analysisRevisionId: "revision_reviewable",
+    });
+    await installSnapshotResponse(application, changed);
+    await publishProjectChange(application, changed);
+    await expect(panel.getByLabel("First anchor word")).toHaveValue("");
+    await expect(panel.getByLabel("Last anchor word")).toHaveValue("");
+    await expect(panel.getByLabel("Start seconds")).toHaveValue("");
+    await expect(panel.getByLabel("End seconds")).toHaveValue("");
+    await expect(panel.getByRole("button", { name: "Save anchor", exact: true })).toBeDisabled();
   } finally {
     await application.close();
     await rm(stateRoot, { recursive: true, force: true });

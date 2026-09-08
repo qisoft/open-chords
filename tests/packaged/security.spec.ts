@@ -17,6 +17,11 @@ import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/pac
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 
+test.skip(
+  process.platform !== "darwin" && process.platform !== "win32",
+  "Installed native profiles support macOS and Windows only",
+);
+
 const PRODUCT_NAME = "Open Chords";
 const EXPECTED_RENDERER_CSP = [
   "default-src 'none'",
@@ -263,7 +268,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       });
     }
     expect(renderer).toMatchObject({
-      apiKeys: ["lyrics", "media", "models", "project", "shell"],
+      apiKeys: ["alignment", "lyrics", "media", "models", "project", "shell"],
       modelsKeys: ["perform"],
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },
@@ -1140,11 +1145,11 @@ async function decodeWebSocketMessage(data: unknown): Promise<string | null> {
 
 test("installed MFA runtime verifies its manifest and starts without system Python or Conda", async () => {
   test.setTimeout(240_000);
-  const { inspectAlignmentRuntime } =
+  const { inspectAlignmentRuntime, packagedAlignmentRuntimeRoot } =
     await import("../../apps/desktop/src/main/alignment-runtime.ts");
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
-  const root = join(resourcesPath, "open-chords-alignment");
+  const root = packagedAlignmentRuntimeRoot(resourcesPath);
   const info = await inspectAlignmentRuntime(root);
   expect(info.available).toBe(true);
   expect(info.installedBytes).toBeGreaterThan(0);
@@ -1189,6 +1194,387 @@ test("installed MFA runtime verifies its manifest and starts without system Pyth
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("installed native Alignment worker runs exact EN/RU packs offline and publishes only verified occurrences", async () => {
+  test.setTimeout(600_000);
+  const { createHash, randomUUID } = await import("node:crypto");
+  const { readdir, writeFile, stat, rename, rm } = await import("node:fs/promises");
+  const { addLyricsDocument } = await import("@open-chords/domain");
+  const { openAlignmentJobs } = await import("../../apps/desktop/src/main/alignment-jobs.ts");
+  const { createContainedAlignmentWorker } =
+    await import("../../apps/desktop/src/main/alignment-worker.ts");
+  const { ALIGNMENT_PACKS } = await import("../../apps/desktop/src/main/alignment-packs.ts");
+  const { openModelStore } = await import("../../apps/desktop/src/main/model-store.ts");
+  const library = await openProjectLibrary({ stateRoot: userDataDirectory });
+  const media = new LocalMediaService({ library, pickFile: async () => null });
+  const source = await library.readProject(packagedProjectId);
+  const modelStore = await openModelStore({
+    stateRoot: userDataDirectory,
+    packs: ALIGNMENT_PACKS,
+    runtime: "mfa-3.4.1",
+  });
+  const runtimeRoot =
+    process.platform === "darwin"
+      ? join(
+          resourcesPath,
+          "..",
+          "XPCServices",
+          "OpenChordsAnalysisService.xpc",
+          "Contents",
+          "Resources",
+          "open-chords-alignment",
+        )
+      : join(resourcesPath, "open-chords-alignment");
+  const containmentRoot =
+    process.platform === "darwin"
+      ? join(resourcesPath, "..", "MacOS", "containment")
+      : join(resourcesPath, "containment");
+  const digestFile = (path: string) =>
+    createHash("sha256").update(readFileSync(path)).digest("hex");
+  const worker = createContainedAlignmentWorker({
+    stateRoot: userDataDirectory,
+    runtimeRoot,
+    runtimeManifestHash: digestFile(join(runtimeRoot, "runtime-info.json")),
+    containmentRoot,
+    containmentManifestHash: digestFile(join(containmentRoot, "containment-manifest.json")),
+    ...(process.platform === "darwin"
+      ? { bridgePath: join(resourcesPath, "..", "MacOS", "open-chords-containment-bridge") }
+      : {}),
+    media,
+    modelStore,
+  });
+  const jobs = await openAlignmentJobs({
+    stateRoot: userDataDirectory,
+    modelStore,
+    packs: ALIGNMENT_PACKS,
+    runtimeManifestHash: digestFile(join(runtimeRoot, "runtime-info.json")),
+  });
+  for (const [language, text] of [
+    ["en", "hello world\n(ＣＡＮ’T hello)\n[chorus]"],
+    ["ru", "привет мир"],
+  ] as const) {
+    const pack = ALIGNMENT_PACKS.find((item) => item.language === language)!;
+    await modelStore.install(pack.id);
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(
+        readFileSync(
+          join(process.cwd(), "packages/testkit/contracts/v1/valid/project-envelope.json"),
+          "utf8",
+        ),
+      ),
+    );
+    envelope.payload.id = `project_native_alignment_${language}`;
+    for (const revision of envelope.payload.analysisRevisions)
+      revision.projectId = envelope.payload.id;
+    envelope.payload = addLyricsDocument(
+      envelope.payload,
+      { text, language, format: "text" },
+      `lyrics_native_${language}`,
+    );
+    const document = envelope.payload.lyricsDocuments.at(-1)!;
+    const active = envelope.payload.activeView!;
+    const layer = envelope.payload.editLayers.find((item) => item.id === active.editLayerId)!;
+    layer.transactions.push({
+      id: `anchor_transaction_${language}`,
+      parentTransactionId: null,
+      operations: [
+        {
+          type: "set_lyrics_anchor",
+          anchor: {
+            id: `anchor_native_${language}`,
+            lyricsDocumentId: document.id,
+            analysisRevisionId: active.analysisRevisionId,
+            firstTokenId: document.tokens[0]!.id,
+            lastTokenId: document.tokens[0]!.id,
+            startSample: 12000,
+            endSample: 24000,
+          },
+        },
+      ],
+    });
+    active.editHistoryPosition = layer.transactions.length;
+    await library.createProject({
+      envelope,
+      records: {
+        ...source.records,
+        legacyManifestlessAnalysisRevisionIds: envelope.payload.analysisRevisions.map(
+          (item) => item.id,
+        ),
+      },
+    });
+    const job = await jobs.request({
+      project: envelope.payload,
+      lyricsDocumentId: `lyrics_native_${language}`,
+      analysisRevisionId: envelope.payload.activeView!.analysisRevisionId,
+      ...(await media.getAnalysisSource(envelope.payload.id)),
+    });
+    expect(await jobs.run(job.id, { library, worker })).toMatchObject({ state: "succeeded" });
+    const result = (await library.getSnapshot(envelope.payload.id))!.project.lyricsAlignments.at(
+      -1,
+    )!;
+    expect(result.provenance).toMatchObject({
+      recipeHash: job.key,
+      qualityStatus: "benchmark_pending",
+    });
+    expect(result.occurrences).toHaveLength(document.tokens.length);
+    if (language === "en") {
+      for (const occurrence of result.occurrences.slice(2, 4)) {
+        expect(occurrence.timing).not.toMatchObject({ reasonCode: "annotation" });
+        expect(occurrence.timing).not.toMatchObject({ reasonCode: "oov" });
+      }
+      expect(result.occurrences.at(-1)!.timing).toMatchObject({
+        state: "unmatched",
+        reasonCode: "annotation",
+      });
+    }
+    if (language === "en")
+      expect(result.occurrences.some((item) => item.timing.state === "matched")).toBe(true);
+    expect(
+      result.occurrences.every(
+        (item) =>
+          item.timing.state === "unmatched" || item.timing.assertion.state === "low_confidence",
+      ),
+    ).toBe(true);
+    process.stdout.write(`Packaged Alignment stage: ${language}_published\n`);
+    expect(await readdir(join(userDataDirectory, "alignment-workspaces"))).toEqual([]);
+    if (language === "en") {
+      const before = (await library.getSnapshot(envelope.payload.id))!;
+      const lastTransaction = before.project.editLayers
+        .find((item) => item.id === before.project.activeView!.editLayerId)!
+        .transactions.at(-1)!;
+      await library.commitEditTransaction({
+        projectId: before.project.id,
+        expectedProjectRevisionId: before.projectRevisionId,
+        transaction: {
+          id: "transaction_cancel_anchor",
+          parentTransactionId: lastTransaction.id,
+          operations: [
+            {
+              type: "set_lyrics_anchor",
+              anchor: {
+                id: "anchor_cancel_tail",
+                lyricsDocumentId: document.id,
+                analysisRevisionId: active.analysisRevisionId,
+                firstTokenId: document.tokens[1]!.id,
+                lastTokenId: document.tokens[1]!.id,
+                startSample: 24000,
+                endSample: 48000,
+              },
+            },
+          ],
+        },
+      });
+      const candidate = (await library.getSnapshot(before.project.id))!;
+      const cancelJob = await jobs.request({
+        project: candidate.project,
+        lyricsDocumentId: document.id,
+        analysisRevisionId: active.analysisRevisionId,
+        ...(await media.getAnalysisSource(before.project.id)),
+      });
+      const jobsRoot = join(userDataDirectory, "alignment-jobs");
+      const savedJobsRoot = `${jobsRoot}-stage-fault`;
+      await expect(
+        jobs.run(cancelJob.id, {
+          library,
+          worker: (input) =>
+            worker({
+              ...input,
+              reportStage: async (stage) => {
+                if (stage !== "aligning") return input.reportStage(stage);
+                await rename(jobsRoot, savedJobsRoot);
+                await writeFile(jobsRoot, "unavailable storage");
+                try {
+                  await input.reportStage(stage);
+                } finally {
+                  await rm(jobsRoot);
+                  await rename(savedJobsRoot, jobsRoot);
+                }
+              },
+            }),
+        }),
+      ).rejects.toBeInstanceOf(Error);
+      expect(await jobs.get(cancelJob.id)).toMatchObject({
+        state: "retryable",
+        failure: "storage",
+        circuitOpen: false,
+      });
+      expect(await readdir(join(userDataDirectory, "alignment-workspaces"))).toEqual([]);
+      await jobs.confirm(cancelJob.id);
+      const execution = jobs.run(cancelJob.id, { library, worker }).then(
+        (value) => value,
+        (error: unknown) => error,
+      );
+      await expect
+        .poll(async () => (await jobs.get(cancelJob.id))?.stage, { timeout: 60000 })
+        .toBe("aligning");
+      await jobs.cancel(cancelJob.id);
+      expect(await execution).toBeInstanceOf(Error);
+      expect((await jobs.get(cancelJob.id))?.state).toBe("cancelled");
+      expect((await library.getSnapshot(before.project.id))!.project.lyricsAlignments).toEqual(
+        before.project.lyricsAlignments,
+      );
+      expect(await readdir(join(userDataDirectory, "alignment-workspaces"))).toEqual([]);
+      process.stdout.write("Packaged Alignment stage: cancelled_and_cleaned\n");
+      const { preparePackagedWorkspace } =
+        await import("../../apps/desktop/src/main/packaged-sidecar-proof-workspace.ts");
+      const { verifyContainmentRuntime } =
+        await import("../../apps/desktop/src/main/sidecar-containment-integrity.ts");
+      const { recoverAlignmentWorkspaces } =
+        await import("../../apps/desktop/src/main/alignment-worker.ts");
+      const recoveryOptions = {
+        stateRoot: userDataDirectory,
+        containmentRoot,
+        containmentManifestHash: digestFile(join(containmentRoot, "containment-manifest.json")),
+        ...(process.platform === "darwin"
+          ? { bridgePath: join(resourcesPath, "../MacOS/open-chords-containment-bridge") }
+          : {}),
+      };
+      const platform = process.platform === "darwin" ? "darwin" : "win32";
+      const containment = verifyContainmentRuntime(
+        containmentRoot,
+        recoveryOptions.containmentManifestHash,
+        platform,
+        recoveryOptions.bridgePath,
+      );
+      const identity = randomUUID();
+      await writeFile(join(userDataDirectory, "alignment-workspaces", identity), "", {
+        flag: "wx",
+      });
+      const interrupted = preparePackagedWorkspace(
+        platform,
+        containment.helperPath,
+        runtimeRoot,
+        identity,
+      );
+      await writeFile(
+        join(interrupted.workspace, "audio.wav"),
+        Buffer.from("interrupted temporary audio"),
+      );
+      await recoverAlignmentWorkspaces(recoveryOptions);
+      await expect(stat(interrupted.workspace)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readdir(join(userDataDirectory, "alignment-workspaces"))).toEqual([]);
+      process.stdout.write("Packaged Alignment stage: interrupted_workspace_recovered\n");
+    }
+  }
+  expect(
+    await inspectInstalled(
+      userDataDirectory,
+      `(async () => {
+    for (const language of ["en", "ru"]) {
+      const projectId = "project_native_alignment_" + language;
+      const snapshot = await window.openChords.project.getSnapshot(projectId);
+      const status = await window.openChords.alignment.perform({ type: "status", projectId });
+      if (snapshot.type !== "project.snapshot" || status.type !== "alignment.result") return false;
+      const completed = status.jobs.find(job => job.state === "succeeded");
+      if (!completed || !snapshot.project.lyricsAlignments.some(item => item.id === completed.alignmentId)) return false;
+      const selected = await window.openChords.alignment.perform({ type: "select", projectId, expectedProjectRevisionId: snapshot.projectRevisionId, alignmentId: completed.alignmentId });
+      if (selected.type !== "alignment.result") return false;
+      const reopened = await window.openChords.project.getSnapshot(projectId);
+      if (reopened.type !== "project.snapshot" || reopened.project.activeView.lyricsAlignmentId !== completed.alignmentId) return false;
+    }
+    return true;
+  })()`,
+    ),
+  ).toBe(true);
+});
+
+async function inspectInstalled(stateRoot: string, expression: string) {
+  const port = await reservePort();
+  const application = spawn(
+    executablePath,
+    [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
+    { stdio: "ignore" },
+  );
+  let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
+  try {
+    await expect
+      .poll(
+        async () => {
+          try {
+            target = CdpTargetsSchema.parse(
+              await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(),
+            ).find(
+              (candidate) =>
+                candidate.type === "page" && candidate.url.startsWith("open-chords://"),
+            );
+            return Boolean(target);
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 30000 },
+      )
+      .toBe(true);
+    if (!target) throw new Error("Installed Alignment capability is unavailable");
+    return await evaluatePackagedExpression(
+      target.webSocketDebuggerUrl,
+      `(async () => {
+      const deadline = Date.now() + 10000;
+      while (!window.openChords && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+      return await (${expression});
+    })()`,
+      60000,
+    );
+  } finally {
+    try {
+      if (target) await quitInstalledApplication(application, target.webSocketDebuggerUrl);
+    } finally {
+      if (
+        process.platform !== "win32" &&
+        application.exitCode === null &&
+        application.signalCode === null
+      )
+        application.kill("SIGKILL");
+      await stopApplication(application);
+    }
+  }
+}
+
+async function quitInstalledApplication(
+  application: ReturnType<typeof spawn>,
+  webSocketUrl: string,
+) {
+  if (application.exitCode !== null || application.signalCode !== null) return;
+  await new Promise<void>((resolve, reject) => {
+    const socket = new WebSocket(webSocketUrl);
+    let sent = false;
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      application.off("exit", onExit);
+      socket.close();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onExit = (code: number | null) =>
+      finish(code === 0 ? undefined : new Error("Installed app did not quit cleanly"));
+    const timeout = setTimeout(
+      () => finish(new Error("Installed app quit lifecycle timed out")),
+      15000,
+    );
+    application.once("exit", onExit);
+    socket.addEventListener(
+      "error",
+      () => {
+        // Quit may close the debugging socket before the process exit event.
+        // Once sent, only a clean exit proves completion; the deadline remains active.
+        if (!sent) finish(new Error("Installed app quit connection failed"));
+      },
+      { once: true },
+    );
+    // Electron handles Browser.close by invoking Browser::Quit on its main thread.
+    socket.addEventListener(
+      "open",
+      () => {
+        socket.send(JSON.stringify({ id: 1, method: "Browser.close" }));
+        sent = true;
+      },
+      { once: true },
+    );
+  });
+}
 
 test("installed app installs an exact English pack, reopens, and removes it through named IPC", async () => {
   test.setTimeout(480_000);

@@ -70,22 +70,27 @@ static bool matches_embedded_runtime(const char *runtime_root, const char *execu
       resources, true, resource_path, sizeof(resource_path));
   CFRelease(resources);
   if (!converted) return false;
-  char expected_runtime[PATH_MAX];
-  char expected_executable[PATH_MAX];
-  if (snprintf(expected_runtime, sizeof(expected_runtime), "%s/open-chords-analysis",
-          resource_path) >= (int)sizeof(expected_runtime) ||
-      snprintf(expected_executable, sizeof(expected_executable), "%s/open-chords-analysis",
-          expected_runtime) >= (int)sizeof(expected_executable)) return false;
-  char canonical_expected_runtime[PATH_MAX];
-  char canonical_expected_executable[PATH_MAX];
   char canonical_runtime[PATH_MAX];
   char canonical_executable[PATH_MAX];
-  return realpath(expected_runtime, canonical_expected_runtime) != NULL &&
-      realpath(expected_executable, canonical_expected_executable) != NULL &&
-      realpath(runtime_root, canonical_runtime) != NULL &&
-      realpath(executable, canonical_executable) != NULL &&
-      strcmp(canonical_expected_runtime, canonical_runtime) == 0 &&
-      strcmp(canonical_expected_executable, canonical_executable) == 0;
+  if (realpath(runtime_root, canonical_runtime) == NULL ||
+      realpath(executable, canonical_executable) == NULL) return false;
+  const char *runtimes[] = {"open-chords-analysis", "open-chords-alignment"};
+  const char *executables[] = {"open-chords-analysis", "open-chords-alignment-worker"};
+  for (size_t index = 0; index < 2; index++) {
+    char expected_runtime[PATH_MAX];
+    char expected_executable[PATH_MAX];
+    char canonical_expected_runtime[PATH_MAX];
+    char canonical_expected_executable[PATH_MAX];
+    if (snprintf(expected_runtime, sizeof(expected_runtime), "%s/%s", resource_path,
+          runtimes[index]) >= (int)sizeof(expected_runtime) ||
+        snprintf(expected_executable, sizeof(expected_executable), "%s/%s",
+          expected_runtime, executables[index]) >= (int)sizeof(expected_executable)) return false;
+    if (realpath(expected_runtime, canonical_expected_runtime) != NULL &&
+        realpath(expected_executable, canonical_expected_executable) != NULL &&
+        strcmp(canonical_expected_runtime, canonical_runtime) == 0 &&
+        strcmp(canonical_expected_executable, canonical_executable) == 0) return true;
+  }
+  return false;
 }
 
 static void fail(int control, const char *reason) {

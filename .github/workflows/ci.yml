@@ -151,3 +151,11 @@ jobs:
         run: pnpm make -- --arch=${{ matrix.arch }}
       - name: Verify installed trust boundary
         run: pnpm test:packaged --retries=0
+      - name: Preserve the release-owned artifact for failed native verification
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-native-artifact-${{ matrix.profile }}
+          path: out/make/zip/${{ runner.os == 'macOS' && 'darwin' || 'win32' }}/${{ matrix.arch }}/*.zip
+          retention-days: 1
+          if-no-files-found: ignore

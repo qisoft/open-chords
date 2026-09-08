@@ -246,6 +246,26 @@ it("surfaces bounded native containment failure reasons", () => {
 it("surfaces only allowlisted bounded sidecar crash reasons", () => {
   expect(
     parseSidecarProcessFailure(
+      "PermissionError: private file name\n[PYI-1:ERROR] Failed to execute script 'pyi_rth_mplconfig' due to unhandled exception!\n",
+    ),
+  ).toBe("sidecar_bootstrap_pyi_rth_mplconfig_PermissionError");
+  expect(
+    parseSidecarProcessFailure(
+      "PermissionError: private file name\nFailed to execute script 'private_file'\n",
+    ),
+  ).toBeNull();
+  expect(
+    parseSidecarProcessFailure(
+      "Open Chords Alignment worker failed safely: alignment_session_permission\n",
+    ),
+  ).toBe("alignment_session_permission");
+  expect(
+    parseSidecarProcessFailure(
+      "Open Chords Alignment worker failed safely: alignment_session_private_path\n",
+    ),
+  ).toBeNull();
+  expect(
+    parseSidecarProcessFailure(
       "Open Chords analysis sidecar failed safely: sidecar_protocol_error\n",
     ),
   ).toBe("sidecar_protocol_error");

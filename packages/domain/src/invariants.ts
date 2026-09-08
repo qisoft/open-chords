@@ -1,3 +1,4 @@
+import type { LyricsAnchor } from "./alignment.ts";
 import type {
   LyricsAlignment,
   LyricsDocument,
@@ -223,7 +224,13 @@ export function validateProjectInvariants(project: ProjectContract): void {
       issues.push(`${layer.id} references unknown Analysis Revision`);
     validateUniqueIds(layer.transactions, `transactions in ${layer.id}`, issues);
     const precedingTransactions = new Set<string>();
+    const anchorHistory = new Map<string, Map<string, LyricsAnchor>>();
     for (const transaction of layer.transactions) {
+      const anchors = new Map(
+        transaction.parentTransactionId === null
+          ? undefined
+          : anchorHistory.get(transaction.parentTransactionId),
+      );
       if (
         transaction.parentTransactionId !== null &&
         !precedingTransactions.has(transaction.parentTransactionId)
@@ -232,6 +239,10 @@ export function validateProjectInvariants(project: ProjectContract): void {
       }
       precedingTransactions.add(transaction.id);
       for (const operation of transaction.operations) {
+        if (operation.type === "set_lyrics_anchor")
+          anchors.set(operation.anchor.id, operation.anchor);
+        if (operation.type === "remove_lyrics_anchor" && !anchors.delete(operation.anchorId))
+          issues.push(`${transaction.id} references an unknown Lyrics Anchor`);
         if (operation.type === "set_lyrics_timing" || operation.type === "set_lyrics_line_timing") {
           const alignment = alignments.get(operation.alignmentId);
           if (alignment === undefined) {
@@ -254,6 +265,8 @@ export function validateProjectInvariants(project: ProjectContract): void {
           }
         }
       }
+      validateLyricsAnchors([...anchors.values()], project, layer.analysisRevisionId, issues);
+      anchorHistory.set(transaction.id, anchors);
     }
   }
 
@@ -302,6 +315,20 @@ export function validateProjectInvariants(project: ProjectContract): void {
   }
 
   for (const alignment of project.lyricsAlignments) {
+    const recipe = alignment.provenance?.recipe;
+    if (recipe) {
+      if (
+        recipe.projectId !== project.id ||
+        recipe.lyricsDocumentId !== alignment.lyricsDocumentId ||
+        recipe.analysisRevisionId !== alignment.analysisRevisionId ||
+        recipe.sampleRate !== project.sampleRate ||
+        recipe.durationSamples !== project.durationSamples
+      )
+        issues.push(`${alignment.id} Alignment Recipe scope is invalid`);
+      if (recipe.anchors.some((anchor) => anchor.lyricsDocumentId !== alignment.lyricsDocumentId))
+        issues.push(`${alignment.id} Lyrics Anchor belongs to another document`);
+      validateLyricsAnchors(recipe.anchors, project, alignment.analysisRevisionId, issues);
+    }
     const document = documents.get(alignment.lyricsDocumentId);
     if (!revisionIds.has(alignment.analysisRevisionId))
       issues.push(`${alignment.id} references unknown Analysis Revision`);
@@ -363,4 +390,48 @@ export function validateProjectInvariants(project: ProjectContract): void {
   }
 
   if (issues.length > 0) throw new DomainInvariantError(issues);
+}
+
+function validateLyricsAnchors(
+  anchors: readonly LyricsAnchor[],
+  project: ProjectContract,
+  revisionId: string,
+  issues: string[],
+): void {
+  if (anchors.length === 0) return;
+  if (anchors.length > 1000) issues.push("Lyrics Anchor limit exceeded");
+  for (const anchor of anchors) {
+    const document = project.lyricsDocuments.find((item) => item.id === anchor.lyricsDocumentId);
+    const first = document?.tokens.findIndex((token) => token.id === anchor.firstTokenId) ?? -1;
+    const last = document?.tokens.findIndex((token) => token.id === anchor.lastTokenId) ?? -1;
+    if (
+      anchor.analysisRevisionId !== revisionId ||
+      first < 0 ||
+      last < first ||
+      anchor.startSample >= anchor.endSample ||
+      anchor.endSample > project.durationSamples
+    )
+      issues.push(`${anchor.id} Lyrics Anchor scope or interval is invalid`);
+  }
+  const referenced = new Set(anchors.map((anchor) => anchor.lyricsDocumentId));
+  for (const document of project.lyricsDocuments) {
+    if (!referenced.has(document.id)) continue;
+    const positions = new Map(document.tokens.map((token, index) => [token.id, index]));
+    const ordered = anchors
+      .filter((anchor) => anchor.lyricsDocumentId === document.id)
+      .toSorted(
+        (left, right) =>
+          (positions.get(left.firstTokenId) ?? -1) - (positions.get(right.firstTokenId) ?? -1),
+      );
+    for (let index = 1; index < ordered.length; index++) {
+      const previous = ordered[index - 1]!;
+      const current = ordered[index]!;
+      if (
+        (positions.get(previous.lastTokenId) ?? -1) >=
+          (positions.get(current.firstTokenId) ?? -1) ||
+        previous.endSample > current.startSample
+      )
+        issues.push("Lyrics Anchors conflict in token order or Project Time");
+    }
+  }
 }

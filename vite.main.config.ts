@@ -9,6 +9,9 @@ const sidecarManifestPath = resolve(
   "dist/analysis-sidecar/open-chords-analysis/runtime-manifest.json",
 );
 const containmentManifestPath = resolve("dist/containment/containment-manifest.json");
+const alignmentManifestPath = resolve(
+  "dist/alignment-runtime/open-chords-alignment/runtime-info.json",
+);
 
 export function readSidecarManifestHash(manifestPath: string, required: boolean): string {
   if (!existsSync(manifestPath)) {
@@ -24,8 +27,10 @@ export default defineConfig(({ mode }) => {
     containmentManifestPath,
     mode === "packaged",
   );
+  const alignmentManifestHash = readSidecarManifestHash(alignmentManifestPath, mode === "packaged");
   return {
     define: {
+      OPEN_CHORDS_EMBEDDED_ALIGNMENT_MANIFEST_SHA256: JSON.stringify(alignmentManifestHash),
       OPEN_CHORDS_EMBEDDED_CONTAINMENT_MANIFEST_SHA256: JSON.stringify(containmentManifestHash),
       OPEN_CHORDS_EMBEDDED_SIDECAR_MANIFEST_SHA256: JSON.stringify(sidecarManifestHash),
     },

@@ -20,6 +20,7 @@ import {
   type ProjectContract,
 } from "@open-chords/domain";
 
+import { AlignmentServiceError, type AlignmentService } from "./alignment-service.ts";
 import { APP_ENTRY_URL } from "./desktop-origin.ts";
 import type {
   LocalMediaPlayback,
@@ -140,6 +141,10 @@ export class DesktopCommandGateway {
   #modelsBusy = false;
   #modelsControlBusy = false;
   #lyricsBusy = false;
+  readonly #alignment: AlignmentService | undefined;
+  #alignmentBusy = false;
+  #alignmentControlBusy = false;
+  #alignmentStatusBusy = false;
   #activeMediaCommands = 0;
   #activeReads = 0;
   #pendingMutations = 0;
@@ -149,9 +154,11 @@ export class DesktopCommandGateway {
     mediaAuthority?: LocalMediaAuthority,
     lyrics?: { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> },
     models?: ModelGatewayService,
+    alignment?: AlignmentService,
   ) {
     this.#authority = authority;
     this.#models = models;
+    this.#alignment = alignment;
     this.#lyrics = lyrics;
     this.#mediaAuthority = mediaAuthority;
   }
@@ -208,6 +215,7 @@ export class DesktopCommandGateway {
       };
     }
 
+    if (command.type === "alignment.perform") return this.#performAlignment(command);
     if (command.type === "models.perform") return this.#performModels(command);
     if (command.type === "lyrics.perform") return this.#performLyrics(command);
     if (command.type === "project.list") return this.#listProjects(command);
@@ -436,6 +444,64 @@ export class DesktopCommandGateway {
       if (this.#mutationQueues.get(command.projectId) === queueTail) {
         this.#mutationQueues.delete(command.projectId);
       }
+    }
+  }
+
+  async #performAlignment(
+    command: Extract<DesktopCommand, { type: "alignment.perform" }>,
+  ): Promise<DesktopGatewayResult> {
+    if (!this.#alignment)
+      return {
+        action: "none",
+        response: errorResponse(
+          "capability_unavailable",
+          "Alignment is unavailable",
+          false,
+          command,
+        ),
+      };
+    const control = command.action.type === "cancel";
+    const status = command.action.type === "status";
+    if (
+      status
+        ? this.#alignmentStatusBusy
+        : control
+          ? this.#alignmentControlBusy
+          : this.#alignmentBusy
+    )
+      return {
+        action: "none",
+        response: errorResponse("busy", "An Alignment operation is running", true, command),
+      };
+    if (status) this.#alignmentStatusBusy = true;
+    else if (control) this.#alignmentControlBusy = true;
+    else this.#alignmentBusy = true;
+    try {
+      const result = await this.#alignment.perform(command.action);
+      return {
+        action: "none",
+        response: DesktopResponseSchema.parse({
+          ...responseEnvelope(command),
+          type: "alignment.result",
+          ...result,
+        }),
+      };
+    } catch (error) {
+      return {
+        action: "none",
+        response: errorResponse(
+          error instanceof AlignmentServiceError ? error.code : "capability_unavailable",
+          error instanceof AlignmentServiceError
+            ? error.message
+            : "Alignment operation failed. Verify the Source and exact language pack, then retry.",
+          true,
+          command,
+        ),
+      };
+    } finally {
+      if (status) this.#alignmentStatusBusy = false;
+      else if (control) this.#alignmentControlBusy = false;
+      else this.#alignmentBusy = false;
     }
   }
 

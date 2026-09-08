@@ -11,6 +11,7 @@ function installStagedMacOSContainment(
   runtimeSource,
   serviceEntitlements,
   signService = signMacOSService,
+  alignmentRuntimeSource,
 ) {
   if (platform !== "darwin") return;
   const contents = resolve(buildPath, "..", "..");
@@ -25,6 +26,13 @@ function installStagedMacOSContainment(
   cpSync(runtimeSource, join(service, "Contents", "Resources", "open-chords-analysis"), {
     recursive: true,
   });
+  if (alignmentRuntimeSource) {
+    cpSync(
+      alignmentRuntimeSource,
+      join(service, "Contents", "Resources", "open-chords-alignment"),
+      { recursive: true },
+    );
+  }
   signService(service, serviceEntitlements);
   cpSync(containmentSource, join(contents, "MacOS", "containment"), {
     recursive: true,

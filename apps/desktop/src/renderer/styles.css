@@ -102,6 +102,7 @@ button:focus-visible {
 .primary-button,
 .secondary-button,
 .quiet-button,
+.lyrics-timing button:not([class]),
 .play-button {
   display: inline-flex;
   min-height: 40px;
@@ -122,7 +123,8 @@ button:focus-visible {
   background: var(--color-selection-surface);
   color: var(--color-focus);
 }
-.quiet-button {
+.quiet-button,
+.lyrics-timing button:not([class]) {
   border: 1px solid var(--color-border-default);
   background: var(--color-surface-raised);
   color: var(--color-text-secondary);
@@ -848,6 +850,47 @@ button:disabled {
 
 .lyrics-selection {
   margin: 0.75rem 20px;
+}
+
+.lyrics-timing {
+  margin: 0.75rem 20px;
+  min-width: 0;
+}
+.lyrics-timing select,
+.lyrics-timing input {
+  max-width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  color: inherit;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+.lyrics-timing label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 100%;
+  margin: 0.6rem 0.75rem 0.6rem 0;
+}
+.lyrics-timing p {
+  margin-block: 0.6rem;
+  line-height: 1.5;
+}
+.lyrics-timing button + button {
+  margin-left: 0.5rem;
+}
+.lyrics-timing fieldset {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-block: 1rem;
+  min-width: 0;
+}
+.lyrics-timing output {
+  display: block;
+  margin-top: 0.5rem;
 }
 .lyrics-selection fieldset {
   display: flex;

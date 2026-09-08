@@ -25,6 +25,7 @@ import {
 
 import { ChordEditor } from "./chord-editor.tsx";
 import { LyricsSelection } from "./lyrics-selection.tsx";
+import { LyricsTiming } from "./lyrics-timing.tsx";
 import { LyricsViewport } from "./lyrics-viewport.tsx";
 import { ModelPacks } from "./model-packs.tsx";
 import { createPlaybackClock, type PlaybackClock } from "./playback-clock.ts";
@@ -497,7 +498,10 @@ export function ProjectWorkspace({
         change={(action) => void changePractice(action)}
         clock={clock}
       />
-      <LyricsSelection key={snapshot.project.id} api={api} snapshot={snapshot} />
+      <div className="lyrics-controls">
+        <LyricsSelection key={snapshot.project.id} api={api} snapshot={snapshot} />
+        <LyricsTiming key={`timing:${snapshot.project.id}`} api={api} snapshot={snapshot} />
+      </div>
       <section className="content-section" aria-labelledby="content-heading">
         <div className="section-heading">
           <div>

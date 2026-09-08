@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-const identifierPattern = /^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$/;
-
-export const StableIdSchema = z.string().regex(identifierPattern).meta({ id: "StableId" });
+import { AlignmentProvenanceSchema, LyricsAnchorSchema } from "./alignment.ts";
+import { StableIdSchema } from "./identifiers.ts";
+export { StableIdSchema } from "./identifiers.ts";
 export const SampleFrameSchema = z.int().nonnegative().meta({ id: "SampleFrame" });
 export const PositiveSampleFrameSchema = z.int().positive().meta({ id: "PositiveSampleFrame" });
 const TextOffsetSchema = z.int().nonnegative().meta({ id: "TextOffset" });
@@ -258,6 +258,7 @@ const UserLyricsTimingSchema = z
 
 export const LyricsAlignmentSchema = z
   .strictObject({
+    provenance: AlignmentProvenanceSchema.optional(),
     analysisRevisionId: StableIdSchema,
     id: StableIdSchema,
     lineOccurrences: z.array(
@@ -270,6 +271,8 @@ export const LyricsAlignmentSchema = z
 
 export const EditOperationSchema = z
   .discriminatedUnion("type", [
+    z.strictObject({ type: z.literal("set_lyrics_anchor"), anchor: LyricsAnchorSchema }),
+    z.strictObject({ type: z.literal("remove_lyrics_anchor"), anchorId: StableIdSchema }),
     z.strictObject({
       type: z.literal("replace_chord_sequence"),
       targetEventIds: z.array(StableIdSchema).min(1).max(10000),

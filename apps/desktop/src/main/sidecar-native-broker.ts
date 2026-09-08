@@ -59,6 +59,8 @@ const MAX_ATTESTATION_BYTES = 4 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
 const SIDECAR_FAILURE_PATTERN =
   /(?:^|\n)Open Chords analysis sidecar failed safely: (sidecar_(?:broken_pipe|file_not_found|internal_error|os_error|protocol_error|runtime_error|runtime_entry_content_permission_denied|runtime_entry_metadata_permission_denied|runtime_file_permission_denied|runtime_inventory_permission_denied|runtime_manifest_permission_denied|runtime_root_permission_denied|runtime_tool_permission_denied|session_permission_denied|value_error))(?:\r?\n|$)/u;
+const ALIGNMENT_FAILURE_PATTERN =
+  /(?:^|\n)Open Chords Alignment worker failed safely: (alignment_(?:bootstrap|session)_(?:permission|missing_file|import|os|value|internal))(?:\r?\n|$)/u;
 
 export function createExecutableNativeContainmentBroker(
   options: NativeBrokerOptions,
@@ -100,12 +102,20 @@ export function createExecutableNativeContainmentBroker(
       // exit validation still report the failure through the public API.
       const onChildError = () => undefined;
       child.on("error", onChildError);
-      child.once("close", () => child.off("error", onChildError));
-      const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-        (resolveExit) => {
-          child.once("close", (code, exitSignal) => resolveExit({ code, signal: exitSignal }));
-        },
-      );
+      // A failed pipe write reports both its callback and a stream error event.
+      // The callback remains authoritative for the session; cancellation can
+      // close the native pipe before its cooperative cancel frame is written.
+      child.stdin?.on("error", onChildError);
+      child.once("close", () => {
+        child.off("error", onChildError);
+        child.stdin?.off("error", onChildError);
+      });
+      const exited = new Promise<{
+        code: number | null;
+        signal: NodeJS.Signals | null;
+      }>((resolveExit) => {
+        child.once("close", (code, exitSignal) => resolveExit({ code, signal: exitSignal }));
+      });
       try {
         await waitForSpawn(child);
         const evidence = await readEvidence(child, Math.min(request.timeoutMs, 60_000));
@@ -187,7 +197,7 @@ async function* containedProcessStdout(
   );
   throw new SidecarSessionError(
     "process_failure",
-    "Contained sidecar exited before completing its protocol",
+    `Contained sidecar exited before completing its protocol (exit=${status.code ?? "none"}, reason=${failureCode ?? "unclassified"})`,
     failureCode === null ? undefined : { remoteCode: failureCode },
   );
 }
@@ -223,7 +233,24 @@ export function createBoundedSidecarStderrCapture(onExceeded: () => void): {
 
 export function parseSidecarProcessFailure(value: string, exceeded = false): string | null {
   if (exceeded) return null;
-  return SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? null;
+  const reported =
+    SIDECAR_FAILURE_PATTERN.exec(value)?.[1] ?? ALIGNMENT_FAILURE_PATTERN.exec(value)?.[1] ?? null;
+  if (reported) return reported;
+  // Frozen bootloader/runtime-hook failures occur before the application's
+  // diagnostic handler. Expose only fixed scopes and exception classes.
+  const hook =
+    /Failed to execute script '(pyi_rth_(?:inspect|pkgutil|multiprocessing|_tkinter|mplconfig|setuptools)|entry)'/u.exec(
+      value,
+    )?.[1];
+  if (hook) {
+    const kind =
+      /(?:^|\n)(PermissionError|FileNotFoundError|ImportError|ModuleNotFoundError|OSError|RuntimeError|ValueError):/u.exec(
+        value,
+      )?.[1] ?? "unknown";
+    return `sidecar_bootstrap_${hook}_${kind}`;
+  }
+  if (value.includes("Failed to load Python DLL")) return "sidecar_bootstrap_python_library";
+  return null;
 }
 
 async function readEvidence(
