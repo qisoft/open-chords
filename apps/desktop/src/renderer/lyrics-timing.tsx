@@ -292,12 +292,12 @@ function TimingCorrection({
     alignment?.lineOccurrences.filter((item) => item.timing.state === "matched").length ?? 0;
   return (
     <section aria-label="Lyrics timing correction" className="chord-editor">
-      <p role="group" aria-label="Word coverage">
+      <fieldset className="timing-coverage" aria-label="Word coverage">
         Word coverage: {wordCount}/{document.tokens.length}
-      </p>
-      <p role="group" aria-label="Line coverage">
+      </fieldset>
+      <fieldset className="timing-coverage" aria-label="Line coverage">
         Line coverage: {lineCount}/{document.lines.length}
-      </p>
+      </fieldset>
       <p>
         Times are seconds from the start of this Project. Corrections and anchors use Undo edit /
         Redo edit.
