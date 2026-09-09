@@ -317,6 +317,12 @@ export class ProjectLibrary {
           observation,
           this.#allYouTubeSources(),
           signal,
+          (source) =>
+            assertSourceAuthorityAgainstEntries(
+              { sources: [source] },
+              this.#entries,
+              this.#youtubeCatalog,
+            ),
         );
       } finally {
         this.#youtubeCatalog = await readYouTubeSources(this.#activeRoot);
@@ -328,7 +334,10 @@ export class ProjectLibrary {
     return mergeYouTubeSources(
       [...this.#entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
       this.#youtubeCatalog,
-    );
+    ).map((source) => ({
+      ...source,
+      locators: structuredClone(this.#locatorCatalog.get(source.id) ?? source.locators),
+    }));
   }
   readonly #currentSchemaVersion: string;
   readonly #faultInjector: NonNullable<ProjectLibraryOptions["faultInjector"]>;
@@ -1492,6 +1501,7 @@ export class ProjectLibrary {
     await this.#scanProjectContainer("active", entries);
     await this.#scanProjectContainer("trashed", entries);
     validateLibrarySourceAuthority(entries);
+    assertSourceAuthorityAgainstEntries({ sources: this.#youtubeCatalog }, entries);
     mergeYouTubeSources(
       [...entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
       this.#youtubeCatalog,
@@ -1967,7 +1977,7 @@ export class ProjectLibrary {
     const payload = validateStoredPayload(rawPayload);
     if (payload.envelope.payload.id !== projectId)
       throw new Error("Project payload belongs to another Project");
-    assertSourceAuthorityAgainstEntries(payload.records, this.#entries);
+    assertSourceAuthorityAgainstEntries(payload.records, this.#entries, this.#youtubeCatalog);
     mergeYouTubeSources(payload.records.sources, this.#allYouTubeSources());
     assertLocatorUpdates(payload.records, this.#locatorCatalog);
     const projectRevisionId = `projectrevision_${randomUUID().replaceAll("-", "")}`;
@@ -2549,8 +2559,9 @@ function validateLibrarySourceAuthority(entries: ReadonlyMap<string, LibraryEntr
 }
 
 function assertSourceAuthorityAgainstEntries(
-  records: ProjectOwnedRecords,
+  records: Pick<ProjectOwnedRecords, "sources">,
   entries: ReadonlyMap<string, LibraryEntry>,
+  additionalSources: ProjectOwnedRecords["sources"] = [],
 ): void {
   const sourceIdToIdentity = new Map<string, string>();
   const identityToSourceId = new Map<string, string>();
@@ -2568,7 +2579,7 @@ function assertSourceAuthorityAgainstEntries(
         observationById.set(observation.id, canonicalSerialize(observation));
     }
   }
-  for (const source of records.sources) {
+  for (const source of [...additionalSources, ...records.sources]) {
     const identity = sourceIdentityKey(source.identity);
     const establishedIdentity = sourceIdToIdentity.get(source.id);
     if (establishedIdentity !== undefined && establishedIdentity !== identity)

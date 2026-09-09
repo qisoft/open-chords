@@ -130,6 +130,31 @@ test("the named player API opens an unprivileged surface and Offline Mode destro
         oldSession.sessionId,
       ),
     ).toMatchObject({ type: "desktop.error" });
+    await primary.evaluate(() =>
+      window.openChords!.youtube.perform({
+        type: "open_player",
+        url: "https://youtu.be/stall000000",
+      }),
+    );
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
+      .toMatchObject({ player: { state: "ready" } });
+    await primary.evaluate(async () => {
+      const status = await window.openChords!.youtube.perform({ type: "status" });
+      if (status.type !== "youtube.result" || !status.player) throw new Error("Player missing");
+      return window.openChords!.youtube.perform({
+        type: "play",
+        sessionId: status.player.sessionId,
+      });
+    });
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
+      .toMatchObject({ player: { state: "buffering" } });
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })), {
+        timeout: 18000,
+      })
+      .toMatchObject({ player: { state: "error", error: "network_unavailable" } });
     expect(
       await primary.evaluate(() =>
         window.openChords!.youtube.perform({ type: "set_offline", offline: true }),

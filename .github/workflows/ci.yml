@@ -162,6 +162,17 @@ jobs:
         run: pnpm make -- --arch=${{ matrix.arch }}
       - name: Verify installed trust boundary
         run: pnpm test:packaged --retries=0
+      - name: Observe live installed YouTube playback
+        env:
+          OPEN_CHORDS_LIVE_YOUTUBE: "1"
+        run: pnpm exec playwright test tests/packaged/youtube.spec.ts --grep "installed live" --retries=0 --output=test-results/youtube-live
+      - name: Preserve installed YouTube observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-evidence-${{ matrix.profile }}
+          path: test-results/youtube-live/
+          if-no-files-found: ignore
       - name: Preserve the release-owned artifact for native assistive technology verification
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,6 +63,7 @@ async function launchInstalled() {
     )
     .toBe(true);
   const browser = await chromium.connectOverCDP(endpoint);
+  process.stdout.write("YouTube installed probe: CDP connected\n");
   const context = browser.contexts()[0];
   if (!context) throw new Error("Installed context missing");
   await expect
@@ -70,12 +71,15 @@ async function launchInstalled() {
     .toBe(true);
   const primary = context.pages().find((page) => page.url().startsWith("open-chords://"))!;
   await expect(primary.getByRole("button", { name: "YouTube source", exact: true })).toBeVisible();
+  process.stdout.write("YouTube installed probe: primary ready\n");
   return { child, browser, context, primary };
 }
 async function stopInstalled(child: ChildProcess, browser: Browser) {
   try {
     const cdp = await browser.newBrowserCDPSession();
-    await cdp.send("Browser.close");
+    process.stdout.write("YouTube installed probe: closing\n");
+    // Electron may exit without acknowledging Browser.close on this transport.
+    void cdp.send("Browser.close").catch(() => undefined);
     await expect
       .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
       .toBe(true);
@@ -90,12 +94,14 @@ test("installed isolated player preserves commands, errors and Offline Mode at t
   const { child, browser, context, primary } = await launchInstalled();
   try {
     await installYouTubeProviderFixture(context);
+    process.stdout.write("YouTube installed probe: provider fixture installed\n");
     await primary.evaluate(() =>
       window.openChords!.youtube.perform({
         type: "open_player",
         url: "https://youtu.be/aqz-KE-bpKQ",
       }),
     );
+    process.stdout.write("YouTube installed probe: player opened\n");
     await expect
       .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
       .toMatchObject({ player: { state: "ready" } });
@@ -147,18 +153,43 @@ test("installed isolated player preserves commands, errors and Offline Mode at t
       [101, "not_embeddable"],
       [-1, "autoplay_denied"],
     ] as const) {
-      await context.unrouteAll({ behavior: "wait" });
-      await installYouTubeProviderFixture(context, code);
-      await primary.evaluate(() =>
-        window.openChords!.youtube.perform({
-          type: "open_player",
-          url: "https://youtu.be/aqz-KE-bpKQ",
-        }),
+      await primary.evaluate(
+        (videoId) =>
+          window.openChords!.youtube.perform({
+            type: "open_player",
+            url: `https://youtu.be/${videoId}`,
+          }),
+        `error${String(code === -1 ? 1 : code).padStart(6, "0")}`,
       );
       await expect
         .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
         .toMatchObject({ player: { state: "error", error } });
     }
+    await primary.evaluate(() =>
+      window.openChords!.youtube.perform({
+        type: "open_player",
+        url: "https://youtu.be/stall000000",
+      }),
+    );
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
+      .toMatchObject({ player: { state: "ready" } });
+    await primary.evaluate(async () => {
+      const status = await window.openChords!.youtube.perform({ type: "status" });
+      if (status.type !== "youtube.result" || !status.player) throw new Error("Player missing");
+      return window.openChords!.youtube.perform({
+        type: "play",
+        sessionId: status.player.sessionId,
+      });
+    });
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
+      .toMatchObject({ player: { state: "buffering", seconds: 1 } });
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })), {
+        timeout: 18000,
+      })
+      .toMatchObject({ player: { state: "error", error: "network_unavailable" } });
     await context.unrouteAll({ behavior: "wait" });
     await context.route("https://www.youtube.com/**", (route) =>
       route.abort("internetdisconnected"),
@@ -243,20 +274,52 @@ test("installed live YouTube sends app identity and advances actual media time",
     const result = await primary.evaluate(() =>
       window.openChords!.youtube.perform({ type: "status" }),
     );
-    await testInfo.attach("live-player-observation", {
-      body: JSON.stringify(
+    if (result.type !== "youtube.result" || !result.player)
+      throw new Error("Live playback missing");
+    const advancingSeconds = result.player.seconds;
+    await primary.evaluate(async (sessionId) => {
+      await window.openChords!.youtube.perform({ type: "seek", sessionId, seconds: 30 });
+      await window.openChords!.youtube.perform({ type: "set_rate", sessionId, rate: 1.5 });
+      await window.openChords!.youtube.perform({ type: "pause", sessionId });
+    }, result.player.sessionId);
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
+      .toMatchObject({ player: { state: "paused", rate: 1.5 } });
+    const paused = await primary.evaluate(() =>
+      window.openChords!.youtube.perform({ type: "status" }),
+    );
+    if (paused.type !== "youtube.result" || !paused.player)
+      throw new Error("Live seek result missing");
+    expect(paused.player.seconds).toBeGreaterThanOrEqual(29);
+    expect(paused.player.seconds).toBeLessThan(40);
+    const observationPath = testInfo.outputPath("live-player-observation.json");
+    await writeFile(
+      observationPath,
+      JSON.stringify(
         {
+          observedAt: new Date().toISOString(),
           platform: process.platform,
           arch: process.arch,
           origin: player.url(),
           referer: identity[0],
-          result,
+          advancingSeconds,
+          player: {
+            videoId: paused.player.videoId,
+            state: paused.player.state,
+            seconds: paused.player.seconds,
+            durationSeconds: paused.player.durationSeconds,
+            rate: paused.player.rate,
+          },
         },
         null,
         2,
       ),
+    );
+    await testInfo.attach("live-player-observation", {
+      path: observationPath,
       contentType: "application/json",
     });
+    await player.screenshot({ path: testInfo.outputPath("live-player.png") });
   } finally {
     await stopInstalled(child, browser);
   }

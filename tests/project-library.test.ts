@@ -1795,6 +1795,13 @@ describe("ProjectLibrary", () => {
       library.createProject({ envelope: goldenEnvelope(), records }),
     ).resolves.toBeDefined();
     const beforeRefresh = await library.readProject("project_golden");
+    const locator = {
+      ...source.locators[0]!,
+      id: "locator_refreshed",
+      observedAt: "2026-09-09T10:00:00Z",
+    };
+    await library.observeSourceLocator(source.id, locator);
+    expect(library.getSourceById(source.id)?.locators).toContainEqual(locator);
     const refreshed = await library.observeYouTubeSource("BBBBBBBBBBB", {
       id: "metadata_explicit_refresh",
       observedAt: "2026-09-09T10:00:00Z",
@@ -1804,6 +1811,7 @@ describe("ProjectLibrary", () => {
     expect(refreshed.id).toBe(source.id);
     const reopened = await openProjectLibrary({ stateRoot });
     const afterRefresh = await reopened.readProject("project_golden");
+    expect(reopened.getSourceById(source.id)?.locators).toContainEqual(locator);
     expect(afterRefresh.envelope).toEqual(beforeRefresh.envelope);
     expect(afterRefresh.records.sources[0]?.snapshots).toEqual(
       beforeRefresh.records.sources[0]?.snapshots,
@@ -1811,6 +1819,33 @@ describe("ProjectLibrary", () => {
     expect(afterRefresh.records.sources[0]?.metadataObservations).toEqual(
       refreshed.metadataObservations,
     );
+  });
+
+  it("protects pre-acquisition Source and observation identities across Source kinds", async () => {
+    for (const collision of ["source", "observation"] as const) {
+      const stateRoot = await temporaryDirectory("open-chords-library-youtube-conflict-");
+      const library = await openProjectLibrary({ stateRoot });
+      const observation = {
+        id: "metadata_reserved",
+        provider: "youtube",
+        observedAt: "2026-09-09T10:00:00Z",
+        title: "Reserved title",
+      };
+      const youtube = await library.observeYouTubeSource("aqz-KE-bpKQ", observation);
+      const records = ownedRecords();
+      const source = records.sources[0]!;
+      if (collision === "source") {
+        source.id = youtube.id;
+        records.projectRange.sourceId = youtube.id;
+      } else
+        source.metadataObservations = [
+          { ...observation, provider: "local", title: "Changed content" },
+        ];
+      await expect(library.createProject({ envelope: goldenEnvelope(), records })).rejects.toThrow(
+        /identity|immutable/,
+      );
+      expect(library.listProjects()).toEqual([]);
+    }
   });
 
   it("supports recoverable Trash without deleting external media or export targets", async () => {

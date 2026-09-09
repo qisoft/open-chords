@@ -84,6 +84,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
       },
     );
 } else {
+  if (process.platform === "win32") app.setAppUserModelId("io.github.qisoft.open-chords");
   registerRendererScheme();
 
   const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;

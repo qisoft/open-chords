@@ -62,7 +62,8 @@ export class IsolatedYouTubePlayer implements YouTubePlayer {
     playerSessions.add(isolated);
     isolated.setPermissionCheckHandler(() => false);
     isolated.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-    isolated.on("will-download", (event) => event.preventDefault());
+    if (isolated.listenerCount("will-download") === 0)
+      isolated.on("will-download", (event) => event.preventDefault());
     isolated.webRequest.onBeforeRequest((details, callback) => {
       const local = details.url === entry || details.url === `${origin}/adapter.js`;
       callback({ cancel: !local && !providerUrl(details.url) });
@@ -210,20 +211,26 @@ export class IsolatedYouTubePlayer implements YouTubePlayer {
 
 const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>YouTube — Open Chords</title><style>html,body{height:100%;margin:0;background:#111;color:white;font:16px system-ui}#player{width:100%;height:calc(100% - 48px)}p{margin:8px}</style><div id="player"></div><p id="status" role="status">Loading YouTube…</p><script src="/adapter.js"></script></html>`;
 const adapter = `(() => {
-  let player, videoId, ready = false, timeout;
+  let player, videoId, ready = false, timeout, progressAt = Date.now(), lastSeconds = 0;
   let status = { state: 'loading', seconds: 0, durationSeconds: 0, rate: 1 };
   const fail = error => { status = { ...status, state: 'error', error }; document.querySelector('#status').textContent = 'Playback unavailable: ' + error.replaceAll('_', ' ') + '. Use Open on YouTube in Open Chords.'; };
   const load = () => {
     if (!videoId || !window.YT?.Player) return;
     player = new YT.Player('player', { videoId, width: '100%', height: '100%', playerVars: { autoplay: 0, playsinline: 1, origin: location.origin }, events: {
       onReady: () => { ready = true; clearTimeout(timeout); status.state = 'ready'; document.querySelector('#status').textContent = 'Use the YouTube controls to start playback.'; },
-      onStateChange: event => { const state = { '-1': 'ready', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'ready' }[event.data]; if (state) { status.state = state; delete status.error; } },
+      onStateChange: event => { const state = { '-1': 'ready', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'ready' }[event.data]; if (state) { if (!['playing', 'buffering'].includes(status.state)) progressAt = Date.now(); status.state = state; delete status.error; } },
       onError: event => fail({ 2: 'invalid_video', 5: 'playback_failed', 100: 'unavailable', 101: 'not_embeddable', 150: 'not_embeddable', 153: 'missing_identity' }[event.data] || 'playback_failed'),
       onAutoplayBlocked: () => fail('autoplay_denied'),
     } });
   };
   window.onYouTubeIframeAPIReady = load;
   window.addEventListener('offline', () => fail('network_unavailable'));
+  setInterval(() => {
+    if (!ready || !['playing', 'buffering'].includes(status.state)) return;
+    const seconds = Number(player.getCurrentTime()) || 0;
+    if (seconds !== lastSeconds) { lastSeconds = seconds; progressAt = Date.now(); }
+    else if (Date.now() - progressAt >= 15000) fail('network_unavailable');
+  }, 500);
   window.youtubePlayback = Object.freeze({
     open: id => { if (videoId || !/^[A-Za-z0-9_-]{11}$/.test(id)) throw Error('Invalid playback'); videoId = id; timeout = setTimeout(() => fail('network_unavailable'), 15000); const script = document.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; script.onerror = () => fail('network_unavailable'); document.head.append(script); },
     command: action => { if (!ready) throw Error('Player is not ready'); if (action.type === 'play') player.playVideo(); else if (action.type === 'pause') player.pauseVideo(); else if (action.type === 'seek') player.seekTo(action.seconds, true); else if (action.type === 'set_rate') player.setPlaybackRate(action.rate); else throw Error('Invalid command'); },

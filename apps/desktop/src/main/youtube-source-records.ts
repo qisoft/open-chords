@@ -96,6 +96,7 @@ export async function appendYouTubeObservation(
   raw: unknown,
   established: Source[],
   signal?: AbortSignal,
+  validate?: (source: Source) => void,
 ) {
   signal?.throwIfAborted();
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new Error("Invalid YouTube video ID");
@@ -132,6 +133,7 @@ export async function appendYouTubeObservation(
   if (source.metadataObservations.length >= 1000)
     throw new Error("YouTube metadata history limit reached");
   source.metadataObservations.push(observation);
+  validate?.(source);
   const data = canonicalSerialize(catalogSchema.parse({ version: 1, sources }));
   if (Buffer.byteLength(data) > 8 * 1024 * 1024)
     throw new Error("YouTube Source catalog limit reached");
