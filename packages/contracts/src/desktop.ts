@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 
 import { AlignmentActionSchema, AlignmentJobSummarySchema } from "./alignment.ts";
+import { ExportActionSchema, ExportReceiptSummarySchema } from "./exports.ts";
 import { DesktopMessageIdSchema } from "./identifiers.ts";
 import {
   YouTubeActionSchema,
@@ -498,4 +499,3 @@ export type OpenChordsDesktopApi = {
     getSecuritySnapshot(): Promise<DesktopErrorResponse | ShellSecuritySnapshotResponse>;
   };
 };
-import { ExportActionSchema, ExportReceiptSummarySchema } from "./exports.ts";

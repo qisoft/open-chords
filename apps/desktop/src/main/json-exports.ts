@@ -93,7 +93,14 @@ export class JsonExports {
         .slice(-100)
         .map(({ outputLocation, ...receipt }) => ({
           ...receipt,
-          displayName: basename(outputLocation).slice(0, 240),
+          displayName: basename(outputLocation).slice(0, 240) || "Export",
+          profileVersion: receipt.profileVersion.slice(0, 100),
+          omissions: receipt.omissions.slice(0, 100).map((omission) => omission.slice(0, 200)),
+          detailsTruncated:
+            receipt.profileVersion.length > 100 ||
+            receipt.omissions.length > 100 ||
+            receipt.omissions.some((omission) => omission.length > 200) ||
+            basename(outputLocation).length > 240,
         })),
     };
   }

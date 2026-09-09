@@ -82,6 +82,27 @@ test("only the primary named export capability can publish; renderer paths are r
       receipts: [{ displayName: "result.json" }],
     });
     expect(JSON.stringify(result)).not.toContain(root);
+    const originalReceipt = {
+      ...library.listExportReceipts("project_golden")[0]!,
+      id: "export_historical",
+      omissions: Array.from({ length: 101 }, () => "x".repeat(201)),
+      profileVersion: "p".repeat(101),
+    };
+    await library.recordExportReceipt("project_golden", originalReceipt);
+    const listed = (
+      await gateway.execute(
+        { ...command, action: { type: "list", projectId: "project_golden" } },
+        sender,
+      )
+    ).response;
+    expect(listed.type).toBe("exports.result");
+    if (listed.type !== "exports.result") throw new Error("Receipt summary unavailable");
+    const summary = listed.receipts.find(({ id }) => id === "export_historical")!;
+    expect(summary.detailsTruncated).toBe(true);
+    expect(summary.omissions).toHaveLength(100);
+    expect(summary.omissions[0]).toHaveLength(200);
+    expect(summary.profileVersion).toHaveLength(100);
+    expect(library.listExportReceipts("project_golden").at(-1)).toEqual(originalReceipt);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

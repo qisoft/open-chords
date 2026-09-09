@@ -145,6 +145,12 @@ export function ExportProject({
               </p>
               <details>
                 <summary>Snapshot hashes and omissions</summary>
+                {receipt.detailsTruncated && (
+                  <p>
+                    Details were shortened for display. The complete Receipt remains in the Project
+                    Library.
+                  </p>
+                )}
                 <p className="model-reference">Output SHA-256: {receipt.outputHash}</p>
                 <p className="model-reference">Active View SHA-256: {receipt.activeViewHash}</p>
                 {receipt.omissions.map((omission, index) => (

@@ -18,6 +18,7 @@ export const ExportReceiptSummarySchema = z.strictObject({
   profileVersion: z.string().min(1).max(100),
   outputHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   activeViewHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  detailsTruncated: z.boolean(),
   displayName: z.string().min(1).max(240),
   omissions: z.array(z.string().min(1).max(200)).max(100),
 });
