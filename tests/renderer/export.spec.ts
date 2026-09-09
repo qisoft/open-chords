@@ -44,6 +44,18 @@ test("the export dialog saves a committed JSON view and reopens its Receipt", as
     await page.getByRole("button", { name: "Save JSON", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Export saved" })).toBeVisible();
     await expect(page.getByText("score.json", { exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.getByText("Snapshot hashes and omissions", { exact: true }).click();
+    expect(
+      await page
+        .getByRole("dialog")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    await expect(
+      page.getByText("Free-form benchmark descriptions were omitted to protect private data.", {
+        exact: true,
+      }),
+    ).toBeVisible();
     expect(JSON.parse(await readFile(join(root, "score.json"), "utf8")).lyrics.document.text).toBe(
       "go go\nhome go",
     );

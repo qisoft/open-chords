@@ -1071,3 +1071,17 @@ button:disabled {
 .youtube-actions button {
   margin-top: 0;
 }
+
+.export-project {
+  overflow-wrap: anywhere;
+}
+.export-project label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.export-project select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.4rem;
+}

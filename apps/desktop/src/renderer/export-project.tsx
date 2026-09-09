@@ -6,6 +6,17 @@ import type {
 } from "@open-chords/contracts";
 import { useRef, useState } from "react";
 
+const omissionLabels: Record<string, string> = {
+  unrecognized_lyrics_reference_omitted:
+    "An unrecognized lyrics source reference was omitted to protect private data.",
+  unrecognized_lyrics_provider_omitted:
+    "The lyrics provider could not be represented by this export profile.",
+  support_claim_descriptions_omitted:
+    "Free-form benchmark descriptions were omitted to protect private data.",
+  alignment_recipe_omitted:
+    "Alignment runtime details were omitted; verification hashes are included.",
+};
+
 type Result = Extract<DesktopResponse, { type: "exports.result" }>;
 
 export function ExportProject({
@@ -69,7 +80,7 @@ export function ExportProject({
       <Dialog.Trigger>Export Project</Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Backdrop className="model-packs-backdrop" />
-        <Dialog.Popup className="model-packs">
+        <Dialog.Popup className="model-packs export-project">
           <header>
             <Dialog.Title>Export Project</Dialog.Title>
             <Dialog.Close>Close</Dialog.Close>
@@ -137,7 +148,9 @@ export function ExportProject({
                 <p className="model-reference">Output SHA-256: {receipt.outputHash}</p>
                 <p className="model-reference">Active View SHA-256: {receipt.activeViewHash}</p>
                 {receipt.omissions.map((omission, index) => (
-                  <p key={`${index}:${omission}`}>{omission}</p>
+                  <p key={`${index}:${omission}`}>
+                    {omissionLabels[omission] ?? "This export profile recorded an omission."}
+                  </p>
                 ))}
               </details>
             </section>
