@@ -9,7 +9,8 @@
     "packages/testkit/contracts/v1/schema/**",
     "playwright-report/**",
     "test-results/**",
-    "tests/fixtures/json-export-golden.json"
+    "tests/fixtures/json-export-golden.json",
+    "tools/benchmark/schemata/**"
   ],
   "printWidth": 100,
   "sortImports": {},
