@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { canonicalSerialize } from "@open-chords/domain";
 import { expect, it } from "vitest";
 
-import { contentHash } from "../tools/benchmark/index.ts";
+import { auditCorpus, contentHash } from "../tools/benchmark/index.ts";
 import { corpusFixture, fixtureContext } from "./support/benchmark-fixture.ts";
 
 const cli = (args: string[], input?: string) =>
@@ -130,6 +130,16 @@ it("publishes real files, keeps sealed plaintext and custody key out of tuning, 
     expect(readFileSync(join(output, "track_sealed.bin"), "utf8")).toBe(
       "SYNTHETIC AUDIO 1 private marker",
     );
+    const receipt = JSON.parse(readFileSync(join(output, "opening-receipt.json"), "utf8"));
+    const released = JSON.parse(readFileSync(join(output, "sealed.json"), "utf8"));
+    const currentManifest = {
+      ...released.input.manifest,
+      tracks: manifest.tracks.map((track) => ({ ...track, rights: track.rights })),
+    };
+    expect(auditCorpus(currentManifest, released.input.gold, receipt.currentAudit.context)).toEqual(
+      receipt.currentAudit,
+    );
+    expect(receipt.currentAuditHash).toBe(receipt.currentAudit.hash);
     expect(cli(args, privateKey).status).toBe(1);
     const wrongKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
       type: "pkcs8",

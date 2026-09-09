@@ -476,6 +476,7 @@ export async function openSealedCorpus(
         freeze,
         openedAt: new Date().toISOString(),
         currentAuditHash: current.hash,
+        currentAudit: current,
         rightsReview,
       });
       return { bundleHash: declaration.bundleHash, policyHash: declaration.policyHash };
