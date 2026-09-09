@@ -52,27 +52,40 @@ async function launchInstalled() {
     { stdio: "ignore" },
   );
   const endpoint = `http://127.0.0.1:${address.port}`;
-  await expect
-    .poll(
-      async () =>
-        fetch(`${endpoint}/json/version`).then(
-          (response) => response.ok,
-          () => false,
-        ),
-      { timeout: 30000 },
-    )
-    .toBe(true);
-  const browser = await chromium.connectOverCDP(endpoint);
-  process.stdout.write("YouTube installed probe: CDP connected\n");
-  const context = browser.contexts()[0];
-  if (!context) throw new Error("Installed context missing");
-  await expect
-    .poll(() => context.pages().some((page) => page.url().startsWith("open-chords://")))
-    .toBe(true);
-  const primary = context.pages().find((page) => page.url().startsWith("open-chords://"))!;
-  await expect(primary.getByRole("button", { name: "YouTube source", exact: true })).toBeVisible();
-  process.stdout.write("YouTube installed probe: primary ready\n");
-  return { child, browser, context, primary };
+  let connected: Browser | undefined;
+  try {
+    await expect
+      .poll(
+        async () =>
+          fetch(`${endpoint}/json/version`).then(
+            (response) => response.ok,
+            () => false,
+          ),
+        { timeout: 30000 },
+      )
+      .toBe(true);
+    const browser = await chromium.connectOverCDP(endpoint);
+    connected = browser;
+    process.stdout.write("YouTube installed probe: CDP connected\n");
+    const context = browser.contexts()[0];
+    if (!context) throw new Error("Installed context missing");
+    await expect
+      .poll(() => context.pages().some((page) => page.url().startsWith("open-chords://")), {
+        timeout: 30000,
+      })
+      .toBe(true);
+    const primary = context.pages().find((page) => page.url().startsWith("open-chords://"));
+    if (!primary) throw new Error("Installed primary target missing");
+    await expect(
+      primary.getByRole("button", { name: "YouTube source", exact: true }),
+    ).toBeVisible();
+    process.stdout.write("YouTube installed probe: primary ready\n");
+    return { child, browser, context, primary };
+  } catch (error) {
+    if (connected) await stopInstalled(child, connected);
+    else child.kill();
+    throw error;
+  }
 }
 async function stopInstalled(child: ChildProcess, browser: Browser) {
   try {
@@ -129,7 +142,13 @@ test("installed isolated player preserves commands, errors and Offline Mode at t
       seek: { player: { seconds: 42.5 } },
       rate: { player: { rate: 1.5 } },
     });
-    const player = context.pages().find((page) => page.url().startsWith("open-chords-player://"))!;
+    await expect
+      .poll(() => context.pages().some((page) => page.url().startsWith("open-chords-player://")), {
+        timeout: 30000,
+      })
+      .toBe(true);
+    const player = context.pages().find((page) => page.url().startsWith("open-chords-player://"));
+    if (!player) throw new Error("Installed player target missing");
     expect(
       await player.evaluate(async () => ({
         origin: location.origin,
@@ -250,7 +269,13 @@ test("installed live YouTube sends app identity and advances actual media time",
         url: "https://youtu.be/aqz-KE-bpKQ",
       }),
     );
-    const player = context.pages().find((page) => page.url().startsWith("open-chords-player://"))!;
+    await expect
+      .poll(() => context.pages().some((page) => page.url().startsWith("open-chords-player://")), {
+        timeout: 30000,
+      })
+      .toBe(true);
+    const player = context.pages().find((page) => page.url().startsWith("open-chords-player://"));
+    if (!player) throw new Error("Installed player target missing");
     await player
       .frameLocator("iframe")
       .getByRole("button", { name: "Play video", exact: true })

@@ -19,7 +19,11 @@ export function YouTubeSource({ api }: { api: OpenChordsDesktopApi }) {
       const response = await api.youtube.perform(action);
       if (version.current !== current) return;
       if (response.type === "desktop.error") setMessage(response.message);
-      else setResult(response);
+      else {
+        setResult(response);
+        const videoId = response.player?.videoId;
+        if (videoId) setUrl((draft) => draft || `https://www.youtube.com/watch?v=${videoId}`);
+      }
     } catch {
       if (version.current === current) setMessage("YouTube is unavailable. Try again.");
     } finally {
@@ -67,11 +71,15 @@ export function YouTubeSource({ api }: { api: OpenChordsDesktopApi }) {
         <Dialog.Popup className="model-packs youtube-source">
           <header>
             <Dialog.Title>YouTube source</Dialog.Title>
-            <Dialog.Close>Close</Dialog.Close>
+            <Dialog.Close>Close controls</Dialog.Close>
           </header>
           <p>
             Preview a public video or explicitly refresh its title and uploader. To create a Project
             for analysis, open an authorized local recording.
+          </p>
+          <p>
+            The separate player window stays open when you close these controls. Use Close player to
+            stop playback.
           </p>
           <label>
             YouTube video URL

@@ -32,13 +32,19 @@ export class YouTubeService {
   #controller: AbortController | null = null;
   constructor(options: YouTubeServiceOptions) {
     this.#options = options;
-    this.#unsubscribe = options.network.subscribe(() => this.cancel());
+    this.#unsubscribe = options.network.subscribe(() => {
+      this.#cancelMetadata();
+      if (options.network.offline) options.player?.close();
+    });
   }
   cancel() {
+    this.#cancelMetadata();
+    this.#options.player?.close();
+  }
+  #cancelMetadata() {
     this.#controller?.abort();
     this.#epoch++;
     this.#options.metadata.cancel();
-    this.#options.player?.close();
   }
   close() {
     this.cancel();

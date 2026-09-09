@@ -44,7 +44,47 @@ for (const [code, error] of [
   });
 }
 
+test("a slow provider status read leaves the existing player session available", async () => {
+  const root = mkdtempSync(join(tmpdir(), "open-chords-youtube-slow-"));
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env))
+    if (key !== "ELECTRON_RUN_AS_NODE" && value !== undefined) env[key] = value;
+  const application = await electron.launch({
+    args: [join(import.meta.dirname, "../.."), `--user-data-dir=${root}`],
+    env,
+  });
+  try {
+    await installYouTubeProviderFixture(application.context());
+    const primary = await application.firstWindow();
+    await expect(
+      primary.getByRole("button", { name: "YouTube source", exact: true }),
+    ).toBeVisible();
+    await primary.evaluate(() =>
+      window.openChords!.youtube.perform({
+        type: "open_player",
+        url: "https://youtu.be/slow0000000",
+      }),
+    );
+    await expect.poll(() => application.windows().length).toBe(2);
+    const player = application.windows().find((page) => page !== primary)!;
+    await expect(
+      player.frameLocator("iframe").getByText("Deterministic provider fixture"),
+    ).toBeVisible();
+    expect(
+      await primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })),
+    ).toMatchObject({ player: { videoId: "slow0000000" } });
+    expect(application.windows()).toHaveLength(2);
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
+      .toMatchObject({ player: { state: "ready", videoId: "slow0000000" } });
+  } finally {
+    await application.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the named player API opens an unprivileged surface and Offline Mode destroys it", async () => {
+  test.setTimeout(60000);
   const root = mkdtempSync(join(tmpdir(), "open-chords-youtube-player-"));
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -63,13 +103,15 @@ test("the named player API opens an unprivileged surface and Offline Mode destro
       .getByRole("textbox", { name: "YouTube video URL" })
       .fill("https://youtu.be/aqz-KE-bpKQ");
     await primary.getByRole("button", { name: "Open player", exact: true }).click();
-    expect(
-      await primary.evaluate(() =>
-        window.openChords!.youtube.perform({
-          type: "status",
-        }),
-      ),
-    ).toMatchObject({ type: "youtube.result", player: { videoId: "aqz-KE-bpKQ" } });
+    await expect
+      .poll(() =>
+        primary.evaluate(() =>
+          window.openChords!.youtube.perform({
+            type: "status",
+          }),
+        ),
+      )
+      .toMatchObject({ type: "youtube.result", player: { videoId: "aqz-KE-bpKQ" } });
     await expect.poll(() => application.windows().length).toBe(2);
     await expect
       .poll(async () => {
@@ -84,6 +126,17 @@ test("the named player API opens an unprivileged surface and Offline Mode destro
       return response.type === "youtube.result" ? response.player : null;
     });
     expect(oldSession).toHaveProperty("sessionId");
+    await primary.getByRole("button", { name: "Close controls", exact: true }).click();
+    await expect.poll(() => application.windows().length).toBe(2);
+    await primary.getByRole("button", { name: "YouTube source", exact: true }).click();
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
+      .toMatchObject({ player: oldSession });
+    expect(
+      await primary.evaluate(() =>
+        window.openChords!.youtube.perform({ type: "set_offline", offline: false }),
+      ),
+    ).toMatchObject({ player: oldSession });
     await primary.getByRole("button", { name: "Play YouTube", exact: true }).click();
     await expect(primary.getByText("Player playing", { exact: true })).toBeVisible();
     await primary.getByRole("button", { name: "Pause YouTube", exact: true }).click();

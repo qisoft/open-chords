@@ -1821,6 +1821,31 @@ describe("ProjectLibrary", () => {
     );
   });
 
+  it("quarantines damaged YouTube metadata without making existing Projects unreachable", async () => {
+    for (const contents of ["{broken", "{}", "x".repeat(8 * 1024 * 1024 + 1)]) {
+      const stateRoot = await temporaryDirectory("open-chords-library-youtube-recovery-");
+      const library = await openProjectLibrary({ stateRoot });
+      await library.createProject({ envelope: goldenEnvelope(), records: ownedRecords() });
+      const before = await library.readProject("project_golden");
+      writeFileSync(join(library.activeRoot, "youtube-sources.json"), contents);
+      const reopened = await openProjectLibrary({ stateRoot });
+      expect((await reopened.readProject("project_golden")).envelope).toEqual(before.envelope);
+      expect(await reopened.listYouTubeSources()).toEqual([]);
+      const retained = readdirSync(join(reopened.activeRoot, "quarantine")).filter((name) =>
+        name.includes("youtube-sources.json"),
+      );
+      expect(retained).toHaveLength(1);
+      expect(readFileSync(join(reopened.activeRoot, "quarantine", retained[0]!), "utf8")).toBe(
+        contents,
+      );
+      expect(
+        readdirSync(join(reopened.activeRoot, "reports")).some((name) =>
+          name.startsWith("source-catalog-recovery-"),
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("protects pre-acquisition Source and observation identities across Source kinds", async () => {
     for (const collision of ["source", "observation"] as const) {
       const stateRoot = await temporaryDirectory("open-chords-library-youtube-conflict-");

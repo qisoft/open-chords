@@ -17,7 +17,8 @@ export async function installYouTubeProviderFixture(context: BrowserContext, err
           const iframe = document.createElement('iframe'); iframe.src = 'https://www.youtube.com/embed/' + options.videoId;
           document.getElementById(id).replaceWith(iframe);
           let seconds = 0, rate = 1;
-          this.getCurrentTime = () => seconds; this.getDuration = () => 600; this.getPlaybackRate = () => rate;
+          let delayed = false;
+          this.getCurrentTime = () => { if (options.videoId === 'slow0000000' && !delayed) { delayed = true; const deadline = Date.now() + 4000; while (Date.now() < deadline) {} } return seconds; }; this.getDuration = () => 600; this.getPlaybackRate = () => rate;
           this.playVideo = () => { options.events.onStateChange({ data: 1 }); if (options.videoId === 'stall000000') { seconds = 1; setTimeout(() => { fetch('https://www.youtube.com/fixture-media').catch(() => options.events.onStateChange({ data: 3 })); }, 100); } };
           this.pauseVideo = () => options.events.onStateChange({ data: 2 });
           this.seekTo = value => { seconds = value; }; this.setPlaybackRate = value => { rate = value; };

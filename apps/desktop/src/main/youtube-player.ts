@@ -48,6 +48,7 @@ export class IsolatedYouTubePlayer implements YouTubePlayer {
   #cleanup: Promise<void> = Promise.resolve();
   #epoch = 0;
   #sessionId: string | null = null;
+  #pendingState: { window: BrowserWindow; reply: Promise<unknown> } | null = null;
 
   async open(videoId: string) {
     if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new Error("Invalid YouTube video");
@@ -155,9 +156,13 @@ export class IsolatedYouTubePlayer implements YouTubePlayer {
     const sessionId = this.#sessionId;
     if (!window || !videoId || !sessionId) return null;
     try {
-      const value = await this.#evaluate(window, "window.youtubePlayback.state()");
+      const value = await this.#evaluate(window, "window.youtubePlayback.state()", false);
       if (this.#window !== window) return null;
-      return YouTubePlayerStateSchema.parse({ ...value, videoId, sessionId });
+      return YouTubePlayerStateSchema.parse({
+        ...(typeof value === "object" && value !== null ? value : {}),
+        videoId,
+        sessionId,
+      });
     } catch {
       return this.#window === window
         ? {
@@ -179,33 +184,48 @@ export class IsolatedYouTubePlayer implements YouTubePlayer {
     this.#window = null;
     this.#videoId = null;
     this.#sessionId = null;
+    this.#pendingState = null;
     if (window && !window.isDestroyed()) window.destroy();
     const isolated = this.#session;
     if (isolated) {
       isolated.webRequest.onBeforeRequest((_details, callback) => callback({ cancel: true }));
-      this.#cleanup = Promise.all([
-        isolated.closeAllConnections(),
-        isolated.clearStorageData(),
-        isolated.clearCache(),
-      ]).then(() => undefined);
+      this.#cleanup = this.#cleanup
+        .then(() =>
+          Promise.all([
+            isolated.closeAllConnections(),
+            isolated.clearStorageData(),
+            isolated.clearCache(),
+          ]),
+        )
+        .then(() => undefined);
       void this.#cleanup.catch(() => undefined);
     }
   }
-  async #evaluate(window: BrowserWindow, script: string) {
+  #evaluate(window: BrowserWindow, script: string, closeOnTimeout = true): Promise<unknown> {
+    if (!closeOnTimeout && this.#pendingState?.window === window) return this.#pendingState.reply;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        window.webContents.executeJavaScript(script),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            if (this.#window === window) this.close();
-            reject(new Error("Player response timed out"));
-          }, 3000);
-        }),
-      ]);
-    } finally {
+    const query: Promise<unknown> = window.webContents.executeJavaScript(script);
+    const reply = Promise.race([
+      query,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          if (closeOnTimeout && this.#window === window) this.close();
+          reject(new Error("Player response timed out"));
+        }, 3000);
+      }),
+    ]).finally(() => {
       clearTimeout(timer);
+    });
+    if (!closeOnTimeout) {
+      const pending = { window, reply };
+      this.#pendingState = pending;
+      const clear = () => {
+        if (this.#pendingState === pending) this.#pendingState = null;
+        return undefined;
+      };
+      void query.then(clear, clear);
     }
+    return reply;
   }
 }
 

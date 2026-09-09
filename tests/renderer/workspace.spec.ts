@@ -1058,6 +1058,16 @@ test("practice Play starts at the loop boundary and count-in is cancellable by k
   try {
     const page = await application.firstWindow();
     await expect(page.getByText("Verified local playback", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "YouTube source", exact: true }).click();
+    const sourceDialog = page.getByRole("dialog", { name: "YouTube source", exact: true });
+    await sourceDialog.focus();
+    await sourceDialog.press("Space");
+    await page.keyboard.press("Escape");
+    expect(
+      await page
+        .locator("main.workspace audio")
+        .evaluate((element) => element instanceof HTMLAudioElement && element.paused),
+    ).toBe(true);
     await page.locator('[data-region-id="bar_three_four"]').focus();
     await page.locator('[data-region-id="bar_three_four"]').press("Enter");
     await page.getByRole("button", { name: "Set loop from selection" }).click();

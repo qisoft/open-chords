@@ -251,7 +251,9 @@ export function ProjectWorkspace({
         event.metaKey ||
         event.altKey ||
         (event.target instanceof Element &&
-          event.target.closest("button, input, select, textarea, [contenteditable=true]"))
+          event.target.closest(
+            "button, input, select, textarea, [contenteditable=true], [role=dialog], [role=alertdialog]",
+          ))
       )
         return;
       event.preventDefault();

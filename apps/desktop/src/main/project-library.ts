@@ -1496,16 +1496,22 @@ export class ProjectLibrary {
   }
 
   async #refreshEntries(): Promise<void> {
-    this.#youtubeCatalog = await readYouTubeSources(this.#activeRoot);
     const entries = new Map<string, LibraryEntry>();
     await this.#scanProjectContainer("active", entries);
     await this.#scanProjectContainer("trashed", entries);
     validateLibrarySourceAuthority(entries);
-    assertSourceAuthorityAgainstEntries({ sources: this.#youtubeCatalog }, entries);
-    mergeYouTubeSources(
-      [...entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
-      this.#youtubeCatalog,
-    );
+    try {
+      const catalog = await readYouTubeSources(this.#activeRoot);
+      assertSourceAuthorityAgainstEntries({ sources: catalog }, entries);
+      mergeYouTubeSources(
+        [...entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
+        catalog,
+      );
+      this.#youtubeCatalog = catalog;
+    } catch {
+      await this.#quarantineInvalidCatalogs([join(this.#activeRoot, "youtube-sources.json")]);
+      this.#youtubeCatalog = [];
+    }
     for (const [projectId, failure] of this.#migrationFailures) {
       const entry = entries.get(projectId);
       if (entry !== undefined) entry.migrationFailure = failure;
