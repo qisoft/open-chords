@@ -239,13 +239,15 @@ test("an external committed revision invalidates an open draft even after draft 
       });
     });
     expect(response.type).toBe("project.committed");
-    await expect(editor.getByRole("alert")).toContainText("revision changed");
+    const staleAlert = editor.getByRole("alert").filter({ hasText: "revision changed" });
+    await expect(staleAlert).toBeVisible();
     await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
     await editor.getByRole("button", { name: "Reset draft", exact: true }).click();
-    await expect(editor.getByRole("alert")).toContainText("revision changed");
+    await expect(staleAlert).toBeVisible();
     await editor.getByRole("button", { name: "Cancel", exact: true }).click();
     await page.getByRole("button", { name: "Edit chords", exact: true }).click();
-    await expect(editor.getByRole("alert")).toHaveCount(0);
+    await expect(staleAlert).toHaveCount(0);
+    await expect(editor.getByRole("alert")).toBeEmpty();
     await expect(editor.locator('[data-event-id="chord_g7"] strong')).toHaveText("N");
   } finally {
     await application.close();
