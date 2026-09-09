@@ -9,7 +9,7 @@ import {
   reviewEditMapping,
   type EditHistoryAction,
 } from "@open-chords/domain";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import { createEditorDraft, type DraftEvent } from "./editor-draft.ts";
@@ -377,6 +377,13 @@ function DraftSession({
   const [error, setError] = useState<string | null>(null);
   const region = useRef<HTMLElement>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  useLayoutEffect(() => {
+    // A late revision warning can push the focused footer below the viewport.
+    const focused = document.activeElement;
+    if (state.stale && focused instanceof HTMLElement && region.current?.contains(focused)) {
+      focused.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [state.stale]);
   useEffect(() => {
     draft.reconcile({
       project: snapshot.project,
