@@ -427,7 +427,7 @@ function DraftSession({
           saved version.
         </p>
       )}
-      <div id={validationId} role={state.errors.length > 0 ? "alert" : undefined}>
+      <div id={validationId} role="alert">
         {state.errors.map((message) => (
           <p key={message}>{message}</p>
         ))}

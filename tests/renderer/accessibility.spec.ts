@@ -106,12 +106,7 @@ for (const profile of [
       if (profile.contrast)
         await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
       await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
-      for (const name of [
-        "Project facts",
-        "Timeline state legend",
-        "Timeline selection actions",
-        "Practice settings",
-      ])
+      for (const name of ["Timeline selection actions", "Practice settings"])
         await expect(page.getByRole("group", { name, exact: true })).toHaveCount(1);
       const captureSession = await page.context().newCDPSession(page);
       const audit = async (name: string) => {
@@ -234,7 +229,8 @@ for (const profile of [
         await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
         await audit("invalid-draft");
         await activate(editor.getByRole("button", { name: "Reset draft", exact: true }));
-        await expect(editor.getByRole("alert")).toHaveCount(0);
+        await expect(editor.locator('[role="alert"]')).toHaveCount(1);
+        await expect(editor.locator('[role="alert"]')).toBeEmpty();
         await expect(duration).not.toHaveAttribute("aria-invalid", "true");
         await expect(duration).toHaveAccessibleDescription("");
         await expect(
@@ -307,7 +303,7 @@ for (const profile of [
       await activate(page.getByRole("button", { name: "Lyrics timing", exact: true }));
       await audit("lyrics-timing");
       for (const name of ["Word coverage", "Line coverage"])
-        await expect(page.getByRole("group", { name, exact: true })).toContainText(/\d+\/\d+/);
+        await expect(page.getByText(new RegExp(`^${name}: \\d+/\\d+$`))).toBeVisible();
       if (profile.name === "1080 CSS pixels") {
         const panel = page.getByRole("region", { name: "Lyrics timing correction", exact: true });
         const occurrence = panel.getByRole("combobox", { name: "Timing occurrence", exact: true });

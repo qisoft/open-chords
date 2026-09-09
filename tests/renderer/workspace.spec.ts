@@ -839,7 +839,7 @@ test("profile committed timeline density before choosing virtualization", async 
         readyMs,
         elements: measurement.elements,
         seekPaintSamplesMs: measurement.samples,
-        seekPaintMedianMs: ordered[10],
+        seekPaintMedianMs: (ordered[9]! + ordered[10]!) / 2,
         seekPaintP95Ms: ordered[18],
       };
       console.log(JSON.stringify(result));
@@ -1240,8 +1240,8 @@ test("lyric timing corrections use distinct occurrences and durable Undo/Redo wi
     let page = await application.firstWindow();
     await page.getByRole("button", { name: "Lyrics timing" }).click();
     const panel = page.getByRole("region", { name: "Lyrics timing correction" });
-    await expect(panel.getByLabel("Word coverage")).toContainText("/");
-    await expect(panel.getByLabel("Line coverage")).toContainText("/");
+    await expect(panel.getByText(/^Word coverage: \d+\/\d+$/)).toBeVisible();
+    await expect(panel.getByText(/^Line coverage: \d+\/\d+$/)).toBeVisible();
     await panel.getByLabel("Timing occurrence").selectOption({ index: 1 });
     await panel.getByRole("button", { name: "Mark untimed" }).click();
     await expect(panel.getByRole("status")).toHaveText("Timing correction saved");

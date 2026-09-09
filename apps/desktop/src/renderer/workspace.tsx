@@ -282,13 +282,13 @@ export function ProjectWorkspace({
           <h1 id="workspace-heading">Local Project</h1>
           <p className="project-identity">{snapshot.project.id}</p>
         </div>
-        <fieldset className="project-facts" aria-label="Project facts">
+        <div className="project-facts">
           <span>{formatDuration(timeline.durationSamples, snapshot.project.sampleRate)}</span>
           <span>{snapshot.project.sampleRate.toLocaleString("en-US")} Hz</span>
           <span>
             {snapshot.project.activeView === null ? "Awaiting analysis" : "Analysis ready"}
           </span>
-        </fieldset>
+        </div>
         <ModelPacks api={api} />
       </header>
 
@@ -298,7 +298,7 @@ export function ProjectWorkspace({
             <p className="eyebrow">Project Time</p>
             <h2 id="timeline-heading">Musical timeline</h2>
           </div>
-          <fieldset className="timeline-legend" aria-label="Timeline state legend">
+          <div className="timeline-legend">
             <span>
               <i className="selection-key" />
               Selected
@@ -307,7 +307,7 @@ export function ProjectWorkspace({
               <i className="loop-key" />
               Loop
             </span>
-          </fieldset>
+          </div>
         </div>
         <TimelineSurface
           autoscroll={practice.autoscroll}
