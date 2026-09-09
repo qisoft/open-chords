@@ -250,6 +250,7 @@ test("installed live YouTube sends app identity and advances actual media time",
   test.setTimeout(120000);
   const { child, browser, context, primary } = await launchInstalled();
   const identity: string[] = [];
+  const states: unknown[] = [];
   try {
     // Browser-level target discovery attaches to the real player before its provider requests.
     context.on("page", (page) => {
@@ -286,6 +287,7 @@ test("installed live YouTube sends app identity and advances actual media time",
           const result = await primary.evaluate(() =>
             window.openChords!.youtube.perform({ type: "status" }),
           );
+          states.push(result.type === "youtube.result" ? result.player : { type: result.type });
           return (
             result.type === "youtube.result" &&
             result.player?.state === "playing" &&
@@ -345,6 +347,22 @@ test("installed live YouTube sends app identity and advances actual media time",
       contentType: "application/json",
     });
     await player.screenshot({ path: testInfo.outputPath("live-player.png") });
+  } catch (error) {
+    const failurePath = testInfo.outputPath("live-player-failure.json");
+    await writeFile(
+      failurePath,
+      JSON.stringify({ platform: process.platform, arch: process.arch, identity, states }, null, 2),
+    );
+    await testInfo.attach("live-player-failure", {
+      path: failurePath,
+      contentType: "application/json",
+    });
+    const player = context.pages().find((page) => page.url().startsWith("open-chords-player://"));
+    if (player)
+      await player
+        .screenshot({ path: testInfo.outputPath("live-player-failure.png"), timeout: 5000 })
+        .catch(() => undefined);
+    throw error;
   } finally {
     await stopInstalled(child, browser);
   }
