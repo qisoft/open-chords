@@ -62,6 +62,21 @@ function portableAlignment(alignment: z.infer<typeof LyricsAlignmentSchema>) {
       : {}),
   };
 }
+const supportReferenceSchema = z.discriminatedUnion("evidenceStatus", [
+  SupportClaimSchema.options[0].pick({
+    id: true,
+    capability: true,
+    evidenceStatus: true,
+    benchmarkPolicyHash: true,
+    benchmarkRunHash: true,
+  }),
+  SupportClaimSchema.options[1].pick({
+    id: true,
+    capability: true,
+    evidenceStatus: true,
+    benchmarkPolicyHash: true,
+  }),
+]);
 export const OpenChordsJsonSnapshotSchema = z.strictObject({
   format: z.literal("open-chords/json-snapshot"),
   schemaVersion: z.literal("1.0"),
@@ -90,14 +105,19 @@ export const OpenChordsJsonSnapshotSchema = z.strictObject({
     analysisRevisionId: StableIdSchema,
     createdAt: z.iso.datetime({ offset: true }),
     manifestHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    supportClaims: z.array(SupportClaimSchema),
+    supportClaimReferences: z.array(supportReferenceSchema),
   }),
   userAuthorship: z.strictObject({
     entityIds: z.array(StableIdSchema),
     lyricsAnchors: z.array(LyricsAnchorSchema),
   }),
   omissions: z.array(
-    z.enum(["unrecognized_lyrics_reference_omitted", "unrecognized_lyrics_provider_omitted"]),
+    z.enum([
+      "unrecognized_lyrics_reference_omitted",
+      "unrecognized_lyrics_provider_omitted",
+      "support_claim_descriptions_omitted",
+      "alignment_recipe_omitted",
+    ]),
   ),
 });
 export type OpenChordsJsonSnapshot = z.infer<typeof OpenChordsJsonSnapshotSchema>;
@@ -168,6 +188,19 @@ export function captureJsonExport(input: unknown, options: unknown): OpenChordsJ
         : {}),
     };
   }
+  const supportClaimReferences = project.supportClaims
+    .filter(({ id }) => revision.supportClaimIds.includes(id))
+    .map((claim) => ({
+      id: claim.id,
+      capability: claim.capability,
+      evidenceStatus: claim.evidenceStatus,
+      benchmarkPolicyHash: claim.benchmarkPolicyHash,
+      ...(claim.evidenceStatus === "supported" ? { benchmarkRunHash: claim.benchmarkRunHash } : {}),
+    }));
+  if (supportClaimReferences.length > 0) omissions.push("support_claim_descriptions_omitted");
+  if (lyrics?.originalAlignment?.provenance || lyrics?.effectiveAlignment?.provenance)
+    omissions.push("alignment_recipe_omitted");
+  const retainedIds = semanticEntityIds(effectiveTimeline, lyrics?.document);
   const snapshot = OpenChordsJsonSnapshotSchema.parse({
     format: "open-chords/json-snapshot",
     schemaVersion: "1.0",
@@ -190,17 +223,17 @@ export function captureJsonExport(input: unknown, options: unknown): OpenChordsJ
       analysisRevisionId: revision.id,
       createdAt: revision.createdAt,
       manifestHash: revision.manifestHash,
-      supportClaims: project.supportClaims.filter(({ id }) =>
-        revision.supportClaimIds.includes(id),
-      ),
+      supportClaimReferences,
     },
     userAuthorship: {
-      entityIds: authoredEntities(project),
-      lyricsAnchors: resolveLyricsAnchors(project),
+      entityIds: authoredEntities(project).filter((id) => retainedIds.has(id)),
+      lyricsAnchors: resolveLyricsAnchors(project).filter(
+        (anchor) => anchor.lyricsDocumentId === active.lyricsDocumentId,
+      ),
     },
     omissions,
   });
-  return freeze(snapshot);
+  return freeze(parseJsonExport(snapshot));
 }
 
 export function parseJsonExport(input: unknown): OpenChordsJsonSnapshot {
@@ -283,7 +316,61 @@ export function parseJsonExport(input: unknown): OpenChordsJsonSnapshot {
         validateLyricsAlignmentInvariants(timing, document, snapshot.project.durationSamples);
       }
   }
+  const retainedIds = semanticEntityIds(snapshot.effectiveTimeline, snapshot.lyrics?.document);
+  if (
+    new Set(snapshot.userAuthorship.entityIds).size !== snapshot.userAuthorship.entityIds.length ||
+    snapshot.userAuthorship.entityIds.some((id) => !retainedIds.has(id))
+  )
+    throw new Error("Export authorship references an unknown entity");
+  const anchors = snapshot.userAuthorship.lyricsAnchors;
+  const tokens = snapshot.lyrics?.document.tokens ?? [];
+  if (new Set(anchors.map(({ id }) => id)).size !== anchors.length)
+    throw new Error("Duplicate export anchor");
+  const positions = new Map(tokens.map(({ id }, index) => [id, index]));
+  for (const anchor of anchors) {
+    const first = positions.get(anchor.firstTokenId) ?? -1;
+    const last = positions.get(anchor.lastTokenId) ?? -1;
+    if (
+      anchor.lyricsDocumentId !== snapshot.selection.lyricsDocumentId ||
+      anchor.analysisRevisionId !== snapshot.selection.analysisRevisionId ||
+      first < 0 ||
+      last < first ||
+      anchor.startSample >= anchor.endSample ||
+      anchor.endSample > snapshot.project.durationSamples
+    )
+      throw new Error("Export anchor scope or interval is invalid");
+  }
+  const ordered = anchors.toSorted(
+    (a, b) => positions.get(a.firstTokenId)! - positions.get(b.firstTokenId)!,
+  );
+  for (let index = 1; index < ordered.length; index++) {
+    const previous = ordered[index - 1]!;
+    const current = ordered[index]!;
+    if (
+      positions.get(previous.lastTokenId)! >= positions.get(current.firstTokenId)! ||
+      previous.endSample > current.startSample
+    )
+      throw new Error("Export anchors conflict");
+  }
   return snapshot;
+}
+
+function semanticEntityIds(
+  timeline: z.infer<typeof MusicalTimelineSchema>,
+  document?: z.infer<typeof documentSchema>,
+): Set<string> {
+  return new Set(
+    [
+      ...timeline.chordEvents,
+      ...timeline.bars,
+      ...timeline.bars.flatMap(({ beats }) => beats),
+      ...timeline.keyRegions,
+      ...timeline.sectionRegions,
+      ...timeline.unmeteredRegions,
+      ...(document?.tokens ?? []),
+      ...(document?.lines ?? []),
+    ].map(({ id }) => id),
+  );
 }
 
 function authoredEntities(project: z.infer<typeof ProjectContractSchema>): string[] {

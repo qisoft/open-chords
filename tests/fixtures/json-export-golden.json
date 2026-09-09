@@ -491,7 +491,8 @@
     }
   },
   "omissions": [
-    "unrecognized_lyrics_reference_omitted"
+    "unrecognized_lyrics_reference_omitted",
+    "support_claim_descriptions_omitted"
   ],
   "original": {
     "bars": [
@@ -829,27 +830,12 @@
     "analysisRevisionId": "revision_original",
     "createdAt": "2026-08-17T10:00:00Z",
     "manifestHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-    "supportClaims": [
+    "supportClaimReferences": [
       {
         "benchmarkPolicyHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
         "capability": "chords",
         "evidenceStatus": "insufficient_evidence",
-        "id": "claim_fixture",
-        "inputs": [
-          "synthetic fixture"
-        ],
-        "operatingConditions": [
-          "deterministic fixture runtime"
-        ],
-        "platformProfiles": [
-          "contract-test"
-        ],
-        "releaseVersion": "fixture-1",
-        "slices": [
-          "rich chords",
-          "N",
-          "abstention"
-        ]
+        "id": "claim_fixture"
       }
     ]
   },

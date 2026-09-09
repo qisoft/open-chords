@@ -112,3 +112,58 @@ it("exports alignment hashes without operational recipes or private runtime iden
   expect(bytes).not.toContain("secret-runtime");
   expect(bytes).not.toContain('"recipe":');
 });
+
+it("keeps only hash-addressed support provenance and reports omitted descriptions", () => {
+  const project = fixture();
+  project.supportClaims[0].inputs = ["/Users/private/secret.wav"];
+  project.supportClaims[0].operatingConditions = ["api-secret-value"];
+  const snapshot = captureJsonExport(project, { presentation: "current" });
+  const bytes = serializeJsonExport(snapshot);
+  expect(bytes).not.toContain("/Users/private/");
+  expect(bytes).not.toContain("api-secret-value");
+  expect(snapshot.omissions).toContain("support_claim_descriptions_omitted");
+});
+
+it("rejects authorship outside retained semantic entities and selected lyric scope", () => {
+  const snapshot = JSON.parse(readFileSync("tests/fixtures/json-export-golden.json", "utf8"));
+  snapshot.userAuthorship.entityIds = ["chord_missing"];
+  expect(() => parseJsonExport(snapshot)).toThrow(Error);
+  snapshot.userAuthorship.entityIds = [];
+  snapshot.userAuthorship.lyricsAnchors = [
+    {
+      id: "anchor_invalid",
+      lyricsDocumentId: "lyrics_missing",
+      analysisRevisionId: "revision_missing",
+      firstTokenId: "token_missing",
+      lastTokenId: "token_missing",
+      startSample: 500,
+      endSample: 1,
+    },
+  ];
+  expect(() => parseJsonExport(snapshot)).toThrow(Error);
+});
+
+it("validates anchor order and sample bounds while retaining valid repeated-token identity", () => {
+  const snapshot = JSON.parse(readFileSync("tests/fixtures/json-export-golden.json", "utf8"));
+  const anchor = {
+    id: "anchor_valid",
+    lyricsDocumentId: "lyrics_repeated",
+    analysisRevisionId: "revision_original",
+    firstTokenId: "token_go_1",
+    lastTokenId: "token_go_2",
+    startSample: 0,
+    endSample: 20000,
+  };
+  snapshot.userAuthorship.lyricsAnchors = [anchor];
+  expect(parseJsonExport(snapshot).userAuthorship.lyricsAnchors).toEqual([anchor]);
+  for (const change of [
+    { endSample: 50000 },
+    { firstTokenId: "token_go_3" },
+    { startSample: 20000 },
+  ]) {
+    snapshot.userAuthorship.lyricsAnchors = [{ ...anchor, ...change }];
+    expect(() => parseJsonExport(snapshot)).toThrow("Export anchor scope or interval is invalid");
+  }
+  snapshot.userAuthorship.lyricsAnchors = [anchor, { ...anchor, id: "anchor_overlap" }];
+  expect(() => parseJsonExport(snapshot)).toThrow("Export anchors conflict");
+});

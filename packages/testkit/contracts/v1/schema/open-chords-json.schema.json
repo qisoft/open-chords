@@ -638,163 +638,6 @@
       "pattern": "^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$",
       "type": "string"
     },
-    "SupportClaim": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "benchmarkPolicyHash": {
-              "pattern": "^sha256:[a-f0-9]{64}$",
-              "type": "string"
-            },
-            "benchmarkRunHash": {
-              "pattern": "^sha256:[a-f0-9]{64}$",
-              "type": "string"
-            },
-            "capability": {
-              "enum": [
-                "rhythm",
-                "meter",
-                "key",
-                "chords",
-                "sections",
-                "lyrics_alignment"
-              ],
-              "type": "string"
-            },
-            "evidenceStatus": {
-              "const": "supported",
-              "type": "string"
-            },
-            "id": {
-              "$ref": "#/$defs/StableId"
-            },
-            "inputs": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "operatingConditions": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "platformProfiles": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "releaseVersion": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "slices": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "benchmarkPolicyHash",
-            "capability",
-            "id",
-            "inputs",
-            "operatingConditions",
-            "platformProfiles",
-            "releaseVersion",
-            "slices",
-            "benchmarkRunHash",
-            "evidenceStatus"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "benchmarkPolicyHash": {
-              "pattern": "^sha256:[a-f0-9]{64}$",
-              "type": "string"
-            },
-            "capability": {
-              "enum": [
-                "rhythm",
-                "meter",
-                "key",
-                "chords",
-                "sections",
-                "lyrics_alignment"
-              ],
-              "type": "string"
-            },
-            "evidenceStatus": {
-              "const": "insufficient_evidence",
-              "type": "string"
-            },
-            "id": {
-              "$ref": "#/$defs/StableId"
-            },
-            "inputs": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "operatingConditions": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "platformProfiles": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "releaseVersion": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "slices": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "benchmarkPolicyHash",
-            "capability",
-            "id",
-            "inputs",
-            "operatingConditions",
-            "platformProfiles",
-            "releaseVersion",
-            "slices",
-            "evidenceStatus"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "TextOffset": {
       "maximum": 9007199254740991,
       "minimum": 0,
@@ -1161,7 +1004,9 @@
       "items": {
         "enum": [
           "unrecognized_lyrics_reference_omitted",
-          "unrecognized_lyrics_provider_omitted"
+          "unrecognized_lyrics_provider_omitted",
+          "support_claim_descriptions_omitted",
+          "alignment_recipe_omitted"
         ],
         "type": "string"
       },
@@ -1299,9 +1144,83 @@
           "pattern": "^sha256:[a-f0-9]{64}$",
           "type": "string"
         },
-        "supportClaims": {
+        "supportClaimReferences": {
           "items": {
-            "$ref": "#/$defs/SupportClaim"
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "benchmarkPolicyHash": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "benchmarkRunHash": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "capability": {
+                    "enum": [
+                      "rhythm",
+                      "meter",
+                      "key",
+                      "chords",
+                      "sections",
+                      "lyrics_alignment"
+                    ],
+                    "type": "string"
+                  },
+                  "evidenceStatus": {
+                    "const": "supported",
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StableId"
+                  }
+                },
+                "required": [
+                  "id",
+                  "capability",
+                  "evidenceStatus",
+                  "benchmarkPolicyHash",
+                  "benchmarkRunHash"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "benchmarkPolicyHash": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "capability": {
+                    "enum": [
+                      "rhythm",
+                      "meter",
+                      "key",
+                      "chords",
+                      "sections",
+                      "lyrics_alignment"
+                    ],
+                    "type": "string"
+                  },
+                  "evidenceStatus": {
+                    "const": "insufficient_evidence",
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StableId"
+                  }
+                },
+                "required": [
+                  "id",
+                  "capability",
+                  "evidenceStatus",
+                  "benchmarkPolicyHash"
+                ],
+                "type": "object"
+              }
+            ]
           },
           "type": "array"
         }
@@ -1310,7 +1229,7 @@
         "analysisRevisionId",
         "createdAt",
         "manifestHash",
-        "supportClaims"
+        "supportClaimReferences"
       ],
       "type": "object"
     },

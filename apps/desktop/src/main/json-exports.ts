@@ -156,6 +156,8 @@ export class JsonExports {
       const journalRootStat = await lstat(this.#journalRoot);
       if (!journalRootStat.isDirectory() || journalRootStat.isSymbolicLink())
         throw new Error("Invalid export recovery directory");
+      // Persist the new directory entry itself before relying on its recovery records.
+      await syncDirectory(this.#options.stateRoot);
       journalPath = join(this.#journalRoot, `${id}.json`);
       // Persist recovery intent before target publication. A receipt failure can then be retried.
       await writeDurable(

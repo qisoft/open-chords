@@ -1,5 +1,14 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+  chmod,
+  readdir,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -186,3 +195,36 @@ it("honors cancellation while the picker is open and rejects stale or protected 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it.skipIf(process.platform === "win32")(
+  "a real staging write denial preserves an existing destination and removes recovery intent",
+  async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "oc-export-denied-")));
+    const destination = join(root, "destination");
+    try {
+      const stateRoot = join(root, "state");
+      const library = await openProjectLibrary({ stateRoot });
+      await library.createProject({ envelope: envelope(), records: goldenRecords() });
+      await mkdir(destination);
+      const target = join(destination, "existing.json");
+      await writeFile(target, "existing complete file");
+      await chmod(destination, 0o500);
+      const service = await openJsonExports({ library, stateRoot, pickTarget: async () => target });
+      await expect(
+        service.saveJson({
+          projectId: "project_golden",
+          expectedProjectRevisionId: (await library.getSnapshot("project_golden"))!
+            .projectRevisionId,
+          presentation: "current",
+        }),
+      ).rejects.toThrow(Error);
+      expect(await readFile(target, "utf8")).toBe("existing complete file");
+      expect(await readdir(destination)).toEqual(["existing.json"]);
+      expect(await readdir(join(stateRoot, "export-pending"))).toEqual([]);
+      expect(library.listExportReceipts("project_golden")).toEqual([]);
+    } finally {
+      await chmod(destination, 0o700);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
