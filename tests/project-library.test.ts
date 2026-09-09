@@ -1794,6 +1794,23 @@ describe("ProjectLibrary", () => {
     await expect(
       library.createProject({ envelope: goldenEnvelope(), records }),
     ).resolves.toBeDefined();
+    const beforeRefresh = await library.readProject("project_golden");
+    const refreshed = await library.observeYouTubeSource("BBBBBBBBBBB", {
+      id: "metadata_explicit_refresh",
+      observedAt: "2026-09-09T10:00:00Z",
+      provider: "youtube",
+      title: "Updated provider title",
+    });
+    expect(refreshed.id).toBe(source.id);
+    const reopened = await openProjectLibrary({ stateRoot });
+    const afterRefresh = await reopened.readProject("project_golden");
+    expect(afterRefresh.envelope).toEqual(beforeRefresh.envelope);
+    expect(afterRefresh.records.sources[0]?.snapshots).toEqual(
+      beforeRefresh.records.sources[0]?.snapshots,
+    );
+    expect(afterRefresh.records.sources[0]?.metadataObservations).toEqual(
+      refreshed.metadataObservations,
+    );
   });
 
   it("supports recoverable Trash without deleting external media or export targets", async () => {

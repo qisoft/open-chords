@@ -9,6 +9,7 @@ import {
 import "./styles.css";
 import { ModelPacks } from "./model-packs.tsx";
 import { EmptyWorkspace, ProjectWorkspace } from "./workspace.tsx";
+import { YouTubeSource } from "./youtube-source.tsx";
 
 const root = document.querySelector<HTMLElement>("#root");
 
@@ -85,6 +86,7 @@ function App() {
     <>
       <div className="empty-model-tools">
         <ModelPacks api={api} />
+        <YouTubeSource api={api} />
       </div>
       <EmptyWorkspace
         busy={busy || committed.kind === "loading"}

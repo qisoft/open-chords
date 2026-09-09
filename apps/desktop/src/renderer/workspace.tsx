@@ -40,6 +40,7 @@ import {
   shouldRestoreRegionFocus,
   type WorkspaceTimelineRegion,
 } from "./workspace-timeline.ts";
+import { YouTubeSource } from "./youtube-source.tsx";
 
 export function ProjectWorkspace({
   api,
@@ -290,6 +291,7 @@ export function ProjectWorkspace({
           </span>
         </div>
         <ModelPacks api={api} />
+        <YouTubeSource api={api} />
       </header>
 
       <section className="timeline-section" aria-labelledby="timeline-heading">

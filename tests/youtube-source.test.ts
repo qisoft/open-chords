@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { openNetworkMode } from "../apps/desktop/src/main/network-mode.ts";
+import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
 import {
   canonicalYouTubeSource,
   YouTubeMetadata,
@@ -13,6 +14,36 @@ import {
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+});
+
+test("the Library retains immutable YouTube observations before a Project is acquired", async () => {
+  const root = await mkdtemp(join(tmpdir(), "open-chords-youtube-library-"));
+  roots.push(root);
+  const library = await openProjectLibrary({ stateRoot: root });
+  const first = {
+    id: "metadata_first",
+    observedAt: "2026-09-09T10:00:00Z",
+    provider: "youtube",
+    title: "Original title",
+  };
+  const source = await library.observeYouTubeSource("aqz-KE-bpKQ", first);
+  await library.observeYouTubeSource("aqz-KE-bpKQ", {
+    ...first,
+    id: "metadata_second",
+    title: "Updated title",
+  });
+  const reopened = await openProjectLibrary({ stateRoot: root });
+  expect(reopened.getSourceById(source.id)?.metadataObservations).toHaveLength(2);
+  expect(await reopened.listYouTubeSources()).toEqual([
+    {
+      ...source,
+      metadataObservations: [first, { ...first, id: "metadata_second", title: "Updated title" }],
+    },
+  ]);
+  await expect(
+    reopened.observeYouTubeSource("aqz-KE-bpKQ", { ...first, title: "Rewritten" }),
+  ).rejects.toThrow("immutable");
+  expect(reopened.listProjects()).toEqual([]);
 });
 
 describe("YouTube Source identity", () => {
