@@ -23,3 +23,7 @@ YouTube's [desktop client identity requirement](https://developers.google.com/yo
 - `OPEN_CHORDS_LIVE_YOUTUBE=1 pnpm exec playwright test tests/packaged/youtube.spec.ts`: separately verifies actual media-time advancement and observed Referer in the installed artifact. It emits an observation artifact and fails if playback cannot be established. Live-provider availability is never inferred from metadata or initialization.
 
 Metadata and playback provide no acquisition verdict. Local-file ingestion remains the analysis path; isolated acquisition is a separate implementation issue.
+
+## Recorded observation
+
+The [2026-09-09 installed macOS arm64 observation](evidence/youtube-player-macos-2026-09-09.json) records the release ZIP hash, actual HTTP Referer, media-time advancement, seek to 30 seconds, pause and 1.5× rate. The screenshot was inspected: the video, native controls and branding are visible, with application status below the iframe. Deterministic installed tests separately passed the listed security and failure journeys. This is not Windows evidence or a claim that every public video embeds successfully.

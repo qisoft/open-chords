@@ -1,0 +1,36 @@
+{
+  "observedAt": "2026-09-09T13:30:30.350Z",
+  "platform": "darwin",
+  "osVersion": "26.6.2",
+  "arch": "arm64",
+  "implementationCommit": "532bcdf00ca8779ba3409894f65ede409d1918aa",
+  "artifact": "Open Chords-darwin-arm64-0.0.0.zip",
+  "artifactSha256": "1a198c6feeca46893256a990687d49c45598d8f3d54c89ed658a122a55ec22e7",
+  "origin": "open-chords-player://player/index.html",
+  "observedHttpReferer": "https://io.github.qisoft.open-chords/",
+  "liveProvider": {
+    "videoId": "aqz-KE-bpKQ",
+    "advancingSecondsBeforeSeek": 2.1887700076293943,
+    "stateAfterSeekAndPause": "paused",
+    "secondsAfterSeek": 30,
+    "durationSeconds": 635,
+    "playbackRate": 1.5
+  },
+  "deterministicInstalledJourneys": [
+    "play_pause_seek_rate",
+    "unprivileged_custom_origin",
+    "no_desktop_node_or_local_media_authority",
+    "popup_denied",
+    "error_153",
+    "non_embeddable",
+    "autoplay_denied",
+    "media_delivery_failure_after_playback",
+    "initial_network_failure",
+    "offline_closes_player_and_prevents_reopen"
+  ],
+  "limitations": [
+    "Provider error fixtures do not claim live errors occurred for this video.",
+    "This observation covers macOS arm64 only; Windows evidence is collected separately.",
+    "Metadata and playback give no acquisition verdict."
+  ]
+}
