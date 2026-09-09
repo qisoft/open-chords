@@ -64,7 +64,7 @@ export function YouTubeSource({ api }: { api: OpenChordsDesktopApi }) {
       <Dialog.Trigger>YouTube source</Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Backdrop className="model-packs-backdrop" />
-        <Dialog.Popup className="model-packs">
+        <Dialog.Popup className="model-packs youtube-source">
           <header>
             <Dialog.Title>YouTube source</Dialog.Title>
             <Dialog.Close>Close</Dialog.Close>
