@@ -37,6 +37,20 @@ for (const [code, error] of [
       await expect
         .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
         .toMatchObject({ type: "youtube.result", player: { state: "error", error } });
+      if (code === -1) {
+        const recovered = await primary.evaluate(async () => {
+          const status = await window.openChords!.youtube.perform({ type: "status" });
+          if (status.type !== "youtube.result" || !status.player) throw new Error("Player missing");
+          return window.openChords!.youtube.perform({
+            type: "play",
+            sessionId: status.player.sessionId,
+          });
+        });
+        expect(recovered).toMatchObject({ player: { state: "playing" } });
+        expect(recovered.type === "youtube.result" && recovered.player?.error).toBeUndefined();
+        const player = application.windows().find((page) => page !== primary)!;
+        await expect(player.getByRole("status")).toHaveText("Playback: playing");
+      }
     } finally {
       await application.close();
       rmSync(root, { recursive: true, force: true });

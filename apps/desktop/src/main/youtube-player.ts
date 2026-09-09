@@ -237,8 +237,8 @@ const adapter = `(() => {
   const load = () => {
     if (!videoId || !window.YT?.Player) return;
     player = new YT.Player('player', { videoId, width: '100%', height: '100%', playerVars: { autoplay: 0, playsinline: 1, origin: location.origin }, events: {
-      onReady: () => { ready = true; clearTimeout(timeout); status.state = 'ready'; document.querySelector('#status').textContent = 'Use the YouTube controls to start playback.'; },
-      onStateChange: event => { const state = { '-1': 'ready', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'ready' }[event.data]; if (state) { if (!['playing', 'buffering'].includes(status.state)) progressAt = Date.now(); status.state = state; delete status.error; } },
+      onReady: () => { ready = true; clearTimeout(timeout); if (status.error) return; status.state = 'ready'; document.querySelector('#status').textContent = 'Use the YouTube controls to start playback.'; },
+      onStateChange: event => { const state = { '-1': 'ready', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'ready' }[event.data]; if (state) { if (status.error && state !== 'playing') return; if (!['playing', 'buffering'].includes(status.state)) progressAt = Date.now(); status.state = state; delete status.error; document.querySelector('#status').textContent = 'Playback: ' + state; } },
       onError: event => fail({ 2: 'invalid_video', 5: 'playback_failed', 100: 'unavailable', 101: 'not_embeddable', 150: 'not_embeddable', 153: 'missing_identity' }[event.data] || 'playback_failed'),
       onAutoplayBlocked: () => fail('autoplay_denied'),
     } });

@@ -31,3 +31,9 @@ Metadata and playback provide no acquisition verdict. Local-file ingestion remai
 ## Recorded observation
 
 The [2026-09-09 installed macOS arm64 observation](evidence/youtube-player-macos-2026-09-09.json) records the release ZIP hash, actual HTTP Referer, media-time advancement, seek to 30 seconds, pause and 1.5× rate. The screenshot was inspected: the video, native controls and branding are visible, with application status below the iframe. Deterministic installed tests separately passed the listed security and failure journeys. This is not Windows evidence or a claim that every public video embeds successfully.
+
+## CI provider restriction
+
+The [2026-09-09 GitHub macOS observation](https://github.com/qisoft/open-chords/actions/runs/34362660401) sent the required Referer, but YouTube displayed a [sign-in bot challenge](evidence/youtube-player-ci-bot-challenge-2026-09-09.png) and media time remained at zero. The preceding eight installed tests passed. This is a failed live observation; the CI gate remains blocking. Local installed macOS playback passed separately. No cookies, account credentials or challenge bypass are introduced to make the CI observation pass.
+
+That observation also exposed a trailing provider `ready` event after its error. The adapter now preserves the error until the provider reports actual playback. The external-provider fixture reproduces the event ordering, and the renderer test verifies error retention and explicit playback recovery.
