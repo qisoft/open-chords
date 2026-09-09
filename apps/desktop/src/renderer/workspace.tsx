@@ -24,6 +24,7 @@ import {
 } from "react";
 
 import { ChordEditor } from "./chord-editor.tsx";
+import { ExportProject } from "./export-project.tsx";
 import { LyricsSelection } from "./lyrics-selection.tsx";
 import { LyricsTiming } from "./lyrics-timing.tsx";
 import { LyricsViewport } from "./lyrics-viewport.tsx";
@@ -292,6 +293,7 @@ export function ProjectWorkspace({
             {snapshot.project.activeView === null ? "Awaiting analysis" : "Analysis ready"}
           </span>
         </div>
+        <ExportProject api={api} snapshot={snapshot} />
         <ModelPacks api={api} />
         <YouTubeSource api={api} />
       </header>

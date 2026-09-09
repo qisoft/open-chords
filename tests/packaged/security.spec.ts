@@ -268,7 +268,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       });
     }
     expect(renderer).toMatchObject({
-      apiKeys: ["alignment", "lyrics", "media", "models", "project", "shell", "youtube"],
+      apiKeys: ["alignment", "exports", "lyrics", "media", "models", "project", "shell", "youtube"],
       modelsKeys: ["perform"],
       contentSecurityPolicy: EXPECTED_RENDERER_CSP,
       effectiveCsp: { evalBlocked: true, inlineScriptBlocked: true },

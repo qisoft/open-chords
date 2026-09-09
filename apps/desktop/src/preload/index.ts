@@ -296,6 +296,16 @@ function reportDispatchError(error: unknown): void {
 }
 
 const api: OpenChordsDesktopApi = {
+  exports: Object.freeze({
+    perform: async (action) =>
+      invokeCapability(
+        DESKTOP_IPC_CHANNELS.exportsPerform,
+        DesktopCommandSchema.parse({ ...envelope(), action, type: "exports.perform" }),
+        (response): response is Extract<DesktopResponse, { type: "exports.result" }> =>
+          response.type === "exports.result",
+        "Unexpected export response",
+      ),
+  }),
   youtube: Object.freeze({
     perform: async (action) =>
       invokeCapability(

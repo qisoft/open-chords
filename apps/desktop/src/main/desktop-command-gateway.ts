@@ -22,6 +22,7 @@ import {
 
 import { AlignmentServiceError, type AlignmentService } from "./alignment-service.ts";
 import { APP_ENTRY_URL } from "./desktop-origin.ts";
+import type { JsonExports } from "./json-exports.ts";
 import type {
   LocalMediaPlayback,
   LocalMediaRelinkResult,
@@ -130,6 +131,7 @@ export type ModelGatewayService = {
 };
 
 export class DesktopCommandGateway {
+  readonly #exports: JsonExports | undefined;
   readonly #youtube: YouTubeService | undefined;
   readonly #authority: ProjectAuthority;
   readonly #invalidCounts = new Map<string, number>();
@@ -158,9 +160,11 @@ export class DesktopCommandGateway {
     models?: ModelGatewayService,
     alignment?: AlignmentService,
     youtube?: YouTubeService,
+    exports?: JsonExports,
   ) {
     this.#authority = authority;
     this.#youtube = youtube;
+    this.#exports = exports;
     this.#models = models;
     this.#alignment = alignment;
     this.#lyrics = lyrics;
@@ -219,6 +223,30 @@ export class DesktopCommandGateway {
       };
     }
 
+    if (command.type === "exports.perform") {
+      try {
+        if (!this.#exports) throw new Error("Unavailable");
+        const result = await this.#exports.perform(command.action);
+        return {
+          action: "none",
+          response: DesktopResponseSchema.parse({
+            ...responseEnvelope(command),
+            type: "exports.result",
+            ...result,
+          }),
+        };
+      } catch {
+        return {
+          action: "none",
+          response: errorResponse(
+            "capability_unavailable",
+            "Export unavailable. Check the destination and saved Project, then retry.",
+            true,
+            command,
+          ),
+        };
+      }
+    }
     if (command.type === "youtube.perform") {
       try {
         if (!this.#youtube) throw new Error("Unavailable");
