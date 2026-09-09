@@ -502,13 +502,18 @@ test("selection and persistent loop remain independent in the deterministic fixt
       "Am7(9, add11, add9)/E",
     );
     await position.fill("0");
-    await page.setViewportSize({ height: 720, width: 320 });
-    const pickupBounds = await pickup.boundingBox();
-    const completeBounds = await complete.boundingBox();
-    if (pickupBounds === null || completeBounds === null) {
-      throw new Error("Timeline region geometry is unavailable");
+    for (let resize = 0; resize < 20; resize++) {
+      await page.setViewportSize({ height: 720, width: 1240 });
+      await page.setViewportSize({ height: 720, width: 320 });
+      // Sample both bars in one layout state while the native window is resizing.
+      const geometry = await pickup.or(complete).evaluateAll((bars) => ({
+        viewportWidth: window.innerWidth,
+        widths: bars.map((bar) => bar.getBoundingClientRect().width),
+      }));
+      expect(geometry.viewportWidth).toBe(320);
+      expect(geometry.widths).toHaveLength(2);
+      expect(geometry.widths[0]! / geometry.widths[1]!).toBeCloseTo(1 / 3, 2);
     }
-    expect(pickupBounds.width / completeBounds.width).toBeCloseTo(1 / 3, 2);
     await expect(pickup).toHaveAttribute("tabindex", "0");
     await expect(complete).toHaveAttribute("tabindex", "-1");
     await pickup.focus();
