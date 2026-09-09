@@ -52,7 +52,7 @@ for (const [code, error] of [
         await expect(player.getByRole("status")).toHaveText("Playback: playing");
       }
     } finally {
-      await application.close();
+      await test.step("Close Electron and its isolated player", () => application.close());
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -92,7 +92,7 @@ test("a slow provider status read leaves the existing player session available",
       .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
       .toMatchObject({ player: { state: "ready", videoId: "slow0000000" } });
   } finally {
-    await application.close();
+    await test.step("Close Electron and its isolated player", () => application.close());
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -237,7 +237,7 @@ test("the named player API opens an unprivileged surface and Offline Mode destro
       ),
     ).toMatchObject({ type: "desktop.error" });
   } finally {
-    await application.close();
+    await test.step("Close Electron and its isolated player", () => application.close());
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -24,7 +24,7 @@ YouTube's [desktop client identity requirement](https://developers.google.com/yo
 - `tests/packaged/youtube.spec.ts`: the same commands, error 153, non-embeddable response, autoplay denial, network failure and Offline Mode in the extracted release ZIP on macOS/Windows. Deterministic fixtures are not live playback evidence.
 - `OPEN_CHORDS_LIVE_YOUTUBE=1 pnpm exec playwright test tests/packaged/youtube.spec.ts`: separately verifies actual media-time advancement and observed Referer in the installed artifact. It emits an observation artifact and fails if playback cannot be established. Live-provider availability is never inferred from metadata or initialization.
 
-The live CI step remains an acceptance gate for this frontier's confirmed installed seam. A provider outage is a failed observation, not proof that playback works on that platform.
+Pull-request CI runs deterministic installed tests. An explicit `workflow_dispatch` run also executes the live installed observation on both native profiles and fails if that observation fails. Live evidence remains required for this frontier's installed acceptance; it is not required on every pull-request runner. A provider outage is a failed observation, not proof that playback works on that platform.
 
 Metadata and playback provide no acquisition verdict. Local-file ingestion remains the analysis path; isolated acquisition is a separate implementation issue.
 
@@ -34,6 +34,6 @@ The [2026-09-09 installed macOS arm64 observation](evidence/youtube-player-macos
 
 ## CI provider restriction
 
-The [2026-09-09 GitHub macOS observation](https://github.com/qisoft/open-chords/actions/runs/34362660401) sent the required Referer, but YouTube displayed a [sign-in bot challenge](evidence/youtube-player-ci-bot-challenge-2026-09-09.png) and media time remained at zero. The preceding eight installed tests passed. This is a failed live observation; the CI gate remains blocking. Local installed macOS playback passed separately. No cookies, account credentials or challenge bypass are introduced to make the CI observation pass.
+The [2026-09-09 GitHub macOS observation](https://github.com/qisoft/open-chords/actions/runs/34362660401) sent the required Referer, but YouTube displayed a [sign-in bot challenge](evidence/youtube-player-ci-bot-challenge-2026-09-09.png) and media time remained at zero. The preceding eight installed tests passed. This is a failed live observation; installed acceptance remains open. The live observation is now an explicit workflow run, while pull-request CI checks deterministic behavior. Local installed macOS playback passed separately. No cookies, account credentials or challenge bypass are introduced to make the CI observation pass.
 
 That observation also exposed a trailing provider `ready` event after its error. The adapter now preserves the error until the provider reports actual playback. The external-provider fixture reproduces the event ordering, and the renderer test verifies error retention and explicit playback recovery.

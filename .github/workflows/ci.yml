@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -163,6 +164,7 @@ jobs:
       - name: Verify installed trust boundary
         run: pnpm test:packaged --retries=0
       - name: Observe live installed YouTube playback
+        if: github.event_name == 'workflow_dispatch'
         env:
           OPEN_CHORDS_LIVE_YOUTUBE: "1"
         run: pnpm exec playwright test tests/packaged/youtube.spec.ts --grep "installed live" --retries=0 --output=test-results/youtube-live
