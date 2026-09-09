@@ -1,0 +1,1337 @@
+{
+  "$defs": {
+    "AlignedAssertion": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "asserted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "low_confidence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Assertion": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "asserted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "low_confidence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "type": "array"
+            },
+            "reasonCodes": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "state": {
+              "const": "abstained",
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "reasonCodes",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Bar": {
+      "additionalProperties": false,
+      "properties": {
+        "beats": {
+          "items": {
+            "$ref": "#/$defs/Beat"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "meter": {
+          "$ref": "#/$defs/Meter"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        },
+        "status": {
+          "$ref": "#/$defs/BarStatus"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "beats",
+        "id",
+        "meter",
+        "status"
+      ],
+      "type": "object"
+    },
+    "BarStatus": {
+      "enum": [
+        "complete",
+        "pickup",
+        "truncated"
+      ],
+      "type": "string"
+    },
+    "Beat": {
+      "additionalProperties": false,
+      "properties": {
+        "atSample": {
+          "$ref": "#/$defs/SampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "role": {
+          "enum": [
+            "downbeat",
+            "beat"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "atSample",
+        "id",
+        "role"
+      ],
+      "type": "object"
+    },
+    "ChordEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/Assertion"
+        },
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        },
+        "value": {
+          "$ref": "#/$defs/ChordValue"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ChordIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "additions": {
+          "items": {
+            "pattern": "^add(?:2|4|6|9|11|13)$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "alterations": {
+          "items": {
+            "pattern": "^(?:b|#)(?:5|9|11|13)$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bass": {
+          "$ref": "#/$defs/PitchClass"
+        },
+        "extensions": {
+          "items": {
+            "enum": [
+              "6",
+              "7",
+              "9",
+              "11",
+              "13"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "chord",
+          "type": "string"
+        },
+        "omissions": {
+          "items": {
+            "pattern": "^no(?:3|5)$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "quality": {
+          "enum": [
+            "major",
+            "minor",
+            "diminished",
+            "augmented",
+            "sus2",
+            "sus4",
+            "major7",
+            "minor7",
+            "diminished7",
+            "half_diminished"
+          ],
+          "type": "string"
+        },
+        "root": {
+          "$ref": "#/$defs/PitchClass"
+        }
+      },
+      "required": [
+        "additions",
+        "alterations",
+        "extensions",
+        "kind",
+        "omissions",
+        "quality",
+        "root"
+      ],
+      "type": "object"
+    },
+    "ChordValue": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ChordIdentity"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "no_chord",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "scale": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "scale",
+        "value"
+      ],
+      "type": "object"
+    },
+    "KeyRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/Assertion"
+        },
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        },
+        "value": {
+          "$ref": "#/$defs/KeyValue"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "value"
+      ],
+      "type": "object"
+    },
+    "KeyValue": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "key",
+              "type": "string"
+            },
+            "mode": {
+              "enum": [
+                "major",
+                "minor",
+                "dorian",
+                "mixolydian",
+                "other"
+              ],
+              "type": "string"
+            },
+            "tonic": {
+              "$ref": "#/$defs/PitchClass"
+            }
+          },
+          "required": [
+            "kind",
+            "mode",
+            "tonic"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LyricsTiming": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "assertion": {
+              "$ref": "#/$defs/AlignedAssertion"
+            },
+            "endSample": {
+              "$ref": "#/$defs/PositiveSampleFrame"
+            },
+            "startSample": {
+              "$ref": "#/$defs/SampleFrame"
+            },
+            "state": {
+              "const": "matched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "endSample",
+            "startSample",
+            "assertion",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reasonCode": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "unmatched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reasonCode",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Meter": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "anyOf": [
+            {
+              "const": 2,
+              "type": "number"
+            },
+            {
+              "const": 4,
+              "type": "number"
+            },
+            {
+              "const": 8,
+              "type": "number"
+            },
+            {
+              "const": 16,
+              "type": "number"
+            }
+          ]
+        },
+        "numerator": {
+          "maximum": 32,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "type": "object"
+    },
+    "MusicalTimeline": {
+      "additionalProperties": false,
+      "properties": {
+        "bars": {
+          "items": {
+            "$ref": "#/$defs/Bar"
+          },
+          "type": "array"
+        },
+        "chordEvents": {
+          "items": {
+            "$ref": "#/$defs/ChordEvent"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "keyRegions": {
+          "items": {
+            "$ref": "#/$defs/KeyRegion"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "sectionRegions": {
+          "items": {
+            "$ref": "#/$defs/SectionRegion"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "unmeteredRegions": {
+          "items": {
+            "$ref": "#/$defs/UnmeteredRegion"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bars",
+        "chordEvents",
+        "keyRegions",
+        "sectionRegions",
+        "unmeteredRegions"
+      ],
+      "type": "object"
+    },
+    "PitchClass": {
+      "enum": [
+        "A",
+        "A#",
+        "Ab",
+        "B",
+        "Bb",
+        "C",
+        "C#",
+        "D",
+        "D#",
+        "Db",
+        "E",
+        "Eb",
+        "F",
+        "F#",
+        "G",
+        "G#",
+        "Gb"
+      ],
+      "type": "string"
+    },
+    "PositiveSampleFrame": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
+    "SampleFrame": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "SectionRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/Assertion"
+        },
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "label": {
+          "enum": [
+            "intro",
+            "verse",
+            "pre_chorus",
+            "chorus",
+            "bridge",
+            "solo",
+            "interlude",
+            "outro",
+            "neutral",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "assertion",
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "StableId": {
+      "pattern": "^[a-z][a-z0-9]*_[a-z0-9][a-z0-9_-]*$",
+      "type": "string"
+    },
+    "TextOffset": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "UnmeteredRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "endSample": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "reasonCode": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "startSample": {
+          "$ref": "#/$defs/SampleFrame"
+        }
+      },
+      "required": [
+        "endSample",
+        "startSample",
+        "id",
+        "reasonCode"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "effectiveTimeline": {
+      "$ref": "#/$defs/MusicalTimeline"
+    },
+    "format": {
+      "const": "open-chords/json-snapshot",
+      "type": "string"
+    },
+    "lyrics": {
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "additionalProperties": false,
+          "properties": {
+            "attribution": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "id": {
+              "$ref": "#/$defs/StableId"
+            },
+            "language": {
+              "minLength": 2,
+              "type": "string"
+            },
+            "lines": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "endOffset": {
+                    "$ref": "#/$defs/TextOffset"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StableId"
+                  },
+                  "startOffset": {
+                    "$ref": "#/$defs/TextOffset"
+                  }
+                },
+                "required": [
+                  "endOffset",
+                  "id",
+                  "startOffset"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "notices": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "provenance": {
+              "additionalProperties": false,
+              "properties": {
+                "provider": {
+                  "enum": [
+                    "user",
+                    "lrclib",
+                    "youtube_human",
+                    "youtube_automatic",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "reference": {
+                  "pattern": "^(user_supplied|lrclib:[0-9]+|youtube:[A-Za-z0-9_-]{11}:[A-Za-z0-9-]+)$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider"
+              ],
+              "type": "object"
+            },
+            "suppliedTimingKind": {
+              "enum": [
+                "untimed",
+                "line",
+                "word"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "tokenization": {
+              "additionalProperties": false,
+              "properties": {
+                "scheme": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scheme",
+                "version"
+              ],
+              "type": "object"
+            },
+            "tokens": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "endOffset": {
+                    "$ref": "#/$defs/TextOffset"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StableId"
+                  },
+                  "lineId": {
+                    "$ref": "#/$defs/StableId"
+                  },
+                  "startOffset": {
+                    "$ref": "#/$defs/TextOffset"
+                  },
+                  "text": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "endOffset",
+                  "id",
+                  "lineId",
+                  "startOffset",
+                  "text"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "attribution",
+            "id",
+            "language",
+            "lines",
+            "notices",
+            "provenance",
+            "suppliedTimingKind",
+            "text",
+            "tokenization",
+            "tokens"
+          ],
+          "type": "object"
+        },
+        "effectiveAlignment": {
+          "additionalProperties": false,
+          "properties": {
+            "analysisRevisionId": {
+              "$ref": "#/$defs/StableId"
+            },
+            "id": {
+              "$ref": "#/$defs/StableId"
+            },
+            "lineOccurrences": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "lineId": {
+                    "$ref": "#/$defs/StableId"
+                  },
+                  "timing": {
+                    "$ref": "#/$defs/LyricsTiming"
+                  }
+                },
+                "required": [
+                  "lineId",
+                  "timing"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "lyricsDocumentId": {
+              "$ref": "#/$defs/StableId"
+            },
+            "occurrences": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "timing": {
+                    "$ref": "#/$defs/LyricsTiming"
+                  },
+                  "tokenId": {
+                    "$ref": "#/$defs/StableId"
+                  }
+                },
+                "required": [
+                  "timing",
+                  "tokenId"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "provenance": {
+              "additionalProperties": false,
+              "properties": {
+                "qualityStatus": {
+                  "const": "benchmark_pending",
+                  "type": "string"
+                },
+                "recipeHash": {
+                  "pattern": "^sha256:[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "resultHash": {
+                  "pattern": "^sha256:[a-f0-9]{64}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "recipeHash",
+                "resultHash",
+                "qualityStatus"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "analysisRevisionId",
+            "id",
+            "lineOccurrences",
+            "lyricsDocumentId",
+            "occurrences"
+          ],
+          "type": "object"
+        },
+        "originalAlignment": {
+          "additionalProperties": false,
+          "properties": {
+            "analysisRevisionId": {
+              "$ref": "#/$defs/StableId"
+            },
+            "id": {
+              "$ref": "#/$defs/StableId"
+            },
+            "lineOccurrences": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "lineId": {
+                    "$ref": "#/$defs/StableId"
+                  },
+                  "timing": {
+                    "$ref": "#/$defs/LyricsTiming"
+                  }
+                },
+                "required": [
+                  "lineId",
+                  "timing"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "lyricsDocumentId": {
+              "$ref": "#/$defs/StableId"
+            },
+            "occurrences": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "timing": {
+                    "$ref": "#/$defs/LyricsTiming"
+                  },
+                  "tokenId": {
+                    "$ref": "#/$defs/StableId"
+                  }
+                },
+                "required": [
+                  "timing",
+                  "tokenId"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "provenance": {
+              "additionalProperties": false,
+              "properties": {
+                "qualityStatus": {
+                  "const": "benchmark_pending",
+                  "type": "string"
+                },
+                "recipeHash": {
+                  "pattern": "^sha256:[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "resultHash": {
+                  "pattern": "^sha256:[a-f0-9]{64}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "recipeHash",
+                "resultHash",
+                "qualityStatus"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "analysisRevisionId",
+            "id",
+            "lineOccurrences",
+            "lyricsDocumentId",
+            "occurrences"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "document"
+      ],
+      "type": "object"
+    },
+    "omissions": {
+      "items": {
+        "enum": [
+          "unrecognized_lyrics_reference_omitted",
+          "unrecognized_lyrics_provider_omitted",
+          "support_claim_descriptions_omitted",
+          "alignment_recipe_omitted"
+        ],
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "original": {
+      "$ref": "#/$defs/MusicalTimeline"
+    },
+    "presentation": {
+      "additionalProperties": false,
+      "properties": {
+        "beginnerView": {
+          "type": "boolean"
+        },
+        "capoGuidance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enharmonicPreference": {
+          "enum": [
+            "sharp",
+            "flat",
+            "contextual"
+          ],
+          "type": "string"
+        },
+        "instrument": {
+          "enum": [
+            "guitar",
+            "ukulele",
+            "piano"
+          ],
+          "type": "string"
+        },
+        "transposeSemitones": {
+          "maximum": 11,
+          "minimum": -11,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "beginnerView",
+        "enharmonicPreference",
+        "transposeSemitones",
+        "instrument",
+        "capoGuidance"
+      ],
+      "type": "object"
+    },
+    "presentedChords": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "eventId": {
+            "$ref": "#/$defs/StableId"
+          },
+          "value": {
+            "$ref": "#/$defs/ChordValue"
+          }
+        },
+        "required": [
+          "eventId",
+          "value"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "profile": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "const": "open_chords_json",
+          "type": "string"
+        },
+        "presentation": {
+          "enum": [
+            "current",
+            "original"
+          ],
+          "type": "string"
+        },
+        "version": {
+          "const": "1.0",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "presentation"
+      ],
+      "type": "object"
+    },
+    "project": {
+      "additionalProperties": false,
+      "properties": {
+        "durationSamples": {
+          "$ref": "#/$defs/PositiveSampleFrame"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "sampleRate": {
+          "exclusiveMinimum": 0,
+          "maximum": 384000,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "sampleRate",
+        "durationSamples"
+      ],
+      "type": "object"
+    },
+    "provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "analysisRevisionId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        },
+        "manifestHash": {
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "supportClaimReferences": {
+          "items": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "benchmarkPolicyHash": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "benchmarkRunHash": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "capability": {
+                    "enum": [
+                      "rhythm",
+                      "meter",
+                      "key",
+                      "chords",
+                      "sections",
+                      "lyrics_alignment"
+                    ],
+                    "type": "string"
+                  },
+                  "evidenceStatus": {
+                    "const": "supported",
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StableId"
+                  }
+                },
+                "required": [
+                  "id",
+                  "capability",
+                  "evidenceStatus",
+                  "benchmarkPolicyHash",
+                  "benchmarkRunHash"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "benchmarkPolicyHash": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "capability": {
+                    "enum": [
+                      "rhythm",
+                      "meter",
+                      "key",
+                      "chords",
+                      "sections",
+                      "lyrics_alignment"
+                    ],
+                    "type": "string"
+                  },
+                  "evidenceStatus": {
+                    "const": "insufficient_evidence",
+                    "type": "string"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StableId"
+                  }
+                },
+                "required": [
+                  "id",
+                  "capability",
+                  "evidenceStatus",
+                  "benchmarkPolicyHash"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "createdAt",
+        "manifestHash",
+        "supportClaimReferences"
+      ],
+      "type": "object"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "type": "string"
+    },
+    "selection": {
+      "additionalProperties": false,
+      "properties": {
+        "analysisRevisionId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "editLayerId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "lyricsAlignmentId": {
+          "$ref": "#/$defs/StableId"
+        },
+        "lyricsDocumentId": {
+          "$ref": "#/$defs/StableId"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "editLayerId"
+      ],
+      "type": "object"
+    },
+    "userAuthorship": {
+      "additionalProperties": false,
+      "properties": {
+        "entityIds": {
+          "items": {
+            "$ref": "#/$defs/StableId"
+          },
+          "type": "array"
+        },
+        "lyricsAnchors": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "analysisRevisionId": {
+                "$ref": "#/$defs/StableId"
+              },
+              "endSample": {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              "firstTokenId": {
+                "$ref": "#/$defs/StableId"
+              },
+              "id": {
+                "$ref": "#/$defs/StableId"
+              },
+              "lastTokenId": {
+                "$ref": "#/$defs/StableId"
+              },
+              "lyricsDocumentId": {
+                "$ref": "#/$defs/StableId"
+              },
+              "startSample": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "lyricsDocumentId",
+              "analysisRevisionId",
+              "firstTokenId",
+              "lastTokenId",
+              "startSample",
+              "endSample"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entityIds",
+        "lyricsAnchors"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "format",
+    "schemaVersion",
+    "profile",
+    "project",
+    "selection",
+    "presentation",
+    "original",
+    "effectiveTimeline",
+    "presentedChords",
+    "provenance",
+    "userAuthorship",
+    "omissions"
+  ],
+  "type": "object"
+}

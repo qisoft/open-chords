@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { writeSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   DESKTOP_IPC_PROTOCOL,
@@ -17,6 +17,7 @@ import { createContainedAlignmentWorker, recoverAlignmentWorkspaces } from "./al
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { blockCpuWorkAfterIncompleteCleanup } from "./cpu-work.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
+import { openJsonExports, type JsonExports } from "./json-exports.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
@@ -93,6 +94,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   let alignmentService: AlignmentService | null = null;
   let lyricsDiscovery: LyricsDiscovery | null = null;
   let youtube: YouTubeService | null = null;
+  let jsonExports: JsonExports | null = null;
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
   const rendererContexts = new Map<
@@ -110,6 +112,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
       "before-quit",
       createMediaCleanupBeforeQuitHandler({
         dispose: async () => {
+          jsonExports?.cancel();
           youtube?.close();
           try {
             await alignmentService?.dispose();
@@ -144,6 +147,19 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
       .then(async () => {
         const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
         const stateRoot = app.getPath("userData");
+        jsonExports = await openJsonExports({
+          library: projectLibrary,
+          stateRoot,
+          protectedRoots: [app.getAppPath(), process.resourcesPath, dirname(process.execPath)],
+          pickTarget: async () => {
+            const result = await dialog.showSaveDialog(getOrCreateWindow(), {
+              title: "Export Open Chords JSON",
+              defaultPath: "Open Chords.json",
+              filters: [{ name: "Open Chords JSON", extensions: ["json"] }],
+            });
+            return result.canceled ? null : result.filePath;
+          },
+        });
         const network = await openNetworkMode(stateRoot);
         youtube = new YouTubeService({
           library: projectLibrary,
@@ -259,6 +275,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           );
         });
         installDesktopIpc(projectLibrary, {
+          exports: jsonExports,
           youtube,
           ...(alignmentService ? { alignment: alignmentService } : {}),
           models: {
@@ -317,6 +334,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   }
 
   function revokeRendererGeneration(webContentsId: number): void {
+    jsonExports?.cancel();
     youtube?.cancel();
     lyricsDiscovery?.cancel();
     modelStore?.cancel();

@@ -1,0 +1,853 @@
+{
+  "effectiveTimeline": {
+    "bars": [
+      {
+        "beats": [
+          {
+            "atSample": 0,
+            "id": "beat_pickup_1",
+            "role": "downbeat"
+          },
+          {
+            "atSample": 4000,
+            "id": "beat_pickup_2",
+            "role": "beat"
+          }
+        ],
+        "endSample": 8000,
+        "id": "bar_pickup",
+        "meter": {
+          "denominator": 4,
+          "numerator": 4
+        },
+        "startSample": 0,
+        "status": "pickup"
+      },
+      {
+        "beats": [
+          {
+            "atSample": 8000,
+            "id": "beat_three_1",
+            "role": "downbeat"
+          },
+          {
+            "atSample": 16000,
+            "id": "beat_three_2",
+            "role": "beat"
+          },
+          {
+            "atSample": 24000,
+            "id": "beat_three_3",
+            "role": "beat"
+          }
+        ],
+        "endSample": 32000,
+        "id": "bar_three_four",
+        "meter": {
+          "denominator": 4,
+          "numerator": 3
+        },
+        "startSample": 8000,
+        "status": "complete"
+      },
+      {
+        "beats": [
+          {
+            "atSample": 40000,
+            "id": "beat_truncated_1",
+            "role": "downbeat"
+          },
+          {
+            "atSample": 44000,
+            "id": "beat_truncated_2",
+            "role": "beat"
+          }
+        ],
+        "endSample": 48000,
+        "id": "bar_truncated",
+        "meter": {
+          "denominator": 8,
+          "numerator": 6
+        },
+        "startSample": 40000,
+        "status": "truncated"
+      }
+    ],
+    "chordEvents": [
+      {
+        "assertion": {
+          "evidence": [
+            {
+              "name": "chroma",
+              "scale": "cosine",
+              "value": 0.91
+            }
+          ],
+          "reasonCodes": [],
+          "state": "asserted"
+        },
+        "endSample": 8000,
+        "id": "chord_am7_e",
+        "startSample": 0,
+        "value": {
+          "additions": [
+            "add11",
+            "add9"
+          ],
+          "alterations": [],
+          "bass": "E",
+          "extensions": [
+            "9"
+          ],
+          "kind": "chord",
+          "omissions": [],
+          "quality": "minor7",
+          "root": "A"
+        }
+      },
+      {
+        "assertion": {
+          "evidence": [
+            {
+              "name": "margin",
+              "scale": "logit",
+              "value": -0.2
+            }
+          ],
+          "reasonCodes": [
+            "insufficient_harmonic_evidence"
+          ],
+          "state": "abstained"
+        },
+        "endSample": 20000,
+        "id": "chord_c_sharp",
+        "startSample": 8000,
+        "value": {
+          "additions": [],
+          "alterations": [
+            "#11"
+          ],
+          "extensions": [
+            "13"
+          ],
+          "kind": "chord",
+          "omissions": [
+            "no5"
+          ],
+          "quality": "major7",
+          "root": "C#"
+        }
+      },
+      {
+        "assertion": {
+          "evidence": [
+            {
+              "name": "energy",
+              "scale": "dbfs",
+              "value": -72.5
+            }
+          ],
+          "reasonCodes": [
+            "asserted_no_chord"
+          ],
+          "state": "asserted"
+        },
+        "endSample": 32000,
+        "id": "chord_n",
+        "startSample": 20000,
+        "value": {
+          "kind": "no_chord"
+        }
+      },
+      {
+        "assertion": {
+          "evidence": [
+            {
+              "name": "template",
+              "scale": "cosine",
+              "value": 0.44
+            }
+          ],
+          "reasonCodes": [
+            "below_asserted_threshold"
+          ],
+          "state": "low_confidence"
+        },
+        "endSample": 48000,
+        "id": "chord_g7",
+        "startSample": 32000,
+        "value": {
+          "additions": [],
+          "alterations": [],
+          "extensions": [
+            "7"
+          ],
+          "kind": "chord",
+          "omissions": [],
+          "quality": "major",
+          "root": "G"
+        }
+      }
+    ],
+    "keyRegions": [
+      {
+        "assertion": {
+          "evidence": [],
+          "reasonCodes": [],
+          "state": "asserted"
+        },
+        "endSample": 32000,
+        "id": "key_a_minor",
+        "startSample": 0,
+        "value": {
+          "kind": "key",
+          "mode": "minor",
+          "tonic": "A"
+        }
+      },
+      {
+        "assertion": {
+          "evidence": [],
+          "reasonCodes": [
+            "key_uncertain"
+          ],
+          "state": "abstained"
+        },
+        "endSample": 48000,
+        "id": "key_unknown",
+        "startSample": 32000,
+        "value": {
+          "kind": "unknown"
+        }
+      }
+    ],
+    "sectionRegions": [
+      {
+        "assertion": {
+          "evidence": [],
+          "reasonCodes": [],
+          "state": "asserted"
+        },
+        "endSample": 20000,
+        "id": "section_intro",
+        "label": "intro",
+        "startSample": 0
+      },
+      {
+        "assertion": {
+          "evidence": [],
+          "reasonCodes": [
+            "section_uncertain"
+          ],
+          "state": "abstained"
+        },
+        "endSample": 48000,
+        "id": "section_unknown",
+        "label": "unknown",
+        "startSample": 20000
+      }
+    ],
+    "unmeteredRegions": [
+      {
+        "endSample": 40000,
+        "id": "unmetered_bridge",
+        "reasonCode": "meter_abstained",
+        "startSample": 32000
+      }
+    ]
+  },
+  "format": "open-chords/json-snapshot",
+  "lyrics": {
+    "document": {
+      "attribution": [
+        "User-supplied fixture text"
+      ],
+      "id": "lyrics_repeated",
+      "language": "en",
+      "lines": [
+        {
+          "endOffset": 5,
+          "id": "line_first",
+          "startOffset": 0
+        },
+        {
+          "endOffset": 13,
+          "id": "line_second",
+          "startOffset": 6
+        }
+      ],
+      "notices": [
+        "Test fixture only"
+      ],
+      "provenance": {
+        "provider": "user"
+      },
+      "suppliedTimingKind": "untimed",
+      "text": "go go\nhome go",
+      "tokenization": {
+        "scheme": "open-chords-whitespace",
+        "version": "1.0"
+      },
+      "tokens": [
+        {
+          "endOffset": 2,
+          "id": "token_go_1",
+          "lineId": "line_first",
+          "startOffset": 0,
+          "text": "go"
+        },
+        {
+          "endOffset": 5,
+          "id": "token_go_2",
+          "lineId": "line_first",
+          "startOffset": 3,
+          "text": "go"
+        },
+        {
+          "endOffset": 10,
+          "id": "token_home",
+          "lineId": "line_second",
+          "startOffset": 6,
+          "text": "home"
+        },
+        {
+          "endOffset": 13,
+          "id": "token_go_3",
+          "lineId": "line_second",
+          "startOffset": 11,
+          "text": "go"
+        }
+      ]
+    },
+    "effectiveAlignment": {
+      "analysisRevisionId": "revision_original",
+      "id": "alignment_repeated",
+      "lineOccurrences": [
+        {
+          "lineId": "line_first",
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [],
+              "state": "asserted"
+            },
+            "endSample": 5000,
+            "startSample": 1000,
+            "state": "matched"
+          }
+        },
+        {
+          "lineId": "line_second",
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [
+                "weak_alignment"
+              ],
+              "state": "low_confidence"
+            },
+            "endSample": 28000,
+            "startSample": 20000,
+            "state": "matched"
+          }
+        }
+      ],
+      "lyricsDocumentId": "lyrics_repeated",
+      "occurrences": [
+        {
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [],
+              "state": "asserted"
+            },
+            "endSample": 3000,
+            "startSample": 1000,
+            "state": "matched"
+          },
+          "tokenId": "token_go_1"
+        },
+        {
+          "timing": {
+            "reasonCode": "repetition_ambiguous",
+            "state": "unmatched"
+          },
+          "tokenId": "token_go_2"
+        },
+        {
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [
+                "weak_alignment"
+              ],
+              "state": "low_confidence"
+            },
+            "endSample": 24000,
+            "startSample": 20000,
+            "state": "matched"
+          },
+          "tokenId": "token_home"
+        },
+        {
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [],
+              "state": "asserted"
+            },
+            "endSample": 28000,
+            "startSample": 25000,
+            "state": "matched"
+          },
+          "tokenId": "token_go_3"
+        }
+      ]
+    },
+    "originalAlignment": {
+      "analysisRevisionId": "revision_original",
+      "id": "alignment_repeated",
+      "lineOccurrences": [
+        {
+          "lineId": "line_first",
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [],
+              "state": "asserted"
+            },
+            "endSample": 5000,
+            "startSample": 1000,
+            "state": "matched"
+          }
+        },
+        {
+          "lineId": "line_second",
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [
+                "weak_alignment"
+              ],
+              "state": "low_confidence"
+            },
+            "endSample": 28000,
+            "startSample": 20000,
+            "state": "matched"
+          }
+        }
+      ],
+      "lyricsDocumentId": "lyrics_repeated",
+      "occurrences": [
+        {
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [],
+              "state": "asserted"
+            },
+            "endSample": 3000,
+            "startSample": 1000,
+            "state": "matched"
+          },
+          "tokenId": "token_go_1"
+        },
+        {
+          "timing": {
+            "reasonCode": "repetition_ambiguous",
+            "state": "unmatched"
+          },
+          "tokenId": "token_go_2"
+        },
+        {
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [
+                "weak_alignment"
+              ],
+              "state": "low_confidence"
+            },
+            "endSample": 24000,
+            "startSample": 20000,
+            "state": "matched"
+          },
+          "tokenId": "token_home"
+        },
+        {
+          "timing": {
+            "assertion": {
+              "evidence": [],
+              "reasonCodes": [],
+              "state": "asserted"
+            },
+            "endSample": 28000,
+            "startSample": 25000,
+            "state": "matched"
+          },
+          "tokenId": "token_go_3"
+        }
+      ]
+    }
+  },
+  "omissions": [
+    "unrecognized_lyrics_reference_omitted",
+    "support_claim_descriptions_omitted"
+  ],
+  "original": {
+    "bars": [
+      {
+        "beats": [
+          {
+            "atSample": 0,
+            "id": "beat_pickup_1",
+            "role": "downbeat"
+          },
+          {
+            "atSample": 4000,
+            "id": "beat_pickup_2",
+            "role": "beat"
+          }
+        ],
+        "endSample": 8000,
+        "id": "bar_pickup",
+        "meter": {
+          "denominator": 4,
+          "numerator": 4
+        },
+        "startSample": 0,
+        "status": "pickup"
+      },
+      {
+        "beats": [
+          {
+            "atSample": 8000,
+            "id": "beat_three_1",
+            "role": "downbeat"
+          },
+          {
+            "atSample": 16000,
+            "id": "beat_three_2",
+            "role": "beat"
+          },
+          {
+            "atSample": 24000,
+            "id": "beat_three_3",
+            "role": "beat"
+          }
+        ],
+        "endSample": 32000,
+        "id": "bar_three_four",
+        "meter": {
+          "denominator": 4,
+          "numerator": 3
+        },
+        "startSample": 8000,
+        "status": "complete"
+      },
+      {
+        "beats": [
+          {
+            "atSample": 40000,
+            "id": "beat_truncated_1",
+            "role": "downbeat"
+          },
+          {
+            "atSample": 44000,
+            "id": "beat_truncated_2",
+            "role": "beat"
+          }
+        ],
+        "endSample": 48000,
+        "id": "bar_truncated",
+        "meter": {
+          "denominator": 8,
+          "numerator": 6
+        },
+        "startSample": 40000,
+        "status": "truncated"
+      }
+    ],
+    "chordEvents": [
+      {
+        "assertion": {
+          "evidence": [
+            {
+              "name": "chroma",
+              "scale": "cosine",
+              "value": 0.91
+            }
+          ],
+          "reasonCodes": [],
+          "state": "asserted"
+        },
+        "endSample": 8000,
+        "id": "chord_am7_e",
+        "startSample": 0,
+        "value": {
+          "additions": [
+            "add11",
+            "add9"
+          ],
+          "alterations": [],
+          "bass": "E",
+          "extensions": [
+            "9"
+          ],
+          "kind": "chord",
+          "omissions": [],
+          "quality": "minor7",
+          "root": "A"
+        }
+      },
+      {
+        "assertion": {
+          "evidence": [
+            {
+              "name": "margin",
+              "scale": "logit",
+              "value": -0.2
+            }
+          ],
+          "reasonCodes": [
+            "insufficient_harmonic_evidence"
+          ],
+          "state": "abstained"
+        },
+        "endSample": 20000,
+        "id": "chord_c_sharp",
+        "startSample": 8000,
+        "value": {
+          "additions": [],
+          "alterations": [
+            "#11"
+          ],
+          "extensions": [
+            "13"
+          ],
+          "kind": "chord",
+          "omissions": [
+            "no5"
+          ],
+          "quality": "major7",
+          "root": "C#"
+        }
+      },
+      {
+        "assertion": {
+          "evidence": [
+            {
+              "name": "energy",
+              "scale": "dbfs",
+              "value": -72.5
+            }
+          ],
+          "reasonCodes": [
+            "asserted_no_chord"
+          ],
+          "state": "asserted"
+        },
+        "endSample": 32000,
+        "id": "chord_n",
+        "startSample": 20000,
+        "value": {
+          "kind": "no_chord"
+        }
+      },
+      {
+        "assertion": {
+          "evidence": [
+            {
+              "name": "template",
+              "scale": "cosine",
+              "value": 0.44
+            }
+          ],
+          "reasonCodes": [
+            "below_asserted_threshold"
+          ],
+          "state": "low_confidence"
+        },
+        "endSample": 48000,
+        "id": "chord_g7",
+        "startSample": 32000,
+        "value": {
+          "additions": [],
+          "alterations": [],
+          "extensions": [
+            "7"
+          ],
+          "kind": "chord",
+          "omissions": [],
+          "quality": "major",
+          "root": "G"
+        }
+      }
+    ],
+    "keyRegions": [
+      {
+        "assertion": {
+          "evidence": [],
+          "reasonCodes": [],
+          "state": "asserted"
+        },
+        "endSample": 32000,
+        "id": "key_a_minor",
+        "startSample": 0,
+        "value": {
+          "kind": "key",
+          "mode": "minor",
+          "tonic": "A"
+        }
+      },
+      {
+        "assertion": {
+          "evidence": [],
+          "reasonCodes": [
+            "key_uncertain"
+          ],
+          "state": "abstained"
+        },
+        "endSample": 48000,
+        "id": "key_unknown",
+        "startSample": 32000,
+        "value": {
+          "kind": "unknown"
+        }
+      }
+    ],
+    "sectionRegions": [
+      {
+        "assertion": {
+          "evidence": [],
+          "reasonCodes": [],
+          "state": "asserted"
+        },
+        "endSample": 20000,
+        "id": "section_intro",
+        "label": "intro",
+        "startSample": 0
+      },
+      {
+        "assertion": {
+          "evidence": [],
+          "reasonCodes": [
+            "section_uncertain"
+          ],
+          "state": "abstained"
+        },
+        "endSample": 48000,
+        "id": "section_unknown",
+        "label": "unknown",
+        "startSample": 20000
+      }
+    ],
+    "unmeteredRegions": [
+      {
+        "endSample": 40000,
+        "id": "unmetered_bridge",
+        "reasonCode": "meter_abstained",
+        "startSample": 32000
+      }
+    ]
+  },
+  "presentation": {
+    "beginnerView": false,
+    "capoGuidance": null,
+    "enharmonicPreference": "contextual",
+    "instrument": "guitar",
+    "transposeSemitones": 0
+  },
+  "presentedChords": [
+    {
+      "eventId": "chord_am7_e",
+      "value": {
+        "additions": [
+          "add11",
+          "add9"
+        ],
+        "alterations": [],
+        "bass": "E",
+        "extensions": [
+          "9"
+        ],
+        "kind": "chord",
+        "omissions": [],
+        "quality": "minor7",
+        "root": "A"
+      }
+    },
+    {
+      "eventId": "chord_c_sharp",
+      "value": {
+        "additions": [],
+        "alterations": [
+          "#11"
+        ],
+        "extensions": [
+          "13"
+        ],
+        "kind": "chord",
+        "omissions": [
+          "no5"
+        ],
+        "quality": "major7",
+        "root": "C#"
+      }
+    },
+    {
+      "eventId": "chord_n",
+      "value": {
+        "kind": "no_chord"
+      }
+    },
+    {
+      "eventId": "chord_g7",
+      "value": {
+        "additions": [],
+        "alterations": [],
+        "extensions": [
+          "7"
+        ],
+        "kind": "chord",
+        "omissions": [],
+        "quality": "major",
+        "root": "G"
+      }
+    }
+  ],
+  "profile": {
+    "id": "open_chords_json",
+    "presentation": "current",
+    "version": "1.0"
+  },
+  "project": {
+    "durationSamples": 48000,
+    "id": "project_golden",
+    "sampleRate": 48000
+  },
+  "provenance": {
+    "analysisRevisionId": "revision_original",
+    "createdAt": "2026-08-17T10:00:00Z",
+    "manifestHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "supportClaimReferences": [
+      {
+        "benchmarkPolicyHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "capability": "chords",
+        "evidenceStatus": "insufficient_evidence",
+        "id": "claim_fixture"
+      }
+    ]
+  },
+  "schemaVersion": "1.0",
+  "selection": {
+    "analysisRevisionId": "revision_original",
+    "editLayerId": "edit_original",
+    "lyricsAlignmentId": "alignment_repeated",
+    "lyricsDocumentId": "lyrics_repeated"
+  },
+  "userAuthorship": {
+    "entityIds": [],
+    "lyricsAnchors": []
+  }
+}

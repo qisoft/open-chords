@@ -46,6 +46,7 @@ import { z } from "zod";
 
 import { syncDirectory } from "./filesystem-durability.ts";
 import {
+  ExportReceiptSchema,
   locatorMatchesSourceIdentity,
   ProjectOwnedRecordsSchema,
   SourceLocatorSchema,
@@ -417,6 +418,46 @@ export class ProjectLibrary {
 
   get activeRoot(): string {
     return this.#activeRoot;
+  }
+
+  listExportReceipts(projectId: string): ProjectOwnedRecords["exportReceipts"] {
+    const entry = this.#entries.get(projectId);
+    if (!entry || entry.location === "trashed" || !entry.revision)
+      throw new Error("Export Project is unavailable");
+    return structuredClone(entry.revision.payload.records.exportReceipts);
+  }
+
+  async recordExportReceipt(projectId: string, input: unknown): Promise<void> {
+    const receipt = ExportReceiptSchema.parse(input);
+    await this.#serializeMutation(async () => {
+      const entry = this.#entries.get(projectId);
+      if (
+        !entry ||
+        entry.location === "trashed" ||
+        entry.status === "damaged" ||
+        !entry.revision ||
+        entry.compatibility === "read_only"
+      )
+        throw new Error("Export Project is not writable");
+      const existing = entry.revision.payload.records.exportReceipts.find(
+        ({ id }) => id === receipt.id,
+      );
+      if (existing) {
+        if (canonicalSerialize(existing) !== canonicalSerialize(receipt))
+          throw new Error("Export Receipts are immutable");
+        return;
+      }
+      const records = structuredClone(entry.revision.payload.records);
+      records.exportReceipts.push(receipt);
+      const payload = buildStoredPayload({ envelope: entry.revision.payload.envelope, records });
+      await this.#commitPayload(
+        projectId,
+        payload,
+        entry.revision.revision.projectRevisionId,
+        entry.revision.pointer.sequence + 1,
+        "edit_transaction",
+      );
+    });
   }
 
   listProjects(): ProjectLibraryListEntry[] {

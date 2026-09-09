@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 
 import { AlignmentActionSchema, AlignmentJobSummarySchema } from "./alignment.ts";
+import { ExportActionSchema, ExportReceiptSummarySchema } from "./exports.ts";
 import { DesktopMessageIdSchema } from "./identifiers.ts";
 import {
   YouTubeActionSchema,
@@ -27,6 +28,7 @@ export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
   youtubePerform: "open-chords:youtube:perform",
+  exportsPerform: "open-chords:exports:perform",
   alignmentPerform: "open-chords:alignment:perform",
   modelsPerform: "open-chords:models:perform",
   lyricsPerform: "open-chords:lyrics:perform",
@@ -184,6 +186,11 @@ export const AlignmentCommandSchema = z.strictObject({
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({
     ...correlatedEnvelope,
+    type: z.literal("exports.perform"),
+    action: ExportActionSchema,
+  }),
+  z.strictObject({
+    ...correlatedEnvelope,
     type: z.literal("youtube.perform"),
     action: YouTubeActionSchema,
   }),
@@ -235,6 +242,15 @@ const mediaSelectionEnvelope = {
 };
 
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    ...correlatedEnvelope,
+    type: z.literal("exports.result"),
+    projectId: DesktopProjectIdSchema,
+    state: z.enum(["idle", "saved", "cancelled", "cancelling", "receipt_pending"]),
+    busy: z.boolean(),
+    pendingRecovery: z.number().int().nonnegative(),
+    receipts: z.array(ExportReceiptSummarySchema).max(100),
+  }),
   z.strictObject({
     ...correlatedEnvelope,
     type: z.literal("youtube.result"),
@@ -404,6 +420,11 @@ export type MediaPlaybackResponse = Extract<
 >;
 
 export type OpenChordsDesktopApi = {
+  exports: {
+    perform(
+      action: z.infer<typeof ExportActionSchema>,
+    ): Promise<DesktopErrorResponse | Extract<DesktopResponse, { type: "exports.result" }>>;
+  };
   youtube: {
     perform(
       action: z.infer<typeof YouTubeActionSchema>,

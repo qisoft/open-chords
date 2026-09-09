@@ -16,6 +16,14 @@ export {
 } from "./edit-history.ts";
 export { canonicalSerialize } from "./canonical.ts";
 export {
+  captureJsonExport,
+  parseJsonExport,
+  serializeJsonExport,
+  JsonExportOptionsSchema,
+  OpenChordsJsonSnapshotSchema,
+  type OpenChordsJsonSnapshot,
+} from "./json-export.ts";
+export {
   ANALYSIS_CAPABILITY_STAGES,
   ANALYSIS_MAIN_STAGES,
   ANALYSIS_PIPELINE_STAGES,

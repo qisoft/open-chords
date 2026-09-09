@@ -8,7 +8,8 @@
     "out/**",
     "packages/testkit/contracts/v1/schema/**",
     "playwright-report/**",
-    "test-results/**"
+    "test-results/**",
+    "tests/fixtures/json-export-golden.json"
   ],
   "printWidth": 100,
   "sortImports": {},
