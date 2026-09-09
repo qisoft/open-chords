@@ -8,7 +8,7 @@ The JSON export implementation is merged at `e2bc48f51e22e54b1a5f89bb255bfb652db
 
 Authority: `CONTEXT.md`, specification section 17, and `docs/research/benchmark-release-gate.md` sections 1–3 and 9. This work supplies corpus governance and annotation tooling; metric implementation, threshold selection and release verdicts belong to the dependent benchmark-metrics issue.
 
-## Proposed public test boundaries
+## Confirmed public test boundaries
 
 All three boundaries were confirmed by the user on 2026-09-09.
 
@@ -20,7 +20,7 @@ All three boundaries were confirmed by the user on 2026-09-09.
 
 The repository has a normative benchmark plan but no corpus inventory, grants, independent annotations or Gold Reference files. The user confirmed there is no prepared external corpus; implement the tools first and keep real-corpus acceptance open. Synthetic fixtures may prove workflow correctness; they cannot count toward the 30–50-track corpus or authorize musical Support Claims. Recorded rights evidence is a maintainer-reviewed input, not an automated legal determination. Qualified independent human annotation and adjudication cannot be replaced by agent-generated labels.
 
-## Design constraints under investigation
+## Implementation constraints
 
 - Eligibility is evaluated for the specific requested use and execution location. Lack of public redistribution permission must not be confused with lack of authorized private execution; neither may be guessed from a source URL or repository license.
 - Preserve versioned source/audio/evidence/annotation hashes, reviewer and annotator pseudonyms, expiry/review conditions, and required attribution/notices. Public reports must respect disclosure permissions and omit private grant contents and media paths.
@@ -28,3 +28,7 @@ The repository has a normative benchmark plan but no corpus inventory, grants, i
 - Independent annotation submissions must remain distinct from adjudication. Record qualifications, guide/tool versions, exact sample timebase and disagreement/adjudication links; no candidate output is used as Gold.
 - A CLI role flag is not an access-control boundary. Sealed cleartext and custody keys must be unavailable to tuning processes. The storage design must prove that separation and authenticate the policy-freeze authority; policy numbers and release-run execution remain outside this issue.
 - No real media, restricted annotations, grants or sealed evidence enter Git, ordinary PR CI or public artifacts. Fixtures and their evidence must be unmistakably synthetic.
+
+## Implemented tooling
+
+The Rights Ledger, Gold Reference/JAMS APIs, cohort audit and encrypted file CLI are implemented under `tools/benchmark/`. See [operator workflow](../benchmark-corpus-workflow.md) and [validation/review evidence](../benchmark-corpus-validation.md). Real-corpus acceptance remains open; no metric threshold or Support Claim is established.
