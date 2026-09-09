@@ -51,6 +51,11 @@ import {
   SourceLocatorSchema,
   type ProjectOwnedRecords,
 } from "./project-library-records.ts";
+import {
+  appendYouTubeObservation,
+  readYouTubeSources,
+  mergeYouTubeSources,
+} from "./youtube-source-records.ts";
 
 const HASH_PATTERN = /^sha256:([a-f0-9]{64})$/;
 const PROJECT_REVISION_ID_PATTERN = /^projectrevision_[a-f0-9]{32}$/;
@@ -299,6 +304,41 @@ export async function openProjectLibrary(options: ProjectLibraryOptions): Promis
 }
 
 export class ProjectLibrary {
+  async listYouTubeSources() {
+    return this.#allYouTubeSources();
+  }
+
+  async observeYouTubeSource(videoId: string, observation: unknown, signal?: AbortSignal) {
+    return this.#serializeMutation(async () => {
+      try {
+        return await appendYouTubeObservation(
+          this.#activeRoot,
+          videoId,
+          observation,
+          this.#allYouTubeSources(),
+          signal,
+          (source) =>
+            assertSourceAuthorityAgainstEntries(
+              { sources: [source] },
+              this.#entries,
+              this.#youtubeCatalog,
+            ),
+        );
+      } finally {
+        this.#youtubeCatalog = await readYouTubeSources(this.#activeRoot);
+      }
+    });
+  }
+  #youtubeCatalog: ProjectOwnedRecords["sources"] = [];
+  #allYouTubeSources() {
+    return mergeYouTubeSources(
+      [...this.#entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
+      this.#youtubeCatalog,
+    ).map((source) => ({
+      ...source,
+      locators: structuredClone(this.#locatorCatalog.get(source.id) ?? source.locators),
+    }));
+  }
   readonly #currentSchemaVersion: string;
   readonly #faultInjector: NonNullable<ProjectLibraryOptions["faultInjector"]>;
   readonly #migrations: readonly ProjectMigration[];
@@ -412,7 +452,10 @@ export class ProjectLibrary {
   }
 
   getSourceById(sourceId: string): ProjectOwnedRecords["sources"][number] | undefined {
-    return this.#findSource(({ id }) => id === sourceId);
+    return (
+      this.#allYouTubeSources().find((source) => source.id === sourceId) ??
+      this.#findSource(({ id }) => id === sourceId)
+    );
   }
 
   async observeSourceLocator(sourceId: string, rawLocator: unknown): Promise<void> {
@@ -1457,6 +1500,18 @@ export class ProjectLibrary {
     await this.#scanProjectContainer("active", entries);
     await this.#scanProjectContainer("trashed", entries);
     validateLibrarySourceAuthority(entries);
+    try {
+      const catalog = await readYouTubeSources(this.#activeRoot);
+      assertSourceAuthorityAgainstEntries({ sources: catalog }, entries);
+      mergeYouTubeSources(
+        [...entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
+        catalog,
+      );
+      this.#youtubeCatalog = catalog;
+    } catch {
+      await this.#quarantineInvalidCatalogs([join(this.#activeRoot, "youtube-sources.json")]);
+      this.#youtubeCatalog = [];
+    }
     for (const [projectId, failure] of this.#migrationFailures) {
       const entry = entries.get(projectId);
       if (entry !== undefined) entry.migrationFailure = failure;
@@ -1928,7 +1983,8 @@ export class ProjectLibrary {
     const payload = validateStoredPayload(rawPayload);
     if (payload.envelope.payload.id !== projectId)
       throw new Error("Project payload belongs to another Project");
-    assertSourceAuthorityAgainstEntries(payload.records, this.#entries);
+    assertSourceAuthorityAgainstEntries(payload.records, this.#entries, this.#youtubeCatalog);
+    mergeYouTubeSources(payload.records.sources, this.#allYouTubeSources());
     assertLocatorUpdates(payload.records, this.#locatorCatalog);
     const projectRevisionId = `projectrevision_${randomUUID().replaceAll("-", "")}`;
     await assertManagedDirectory(this.#activeRoot, join(this.#activeRoot, "staging"));
@@ -2194,7 +2250,14 @@ export class ProjectLibrary {
   }
 
   #recordsWithCurrentLocators(records: ProjectOwnedRecords): ProjectOwnedRecords {
-    return materializeCurrentLocators(records, this.#locatorCatalog);
+    const current = materializeCurrentLocators(records, this.#locatorCatalog);
+    const youtube = this.#allYouTubeSources();
+    for (const source of current.sources) {
+      if (source.identity.kind !== "youtube") continue;
+      const observed = youtube.find((item) => item.id === source.id);
+      if (observed) source.metadataObservations = observed.metadataObservations;
+    }
+    return current;
   }
 
   async #refreshLocatorCatalog(
@@ -2502,8 +2565,9 @@ function validateLibrarySourceAuthority(entries: ReadonlyMap<string, LibraryEntr
 }
 
 function assertSourceAuthorityAgainstEntries(
-  records: ProjectOwnedRecords,
+  records: Pick<ProjectOwnedRecords, "sources">,
   entries: ReadonlyMap<string, LibraryEntry>,
+  additionalSources: ProjectOwnedRecords["sources"] = [],
 ): void {
   const sourceIdToIdentity = new Map<string, string>();
   const identityToSourceId = new Map<string, string>();
@@ -2521,7 +2585,7 @@ function assertSourceAuthorityAgainstEntries(
         observationById.set(observation.id, canonicalSerialize(observation));
     }
   }
-  for (const source of records.sources) {
+  for (const source of [...additionalSources, ...records.sources]) {
     const identity = sourceIdentityKey(source.identity);
     const establishedIdentity = sourceIdToIdentity.get(source.id);
     if (establishedIdentity !== undefined && establishedIdentity !== identity)

@@ -978,6 +978,8 @@ button:disabled {
 }
 
 .empty-model-tools {
+  display: flex;
+  gap: 0.75rem;
   position: absolute;
   top: 1rem;
   right: 1rem;
@@ -1028,4 +1030,44 @@ button:disabled {
 .model-reference {
   overflow-wrap: anywhere;
   font-size: 0.8rem;
+}
+
+.youtube-source label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.youtube-source label:has(input[type="url"]),
+.youtube-source label:has(input[type="number"]),
+.youtube-source label:has(select) {
+  align-items: stretch;
+  flex-direction: column;
+}
+.youtube-source input:not([type="checkbox"]),
+.youtube-source select {
+  min-width: 0;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+  color: #1f2937;
+  background: #fff;
+}
+.youtube-source input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+}
+.youtube-source article {
+  overflow-wrap: anywhere;
+}
+.youtube-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.youtube-actions button {
+  margin-top: 0;
 }

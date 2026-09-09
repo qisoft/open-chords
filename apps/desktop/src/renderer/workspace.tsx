@@ -40,6 +40,7 @@ import {
   shouldRestoreRegionFocus,
   type WorkspaceTimelineRegion,
 } from "./workspace-timeline.ts";
+import { YouTubeSource } from "./youtube-source.tsx";
 
 export function ProjectWorkspace({
   api,
@@ -250,7 +251,9 @@ export function ProjectWorkspace({
         event.metaKey ||
         event.altKey ||
         (event.target instanceof Element &&
-          event.target.closest("button, input, select, textarea, [contenteditable=true]"))
+          event.target.closest(
+            "button, input, select, textarea, [contenteditable=true], [role=dialog], [role=alertdialog]",
+          ))
       )
         return;
       event.preventDefault();
@@ -290,6 +293,7 @@ export function ProjectWorkspace({
           </span>
         </div>
         <ModelPacks api={api} />
+        <YouTubeSource api={api} />
       </header>
 
       <section className="timeline-section" aria-labelledby="timeline-heading">

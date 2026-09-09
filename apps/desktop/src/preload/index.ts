@@ -12,6 +12,7 @@ import {
   DESKTOP_IPC_VERSION,
   DesktopGenerationIdSchema,
   DesktopResponseSchema,
+  DesktopCommandSchema,
   OpenMediaPlaybackCommandSchema,
   PickLocalFileCommandSchema,
   ProjectEventSchema,
@@ -295,6 +296,16 @@ function reportDispatchError(error: unknown): void {
 }
 
 const api: OpenChordsDesktopApi = {
+  youtube: Object.freeze({
+    perform: async (action) =>
+      invokeCapability(
+        DESKTOP_IPC_CHANNELS.youtubePerform,
+        DesktopCommandSchema.parse({ ...envelope(), action, type: "youtube.perform" }),
+        (response): response is Extract<DesktopResponse, { type: "youtube.result" }> =>
+          response.type === "youtube.result",
+        "Unexpected YouTube response",
+      ),
+  }),
   alignment: Object.freeze({
     perform: async (action: Parameters<OpenChordsDesktopApi["alignment"]["perform"]>[0]) => {
       const command = AlignmentCommandSchema.parse({

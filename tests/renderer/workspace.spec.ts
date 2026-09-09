@@ -11,13 +11,26 @@ import {
 } from "@open-chords/contracts";
 import { addLyricsDocument } from "@open-chords/domain";
 import { monoPcmWav } from "@open-chords/testkit/media";
-import { _electron as electron, expect, test } from "@playwright/test";
+import { _electron as electron, expect, test, type Locator } from "@playwright/test";
 
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 
 const repositoryRoot = join(import.meta.dirname, "../..");
+
+async function expectSavedPanelClosed(panel: Locator) {
+  try {
+    await expect(panel).toHaveCount(0);
+  } catch (error) {
+    // Capture pending/failed Save state before finally closes the Electron window.
+    await test.info().attach("save-panel-state", {
+      body: await panel.ariaSnapshot(),
+      contentType: "text/plain",
+    });
+    throw error;
+  }
+}
 
 test("an invalid Alignment cleanup journal leaves the desktop available and preserves recovery evidence", async () => {
   const stateRoot = await mkdtemp(join(tmpdir(), "oc-alignment-recovery-"));
@@ -181,7 +194,7 @@ test("a low-confidence chord can be reviewed without changing its value and undo
       .getByRole("button", { name: "Mark reviewed", exact: true })
       .click();
     await editor.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(editor).toHaveCount(0);
+    await expectSavedPanelClosed(editor);
     await page.getByRole("button", { name: "Edit chords", exact: true }).click();
     await expect(
       editor
@@ -280,7 +293,7 @@ test("review mappings retain conflicts until every event is explicitly matched",
     await expect(review.getByRole("alert")).toContainText("Choose a matching entity");
     await review.getByLabel("Match chord_am7_e").selectOption("chord_reviewable");
     await review.getByRole("button", { name: "Apply reviewed edits" }).click();
-    await expect(review).toHaveCount(0);
+    await expectSavedPanelClosed(review);
     const snapshot = await page.evaluate(async () =>
       window.openChords!.project.getSnapshot("project_golden"),
     );
@@ -1058,6 +1071,16 @@ test("practice Play starts at the loop boundary and count-in is cancellable by k
   try {
     const page = await application.firstWindow();
     await expect(page.getByText("Verified local playback", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "YouTube source", exact: true }).click();
+    const sourceDialog = page.getByRole("dialog", { name: "YouTube source", exact: true });
+    await sourceDialog.focus();
+    await sourceDialog.press("Space");
+    await page.keyboard.press("Escape");
+    expect(
+      await page
+        .locator("main.workspace audio")
+        .evaluate((element) => element instanceof HTMLAudioElement && element.paused),
+    ).toBe(true);
     await page.locator('[data-region-id="bar_three_four"]').focus();
     await page.locator('[data-region-id="bar_three_four"]').press("Enter");
     await page.getByRole("button", { name: "Set loop from selection" }).click();

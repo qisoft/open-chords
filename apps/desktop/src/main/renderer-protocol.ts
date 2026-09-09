@@ -33,6 +33,16 @@ const responseHeaders = {
 export function registerRendererScheme(): void {
   protocol.registerSchemesAsPrivileged([
     {
+      scheme: "open-chords-player",
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        allowServiceWorkers: false,
+      },
+    },
+    {
       privileges: {
         allowServiceWorkers: false,
         bypassCSP: false,

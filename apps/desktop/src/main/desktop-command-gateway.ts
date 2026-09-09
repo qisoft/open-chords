@@ -31,6 +31,7 @@ import type { LyricsDiscovery } from "./lyrics-discovery.ts";
 import type { ModelStore } from "./model-store.ts";
 import type { NetworkMode } from "./network-mode.ts";
 import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
+import type { YouTubeService } from "./youtube-service.ts";
 
 const MAX_COMMAND_BYTES = 256 * 1024;
 const MAX_CONCURRENT_MEDIA_COMMANDS = 1;
@@ -129,6 +130,7 @@ export type ModelGatewayService = {
 };
 
 export class DesktopCommandGateway {
+  readonly #youtube: YouTubeService | undefined;
   readonly #authority: ProjectAuthority;
   readonly #invalidCounts = new Map<string, number>();
   readonly #mediaAuthority: LocalMediaAuthority | undefined;
@@ -155,8 +157,10 @@ export class DesktopCommandGateway {
     lyrics?: { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> },
     models?: ModelGatewayService,
     alignment?: AlignmentService,
+    youtube?: YouTubeService,
   ) {
     this.#authority = authority;
+    this.#youtube = youtube;
     this.#models = models;
     this.#alignment = alignment;
     this.#lyrics = lyrics;
@@ -215,6 +219,30 @@ export class DesktopCommandGateway {
       };
     }
 
+    if (command.type === "youtube.perform") {
+      try {
+        if (!this.#youtube) throw new Error("Unavailable");
+        const result = await this.#youtube.perform(command.action);
+        return {
+          action: "none",
+          response: DesktopResponseSchema.parse({
+            ...responseEnvelope(command),
+            type: "youtube.result",
+            ...result,
+          }),
+        };
+      } catch {
+        return {
+          action: "none",
+          response: errorResponse(
+            "capability_unavailable",
+            "YouTube operation unavailable. Check Offline Mode or open the video on YouTube.",
+            true,
+            command,
+          ),
+        };
+      }
+    }
     if (command.type === "alignment.perform") return this.#performAlignment(command);
     if (command.type === "models.perform") return this.#performModels(command);
     if (command.type === "lyrics.perform") return this.#performLyrics(command);

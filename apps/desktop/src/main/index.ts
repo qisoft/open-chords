@@ -32,6 +32,9 @@ import {
 } from "./renderer-security.ts";
 import { createDesktopWindow, hardenWebContents } from "./shell.ts";
 import { presentDesktopWindow } from "./window-lifecycle.ts";
+import { IsolatedYouTubePlayer, isYouTubePlayerSession } from "./youtube-player.ts";
+import { YouTubeService } from "./youtube-service.ts";
+import { YouTubeMetadata } from "./youtube-source.ts";
 
 if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   // Electron otherwise opens a modal error dialog, hiding native CI failures
@@ -81,6 +84,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
       },
     );
 } else {
+  if (process.platform === "win32") app.setAppUserModelId("io.github.qisoft.open-chords");
   registerRendererScheme();
 
   const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
@@ -88,6 +92,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   let modelStore: ModelStore | null = null;
   let alignmentService: AlignmentService | null = null;
   let lyricsDiscovery: LyricsDiscovery | null = null;
+  let youtube: YouTubeService | null = null;
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
   const rendererContexts = new Map<
@@ -105,6 +110,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
       "before-quit",
       createMediaCleanupBeforeQuitHandler({
         dispose: async () => {
+          youtube?.close();
           try {
             await alignmentService?.dispose();
           } finally {
@@ -116,7 +122,9 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
         timeoutMs: MEDIA_CLEANUP_TIMEOUT_MS,
       }),
     );
-    app.on("web-contents-created", (_event, contents) => hardenWebContents(contents));
+    app.on("web-contents-created", (_event, contents) => {
+      if (!isYouTubePlayerSession(contents.session)) hardenWebContents(contents);
+    });
     app.on("second-instance", () => {
       void desktopReady.then(() => presentDesktopWindow(getOrCreateWindow()));
     });
@@ -137,6 +145,13 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
         const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
         const stateRoot = app.getPath("userData");
         const network = await openNetworkMode(stateRoot);
+        youtube = new YouTubeService({
+          library: projectLibrary,
+          network,
+          metadata: new YouTubeMetadata({ network }),
+          player: new IsolatedYouTubePlayer(),
+          openExternal: (url) => shell.openExternal(url),
+        });
         lyricsDiscovery = await openLyricsDiscovery({ stateRoot, network });
         const runtime = await inspectAlignmentRuntime(
           app.isPackaged
@@ -244,6 +259,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           );
         });
         installDesktopIpc(projectLibrary, {
+          youtube,
           ...(alignmentService ? { alignment: alignmentService } : {}),
           models: {
             store: modelStore,
@@ -301,6 +317,7 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   }
 
   function revokeRendererGeneration(webContentsId: number): void {
+    youtube?.cancel();
     lyricsDiscovery?.cancel();
     modelStore?.cancel();
     const context = rendererContexts.get(webContentsId);

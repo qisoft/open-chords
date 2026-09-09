@@ -9,6 +9,11 @@ import { z } from "zod";
 
 import { AlignmentActionSchema, AlignmentJobSummarySchema } from "./alignment.ts";
 import { DesktopMessageIdSchema } from "./identifiers.ts";
+import {
+  YouTubeActionSchema,
+  YouTubePlayerStateSchema,
+  YouTubeSourceSummarySchema,
+} from "./youtube.ts";
 export { DesktopMessageIdSchema } from "./identifiers.ts";
 import { LyricsCandidateSchema, LyricsSearchSchema } from "./lyrics.ts";
 import {
@@ -21,6 +26,7 @@ import {
 export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
+  youtubePerform: "open-chords:youtube:perform",
   alignmentPerform: "open-chords:alignment:perform",
   modelsPerform: "open-chords:models:perform",
   lyricsPerform: "open-chords:lyrics:perform",
@@ -176,6 +182,11 @@ export const AlignmentCommandSchema = z.strictObject({
 });
 
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    ...correlatedEnvelope,
+    type: z.literal("youtube.perform"),
+    action: YouTubeActionSchema,
+  }),
   AlignmentCommandSchema,
   ModelsCommandSchema,
   LyricsCommandSchema,
@@ -224,6 +235,13 @@ const mediaSelectionEnvelope = {
 };
 
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    ...correlatedEnvelope,
+    type: z.literal("youtube.result"),
+    offline: z.boolean(),
+    sources: z.array(YouTubeSourceSummarySchema).max(100),
+    player: YouTubePlayerStateSchema.nullable(),
+  }),
   z.strictObject({
     ...correlatedEnvelope,
     type: z.literal("alignment.result"),
@@ -386,6 +404,11 @@ export type MediaPlaybackResponse = Extract<
 >;
 
 export type OpenChordsDesktopApi = {
+  youtube: {
+    perform(
+      action: z.infer<typeof YouTubeActionSchema>,
+    ): Promise<DesktopErrorResponse | Extract<DesktopResponse, { type: "youtube.result" }>>;
+  };
   alignment: {
     perform(
       action: z.infer<typeof AlignmentActionSchema>,

@@ -16,10 +16,12 @@ import {
   type ProjectAuthority,
 } from "./desktop-command-gateway.ts";
 import type { LyricsDiscovery } from "./lyrics-discovery.ts";
+import type { YouTubeService } from "./youtube-service.ts";
 
 type CommandType = DesktopCommand["type"];
 
 const commandChannels = [
+  [DESKTOP_IPC_CHANNELS.youtubePerform, "youtube.perform"],
   [DESKTOP_IPC_CHANNELS.alignmentPerform, "alignment.perform"],
   [DESKTOP_IPC_CHANNELS.modelsPerform, "models.perform"],
   [DESKTOP_IPC_CHANNELS.lyricsPerform, "lyrics.perform"],
@@ -37,6 +39,7 @@ const commandChannels = [
 ] as const satisfies ReadonlyArray<readonly [string, CommandType]>;
 
 export type DesktopIpcOptions = {
+  youtube?: YouTubeService;
   alignment?: AlignmentService;
   models?: ModelGatewayService;
   lyrics?: { discovery: LyricsDiscovery; openExternal(url: string): Promise<void> };
@@ -54,6 +57,7 @@ export function installDesktopIpc(authority: ProjectAuthority, options: DesktopI
     options.lyrics,
     options.models,
     options.alignment,
+    options.youtube,
   );
 
   for (const [channel, expectedType] of commandChannels) {
