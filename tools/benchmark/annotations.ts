@@ -136,6 +136,7 @@ function validateContent(content: AnnotationContent, duration: number) {
     if (content.capability === "chords")
       for (const { value } of content.events)
         if (value.kind === "chord")
+          // Preserve the lexical component order required by the public Open Chords timeline.
           for (const values of [
             value.additions,
             value.alterations,

@@ -191,12 +191,15 @@ export function auditCorpus(input: unknown, references: unknown[], rawContext: u
           (subjectId) => ({ asset: "annotation", subjectId, operations }),
         ),
       ];
-      if (capability === "lyrics_alignment")
+      if (capability === "lyrics_alignment") {
+        if (track.lyricsSubjectId === null)
+          throw new Error("Lyrics Reference without a lyrics subject");
         uses.push({
           asset: "lyrics",
-          subjectId: track.lyricsSubjectId ?? "missing_lyrics",
+          subjectId: track.lyricsSubjectId,
           operations: [...operations, "human_annotation"],
         });
+      }
       const verdict = evaluateRights(track.rights, { ...context, uses });
       if (!verdict.eligible) failures.push(capability);
     }

@@ -45,6 +45,7 @@ async function main() {
     );
   } else if (command === "open-sealed") {
     count(6);
+    if (process.stdin.isTTY) throw new Error("Custody key must be piped on stdin");
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of process.stdin) {

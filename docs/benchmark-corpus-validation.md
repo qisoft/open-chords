@@ -10,7 +10,7 @@ Scope: [issue 47](https://github.com/qisoft/open-chords/issues/47), implemented 
 - Corpus API: duplicate recording groups, undisclosed related cohorts and substituted references fail; synthetic references cannot be relabeled as a release corpus. The Unmetered regression retains track/negative inventory while exposing zero beat events and no metric-sufficiency verdict.
 - CLI/files: actual child processes and temporary files, separate calibration/sealed content, immutable output publication, deterministic private audit artifacts, no custody key or sealed plaintext in the tuning bundle, signed freeze and current-rights requirements, post-publication revocation, unsigned review edits, wrong keys, ciphertext/policy changes and repeated-output rejection.
 
-Focused suite: 19 passing tests after review fixes. The full repository validation passed before those fixes (467 unit tests and 33 renderer scenarios, existing diagnostic tests skipped); the final unit/type/lint/schema checks are rerun for the fixes. CI runs the same CLI tests on macOS arm64 and Windows x64 as part of foundation tests. GitHub checks on the current PR commit remain the authority for cross-platform results.
+Focused suite: 21 passing tests after review fixes. The full repository validation passed before those fixes (467 unit tests and 33 renderer scenarios, existing diagnostic tests skipped); the final unit/type/lint/schema checks are rerun for the fixes. CI runs the same CLI tests on macOS arm64 and Windows x64 as part of foundation tests. GitHub checks on the current PR commit remain the authority for cross-platform results.
 
 ## Standards
 
@@ -25,3 +25,9 @@ Initial finding: coverage rows contained whole-track seconds and track counts wi
 Resolved in `9bd25d5`: distinguish track inventory from positive event counts/durations and explicit negative evidence; retain Unmetered/Unknown/N/unmatched data, and mark metric sufficiency as not evaluated. The reviewer found no new concrete specification defect in the follow-up.
 
 Review totals: one resolved finding per axis; zero outstanding findings in either follow-up. Scientific adequacy, real human independence and operational key custody are not established by these tests. See [the workflow and remaining acceptance](benchmark-corpus-workflow.md#remaining-real-corpus-acceptance); issue 47 must remain open until the real corpus and its evidence are accepted.
+
+## External review follow-up
+
+CodeRabbit supplied three minor comments. Missing lyrics-subject handling and silent interactive-key input were reproduced and fixed: a grant named `missing_lyrics` can no longer substitute for the absent subject, and real TTY invocation now exits immediately with the fixed diagnostic. The numeric chord-array ordering suggestion was not adopted because the public Open Chords domain requires lexical sorted/unique arrays; a regression checks the annotation API and `parseAnalysisTimeline` against the same chord and rejects duplicate/descending contract order. Harte projection still orders its output degrees numerically.
+
+The opening Receipt also retains its complete current audit, including the exact evaluation context; the real-file CLI regression reconstructs that audit and verifies hash equality.

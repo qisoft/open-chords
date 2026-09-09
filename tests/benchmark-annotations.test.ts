@@ -1,3 +1,10 @@
+import { readFileSync } from "node:fs";
+
+import {
+  parseProjectContract,
+  parseAnalysisTimeline,
+  MusicalTimelineSchema,
+} from "@open-chords/domain";
 import { expect, it } from "vitest";
 
 import {
@@ -181,4 +188,37 @@ it("rejects unsorted bars even when their union covers the track", () => {
     },
   };
   expect(() => parseRawAnnotation(input)).toThrow(/order/);
+});
+
+it("keeps chord array ordering compatible with the public Open Chords timeline contract", () => {
+  const envelope = JSON.parse(
+    readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8"),
+  );
+  const project = parseProjectContract(envelope.payload);
+  const timeline = structuredClone(project.analysisRevisions[0]!.timeline);
+  const value = MusicalTimelineSchema.shape.chordEvents.element.shape.value.parse({
+    kind: "chord",
+    root: "C",
+    quality: "major7",
+    extensions: ["11", "9"],
+    additions: [],
+    alterations: [],
+    omissions: [],
+  });
+  timeline.chordEvents[0]!.value = value;
+  expect(() => parseAnalysisTimeline(timeline, project.durationSamples)).not.toThrow();
+  const rawInput = raw("first");
+  const input = {
+    ...rawInput,
+    content: { ...rawInput.content, events: [{ ...rawInput.content.events[0], value }] },
+  };
+  expect(() => parseRawAnnotation(input)).not.toThrow();
+  if (value.kind !== "chord") throw new Error("Expected chord fixture");
+  value.extensions = ["9", "11"];
+  expect(() => parseAnalysisTimeline(timeline, project.durationSamples)).toThrow(
+    /sorted and unique/,
+  );
+  expect(() => parseRawAnnotation(input)).toThrow(/sorted and unique/);
+  value.extensions = ["9", "9"];
+  expect(() => parseRawAnnotation(input)).toThrow(/sorted and unique/);
 });
