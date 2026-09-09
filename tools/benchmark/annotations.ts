@@ -145,6 +145,13 @@ function validateContent(content: AnnotationContent, duration: number) {
             if (values.some((component, index) => index > 0 && component <= values[index - 1]!))
               throw new Error("Chord components must be sorted and unique");
   } else if ("bars" in content) {
+    for (const intervals of [content.bars, content.unmeteredRegions])
+      if (
+        intervals.some(
+          (item, index) => index > 0 && item.startSample < intervals[index - 1]!.endSample,
+        )
+      )
+        throw new Error("Annotation interval order differs from sample order");
     cover(
       [...content.bars, ...content.unmeteredRegions].toSorted(
         (a, b) => a.startSample - b.startSample,

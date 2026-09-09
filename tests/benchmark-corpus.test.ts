@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { auditCorpus } from "../tools/benchmark/index.ts";
+import { auditCorpus, buildGoldReference, contentHash } from "../tools/benchmark/index.ts";
 import { corpusFixture, fixtureContext } from "./support/benchmark-fixture.ts";
 
 it("accounts for distinct eligible tracks per capability, slice and cohort without promoting synthetic evidence", () => {
@@ -13,9 +13,23 @@ it("accounts for distinct eligible tracks per capability, slice and cohort witho
       slice: "slice_synthetic",
       cohort: "calibration",
       tracks: 1,
-      seconds: 1,
+      trackSeconds: 1,
+      events: 0,
+      eventSeconds: 0,
+      negativeEvents: 1,
+      negativeSeconds: 1,
     },
-    { capability: "chords", slice: "slice_synthetic", cohort: "sealed", tracks: 1, seconds: 1 },
+    {
+      capability: "chords",
+      slice: "slice_synthetic",
+      cohort: "sealed",
+      tracks: 1,
+      trackSeconds: 1,
+      events: 0,
+      eventSeconds: 0,
+      negativeEvents: 1,
+      negativeSeconds: 1,
+    },
   ]);
   const denied = structuredClone(manifest);
   denied.tracks[0]!.rights[0]!.disposition = "ambiguous";
@@ -36,4 +50,63 @@ it("cannot relabel synthetic annotations as a real corpus", () => {
   const { manifest, gold } = corpusFixture();
   manifest.purpose = "release_corpus";
   expect(() => auditCorpus(manifest, gold, fixtureContext)).toThrow(/Synthetic/);
+});
+
+it("retains Unmetered inventory without counting it as beat evidence", () => {
+  const { manifest, gold } = corpusFixture();
+  const references = gold.map((reference) => {
+    const content = {
+      capability: "rhythm",
+      bars: [],
+      unmeteredRegions: [
+        {
+          id: "unmetered_one",
+          startSample: 0,
+          endSample: 48000,
+          reasonCode: "synthetic unmetered",
+        },
+      ],
+    };
+    const annotations = reference.annotations.map((raw) => ({
+      ...raw,
+      content,
+      annotator: {
+        ...raw.annotator,
+        qualification: { ...raw.annotator.qualification, capability: "rhythm" },
+      },
+    }));
+    return buildGoldReference({
+      annotations,
+      adjudication: {
+        ...reference.adjudication,
+        result: content,
+        rawHashes: annotations.map(contentHash),
+        adjudicator: {
+          ...reference.adjudication.adjudicator,
+          qualification: {
+            ...reference.adjudication.adjudicator.qualification,
+            capability: "rhythm",
+          },
+        },
+      },
+    });
+  });
+  manifest.requirements[0]!.capability = "rhythm";
+  manifest.tracks.forEach((track, index) => {
+    track.goldHashes = [references[index]!.hash];
+  });
+  const report = auditCorpus(manifest, references, fixtureContext);
+  expect(report.rows[0]).toEqual({
+    capability: "rhythm",
+    slice: "slice_synthetic",
+    cohort: "calibration",
+    tracks: 1,
+    trackSeconds: 1,
+    events: 0,
+    eventSeconds: 0,
+    negativeEvents: 1,
+    negativeSeconds: 1,
+  });
+  expect(report.inventoryComplete).toBe(true);
+  expect(report.metricSufficiency).toBe("not_evaluated");
 });

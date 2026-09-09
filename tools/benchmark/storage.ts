@@ -19,7 +19,7 @@ import { z } from "zod";
 
 import { contentHash, parseGoldReference } from "./annotations.ts";
 import { auditCorpus, AuditContextSchema, parseCorpusManifest } from "./corpus.ts";
-import { HashSchema, TimeSchema } from "./rights.ts";
+import { HashSchema, RightsGrantSchema, TimeSchema } from "./rights.ts";
 
 const maxJsonBytes = 32 * 1024 * 1024;
 const mediaSchema = z.strictObject({
@@ -70,6 +70,17 @@ const freezeSchema = z.strictObject({
     .string()
     .regex(/^[A-Za-z0-9+/]+={0,2}$/)
     .max(256),
+});
+export const CurrentRightsReviewSchema = z.strictObject({
+  declaration: z.strictObject({
+    version: z.literal("1.0"),
+    corpusHash: HashSchema,
+    reviewedAt: TimeSchema,
+    validUntil: TimeSchema,
+    context: AuditContextSchema.omit({ at: true }),
+    tracks: z.array(z.strictObject({ id: z.string(), rights: z.array(RightsGrantSchema) })).min(1),
+  }),
+  signature: freezeSchema.shape.signature,
 });
 const sealedSchema = z.strictObject({
   input: inputSchema.omit({ media: true }),
@@ -228,7 +239,7 @@ export async function publishCorpus(
   freezeAuthorityPublicKey: string,
 ) {
   const { input, manifest, gold, report } = validateInput(raw);
-  if (report.denied.length > 0 || !report.coverageComplete)
+  if (report.denied.length > 0 || !report.inventoryComplete)
     throw new Error("Corpus rights or coverage are insufficient");
   const custodyKey = createPublicKey(custodianPublicKey),
     authorityKey = createPublicKey(freezeAuthorityPublicKey);
@@ -351,6 +362,7 @@ export async function openSealedCorpus(
   destination: string,
   policyPath: string,
   rawFreeze: unknown,
+  rawRightsReview: unknown,
   trustedAuthorityPublicKey: string,
   custodianPrivateKey: string,
 ) {
@@ -376,6 +388,28 @@ export async function openSealedCorpus(
     Date.parse(declaration.frozenAt) > Date.now()
   )
     throw new Error("Policy freeze binding mismatch");
+  const rightsReview = CurrentRightsReviewSchema.parse(rawRightsReview),
+    review = rightsReview.declaration;
+  const now = Date.now();
+  if (
+    !verify(
+      null,
+      Buffer.from(canonicalSerialize(review)),
+      trustedKey,
+      Buffer.from(rightsReview.signature, "base64"),
+    ) ||
+    review.corpusHash !== index.corpusHash ||
+    Date.parse(review.reviewedAt) > now ||
+    Date.parse(review.validUntil) <= now ||
+    Date.parse(review.reviewedAt) < Date.parse(declaration.frozenAt)
+  )
+    throw new Error("Unauthenticated or expired current rights review");
+  if (
+    review.tracks.some((track) =>
+      track.rights.some((grant) => Date.parse(grant.reviewedAt) > Date.parse(review.reviewedAt)),
+    )
+  )
+    throw new Error("Rights review predates its grants");
   const key = privateDecrypt(
     { key: custodianPrivateKey, oaepHash: "sha256" },
     Buffer.from(index.wrappedKey, "base64"),
@@ -400,11 +434,26 @@ export async function openSealedCorpus(
         canonicalSerialize(original) !== canonicalSerialize(sealed.report)
       )
         throw new Error("Sealed corpus audit mismatch");
-      const current = auditCorpus(manifest, sealed.input.gold, {
-        ...sealed.input.context,
+      if (
+        review.tracks.length !== manifest.tracks.length ||
+        new Set(review.tracks.map((track) => track.id)).size !== manifest.tracks.length ||
+        review.tracks.some(
+          (track) => !manifest.tracks.some((originalTrack) => originalTrack.id === track.id),
+        )
+      )
+        throw new Error("Current rights inventory mismatch");
+      const currentManifest = {
+        ...manifest,
+        tracks: manifest.tracks.map((track) => ({
+          ...track,
+          rights: review.tracks.find((item) => item.id === track.id)!.rights,
+        })),
+      };
+      const current = auditCorpus(currentManifest, sealed.input.gold, {
+        ...review.context,
         at: new Date().toISOString(),
       });
-      if (current.denied.length > 0 || !current.coverageComplete)
+      if (current.denied.length > 0 || !current.inventoryComplete)
         throw new Error("Current corpus rights are insufficient");
       const tracks = manifest.tracks.filter((t) => t.cohort === "sealed");
       if (
@@ -427,6 +476,7 @@ export async function openSealedCorpus(
         freeze,
         openedAt: new Date().toISOString(),
         currentAuditHash: current.hash,
+        rightsReview,
       });
       return { bundleHash: declaration.bundleHash, policyHash: declaration.policyHash };
     });

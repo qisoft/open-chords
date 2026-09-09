@@ -1,6 +1,11 @@
 import { expect, it } from "vitest";
 
-import { buildGoldReference, contentHash, parseGoldReference } from "../tools/benchmark/index.ts";
+import {
+  buildGoldReference,
+  contentHash,
+  parseGoldReference,
+  parseRawAnnotation,
+} from "../tools/benchmark/index.ts";
 
 const hash = `sha256:${"1".repeat(64)}`;
 const raw = (person: string, end = 48000) => ({
@@ -151,4 +156,29 @@ it("matches an independently calculated canonical SHA-256 vector", () => {
   expect(contentHash({ b: 2, a: 1 })).toBe(
     "sha256:080d51f49b27c73d17f51f3b808515a425d16218aa40021eed2ca1d204e59224",
   );
+});
+
+it("rejects unsorted bars even when their union covers the track", () => {
+  const bar = (id: string, startSample: number, endSample: number) => ({
+    id,
+    startSample,
+    endSample,
+    status: "complete",
+    meter: { numerator: 1, denominator: 4 },
+    beats: [{ id: `beat_${id}`, atSample: startSample, role: "downbeat" }],
+  });
+  const annotation = raw("first");
+  const input = {
+    ...annotation,
+    annotator: {
+      ...annotation.annotator,
+      qualification: { ...annotation.annotator.qualification, capability: "rhythm" },
+    },
+    content: {
+      capability: "rhythm",
+      bars: [bar("bar_second", 24000, 48000), bar("bar_first", 0, 24000)],
+      unmeteredRegions: [],
+    },
+  };
+  expect(() => parseRawAnnotation(input)).toThrow(/order/);
 });

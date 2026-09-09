@@ -1,7 +1,12 @@
 import { StableIdSchema } from "@open-chords/domain";
 import { z } from "zod";
 
-import { CapabilitySchema, contentHash, parseGoldReference } from "./annotations.ts";
+import {
+  CapabilitySchema,
+  contentHash,
+  parseGoldReference,
+  type AnnotationContent,
+} from "./annotations.ts";
 import { evaluateRights, HashSchema, RightsGrantSchema, RightsRequestSchema } from "./rights.ts";
 
 const cohort = z.enum(["calibration", "sealed"]);
@@ -94,6 +99,43 @@ export function parseCorpusManifest(input: unknown): CorpusManifest {
     throw new Error("Cross-cohort relationship disclosure mismatch");
   return manifest;
 }
+function referenceCoverage(content: AnnotationContent, sampleRate: number) {
+  const duration = (items: { startSample: number; endSample: number }[]) =>
+    items.reduce((sum, item) => sum + (item.endSample - item.startSample) / sampleRate, 0);
+  if ("events" in content) {
+    const positive = content.events.filter((event) =>
+      "value" in event
+        ? event.value.kind !== "no_chord" && event.value.kind !== "unknown"
+        : event.label !== "unknown",
+    );
+    const negative = content.events.filter((event) => !positive.includes(event));
+    return {
+      events: positive.length,
+      eventSeconds: duration(positive),
+      negativeEvents: negative.length,
+      negativeSeconds: duration(negative),
+    };
+  }
+  if ("bars" in content)
+    return {
+      events:
+        content.capability === "rhythm"
+          ? content.bars.reduce((sum, bar) => sum + bar.beats.length, 0)
+          : content.bars.length,
+      eventSeconds: duration(content.bars),
+      negativeEvents: content.unmeteredRegions.length,
+      negativeSeconds: duration(content.unmeteredRegions),
+    };
+  const matched = content.tokens.flatMap((token) =>
+    token.timing.state === "matched" ? [token.timing] : [],
+  );
+  return {
+    events: matched.length,
+    eventSeconds: duration(matched),
+    negativeEvents: content.tokens.length - matched.length,
+    negativeSeconds: 0,
+  };
+}
 /** Private operator report: never publish without a separate disclosure review. */
 export function auditCorpus(input: unknown, references: unknown[], rawContext: unknown) {
   const manifest = parseCorpusManifest(input),
@@ -114,6 +156,7 @@ export function auditCorpus(input: unknown, references: unknown[], rawContext: u
     throw new Error("Gold Reference inventory mismatch");
   const evaluated = manifest.tracks.map((track) => {
     const capabilities = new Set<string>();
+    const coverage = new Map<string, ReturnType<typeof referenceCoverage>>();
     const failures: string[] = [];
     for (const hash of track.goldHashes) {
       const reference = gold.find((g) => g.hash === hash);
@@ -130,6 +173,7 @@ export function auditCorpus(input: unknown, references: unknown[], rawContext: u
       if (capabilities.has(capability)) throw new Error("Duplicate capability Reference");
       // Use a separate set: a denied reference must still reserve its capability identity.
       capabilities.add(capability);
+      coverage.set(capability, referenceCoverage(reference.adjudication.result, track.sampleRate));
       const operations = ["local_storage", "automated_analysis", "derivative_data"];
       if (context.executionLocation !== "local_reference") operations.push("private_ci_transfer");
       const uses = [
@@ -158,6 +202,7 @@ export function auditCorpus(input: unknown, references: unknown[], rawContext: u
     }
     return {
       track,
+      coverage,
       eligible: [...capabilities].filter((c) => !failures.includes(c)),
       denied: failures.sort(),
     };
@@ -178,9 +223,21 @@ export function auditCorpus(input: unknown, references: unknown[], rawContext: u
           ...requirement,
           cohort: group,
           tracks: matching.length,
-          seconds: matching.reduce(
+          trackSeconds: matching.reduce(
             (sum, t) => sum + t.track.durationSamples / t.track.sampleRate,
             0,
+          ),
+          ...matching.reduce(
+            (sum, t) => {
+              const evidence = t.coverage.get(requirement.capability)!;
+              return {
+                events: sum.events + evidence.events,
+                eventSeconds: sum.eventSeconds + evidence.eventSeconds,
+                negativeEvents: sum.negativeEvents + evidence.negativeEvents,
+                negativeSeconds: sum.negativeSeconds + evidence.negativeSeconds,
+              };
+            },
+            { events: 0, eventSeconds: 0, negativeEvents: 0, negativeSeconds: 0 },
           ),
         };
       }),
@@ -194,7 +251,8 @@ export function auditCorpus(input: unknown, references: unknown[], rawContext: u
     reliability: "not_measured",
     trackCount: manifest.tracks.length,
     completeTrackRange: manifest.tracks.length >= 30 && manifest.tracks.length <= 50,
-    coverageComplete: rows.every((row) => row.tracks > 0),
+    inventoryComplete: rows.every((row) => row.tracks > 0),
+    metricSufficiency: "not_evaluated",
     rows,
     denied: evaluated
       .filter((t) => t.denied.length > 0)

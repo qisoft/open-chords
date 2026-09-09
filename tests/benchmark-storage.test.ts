@@ -71,7 +71,29 @@ it("publishes real files, keeps sealed plaintext and custody key out of tuning, 
         ).toString("base64"),
       }),
     );
-    const args = ["open-sealed", bundle, output, policy, freeze, trustedKey];
+    const reviewPath = join(root, "rights-review.json");
+    const rightsDeclaration = {
+      version: "1.0",
+      corpusHash: index.corpusHash,
+      reviewedAt: new Date(Date.now() - 1000).toISOString(),
+      validUntil: new Date(Date.now() + 60000).toISOString(),
+      context: { territory: "NL", executionLocation: "local_reference" },
+      tracks: manifest.tracks.map((track) => ({ id: track.id, rights: track.rights })),
+    };
+    const saveReview = (rightsValue: unknown) =>
+      writeFileSync(
+        reviewPath,
+        JSON.stringify({
+          declaration: rightsValue,
+          signature: sign(
+            null,
+            Buffer.from(canonicalSerialize(rightsValue)),
+            authority.privateKey,
+          ).toString("base64"),
+        }),
+      );
+    saveReview(rightsDeclaration);
+    const args = ["open-sealed", bundle, output, policy, freeze, reviewPath, trustedKey];
     expect(cli(args).status).toBe(1);
     const privateKey = custodian.privateKey.export({ type: "pkcs8", format: "pem" });
     const bad = JSON.parse(readFileSync(freeze, "utf8"));
@@ -79,10 +101,29 @@ it("publishes real files, keeps sealed plaintext and custody key out of tuning, 
     writeFileSync(join(root, "bad-freeze.json"), JSON.stringify(bad));
     expect(
       cli(
-        ["open-sealed", bundle, output, policy, join(root, "bad-freeze.json"), trustedKey],
+        [
+          "open-sealed",
+          bundle,
+          output,
+          policy,
+          join(root, "bad-freeze.json"),
+          reviewPath,
+          trustedKey,
+        ],
         privateKey,
       ).status,
     ).toBe(1);
+    const revoked = structuredClone(rightsDeclaration);
+    revoked.tracks[1]!.rights[0]!.disposition = "revoked";
+    saveReview(revoked);
+    expect(cli(args, privateKey).status).toBe(1);
+    expect(readdirSync(root)).not.toContain("release");
+    saveReview(rightsDeclaration);
+    const unsigned = JSON.parse(readFileSync(reviewPath, "utf8"));
+    unsigned.declaration.context.territory = "US";
+    writeFileSync(reviewPath, JSON.stringify(unsigned));
+    expect(cli(args, privateKey).status).toBe(1);
+    saveReview(rightsDeclaration);
     const opened = cli(args, privateKey);
     expect({ status: opened.status, stderr: opened.stderr }).toEqual({ status: 0, stderr: "" });
     expect(readFileSync(join(output, "sealed.json"), "utf8")).toContain("track_sealed");
@@ -95,7 +136,7 @@ it("publishes real files, keeps sealed plaintext and custody key out of tuning, 
       format: "pem",
     });
     const rejected = cli(
-      ["open-sealed", bundle, join(root, "wrong-key"), policy, freeze, trustedKey],
+      ["open-sealed", bundle, join(root, "wrong-key"), policy, freeze, reviewPath, trustedKey],
       wrongKey,
     );
     expect({ status: rejected.status, stderr: rejected.stderr }).toEqual({
@@ -108,8 +149,10 @@ it("publishes real files, keeps sealed plaintext and custody key out of tuning, 
     changedCipher[0] = changedCipher[0]! ^ 1;
     writeFileSync(encryptedPath, changedCipher);
     expect(
-      cli(["open-sealed", bundle, join(root, "tampered"), policy, freeze, trustedKey], privateKey)
-        .status,
+      cli(
+        ["open-sealed", bundle, join(root, "tampered"), policy, freeze, reviewPath, trustedKey],
+        privateKey,
+      ).status,
     ).toBe(1);
     expect(readdirSync(root)).not.toContain("tampered");
     writeFileSync(encryptedPath, encrypted);
@@ -121,8 +164,10 @@ it("publishes real files, keeps sealed plaintext and custody key out of tuning, 
     // Policy bytes cannot change after signing, even with a valid custodian key.
     writeFileSync(policy, "{}");
     expect(
-      cli(["open-sealed", bundle, join(root, "changed"), policy, freeze, trustedKey], privateKey)
-        .status,
+      cli(
+        ["open-sealed", bundle, join(root, "changed"), policy, freeze, reviewPath, trustedKey],
+        privateKey,
+      ).status,
     ).toBe(1);
   } finally {
     rmSync(root, { recursive: true, force: true });

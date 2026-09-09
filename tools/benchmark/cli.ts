@@ -44,7 +44,7 @@ async function main() {
       await readFile(args[3]!, "utf8"),
     );
   } else if (command === "open-sealed") {
-    count(5);
+    count(6);
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of process.stdin) {
@@ -60,7 +60,8 @@ async function main() {
         args[1]!,
         args[2]!,
         await readJson(args[3]!),
-        await readFile(args[4]!, "utf8"),
+        await readJson(args[4]!),
+        await readFile(args[5]!, "utf8"),
         key.toString("utf8"),
       );
     } finally {

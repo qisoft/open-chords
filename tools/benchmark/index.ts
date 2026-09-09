@@ -17,4 +17,10 @@ export {
   AuditContextSchema,
   type CorpusManifest,
 } from "./corpus.ts";
-export { publishCorpus, openSealedCorpus, verifyBundle, auditCorpusFiles } from "./storage.ts";
+export {
+  publishCorpus,
+  openSealedCorpus,
+  verifyBundle,
+  auditCorpusFiles,
+  CurrentRightsReviewSchema,
+} from "./storage.ts";
