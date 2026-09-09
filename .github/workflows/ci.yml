@@ -96,6 +96,17 @@ jobs:
         run: pnpm test:python
       - name: Run isolated renderer smoke test
         run: pnpm test:renderer
+      - name: Measure representative workspace fixtures
+        env:
+          OPEN_CHORDS_PROFILE_WORKSPACE: "1"
+        run: pnpm exec playwright test tests/renderer/workspace.spec.ts --grep "profile committed" --retries=0 --output=test-results/performance
+      - name: Preserve workspace accessibility and performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-evidence-${{ matrix.profile }}
+          path: test-results/
+          if-no-files-found: ignore
       - name: Build reviewed FFmpeg on macOS
         if: runner.os == 'macOS'
         shell: bash
@@ -151,11 +162,11 @@ jobs:
         run: pnpm make -- --arch=${{ matrix.arch }}
       - name: Verify installed trust boundary
         run: pnpm test:packaged --retries=0
-      - name: Preserve the release-owned artifact for failed native verification
-        if: failure()
+      - name: Preserve the release-owned artifact for native assistive technology verification
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: failed-native-artifact-${{ matrix.profile }}
+          name: native-artifact-${{ matrix.profile }}
           path: out/make/zip/${{ runner.os == 'macOS' && 'darwin' || 'win32' }}/${{ matrix.arch }}/*.zip
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: ignore

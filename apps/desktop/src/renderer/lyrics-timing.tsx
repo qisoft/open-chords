@@ -292,10 +292,10 @@ function TimingCorrection({
     alignment?.lineOccurrences.filter((item) => item.timing.state === "matched").length ?? 0;
   return (
     <section aria-label="Lyrics timing correction" className="chord-editor">
-      <p aria-label="Word coverage">
+      <p className="timing-coverage">
         Word coverage: {wordCount}/{document.tokens.length}
       </p>
-      <p aria-label="Line coverage">
+      <p className="timing-coverage">
         Line coverage: {lineCount}/{document.lines.length}
       </p>
       <p>

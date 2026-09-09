@@ -282,7 +282,7 @@ export function ProjectWorkspace({
           <h1 id="workspace-heading">Local Project</h1>
           <p className="project-identity">{snapshot.project.id}</p>
         </div>
-        <div className="project-facts" aria-label="Project facts">
+        <div className="project-facts">
           <span>{formatDuration(timeline.durationSamples, snapshot.project.sampleRate)}</span>
           <span>{snapshot.project.sampleRate.toLocaleString("en-US")} Hz</span>
           <span>
@@ -298,7 +298,7 @@ export function ProjectWorkspace({
             <p className="eyebrow">Project Time</p>
             <h2 id="timeline-heading">Musical timeline</h2>
           </div>
-          <div className="timeline-legend" aria-label="Timeline state legend">
+          <div className="timeline-legend">
             <span>
               <i className="selection-key" />
               Selected
@@ -358,7 +358,7 @@ export function ProjectWorkspace({
           ))}
         </TimelineSurface>
 
-        <div className="selection-actions" aria-label="Timeline selection actions">
+        <fieldset className="selection-actions" aria-label="Timeline selection actions">
           <span>
             Selection: <strong>{selectedRegion?.label ?? "None"}</strong>
           </span>
@@ -426,8 +426,8 @@ export function ProjectWorkspace({
                   ? ` through ${timeline.regions.find(({ id }) => id === practice.loop?.lastBarId)?.label ?? "missing Bar"}`
                   : "")}
           </output>
-        </div>
-        <div className="practice-controls" aria-label="Practice settings">
+        </fieldset>
+        <fieldset className="practice-controls" aria-label="Practice settings">
           <label>
             Playback speed{" "}
             <select
@@ -446,7 +446,7 @@ export function ProjectWorkspace({
             </select>
           </label>
           <output aria-label="Practice settings status">{practiceMessage}</output>
-        </div>
+        </fieldset>
         <ChordEditor api={api} snapshot={snapshot} />
       </section>
 

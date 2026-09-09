@@ -124,7 +124,11 @@ export function LyricsViewport({
           >
             {block.kind === "lyric" ? (
               <>
-                <fieldset aria-label={block.value.text} className="lyric-line">
+                <fieldset
+                  aria-label={block.value.text}
+                  className="lyric-line"
+                  lang={content.lyricsLanguage}
+                >
                   {block.value.prefix}
                   {block.value.tokens.map((token) => (
                     <span className="lyric-token" key={token.id}>

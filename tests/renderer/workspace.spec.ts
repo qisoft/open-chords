@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, realpath, rm, writeFile, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cpus, platform, release, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -9,6 +9,7 @@ import {
   ProjectEnvelopeSchema,
   type ProjectSnapshotResponse,
 } from "@open-chords/contracts";
+import { addLyricsDocument } from "@open-chords/domain";
 import { monoPcmWav } from "@open-chords/testkit/media";
 import { _electron as electron, expect, test } from "@playwright/test";
 
@@ -238,13 +239,15 @@ test("an external committed revision invalidates an open draft even after draft 
       });
     });
     expect(response.type).toBe("project.committed");
-    await expect(editor.getByRole("alert")).toContainText("revision changed");
+    const staleAlert = editor.getByRole("alert").filter({ hasText: "revision changed" });
+    await expect(staleAlert).toBeVisible();
     await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
     await editor.getByRole("button", { name: "Reset draft", exact: true }).click();
-    await expect(editor.getByRole("alert")).toContainText("revision changed");
+    await expect(staleAlert).toBeVisible();
     await editor.getByRole("button", { name: "Cancel", exact: true }).click();
     await page.getByRole("button", { name: "Edit chords", exact: true }).click();
-    await expect(editor.getByRole("alert")).toHaveCount(0);
+    await expect(staleAlert).toHaveCount(0);
+    await expect(editor.getByRole("alert")).toBeEmpty();
     await expect(editor.locator('[data-event-id="chord_g7"] strong')).toHaveText("N");
   } finally {
     await application.close();
@@ -684,7 +687,14 @@ async function rejectPlaybackRequests(application: Awaited<ReturnType<typeof lau
 test("profile committed timeline density before choosing virtualization", async () => {
   test.skip(process.env.OPEN_CHORDS_PROFILE_WORKSPACE !== "1", "Opt-in measured workspace profile");
   test.setTimeout(120_000);
-  for (const count of [120, 1200, 4800]) {
+  for (const fixture of [
+    { name: "short", count: 120, step: 12_000, lyrics: false },
+    { name: "many-events", count: 1200, step: 12_000, lyrics: false },
+    { name: "dense-events", count: 4800, step: 12_000, lyrics: false },
+    { name: "long-song", count: 1200, step: 108_000, lyrics: false },
+    { name: "dense-lyrics", count: 4800, step: 12_000, lyrics: true },
+  ]) {
+    const { count, step } = fixture;
     const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "open-chords-profile-")));
     const envelope = ProjectEnvelopeSchema.parse(
       JSON.parse(
@@ -696,7 +706,7 @@ test("profile committed timeline density before choosing virtualization", async 
     );
     const project = envelope.payload;
     const original = project.analysisRevisions[0]!;
-    const duration = count * 12_000;
+    const duration = count * step;
     project.durationSamples = duration;
     project.analysisRevisions = [
       {
@@ -704,21 +714,21 @@ test("profile committed timeline density before choosing virtualization", async 
         timeline: {
           bars: Array.from({ length: count / 4 }, (_, index) => ({
             id: `profile_bar_${index}`,
-            startSample: index * 48_000,
-            endSample: (index + 1) * 48_000,
+            startSample: index * step * 4,
+            endSample: (index + 1) * step * 4,
             status: "complete" as const,
             meter: { numerator: 4, denominator: 4 },
             beats: Array.from({ length: 4 }, (_unused, beat) => ({
               id: `profile_beat_${index}_${beat}`,
-              atSample: index * 48_000 + beat * 12_000,
+              atSample: (index * 4 + beat) * step,
               role: beat === 0 ? ("downbeat" as const) : ("beat" as const),
             })),
           })),
           chordEvents: Array.from({ length: count }, (_, index) => ({
             ...original.timeline.chordEvents[0]!,
             id: `profile_chord_${index}`,
-            startSample: index * 12_000,
-            endSample: (index + 1) * 12_000,
+            startSample: index * step,
+            endSample: (index + 1) * step,
           })),
           sectionRegions: [
             { ...original.timeline.sectionRegions[0]!, endSample: duration, label: "neutral" },
@@ -734,6 +744,39 @@ test("profile committed timeline density before choosing virtualization", async 
     delete project.activeView.lyricsDocumentId;
     project.lyricsDocuments = [];
     project.lyricsAlignments = [];
+    if (fixture.lyrics) {
+      envelope.payload = addLyricsDocument(
+        project,
+        {
+          text: Array.from({ length: count / 8 }, () => "go home go home go home go home").join(
+            "\n",
+          ),
+          language: "en",
+          format: "text",
+        },
+        "lyrics_profile",
+      );
+      const document = envelope.payload.lyricsDocuments[0]!;
+      const alignment = envelope.payload.lyricsAlignments[0]!;
+      alignment.lineOccurrences = document.lines.map((line, index) => ({
+        lineId: line.id,
+        timing: {
+          state: "matched",
+          startSample: index * step * 8,
+          endSample: (index + 1) * step * 8,
+          assertion: { state: "asserted", evidence: [], reasonCodes: [] },
+        },
+      }));
+      alignment.occurrences = document.tokens.map((token, index) => ({
+        tokenId: token.id,
+        timing: {
+          state: "matched",
+          startSample: index * step,
+          endSample: (index + 1) * step,
+          assertion: { state: "asserted", evidence: [], reasonCodes: [] },
+        },
+      }));
+    }
     const records = goldenRecords();
     records.projectRange.endSourceSample = duration;
     records.sources[0]!.snapshots[0]!.durationSamples = duration;
@@ -748,6 +791,10 @@ test("profile committed timeline density before choosing virtualization", async 
         page.getByRole("slider", { name: "Project position", exact: true }),
       ).toBeVisible();
       const readyMs = performance.now() - start;
+      const session = await page.context().newCDPSession(page);
+      await session.send("Accessibility.enable");
+      const accessibility = await session.send("Accessibility.getFullAXTree");
+      const versions = await application.evaluate(() => process.versions);
       const geometry = await page.locator(".timeline-viewport").evaluate((viewport) => ({
         width: viewport.clientWidth,
         bar: viewport.querySelector(".timeline-region")!.getBoundingClientRect().width,
@@ -771,16 +818,39 @@ test("profile committed timeline density before choosing virtualization", async 
         return { samples, elements: document.querySelectorAll("*").length };
       });
       const ordered = measurement.samples.toSorted((a, b) => a - b);
-      console.log(
-        JSON.stringify({
-          profile: "workspace-density",
-          count,
-          readyMs,
-          elements: measurement.elements,
-          seekPaintMedianMs: ordered[10],
-          seekPaintP95Ms: ordered[18],
-        }),
-      );
+      const result = {
+        profile: "workspace-density",
+        fixture: fixture.name,
+        environment: {
+          platform: platform(),
+          release: release(),
+          arch: process.arch,
+          cpu: cpus()[0]?.model,
+          logicalCpus: cpus().length,
+          memoryBytes: totalmem(),
+          versions,
+        },
+        conditions:
+          "Production renderer; synthetic unavailable Source; AX enabled after ready; 20 DOM-input seeks to two animation frames; no native screen reader",
+        count,
+        durationSeconds: duration / project.sampleRate,
+        lyricLines: envelope.payload.lyricsDocuments[0]?.lines.length ?? 0,
+        lyricTokens: envelope.payload.lyricsDocuments[0]?.tokens.length ?? 0,
+        axNodes: accessibility.nodes.length,
+        exposedAxNodes: accessibility.nodes.filter((node) => !node.ignored).length,
+        readyMs,
+        elements: measurement.elements,
+        seekPaintSamplesMs: measurement.samples,
+        seekPaintMedianMs: (ordered[9]! + ordered[10]!) / 2,
+        seekPaintP95Ms: ordered[18],
+      };
+      console.log(JSON.stringify(result));
+      const resultPath = test.info().outputPath(`${fixture.name}-performance.json`);
+      await writeFile(resultPath, JSON.stringify(result, null, 2));
+      await test.info().attach(`${fixture.name}-performance.json`, {
+        path: resultPath,
+        contentType: "application/json",
+      });
     } finally {
       await application.close();
       await rm(stateRoot, { recursive: true, force: true });
@@ -1172,8 +1242,8 @@ test("lyric timing corrections use distinct occurrences and durable Undo/Redo wi
     let page = await application.firstWindow();
     await page.getByRole("button", { name: "Lyrics timing" }).click();
     const panel = page.getByRole("region", { name: "Lyrics timing correction" });
-    await expect(panel.getByLabel("Word coverage")).toContainText("/");
-    await expect(panel.getByLabel("Line coverage")).toContainText("/");
+    await expect(panel.getByText(/^Word coverage: \d+\/\d+$/)).toBeVisible();
+    await expect(panel.getByText(/^Line coverage: \d+\/\d+$/)).toBeVisible();
     await panel.getByLabel("Timing occurrence").selectOption({ index: 1 });
     await panel.getByRole("button", { name: "Mark untimed" }).click();
     await expect(panel.getByRole("status")).toHaveText("Timing correction saved");

@@ -27,7 +27,7 @@
   --color-border-subtle: #292932;
   --color-text-muted: #94949f;
   --color-text-secondary: #a9a9b2;
-  --color-text-subtle: #858590;
+  --color-text-subtle: #94949f;
 }
 
 html {
@@ -56,6 +56,15 @@ body {
 
 button {
   font: inherit;
+}
+fieldset {
+  min-inline-size: 0;
+}
+button,
+input,
+select,
+textarea {
+  scroll-margin: 12px;
 }
 button:focus-visible {
   outline: 2px solid var(--color-focus);
@@ -136,6 +145,7 @@ button:disabled {
 
 .workspace {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: 100vh;
   grid-template-rows: auto auto minmax(180px, 1fr) auto;
@@ -856,6 +866,9 @@ button:disabled {
   margin: 0.75rem 20px;
   min-width: 0;
 }
+.lyrics-controls {
+  min-width: 0;
+}
 .lyrics-timing select,
 .lyrics-timing input {
   max-width: 100%;
@@ -871,7 +884,7 @@ button:disabled {
   display: inline-flex;
   flex-direction: column;
   gap: 0.35rem;
-  max-width: 100%;
+  max-width: calc(100% - 0.75rem);
   margin: 0.6rem 0.75rem 0.6rem 0;
 }
 .lyrics-timing p {
@@ -891,6 +904,11 @@ button:disabled {
 .lyrics-timing output {
   display: block;
   margin-top: 0.5rem;
+}
+.lyrics-timing .timing-coverage {
+  border: 0;
+  padding: 0;
+  margin: 0.35rem 0;
 }
 .lyrics-selection fieldset {
   display: flex;
