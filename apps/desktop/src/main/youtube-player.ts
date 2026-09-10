@@ -119,7 +119,8 @@ export class IsolatedYouTubePlayer implements YouTubePlayer {
         allowRunningInsecureContent: false,
         devTools: !app.isPackaged,
         spellcheck: false,
-        autoplayPolicy: "document-user-activation-required",
+        // Main relays explicit Play commands from a different window.
+        autoplayPolicy: "no-user-gesture-required",
       },
     });
     this.#window = window;

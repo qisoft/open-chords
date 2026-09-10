@@ -7,7 +7,10 @@ import { join } from "node:path";
 import { chromium, expect, test, type Browser } from "@playwright/test";
 import extractZip from "extract-zip";
 
-import { installYouTubeProviderFixture } from "../support/youtube-provider-fixture.ts";
+import {
+  installYouTubeMediaFixture,
+  installYouTubeProviderFixture,
+} from "../support/youtube-provider-fixture.ts";
 
 test.skip(
   process.platform !== "darwin" && process.platform !== "win32",
@@ -241,7 +244,7 @@ test("installed isolated player preserves commands, errors and Offline Mode at t
   }
 });
 
-test("installed live YouTube sends app identity and advances actual media time", async () => {
+test("installed live YouTube starts from application controls without player activation", async () => {
   const testInfo = test.info();
   test.skip(
     process.env.OPEN_CHORDS_LIVE_YOUTUBE !== "1",
@@ -277,10 +280,13 @@ test("installed live YouTube sends app identity and advances actual media time",
       .toBe(true);
     const player = context.pages().find((page) => page.url().startsWith("open-chords-player://"));
     if (!player) throw new Error("Installed player target missing");
-    await player
-      .frameLocator("iframe")
-      .getByRole("button", { name: "Play video", exact: true })
-      .click({ timeout: 30000 });
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })), {
+        timeout: 30000,
+      })
+      .toMatchObject({ player: { state: "ready" } });
+    await primary.getByRole("button", { name: "YouTube source", exact: true }).click();
+    await primary.getByRole("button", { name: "Play YouTube", exact: true }).click();
     await expect
       .poll(
         async () => {
@@ -330,6 +336,7 @@ test("installed live YouTube sends app identity and advances actual media time",
           origin: player.url(),
           referer: identity[0],
           advancingSeconds,
+          startedFrom: "application_play_button_without_player_interaction",
           player: {
             videoId: paused.player.videoId,
             state: paused.player.state,
@@ -363,6 +370,56 @@ test("installed live YouTube sends app identity and advances actual media time",
         .screenshot({ path: testInfo.outputPath("live-player-failure.png"), timeout: 5000 })
         .catch(() => undefined);
     throw error;
+  } finally {
+    await stopInstalled(child, browser);
+  }
+});
+
+test("installed application Play starts unmuted iframe media without player interaction", async () => {
+  test.setTimeout(90000);
+  const { child, browser, context, primary } = await launchInstalled();
+  try {
+    await installYouTubeMediaFixture(context);
+    await primary.getByRole("button", { name: "YouTube source", exact: true }).click();
+    await primary.getByLabel("YouTube video URL").fill("https://youtu.be/aqz-KE-bpKQ");
+    await primary.getByRole("button", { name: "Open player", exact: true }).click();
+    await expect
+      .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
+      .toMatchObject({ player: { state: "ready", seconds: 0 } });
+    const player = context.pages().find((page) => page.url().startsWith("open-chords-player://"));
+    if (!player) throw new Error("Player target missing");
+    const activation = await context.newCDPSession(player);
+    expect(
+      (
+        await activation.send("Runtime.evaluate", {
+          expression: "navigator.userActivation.hasBeenActive",
+          returnByValue: true,
+          userGesture: false,
+        })
+      ).result.value,
+    ).toBe(false);
+    await primary.getByRole("button", { name: "Play YouTube", exact: true }).click();
+    await expect
+      .poll(async () => {
+        const status = await primary.evaluate(() =>
+          window.openChords!.youtube.perform({ type: "status" }),
+        );
+        return (
+          status.type === "youtube.result" &&
+          status.player?.state === "playing" &&
+          status.player.seconds > 0
+        );
+      })
+      .toBe(true);
+    expect(
+      (
+        await activation.send("Runtime.evaluate", {
+          expression: "navigator.userActivation.hasBeenActive",
+          returnByValue: true,
+          userGesture: false,
+        })
+      ).result.value,
+    ).toBe(false);
   } finally {
     await stopInstalled(child, browser);
   }
