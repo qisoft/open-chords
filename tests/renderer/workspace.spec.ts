@@ -231,11 +231,22 @@ test("an external committed revision invalidates an open draft even after draft 
   const application = await launch(stateRoot);
   try {
     const page = await application.firstWindow();
+    await page.setViewportSize({ width: 1080, height: 900 });
     await page.getByRole("button", { name: "Edit chords", exact: true }).click();
     const editor = page.getByRole("region", { name: "Chord Editor" });
     await editor.getByRole("button", { name: "Choose chord" }).first().click();
     await editor.getByLabel("Root").selectOption("N");
     await editor.getByRole("button", { name: "Done", exact: true }).click();
+    const cancel = editor.getByRole("button", { name: "Cancel", exact: true });
+    // Reach the footer through the keyboard before a later revision inserts its warning.
+    for (let step = 0; step < 100; step++) {
+      if (await cancel.evaluate((button) => button === document.activeElement)) break;
+      await page.keyboard.press("Tab");
+    }
+    await expect(cancel).toBeFocused();
+    // Place the focused footer at the viewport edge, where added content can obscure it.
+    await cancel.evaluate((button) => button.scrollIntoView({ block: "end" }));
+    await expect(cancel).toBeInViewport({ ratio: 1 });
     const response = await page.evaluate(async () => {
       const saved = await window.openChords!.project.getSnapshot("project_golden");
       if (saved.type !== "project.snapshot") throw new Error("Snapshot unavailable");
@@ -254,6 +265,8 @@ test("an external committed revision invalidates an open draft even after draft 
     expect(response.type).toBe("project.committed");
     const staleAlert = editor.getByRole("alert").filter({ hasText: "revision changed" });
     await expect(staleAlert).toBeVisible();
+    await expect(cancel).toBeFocused();
+    await expect(cancel).toBeInViewport({ ratio: 1 });
     await expect(editor.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
     await editor.getByRole("button", { name: "Reset draft", exact: true }).click();
     await expect(staleAlert).toBeVisible();
