@@ -987,17 +987,31 @@ async function evaluatePackagedMedia(
         playBounds.left + playBounds.width / 2 - (playheadBounds.left + playheadBounds.width / 2),
       ) < 1;
       const transformBeforePlay = track.style.transform;
-      playButton.click();
-      await waitFor(
-        () => document.querySelector('button[aria-label="Pause"]'),
-        "workspace playback did not start",
-      );
-      workspacePlayed = true;
-      await waitFor(
-        () => track.style.transform !== transformBeforePlay,
-        "workspace timeline did not move",
-      );
-      timelineMoved = true;
+      // Preserve transient playback evidence even if the short fixture ends between timer ticks.
+      await new Promise((resolve, reject) => {
+        const fail = (message) => {
+          observer.disconnect();
+          reject(new Error(message));
+        };
+        let timeout;
+        const observer = new MutationObserver(() => {
+          const previouslyPlaying = workspacePlayed;
+          workspacePlayed ||= playButton.getAttribute("aria-label") === "Pause";
+          timelineMoved ||= track.style.transform !== transformBeforePlay;
+          if (workspacePlayed && timelineMoved) {
+            clearTimeout(timeout);
+            observer.disconnect();
+            resolve();
+          } else if (!previouslyPlaying && workspacePlayed) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => fail("workspace timeline did not move"), 3000);
+          }
+        });
+        timeout = setTimeout(() => fail("workspace playback did not start"), 3000);
+        observer.observe(playButton, { attributes: true, attributeFilter: ["aria-label"] });
+        observer.observe(track, { attributes: true, attributeFilter: ["style"] });
+        playButton.click();
+      });
       document.querySelector('button[aria-label="Pause"]')?.click();
 
       playback = await Promise.race([
@@ -1400,14 +1414,25 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
       });
       expect(await readdir(join(userDataDirectory, "alignment-workspaces"))).toEqual([]);
       await jobs.confirm(cancelJob.id);
-      const execution = jobs.run(cancelJob.id, { library, worker }).then(
-        (value) => value,
-        (error: unknown) => error,
-      );
-      await expect
-        .poll(async () => (await jobs.get(cancelJob.id))?.stage, { timeout: 60000 })
-        .toBe("aligning");
-      await jobs.cancel(cancelJob.id);
+      const execution = jobs
+        .run(cancelJob.id, {
+          library,
+          worker: (input) =>
+            worker({
+              ...input,
+              reportStage: async (stage) => {
+                await input.reportStage(stage);
+                if (stage === "aligning") {
+                  expect((await jobs.get(cancelJob.id))?.stage).toBe("aligning");
+                  await jobs.cancel(cancelJob.id);
+                }
+              },
+            }),
+        })
+        .then(
+          (value) => value,
+          (error: unknown) => error,
+        );
       expect(await execution).toBeInstanceOf(Error);
       expect((await jobs.get(cancelJob.id))?.state).toBe("cancelled");
       expect((await library.getSnapshot(before.project.id))!.project.lyricsAlignments).toEqual(
