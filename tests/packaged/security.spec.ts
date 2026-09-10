@@ -987,17 +987,25 @@ async function evaluatePackagedMedia(
         playBounds.left + playBounds.width / 2 - (playheadBounds.left + playheadBounds.width / 2),
       ) < 1;
       const transformBeforePlay = track.style.transform;
-      playButton.click();
-      await waitFor(
-        () => document.querySelector('button[aria-label="Pause"]'),
-        "workspace playback did not start",
-      );
-      workspacePlayed = true;
-      await waitFor(
-        () => track.style.transform !== transformBeforePlay,
-        "workspace timeline did not move",
-      );
-      timelineMoved = true;
+      // Preserve transient playback evidence even if the short fixture ends between timer ticks.
+      await new Promise((resolve, reject) => {
+        const observer = new MutationObserver(() => {
+          workspacePlayed ||= playButton.getAttribute("aria-label") === "Pause";
+          timelineMoved ||= track.style.transform !== transformBeforePlay;
+          if (workspacePlayed && timelineMoved) {
+            clearTimeout(timeout);
+            observer.disconnect();
+            resolve();
+          }
+        });
+        const timeout = setTimeout(() => {
+          observer.disconnect();
+          reject(new Error(workspacePlayed ? "workspace timeline did not move" : "workspace playback did not start"));
+        }, 3000);
+        observer.observe(playButton, { attributes: true, attributeFilter: ["aria-label"] });
+        observer.observe(track, { attributes: true, attributeFilter: ["style"] });
+        playButton.click();
+      });
       document.querySelector('button[aria-label="Pause"]')?.click();
 
       playback = await Promise.race([
