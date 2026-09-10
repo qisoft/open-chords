@@ -989,19 +989,25 @@ async function evaluatePackagedMedia(
       const transformBeforePlay = track.style.transform;
       // Preserve transient playback evidence even if the short fixture ends between timer ticks.
       await new Promise((resolve, reject) => {
+        const fail = (message) => {
+          observer.disconnect();
+          reject(new Error(message));
+        };
+        let timeout;
         const observer = new MutationObserver(() => {
+          const previouslyPlaying = workspacePlayed;
           workspacePlayed ||= playButton.getAttribute("aria-label") === "Pause";
           timelineMoved ||= track.style.transform !== transformBeforePlay;
           if (workspacePlayed && timelineMoved) {
             clearTimeout(timeout);
             observer.disconnect();
             resolve();
+          } else if (!previouslyPlaying && workspacePlayed) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => fail("workspace timeline did not move"), 3000);
           }
         });
-        const timeout = setTimeout(() => {
-          observer.disconnect();
-          reject(new Error(workspacePlayed ? "workspace timeline did not move" : "workspace playback did not start"));
-        }, 3000);
+        timeout = setTimeout(() => fail("workspace playback did not start"), 3000);
         observer.observe(playButton, { attributes: true, attributeFilter: ["aria-label"] });
         observer.observe(track, { attributes: true, attributeFilter: ["style"] });
         playButton.click();
