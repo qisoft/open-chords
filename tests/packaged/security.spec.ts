@@ -1414,14 +1414,25 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
       });
       expect(await readdir(join(userDataDirectory, "alignment-workspaces"))).toEqual([]);
       await jobs.confirm(cancelJob.id);
-      const execution = jobs.run(cancelJob.id, { library, worker }).then(
-        (value) => value,
-        (error: unknown) => error,
-      );
-      await expect
-        .poll(async () => (await jobs.get(cancelJob.id))?.stage, { timeout: 60000 })
-        .toBe("aligning");
-      await jobs.cancel(cancelJob.id);
+      const execution = jobs
+        .run(cancelJob.id, {
+          library,
+          worker: (input) =>
+            worker({
+              ...input,
+              reportStage: async (stage) => {
+                await input.reportStage(stage);
+                if (stage === "aligning") {
+                  expect((await jobs.get(cancelJob.id))?.stage).toBe("aligning");
+                  await jobs.cancel(cancelJob.id);
+                }
+              },
+            }),
+        })
+        .then(
+          (value) => value,
+          (error: unknown) => error,
+        );
       expect(await execution).toBeInstanceOf(Error);
       expect((await jobs.get(cancelJob.id))?.state).toBe("cancelled");
       expect((await library.getSnapshot(before.project.id))!.project.lyricsAlignments).toEqual(
