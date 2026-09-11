@@ -84,6 +84,7 @@ def serve_one_session(
     runtime: FrozenRuntime,
     *,
     workspace_is_current_directory: bool = False,
+    acquisition_validation: bool = False,
 ) -> None:
     """Read one start frame, publish one result/error, and return."""
 
@@ -176,7 +177,7 @@ def serve_one_session(
             artifact = decode_canonical(
                 workspace,
                 runtime.toolchain,
-                CanonicalDecodeConfig(platform_profile=runtime.platform_profile),
+                CanonicalDecodeConfig(platform_profile=runtime.platform_profile, acquisition_validation=acquisition_validation),
                 cancellation,
                 **decode_kwargs,
             )

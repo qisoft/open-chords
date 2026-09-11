@@ -44,6 +44,11 @@ import {
 } from "@open-chords/domain";
 import { z } from "zod";
 
+import {
+  readAcquiredSources,
+  publishAcquiredSnapshot,
+  type AcquiredSnapshotPublication,
+} from "./acquired-snapshots.ts";
 import { syncDirectory } from "./filesystem-durability.ts";
 import {
   ExportReceiptSchema,
@@ -305,6 +310,25 @@ export async function openProjectLibrary(options: ProjectLibraryOptions): Promis
 }
 
 export class ProjectLibrary {
+  #acquiredCatalog: ProjectOwnedRecords["sources"] = [];
+  async publishYouTubeSnapshot(input: AcquiredSnapshotPublication) {
+    return this.#serializeMutation(async () => {
+      const provenance = input.snapshot.provenance;
+      if (provenance.kind !== "youtube_acquisition")
+        throw new Error("invalid_acquisition_snapshot");
+      const established = this.#allYouTubeSources().find(
+        (source) =>
+          source.identity.kind === "youtube" && source.identity.videoId === provenance.videoId,
+      );
+      const sourceId =
+        established?.id ??
+        `source_youtube_${createHash("sha256").update(provenance.videoId).digest("hex")}`;
+      const published = await publishAcquiredSnapshot(this.#activeRoot, sourceId, input);
+      this.#acquiredCatalog = mergeYouTubeSources(this.#acquiredCatalog, [published]);
+      return published;
+    });
+  }
+
   async listYouTubeSources() {
     return this.#allYouTubeSources();
   }
@@ -319,11 +343,10 @@ export class ProjectLibrary {
           this.#allYouTubeSources(),
           signal,
           (source) =>
-            assertSourceAuthorityAgainstEntries(
-              { sources: [source] },
-              this.#entries,
-              this.#youtubeCatalog,
-            ),
+            assertSourceAuthorityAgainstEntries({ sources: [source] }, this.#entries, [
+              ...this.#youtubeCatalog,
+              ...this.#acquiredCatalog,
+            ]),
         );
       } finally {
         this.#youtubeCatalog = await readYouTubeSources(this.#activeRoot);
@@ -335,6 +358,7 @@ export class ProjectLibrary {
     return mergeYouTubeSources(
       [...this.#entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
       this.#youtubeCatalog,
+      this.#acquiredCatalog,
     ).map((source) => ({
       ...source,
       locators: structuredClone(this.#locatorCatalog.get(source.id) ?? source.locators),
@@ -1553,6 +1577,23 @@ export class ProjectLibrary {
       await this.#quarantineInvalidCatalogs([join(this.#activeRoot, "youtube-sources.json")]);
       this.#youtubeCatalog = [];
     }
+    const accepted: ProjectOwnedRecords["sources"] = [];
+    const projectSources = [...entries.values()].flatMap(
+      (entry) => entry.revision?.payload.records.sources ?? [],
+    );
+    for (const candidate of await readAcquiredSources(this.#activeRoot)) {
+      try {
+        assertSourceAuthorityAgainstEntries({ sources: [candidate] }, entries, [
+          ...this.#youtubeCatalog,
+          ...accepted,
+        ]);
+        mergeYouTubeSources(projectSources, this.#youtubeCatalog, accepted, [candidate]);
+        accepted.push(candidate);
+      } catch {
+        // A conflicting immutable entry cannot invalidate verified Projects or metadata.
+      }
+    }
+    this.#acquiredCatalog = accepted;
     for (const [projectId, failure] of this.#migrationFailures) {
       const entry = entries.get(projectId);
       if (entry !== undefined) entry.migrationFailure = failure;
@@ -2024,7 +2065,10 @@ export class ProjectLibrary {
     const payload = validateStoredPayload(rawPayload);
     if (payload.envelope.payload.id !== projectId)
       throw new Error("Project payload belongs to another Project");
-    assertSourceAuthorityAgainstEntries(payload.records, this.#entries, this.#youtubeCatalog);
+    assertSourceAuthorityAgainstEntries(payload.records, this.#entries, [
+      ...this.#youtubeCatalog,
+      ...this.#acquiredCatalog,
+    ]);
     mergeYouTubeSources(payload.records.sources, this.#allYouTubeSources());
     assertLocatorUpdates(payload.records, this.#locatorCatalog);
     const projectRevisionId = `projectrevision_${randomUUID().replaceAll("-", "")}`;

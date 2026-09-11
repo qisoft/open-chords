@@ -1,0 +1,47 @@
+# Brokered YouTube acquisition
+
+Status: all three public test boundaries confirmed by the user on 2026-09-11. The broker, contained worker, offline validation, Job lifecycle and named desktop controls are implemented. Final installed-platform results and review disposition are recorded in PR #89; no broader acquisition support claim is complete.
+
+## Authority
+
+- [Prove brokered credential-free YouTube acquisition](https://github.com/qisoft/open-chords/issues/60).
+- Specification section 13.2 and decisions [containment](https://github.com/qisoft/open-chords/issues/20) / [narrowed best-effort acquisition](https://github.com/qisoft/open-chords/issues/21).
+- Base: merged main `b3ebab5727711b7493468be6b2552007c321c4aa`.
+
+## Confirmed test boundaries
+
+1. Public Acquisition Job API: canonical video identity, explicit action, shared Offline Mode, cancellation/recovery, bounded redacted retention, no partial Source Snapshot, and atomic publication after validated offline handoff.
+2. Real Extractor Worker / Acquisition Network Broker protocol: one pinned Youtube extractor and broker request handler; no direct handlers, credentials or optional plugins; HTTPS, endpoint policy, DNS/CNAME/global-address checks, connection pinning, redirects and normal TLS; streaming, range/retry behavior and resource limits.
+3. Installed macOS/Windows application: verified packaged runtimes, no direct worker network, process and stream disposal before offline handoff, adversarial path/input checks, cancellation/crash cleanup and local-file fallback for provider or policy failure. Deterministic transport fixtures prove error paths; permitted live acquisition is separately reported and never inferred from metadata/player success.
+
+## Vertical implementation sequence
+
+Start with one bounded broker request through the public broker API. An externally supplied endpoint is denied before a connection is made; a permitted request uses validated and pinned global addresses with hostname TLS verification. Keep DNS and HTTPS peers as external test boundaries.
+
+Extend that path one behavior at a time: CNAME/address and redirect rejection, streaming and bounded reads, cancellation and request/aggregate quotas. Then connect the pinned worker's custom request handler through framed IPC, retaining streaming and error behavior. Finally compose native containment, the Acquisition Job, validated one-object handoff, durable Snapshot publication, named desktop UI and installed journeys.
+
+The historical prototype at `6a74199` is evidence and input for source review, not a production module to copy unchanged. Its Python socket guard is not native containment; suffix-only host checks and provisional quotas are not final endpoint/resource policy. Frozen component versions there were yt-dlp 2026.07.04, yt-dlp-ejs 0.8.0 and Deno 2.8.3. Reinspect those exact sources and establish reproducible artifact hashes before packaging; do not silently upgrade them.
+
+## Fixed limits on scope
+
+Only one direct audio-only or combined progressive object may be acquired. HLS/DASH, acquisition-time FFmpeg, cookies, browser sessions, account credentials, remote components, arbitrary arguments, plugins and broad-network fallbacks remain excluded.
+
+Partial media, signed URLs, raw provider responses, private paths and tokens do not enter retained diagnostics. Failure records retain only approved identity, component/policy hashes, bounded counters and terminal reasons for seven days. Successful Source provenance has the separate referenced lifetime.
+
+Provisional engineering ceilings must be explicitly labelled and versioned. Corpus-derived endpoint coverage, final benchmark/resource policy, successful real-corpus acquisition and platform release claims remain separate evidence gates; unavailable evidence cannot be replaced with synthetic fixtures or more permissive networking.
+
+## Implementation checkpoint — 2026-09-11
+
+The current macOS package exercises the real pinned extractor, native worker and Deno network denial, offline decoder, public Acquisition Job and durable Source Snapshot catalog. A synthetic progressive MP4 publishes one Snapshot that survives reopening the library. Publication retains only provenance in `snapshot.json`; it removes both temporary media copies and the native workspaces before acknowledging success. It does not silently enable Offline Media Cache or claim a complete YouTube-to-Analysis workflow. Bot-check, an interrupted transfer followed by Offline Mode, a WAV served as `video/mp4`, and an MP4 declaring 3601 seconds publish no additional Snapshot and remove their workspace journals. The independent native transport proof verifies its workspace is removed after process disposal.
+
+The broker/worker tests exercise streaming, range retry after truncation, retry after a coarse transport failure, cancellation while waiting for the broker, and cancellation while the OS launch result is still pending. The TLS fixture uses a real loopback HTTPS peer and a CA trusted only by a test child: untrusted certificates and wrong hostnames are rejected before an HTTP request. DNS fixtures include mixed public/private answers, special IPv4/IPv6 ranges, zone IDs and malformed CNAME labels. Retention expires failed/blocked history at seven days while the application stays open. Installed regression tests pause the initial Job catalog rename: switching Offline Mode on and off still cancels that pending start without DNS, and closing the manager returns only after terminal cancellation and workspace cleanup. These tests failed before the start-controller handoff fix and pass afterward. Video URLs containing playlist/query state are canonicalized to the single video; playlist-only input remains rejected.
+
+Current provisional ceilings: 120 requests, eight redirects, four active requests/streams, 256 MiB per response, 512 MiB per attempt, 20-second idle and 180-second network session deadlines. Offline acquisition validation admits MP4/AAC or WebM/Opus/Vorbis, at most two streams with exactly one audio stream, and at most 3600 seconds. FFmpeg has an acquisition-only time/output ceiling; canonical PCM is checked independently after decode. These are engineering bounds, not measured corpus support.
+
+The normal desktop exposes explicit acquisition, cancellation, redacted history and local-file fallback. Offline Mode also blocks calls made directly through the named API. Source Metadata and player access do not imply acquisition availability. Both Standards and Spec reviews found no remaining concrete blocker after fixes to cleanup ambiguity, atomic workspace journals, abandoned history copies, Snapshot byte accounting, parent-directory durability and retention. Ancestor aliases, hard-linked media and mismatched hashes are rejected before handoff.
+
+Review follow-up isolates corrupt acquisition history only after native workspace cleanup is verified; unverified cleanup still blocks shared CPU work. Acquired manifests are checked individually against verified Projects and metadata, so one conflicting entry does not quarantine a valid metadata catalog. Public and persisted Job records reject contradictory lifecycle fields. Local-file fallback is single-flight across picker and Project creation, and acquisition probes retain bounded native failure codes. The minimum development Node version is 24.5.0, matching `https.Agent.proxyEnv` support.
+
+Acceptance requires installed validation of the final review-fix commit and external PR review; PR #89 records the results for the tested commit. The first Windows artifact exceeded the 150-second aggregate harness deadline. Replaying that exact artifact on Windows completed all proof scenarios successfully in 148.7 seconds ([run 34598776936](https://github.com/qisoft/open-chords/actions/runs/34598776936)); the Windows harness now allows 450 seconds for its independently initialized scenarios. Worker/broker deadlines are unchanged. This replay establishes the previous artifact, while current-head installed CI remains required. No live YouTube acquisition or broader endpoint coverage has been claimed. Existing Windows player checks do not satisfy the acquisition gate.
+
+Implementation references: [Node HTTPS Agent](https://nodejs.org/api/https.html#class-httpsagent), [Node TLS hostname and trust verification](https://nodejs.org/api/tls.html#tlsconnectoptions-callback), [yt-dlp pinned release](https://github.com/yt-dlp/yt-dlp/tree/2026.07.04), [Deno pinned release](https://github.com/denoland/deno/releases/tag/v2.8.3).

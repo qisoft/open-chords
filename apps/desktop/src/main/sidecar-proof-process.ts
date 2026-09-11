@@ -30,6 +30,14 @@ export function createUncontainedSpawnLauncherForProof(
         signal,
         windowsHide: true,
       });
+      // AbortSignal may emit after spawn; the session owns cancellation and reaping.
+      const onError = () => undefined;
+      child.on("error", onError);
+      child.stdin?.on("error", onError);
+      child.once("close", () => {
+        child.off("error", onError);
+        child.stdin?.off("error", onError);
+      });
       await waitForSpawn(child);
       if (child.pid === undefined || child.stdout === null || child.stdin === null) {
         throw new SidecarSessionError("launch_failure", "Sidecar process pipes were unavailable");

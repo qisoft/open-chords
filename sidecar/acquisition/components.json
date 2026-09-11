@@ -1,0 +1,23 @@
+{
+  "ytDlp": {
+    "version": "2026.7.4",
+    "sha256": "f11f2b11d5a8ac4059f9bdf29fa4407dc7c6bb00c5097e95ca22a7a9db518266"
+  },
+  "ejs": {
+    "version": "0.8.0",
+    "sha256": "79300e5fca7f937a1eeede11f0456862c1b41107ce1d726871e0207424f4bdb4"
+  },
+  "deno": {
+    "version": "2.8.3",
+    "archives": {
+      "darwin-arm64": {
+        "name": "deno-aarch64-apple-darwin.zip",
+        "sha256": "88b350be928fdba0e5d8142ff7c101a17133426371e3cf5ed0e0f74e62476f6c"
+      },
+      "win32-x64": {
+        "name": "deno-x86_64-pc-windows-msvc.zip",
+        "sha256": "7fdd1f42e6b0855421ecf27bb406e2492ade1087c85e30ebf0deab6280ea743c"
+      }
+    }
+  }
+}

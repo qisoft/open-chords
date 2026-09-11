@@ -403,6 +403,20 @@ class CanonicalDecodeTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_RUNTIME)
 
+    def test_acquisition_preserves_bounded_probe_spawn_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="open-chords-acquisition-probe-") as temporary:
+            workspace = Path(temporary)
+            media = workspace / "input/source-media"
+            media.parent.mkdir(parents=True)
+            self._write_stereo_fixture(media)
+            with (
+                patch("sidecar.open_chords_analysis.canonical_decode.subprocess.Popen", side_effect=OSError("private spawn fixture")),
+                self.assertRaises(CanonicalDecodeError) as raised,
+            ):
+                decode_canonical(workspace, NativeToolchain(Path(sys.executable), Path(sys.executable)), CanonicalDecodeConfig(platform_profile="test", acquisition_validation=True))
+            self.assertEqual(raised.exception.code, CanonicalDecodeFailureCode.PROBE_SPAWN)
+            self.assertEqual(list((workspace / "artifacts").iterdir()), [])
+
     def test_classifies_probe_spawn_failure(self) -> None:
         with (
             patch(

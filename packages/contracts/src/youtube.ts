@@ -3,6 +3,9 @@ const playbackSession = { sessionId: z.string().regex(/^playback_[a-f0-9]{32}$/)
 
 export const YouTubeActionSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("status") }),
+  z.strictObject({ type: z.literal("acquire"), url: z.string().min(1).max(4096) }),
+  z.strictObject({ type: z.literal("cancel_acquisition"), jobId: z.string().uuid() }),
+  z.strictObject({ type: z.literal("clear_acquisition_history") }),
   z.strictObject({ type: z.literal("refresh"), url: z.string().min(1).max(4096) }),
   z.strictObject({ type: z.literal("set_offline"), offline: z.boolean() }),
   z.strictObject({ type: z.literal("cancel") }),
@@ -43,6 +46,14 @@ export const YouTubePlayerStateSchema = z.strictObject({
     .optional(),
 });
 export const YouTubeSourceSummarySchema = z.strictObject({
+  snapshots: z
+    .array(
+      z.strictObject({
+        id: z.string().min(1).max(150),
+        durationSamples: z.number().int().positive(),
+      }),
+    )
+    .max(1000),
   id: z.string().min(1).max(150),
   videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
   title: z.string().max(500).optional(),
@@ -51,3 +62,48 @@ export const YouTubeSourceSummarySchema = z.strictObject({
 });
 export type YouTubeAction = z.infer<typeof YouTubeActionSchema>;
 export type YouTubePlayerState = z.infer<typeof YouTubePlayerStateSchema>;
+
+const AcquisitionReasonSchema = z.enum([
+  "offline",
+  "runtime_unavailable",
+  "cancelled",
+  "interrupted",
+  "bot_check",
+  "unsupported_delivery",
+  "provider_unavailable",
+  "endpoint_denied",
+  "dns_denied",
+  "network_unavailable",
+  "budget_exceeded",
+  "deadline",
+  "cleanup_failure",
+  "worker_failed",
+  "invalid_output",
+]);
+
+const AcquisitionSummaryIdentity = z.strictObject({
+  id: z.string().uuid(),
+  videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+});
+export const AcquisitionJobSummarySchema = z.discriminatedUnion("state", [
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("running"),
+    stage: z.enum(["acquiring", "validating", "publishing"]),
+  }),
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("succeeded"),
+    snapshotId: z.string().regex(/^snapshot_[a-f0-9]{64}$/),
+  }),
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("blocked"),
+    reason: AcquisitionReasonSchema,
+  }),
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("failed"),
+    reason: AcquisitionReasonSchema,
+  }),
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("cancelled"),
+    reason: z.literal("cancelled"),
+  }),
+]);

@@ -9,6 +9,15 @@ import {
 } from "@open-chords/contracts";
 import { app, dialog, shell, powerMonitor, type BrowserWindow, type WebContents } from "electron";
 
+import {
+  EXPECTED_ACQUISITION_MANIFEST_SHA256,
+  EXPECTED_ACQUISITION_POLICY_SHA256,
+} from "./acquisition-build-metadata.ts";
+import {
+  AcquisitionJobsOpenError,
+  openAcquisitionJobs,
+  type AcquisitionJobs,
+} from "./acquisition-jobs.ts";
 import { EXPECTED_ALIGNMENT_MANIFEST_SHA256 } from "./alignment-build-metadata.ts";
 import { ALIGNMENT_PACKS } from "./alignment-packs.ts";
 import { inspectAlignmentRuntime, packagedAlignmentRuntimeRoot } from "./alignment-runtime.ts";
@@ -23,6 +32,7 @@ import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
 import { openModelStore, type ModelStore } from "./model-store.ts";
 import { openNetworkMode } from "./network-mode.ts";
+import { runPackagedAcquisitionProof } from "./packaged-acquisition-proof.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-constants.ts";
 import { packagedProofFailureCode, runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
 import { openProjectLibrary } from "./project-library.ts";
@@ -32,12 +42,16 @@ import {
   type DesktopSecurityConfiguration,
 } from "./renderer-security.ts";
 import { createDesktopWindow, hardenWebContents } from "./shell.ts";
+import { EXPECTED_SIDECAR_MANIFEST_SHA256 } from "./sidecar-build-metadata.ts";
 import { presentDesktopWindow } from "./window-lifecycle.ts";
 import { IsolatedYouTubePlayer, isYouTubePlayerSession } from "./youtube-player.ts";
 import { YouTubeService } from "./youtube-service.ts";
 import { YouTubeMetadata } from "./youtube-source.ts";
 
-if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
+if (
+  process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT) ||
+  process.argv.includes("--open-chords-acquisition-proof")
+) {
   // Electron otherwise opens a modal error dialog, hiding native CI failures
   // behind the outer process timeout. Never continue after an uncaught error.
   process.on("uncaughtException", (error) => {
@@ -76,7 +90,11 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   process.stderr.write("Packaged sidecar proof stage: application_started\n");
   void app
     .whenReady()
-    .then(runPackagedSidecarProof)
+    .then(
+      process.argv.includes("--open-chords-acquisition-proof")
+        ? runPackagedAcquisitionProof
+        : runPackagedSidecarProof,
+    )
     .then(
       () => app.exit(0),
       (cause: unknown) => {
@@ -88,12 +106,13 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   if (process.platform === "win32") app.setAppUserModelId("io.github.qisoft.open-chords");
   registerRendererScheme();
 
-  const MEDIA_CLEANUP_TIMEOUT_MS = 5_000;
+  const MEDIA_CLEANUP_TIMEOUT_MS = 30_000;
   const ownsSingleInstance = app.requestSingleInstanceLock();
   let modelStore: ModelStore | null = null;
   let alignmentService: AlignmentService | null = null;
   let lyricsDiscovery: LyricsDiscovery | null = null;
   let youtube: YouTubeService | null = null;
+  let acquisition: AcquisitionJobs | null = null;
   let jsonExports: JsonExports | null = null;
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
@@ -115,9 +134,13 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           jsonExports?.cancel();
           youtube?.close();
           try {
-            await alignmentService?.dispose();
+            await acquisition?.close();
           } finally {
-            await localMediaAuthority?.dispose();
+            try {
+              await alignmentService?.dispose();
+            } finally {
+              await localMediaAuthority?.dispose();
+            }
           }
         },
         exitWithFailure: () => app.exit(1),
@@ -161,7 +184,54 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
           },
         });
         const network = await openNetworkMode(stateRoot);
+        const packagedNativeRoot =
+          process.platform === "darwin"
+            ? join(
+                process.resourcesPath,
+                "../XPCServices/OpenChordsAnalysisService.xpc/Contents/Resources",
+              )
+            : process.resourcesPath;
+        const acquisitionContainment = {
+          containmentRoot: app.isPackaged
+            ? join(
+                process.resourcesPath,
+                process.platform === "darwin" ? "../MacOS/containment" : "containment",
+              )
+            : join(app.getAppPath(), "dist/containment"),
+          containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
+          ...(app.isPackaged && process.platform === "darwin"
+            ? { bridgePath: join(process.resourcesPath, "../MacOS/open-chords-containment-bridge") }
+            : {}),
+        };
+        try {
+          acquisition = await openAcquisitionJobs({
+            stateRoot,
+            network,
+            library: projectLibrary,
+            policyHash: EXPECTED_ACQUISITION_POLICY_SHA256,
+            runtime: {
+              ...acquisitionContainment,
+              runtimeRoot: app.isPackaged
+                ? join(packagedNativeRoot, "open-chords-acquisition")
+                : join(app.getAppPath(), "dist/acquisition-runtime/open-chords-acquisition"),
+              runtimeManifestHash: EXPECTED_ACQUISITION_MANIFEST_SHA256,
+            },
+            validation: {
+              ...acquisitionContainment,
+              runtimeRoot: app.isPackaged
+                ? join(packagedNativeRoot, "open-chords-analysis")
+                : join(app.getAppPath(), "dist/analysis-sidecar/open-chords-analysis"),
+              runtimeManifestHash: EXPECTED_SIDECAR_MANIFEST_SHA256,
+            },
+          });
+        } catch (error) {
+          const code =
+            error instanceof AcquisitionJobsOpenError ? error.code : "cleanup_unverified";
+          if (code === "cleanup_unverified") blockCpuWorkAfterIncompleteCleanup();
+          console.warn(`Acquisition unavailable: ${code}`);
+        }
         youtube = new YouTubeService({
+          ...(acquisition ? { acquisition } : {}),
           library: projectLibrary,
           network,
           metadata: new YouTubeMetadata({ network }),

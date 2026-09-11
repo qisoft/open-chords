@@ -20,6 +20,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from tools.runtime_licenses import _python_license, _pyinstaller_license, _find_python_license
+
 from sidecar.open_chords_analysis.runtime_manifest import load_frozen_runtime, write_runtime_manifest
 
 PYTHON_ANALYSIS_DISTRIBUTIONS = {
@@ -258,27 +260,6 @@ def _bounded_version_file(path: Path) -> str:
     return lines[0]
 
 
-def _python_license() -> Path:
-    return _find_python_license(
-        Path(sys.executable).resolve(),
-        Path(sysconfig.get_path("stdlib")),
-    )
-
-
-def _pyinstaller_license(distribution: importlib.metadata.Distribution) -> Path:
-    license_file = next(
-        (
-            file
-            for file in distribution.files or []
-            if file.name == "COPYING.txt" and "licenses" in file.parts
-        ),
-        None,
-    )
-    if license_file is None:
-        raise FileNotFoundError("PyInstaller COPYING.txt was not found in distribution metadata")
-    return license_file
-
-
 def _write_python_analysis_licenses(output: Path) -> dict[str, str]:
     sections: list[str] = []
     versions: dict[str, str] = {}
@@ -299,18 +280,6 @@ def _write_python_analysis_licenses(output: Path) -> dict[str, str]:
             sections.append(path.read_text("utf-8", errors="replace").rstrip())
     output.write_text("\n\n".join(sections) + "\n", "utf-8")
     return versions
-
-
-def _find_python_license(executable: Path, stdlib: Path) -> Path:
-    stdlib_license = stdlib / "LICENSE.txt"
-    if stdlib_license.is_file():
-        return stdlib_license
-    for parent in executable.parents:
-        for name in ("LICENSE", "LICENSE.txt"):
-            candidate = parent / name
-            if candidate.is_file():
-                return candidate
-    raise FileNotFoundError("CPython LICENSE was not found beside the exact build interpreter")
 
 
 def _native_files(runtime_root: Path) -> list[dict[str, str]]:

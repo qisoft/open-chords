@@ -12,6 +12,7 @@ function installStagedMacOSContainment(
   serviceEntitlements,
   signService = signMacOSService,
   alignmentRuntimeSource,
+  acquisitionRuntimeSource,
 ) {
   if (platform !== "darwin") return;
   const contents = resolve(buildPath, "..", "..");
@@ -30,6 +31,13 @@ function installStagedMacOSContainment(
     cpSync(
       alignmentRuntimeSource,
       join(service, "Contents", "Resources", "open-chords-alignment"),
+      { recursive: true },
+    );
+  }
+  if (acquisitionRuntimeSource) {
+    cpSync(
+      acquisitionRuntimeSource,
+      join(service, "Contents", "Resources", "open-chords-acquisition"),
       { recursive: true },
     );
   }
@@ -65,6 +73,7 @@ function isPreverifiedContainmentPath(path) {
   return (
     path.includes("/Contents/Resources/open-chords-analysis/") ||
     path.includes("/Contents/Resources/open-chords-alignment/") ||
+    path.includes("/Contents/Resources/open-chords-acquisition/") ||
     path.includes("/Contents/Resources/containment/") ||
     path.includes("/Contents/MacOS/containment/") ||
     path.endsWith("/Contents/MacOS/open-chords-containment-bridge") ||

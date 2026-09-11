@@ -19,7 +19,7 @@ def frozen_main() -> None:
     contained_workspace: Path | None = None
     if len(sys.argv) > 1 and sys.argv[1].startswith("--contained-workspace="):
         contained_workspace = Path(sys.argv.pop(1).split("=", 1)[1])
-    if contained_workspace is not None and sys.argv[1:]:
+    if contained_workspace is not None and sys.argv[1:] and sys.argv[1:] != ["--acquisition-validation"]:
         # Probe modes intentionally exercise workspace-relative behavior. The
         # protocol session keeps the native-validated runtime as cwd while
         # receiving the writable workspace explicitly below.
@@ -121,11 +121,13 @@ def frozen_main() -> None:
             )
         )
         return
-    if sys.argv[1:]:
+    acquisition_validation = sys.argv[1:] == ["--acquisition-validation"]
+    if sys.argv[1:] and not acquisition_validation:
         raise SystemExit("unsupported frozen sidecar argument")
     main(
         workspace=contained_workspace,
         windows_runtime_is_current_directory=contained_workspace is not None,
+        acquisition_validation=acquisition_validation,
     )
 
 
