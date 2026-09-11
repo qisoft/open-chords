@@ -1003,8 +1003,30 @@ test("practice settings and explicit loops survive reopening without following s
   try {
     let page = await application.firstWindow();
     await expect(page.getByRole("heading", { name: "Musical timeline" })).toBeVisible();
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await page.evaluate(() => {
+      const trace: unknown[] = [];
+      Object.assign(window, { loopDiagnostic: trace });
+      for (const kind of ["pointerdown", "pointerup", "click", "focusin"]) {
+        document.addEventListener(kind, event => trace.push({
+          kind, time: performance.now(), target: (event.target as HTMLElement).outerHTML?.slice(0, 400),
+        }), true);
+      }
+      window.openChords!.project.subscribe(update => trace.push({ kind: "project", update }));
+    });
     await page.getByRole("button", { name: "Set loop from selection" }).click();
-    await expect(page.locator(".loop-status")).toContainText("Pickup");
+    try {
+      await expect(page.locator(".loop-status")).toContainText("Pickup");
+    } catch (error) {
+      await test.info().attach("loop-diagnostic", { contentType: "application/json", body: JSON.stringify(await page.evaluate(() => ({
+        trace: (window as unknown as { loopDiagnostic: unknown[] }).loopDiagnostic,
+        status: document.querySelector('[aria-label="Practice settings status"]')?.textContent,
+        body: document.body.innerText,
+      }))) });
+      throw error;
+    }
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
     await page.getByRole("combobox", { name: "Loop end Bar" }).selectOption("bar_three_four");
     await page.getByRole("button", { name: "Set loop from selection" }).click();
     await expect(page.locator(".loop-status")).toContainText("through Complete");

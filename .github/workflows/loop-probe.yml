@@ -1,0 +1,26 @@
+name: Initial loop diagnostic
+on:
+  push:
+    branches: [diagnostic/48-initial-loop]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.30.1 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm electron:install
+      - run: pnpm build:test
+      - run: pnpm exec playwright test tests/renderer/workspace.spec.ts --grep "practice settings and explicit loops" --repeat-each=30 --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: initial-loop-diagnostics
+          path: test-results/
