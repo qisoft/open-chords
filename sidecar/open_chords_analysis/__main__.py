@@ -26,6 +26,7 @@ def main(
     *,
     workspace: Path | None = None,
     windows_runtime_is_current_directory: bool = False,
+    acquisition_validation: bool = False,
 ) -> None:
     freeze_support()
 
@@ -72,6 +73,7 @@ def main(
             session_workspace,
             runtime,
             workspace_is_current_directory=windows_runtime_is_current_directory,
+            acquisition_validation=acquisition_validation,
         )
     except Exception as error:
         if isinstance(error, PermissionError):

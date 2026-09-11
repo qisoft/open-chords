@@ -29,6 +29,11 @@ export function mergeYouTubeSources(...groups: Source[][]): Source[] {
     )
       throw new Error("YouTube Source identity conflict");
     identities.set(source.id, videoId);
+    for (const snapshot of source.snapshots) {
+      const prior = previous?.snapshots.find((item) => item.id === snapshot.id);
+      if (prior && canonicalSerialize(prior) !== canonicalSerialize(snapshot))
+        throw new Error("Source Snapshots are immutable");
+    }
     for (const observation of source.metadataObservations) {
       const content = canonicalSerialize({ videoId, observation });
       if (observations.has(observation.id) && observations.get(observation.id) !== content)

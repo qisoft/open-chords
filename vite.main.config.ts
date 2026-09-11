@@ -28,8 +28,20 @@ export default defineConfig(({ mode }) => {
     mode === "packaged",
   );
   const alignmentManifestHash = readSidecarManifestHash(alignmentManifestPath, mode === "packaged");
+  const acquisitionManifestHash = readSidecarManifestHash(
+    resolve("dist/acquisition-runtime/open-chords-acquisition/runtime-info.json"),
+    mode === "packaged",
+  );
   return {
     define: {
+      OPEN_CHORDS_EMBEDDED_ACQUISITION_MANIFEST_SHA256: JSON.stringify(acquisitionManifestHash),
+      OPEN_CHORDS_EMBEDDED_ACQUISITION_POLICY_SHA256: JSON.stringify(
+        createHash("sha256")
+          .update(readFileSync(resolve("apps/desktop/src/main/acquisition-broker.ts")))
+          .update(readFileSync(resolve("apps/desktop/src/main/acquisition-session.ts")))
+          .update(readFileSync(resolve("sidecar/acquisition/entry.py")))
+          .digest("hex"),
+      ),
       OPEN_CHORDS_EMBEDDED_ALIGNMENT_MANIFEST_SHA256: JSON.stringify(alignmentManifestHash),
       OPEN_CHORDS_EMBEDDED_CONTAINMENT_MANIFEST_SHA256: JSON.stringify(containmentManifestHash),
       OPEN_CHORDS_EMBEDDED_SIDECAR_MANIFEST_SHA256: JSON.stringify(sidecarManifestHash),

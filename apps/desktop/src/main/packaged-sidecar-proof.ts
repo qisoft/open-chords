@@ -950,7 +950,7 @@ function privateCleanupFailures(failures: readonly unknown[]): PackagedProofFail
   return failures.map(() => new PackagedProofFailure("cleanup_failed"));
 }
 
-function canonicalWavFixture(): Buffer {
+export function canonicalWavFixture(): Buffer {
   const sampleCount = 4_800;
   const result = Buffer.alloc(44 + sampleCount * 2);
   result.write("RIFF", 0, "ascii");

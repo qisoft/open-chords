@@ -23,6 +23,7 @@ import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
 import { openModelStore, type ModelStore } from "./model-store.ts";
 import { openNetworkMode } from "./network-mode.ts";
+import { runPackagedAcquisitionProof } from "./packaged-acquisition-proof.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-constants.ts";
 import { packagedProofFailureCode, runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
 import { openProjectLibrary } from "./project-library.ts";
@@ -37,7 +38,10 @@ import { IsolatedYouTubePlayer, isYouTubePlayerSession } from "./youtube-player.
 import { YouTubeService } from "./youtube-service.ts";
 import { YouTubeMetadata } from "./youtube-source.ts";
 
-if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
+if (
+  process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT) ||
+  process.argv.includes("--open-chords-acquisition-proof")
+) {
   // Electron otherwise opens a modal error dialog, hiding native CI failures
   // behind the outer process timeout. Never continue after an uncaught error.
   process.on("uncaughtException", (error) => {
@@ -76,7 +80,11 @@ if (process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT)) {
   process.stderr.write("Packaged sidecar proof stage: application_started\n");
   void app
     .whenReady()
-    .then(runPackagedSidecarProof)
+    .then(
+      process.argv.includes("--open-chords-acquisition-proof")
+        ? runPackagedAcquisitionProof
+        : runPackagedSidecarProof,
+    )
     .then(
       () => app.exit(0),
       (cause: unknown) => {

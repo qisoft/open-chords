@@ -997,6 +997,19 @@ async function readVerifiedBytes(
   return bytes;
 }
 
+/** Inspect closed canonical output using the same file-identity and PCM checks as local import. */
+export async function inspectCanonicalMedia(path: string) {
+  const cleanup = new MediaHandleCleanup();
+  try {
+    const lease = await verifyLocalWav(path, nodeLocalMediaFileSystem, cleanup);
+    const { byteFingerprint, byteSize, canonicalAudioFingerprint, durationSamples, sampleRate } =
+      lease.media;
+    return { byteFingerprint, byteSize, canonicalAudioFingerprint, durationSamples, sampleRate };
+  } finally {
+    await cleanup.releaseAllRetained();
+  }
+}
+
 async function verifyLocalWav(
   candidatePath: string,
   fileSystem: LocalMediaFileSystem,

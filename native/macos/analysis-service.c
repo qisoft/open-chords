@@ -74,9 +74,9 @@ static bool matches_embedded_runtime(const char *runtime_root, const char *execu
   char canonical_executable[PATH_MAX];
   if (realpath(runtime_root, canonical_runtime) == NULL ||
       realpath(executable, canonical_executable) == NULL) return false;
-  const char *runtimes[] = {"open-chords-analysis", "open-chords-alignment"};
-  const char *executables[] = {"open-chords-analysis", "open-chords-alignment-worker"};
-  for (size_t index = 0; index < 2; index++) {
+  const char *runtimes[] = {"open-chords-analysis", "open-chords-alignment", "open-chords-acquisition"};
+  const char *executables[] = {"open-chords-analysis", "open-chords-alignment-worker", "open-chords-extractor-worker"};
+  for (size_t index = 0; index < sizeof(runtimes) / sizeof(runtimes[0]); index++) {
     char expected_runtime[PATH_MAX];
     char expected_executable[PATH_MAX];
     char canonical_expected_runtime[PATH_MAX];
