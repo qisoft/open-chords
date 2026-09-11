@@ -66,6 +66,8 @@ test("installed Extractor Worker streams only through the broker with native net
       mismatchedMediaNoSnapshot: true,
       oversizedDurationNoSnapshot: true,
       initializationCleanupRecoverable: true,
+      offlineDuringStartCancelled: true,
+      closeDuringStartReaped: true,
     });
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });

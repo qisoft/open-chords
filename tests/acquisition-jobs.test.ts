@@ -13,7 +13,9 @@ it("retains a canonical blocked Job without an Attempt when the runtime is unava
   try {
     const network = await openNetworkMode(stateRoot);
     const jobs = await openAcquisitionJobs({ stateRoot, network });
-    const missing = await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" });
+    const missing = await jobs.start({
+      url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ&list=PLignored&index=3",
+    });
     expect(missing).toMatchObject({
       videoId: "aqz-KE-bpKQ",
       state: "blocked",

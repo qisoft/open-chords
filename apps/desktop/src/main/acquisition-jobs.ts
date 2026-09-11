@@ -128,13 +128,17 @@ export class AcquisitionJobs {
   #pending = 0;
   #write: Promise<unknown> = Promise.resolve();
   #expiryTimer: ReturnType<typeof setTimeout> | undefined;
+  readonly #starting = new Set<AbortController>();
   readonly #active = new Map<string, { abort: AbortController; done: Promise<AcquisitionJob> }>();
   constructor(root: string, options: AcquisitionJobsOptions, jobs: AcquisitionJob[]) {
     this.#root = root;
     this.#options = options;
     this.#jobs = jobs;
     this.#unsubscribe = options.network.subscribe(() => {
-      if (options.network.offline) for (const active of this.#active.values()) active.abort.abort();
+      if (options.network.offline) {
+        for (const abort of this.#starting) abort.abort();
+        for (const active of this.#active.values()) active.abort.abort();
+      }
     });
   }
   #now() {
@@ -257,8 +261,6 @@ export class AcquisitionJobs {
     let videoId: string;
     try {
       const input = z.strictObject({ url: z.string().max(4096) }).parse(raw);
-      const url = new URL(input.url);
-      if (url.searchParams.has("list")) throw new Error();
       videoId = canonicalYouTubeSource(input.url).identity.videoId;
     } catch {
       throw new Error("invalid_input");
@@ -266,6 +268,8 @@ export class AcquisitionJobs {
     if (this.#closed) throw new Error("acquisition_closed");
     if (this.#pending >= 32) throw new Error("acquisition_busy");
     this.#pending++;
+    const abort = new AbortController();
+    this.#starting.add(abort);
     const operation = this.#serialize(async () => {
       if (this.#closed) throw new Error("acquisition_closed");
       if (this.#active.size) throw new Error("acquisition_busy");
@@ -315,7 +319,6 @@ export class AcquisitionJobs {
       await this.#persist([...this.#jobs, job]);
       this.#jobs.push(job);
       if (attempt) {
-        const abort = new AbortController();
         const done = this.#run(job, attempt, abort.signal).finally(() =>
           this.#active.delete(job.id),
         );
@@ -329,6 +332,7 @@ export class AcquisitionJobs {
     try {
       return await operation;
     } finally {
+      this.#starting.delete(abort);
       this.#pending--;
     }
   }
@@ -357,6 +361,10 @@ export class AcquisitionJobs {
     this.#closed = true;
     clearTimeout(this.#expiryTimer);
     this.#unsubscribe();
+    for (const abort of this.#starting) abort.abort();
+    for (const active of this.#active.values()) active.abort.abort();
+    // Starts paused in durable publication must hand off before we await attempts.
+    await this.#write.catch(() => undefined);
     for (const active of this.#active.values()) active.abort.abort();
     await Promise.all([...this.#active.values()].map((active) => active.done));
     await this.#write.catch(() => undefined);

@@ -14,6 +14,7 @@ import { openContainedAcquisitionAttempt } from "./acquisition-runtime.ts";
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { openNetworkMode } from "./network-mode.ts";
 import { proveInitializationCleanupRecovery } from "./packaged-acquisition-fault-proof.ts";
+import { proveAcquisitionStartCancellation } from "./packaged-acquisition-start-proof.ts";
 import { canonicalWavFixture } from "./packaged-sidecar-proof.ts";
 import { ProjectOwnedRecordsSchema } from "./project-library-records.ts";
 import { openProjectLibrary } from "./project-library.ts";
@@ -285,6 +286,7 @@ export async function runPackagedAcquisitionProof() {
     source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
   );
   await network.setOffline(false);
+  const startCancellation = await proveAcquisitionStartCancellation(jobOptions);
   const initializationCleanupRecoverable = await proveInitializationCleanupRecovery(jobOptions);
   process.stdout.write(
     JSON.stringify({
@@ -303,6 +305,7 @@ export async function runPackagedAcquisitionProof() {
       mismatchedMediaNoSnapshot,
       oversizedDurationNoSnapshot,
       initializationCleanupRecoverable,
+      ...startCancellation,
       temporaryMediaRemoved:
         (await readdir(join(library.activeRoot, "source-snapshots", job.snapshotId!))).join() ===
         "snapshot.json",
