@@ -8,6 +8,8 @@ The active Project Library owns pre-acquisition YouTube Sources and immutable me
 
 The player is a separate sandboxed BrowserWindow in a memory-only, cache-disabled Session. It has no preload, desktop IPC, Node, Project or local-media protocol. Its only local resources are a bundled static adapter and HTML at `open-chords-player://player`. The primary renderer's CSP, navigation policy and request policy remain unchanged.
 
+The player window uses `no-user-gesture-required` because an explicit Play action is relayed from the separate primary window. The primary window retains `document-user-activation-required`. The adapter keeps `autoplay: 0`, so opening the player does not request playback. Browser policy relaxation grants no additional IPC, filesystem, network or process capability; provider autoplay-denial errors remain handled.
+
 Main accepts only bounded playback actions and reads schema-validated playback state. Each opened player receives a fresh main-owned session ID; commands for an old session fail. Closing the primary renderer, cancellation or enabling Offline Mode destroys the player, blocks its requests, closes network connections and clears session storage. Open/command response timeouts terminate an unresponsive adapter. A slow status read reports an error without closing the window; only one underlying read remains pending until it settles. Permissions, downloads, new windows, webviews and top-level navigation are denied.
 
 The controls dialog and the separate native player window have distinct lifetimes. **Close controls** leaves the visible player and its native YouTube controls available, including while the user returns to a Project. **Close player**, closing the native window, cancellation, application closure and Offline Mode stop playback. The dialog states this distinction explicitly; it does not leave a hidden player behind.
@@ -37,3 +39,11 @@ The [2026-09-09 installed macOS arm64 observation](evidence/youtube-player-macos
 The [2026-09-09 GitHub macOS observation](https://github.com/qisoft/open-chords/actions/runs/34362660401) sent the required Referer, but YouTube displayed a [sign-in bot challenge](evidence/youtube-player-ci-bot-challenge-2026-09-09.png) and media time remained at zero. The preceding eight installed tests passed. This is a failed live observation; installed acceptance remains open. The live observation is now an explicit workflow run, while pull-request CI checks deterministic behavior. Local installed macOS playback passed separately. No cookies, account credentials or challenge bypass are introduced to make the CI observation pass.
 
 That observation also exposed a trailing provider `ready` event after its error. The adapter now preserves the error until the provider reports actual playback. The external-provider fixture reproduces the event ordering, and the renderer test verifies error retention and explicit playback recovery.
+
+## First Play from application controls
+
+The user reported successful Windows playback, pause/resume, seek/rate, closing and Offline Mode with the PR #87 artifact, after an initial click inside YouTube. Subsequent application Play/Pause commands worked. The exact Windows version was not supplied, so this report is not a complete Windows 11 acceptance record.
+
+For the first-Play change, the user explicitly waived another manual Windows pass and accepted macOS validation plus Windows CI. This waiver does not turn macOS results into Windows live-provider evidence or waive the separate Narrator gate.
+
+The installed regression replaces only provider responses and plays real unmuted WAV media in a cross-origin iframe. It clicks the primary application's Play control without interacting with the player, checks actual media-time advancement and observes user activation with CDP `userGesture: false`. Playwright `page.evaluate` must not be used for that observation because it itself grants activation. The previous policy failed this scenario. The opt-in live test now also starts through application controls, retaining Referer, time advancement, seek, rate and pause assertions.
