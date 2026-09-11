@@ -8,7 +8,7 @@ import { openAcquisitionJobs, type AcquisitionJobsOptions } from "./acquisition-
 /** Pause an external durable rename at the public Job start boundary. */
 export async function proveAcquisitionStartCancellation(options: AcquisitionJobsOptions) {
   const results: boolean[] = [];
-  for (const cause of ["offline", "close"] as const) {
+  for (const cause of ["offline", "close", "close_write_failure"] as const) {
     await options.network.setOffline(false);
     const stateRoot = join(options.stateRoot, `start-${cause}`);
     let resolutions = 0;
@@ -42,6 +42,14 @@ export async function proveAcquisitionStartCancellation(options: AcquisitionJobs
           paused();
           return gate.then(() => Reflect.apply(target, receiver, args));
         }
+        if (
+          !armed &&
+          cause === "close_write_failure" &&
+          String(args[1]) === join(stateRoot, "acquisition-jobs/state.json")
+        )
+          return Promise.reject(
+            Object.assign(new Error("private publication fixture"), { code: "EIO" }),
+          );
         return Reflect.apply(target, receiver, args);
       },
     });
@@ -67,6 +75,19 @@ export async function proveAcquisitionStartCancellation(options: AcquisitionJobs
       }
       release();
       const started = await starting;
+      if (cause === "close_write_failure") {
+        const failure = await closing?.then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        results.push(
+          failure instanceof Error &&
+            failure.message === "acquisition_cleanup_failed" &&
+            resolutions === 0 &&
+            (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0,
+        );
+        continue;
+      }
       await closing;
       const closedTerminal =
         cause !== "close" ||
@@ -86,9 +107,20 @@ export async function proveAcquisitionStartCancellation(options: AcquisitionJobs
       syncBuiltinESMExports();
       await starting?.catch(() => undefined);
       await closing?.catch(() => undefined);
-      await jobs.close();
+      await jobs.close().catch((error: unknown) => {
+        if (
+          cause !== "close_write_failure" ||
+          !(error instanceof Error) ||
+          error.message !== "acquisition_cleanup_failed"
+        )
+          throw error;
+      });
       await options.network.setOffline(false);
     }
   }
-  return { offlineDuringStartCancelled: results[0], closeDuringStartReaped: results[1] };
+  return {
+    offlineDuringStartCancelled: results[0],
+    closeDuringStartReaped: results[1],
+    closeFailureRedacted: results[2],
+  };
 }

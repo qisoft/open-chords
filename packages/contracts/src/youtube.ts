@@ -63,32 +63,47 @@ export const YouTubeSourceSummarySchema = z.strictObject({
 export type YouTubeAction = z.infer<typeof YouTubeActionSchema>;
 export type YouTubePlayerState = z.infer<typeof YouTubePlayerStateSchema>;
 
-export const AcquisitionJobSummarySchema = z.strictObject({
+const AcquisitionReasonSchema = z.enum([
+  "offline",
+  "runtime_unavailable",
+  "cancelled",
+  "interrupted",
+  "bot_check",
+  "unsupported_delivery",
+  "provider_unavailable",
+  "endpoint_denied",
+  "dns_denied",
+  "network_unavailable",
+  "budget_exceeded",
+  "deadline",
+  "cleanup_failure",
+  "worker_failed",
+  "invalid_output",
+]);
+
+const AcquisitionSummaryIdentity = z.strictObject({
   id: z.string().uuid(),
   videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
-  state: z.enum(["blocked", "running", "succeeded", "failed", "cancelled"]),
-  stage: z.enum(["acquiring", "validating", "publishing"]).optional(),
-  reason: z
-    .enum([
-      "offline",
-      "runtime_unavailable",
-      "cancelled",
-      "interrupted",
-      "bot_check",
-      "unsupported_delivery",
-      "provider_unavailable",
-      "endpoint_denied",
-      "dns_denied",
-      "network_unavailable",
-      "budget_exceeded",
-      "deadline",
-      "cleanup_failure",
-      "worker_failed",
-      "invalid_output",
-    ])
-    .optional(),
-  snapshotId: z
-    .string()
-    .regex(/^snapshot_[a-f0-9]{64}$/)
-    .optional(),
 });
+export const AcquisitionJobSummarySchema = z.discriminatedUnion("state", [
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("running"),
+    stage: z.enum(["acquiring", "validating", "publishing"]),
+  }),
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("succeeded"),
+    snapshotId: z.string().regex(/^snapshot_[a-f0-9]{64}$/),
+  }),
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("blocked"),
+    reason: AcquisitionReasonSchema,
+  }),
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("failed"),
+    reason: AcquisitionReasonSchema,
+  }),
+  AcquisitionSummaryIdentity.extend({
+    state: z.literal("cancelled"),
+    reason: z.literal("cancelled"),
+  }),
+]);

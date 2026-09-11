@@ -13,7 +13,11 @@ import {
   EXPECTED_ACQUISITION_MANIFEST_SHA256,
   EXPECTED_ACQUISITION_POLICY_SHA256,
 } from "./acquisition-build-metadata.ts";
-import { openAcquisitionJobs, type AcquisitionJobs } from "./acquisition-jobs.ts";
+import {
+  AcquisitionJobsOpenError,
+  openAcquisitionJobs,
+  type AcquisitionJobs,
+} from "./acquisition-jobs.ts";
 import { EXPECTED_ALIGNMENT_MANIFEST_SHA256 } from "./alignment-build-metadata.ts";
 import { ALIGNMENT_PACKS } from "./alignment-packs.ts";
 import { inspectAlignmentRuntime, packagedAlignmentRuntimeRoot } from "./alignment-runtime.ts";
@@ -220,8 +224,11 @@ if (
               runtimeManifestHash: EXPECTED_SIDECAR_MANIFEST_SHA256,
             },
           });
-        } catch {
-          blockCpuWorkAfterIncompleteCleanup();
+        } catch (error) {
+          const code =
+            error instanceof AcquisitionJobsOpenError ? error.code : "cleanup_unverified";
+          if (code === "cleanup_unverified") blockCpuWorkAfterIncompleteCleanup();
+          console.warn(`Acquisition unavailable: ${code}`);
         }
         youtube = new YouTubeService({
           ...(acquisition ? { acquisition } : {}),

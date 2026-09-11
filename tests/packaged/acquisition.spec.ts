@@ -68,6 +68,7 @@ test("installed Extractor Worker streams only through the broker with native net
       initializationCleanupRecoverable: true,
       offlineDuringStartCancelled: true,
       closeDuringStartReaped: true,
+      closeFailureRedacted: true,
     });
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });

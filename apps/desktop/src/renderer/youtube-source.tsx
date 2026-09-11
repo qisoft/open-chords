@@ -163,8 +163,8 @@ export function YouTubeSource({
             {result?.acquisitionJobs.map((job) => (
               <article key={job.id}>
                 <p>
-                  {job.videoId}: {job.stage ?? job.state}
-                  {job.reason ? ` — ${job.reason.replaceAll("_", " ")}` : ""}
+                  {job.videoId}: {job.state === "running" ? job.stage : job.state}
+                  {"reason" in job ? ` — ${job.reason.replaceAll("_", " ")}` : ""}
                 </p>
                 {job.state === "succeeded" && (
                   <p>Snapshot provenance saved. Temporary media removed.</p>

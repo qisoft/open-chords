@@ -80,3 +80,51 @@ it("expires failed history after seven days while the application remains open",
     await rm(stateRoot, { recursive: true, force: true });
   }
 });
+
+it("distinguishes corrupt history after verified cleanup from an unverified workspace", async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "open-chords-acquisition-open-"));
+  try {
+    const network = await openNetworkMode(stateRoot);
+    const jobs = await openAcquisitionJobs({ stateRoot, network });
+    await jobs.close();
+    const root = join(stateRoot, "acquisition-jobs");
+    await writeFile(join(root, "state.json"), "corrupt-private-fixture");
+    await expect(openAcquisitionJobs({ stateRoot, network })).rejects.toMatchObject({
+      code: "state_unavailable",
+    });
+    const journal = join(root, "workspaces", randomUUID());
+    await writeFile(journal, "corrupt-private-journal");
+    await expect(openAcquisitionJobs({ stateRoot, network })).rejects.toMatchObject({
+      code: "cleanup_unverified",
+    });
+    expect(await readFile(journal, "utf8")).toBe("corrupt-private-journal");
+    expect(await readFile(join(root, "state.json"), "utf8")).toBe("corrupt-private-fixture");
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+it("rejects contradictory persisted Job lifecycle fields", async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "open-chords-acquisition-state-"));
+  try {
+    const network = await openNetworkMode(stateRoot);
+    const jobs = await openAcquisitionJobs({ stateRoot, network });
+    const blocked = await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" });
+    await jobs.close();
+    for (const invalid of [
+      { ...blocked, state: "failed", snapshotId: `snapshot_${"a".repeat(64)}` },
+      { ...blocked, state: "succeeded" },
+      { ...blocked, stage: "acquiring" },
+    ]) {
+      await writeFile(
+        join(stateRoot, "acquisition-jobs/state.json"),
+        JSON.stringify({ version: 1, jobs: [invalid] }),
+      );
+      await expect(openAcquisitionJobs({ stateRoot, network })).rejects.toMatchObject({
+        code: "state_unavailable",
+      });
+    }
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});

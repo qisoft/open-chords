@@ -1565,10 +1565,9 @@ export class ProjectLibrary {
     await this.#scanProjectContainer("active", entries);
     await this.#scanProjectContainer("trashed", entries);
     validateLibrarySourceAuthority(entries);
-    this.#acquiredCatalog = await readAcquiredSources(this.#activeRoot);
     try {
       const catalog = await readYouTubeSources(this.#activeRoot);
-      assertSourceAuthorityAgainstEntries({ sources: catalog }, entries, this.#acquiredCatalog);
+      assertSourceAuthorityAgainstEntries({ sources: catalog }, entries);
       mergeYouTubeSources(
         [...entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
         catalog,
@@ -1578,6 +1577,23 @@ export class ProjectLibrary {
       await this.#quarantineInvalidCatalogs([join(this.#activeRoot, "youtube-sources.json")]);
       this.#youtubeCatalog = [];
     }
+    const accepted: ProjectOwnedRecords["sources"] = [];
+    const projectSources = [...entries.values()].flatMap(
+      (entry) => entry.revision?.payload.records.sources ?? [],
+    );
+    for (const candidate of await readAcquiredSources(this.#activeRoot)) {
+      try {
+        assertSourceAuthorityAgainstEntries({ sources: [candidate] }, entries, [
+          ...this.#youtubeCatalog,
+          ...accepted,
+        ]);
+        mergeYouTubeSources(projectSources, this.#youtubeCatalog, accepted, [candidate]);
+        accepted.push(candidate);
+      } catch {
+        // A conflicting immutable entry cannot invalidate verified Projects or metadata.
+      }
+    }
+    this.#acquiredCatalog = accepted;
     for (const [projectId, failure] of this.#migrationFailures) {
       const entry = entries.get(projectId);
       if (entry !== undefined) entry.migrationFailure = failure;

@@ -10,6 +10,7 @@ import { openNetworkMode } from "../apps/desktop/src/main/network-mode.ts";
 import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
 import { YouTubeService } from "../apps/desktop/src/main/youtube-service.ts";
 import { YouTubeMetadata } from "../apps/desktop/src/main/youtube-source.ts";
+import { AcquisitionJobSummarySchema } from "../packages/contracts/src/youtube.ts";
 
 test("named metadata commands persist safely while a remote player sender has no desktop authority", async () => {
   const root = await mkdtemp(join(tmpdir(), "open-chords-youtube-desktop-"));
@@ -128,4 +129,25 @@ test("named metadata commands persist safely while a remote player sender has no
     await acquisition.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("public acquisition summaries reject impossible lifecycle combinations", () => {
+  const identity = { id: "11111111-1111-4111-8111-111111111111", videoId: "aqz-KE-bpKQ" };
+  for (const fields of [
+    { state: "succeeded" },
+    { state: "running" },
+    { state: "failed" },
+    { state: "cancelled", reason: "offline", snapshotId: `snapshot_${"a".repeat(64)}` },
+    { state: "blocked", reason: "offline", stage: "acquiring" },
+    { state: "succeeded", snapshotId: `snapshot_${"a".repeat(64)}`, reason: "worker_failed" },
+  ])
+    expect(AcquisitionJobSummarySchema.safeParse({ ...identity, ...fields }).success).toBe(false);
+  for (const fields of [
+    { state: "succeeded", snapshotId: `snapshot_${"a".repeat(64)}` },
+    { state: "running", stage: "acquiring" },
+    { state: "blocked", reason: "offline" },
+    { state: "failed", reason: "worker_failed" },
+    { state: "cancelled", reason: "cancelled" },
+  ])
+    expect(AcquisitionJobSummarySchema.safeParse({ ...identity, ...fields }).success).toBe(true);
 });

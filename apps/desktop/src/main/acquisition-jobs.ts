@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, opendir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+import { AcquisitionJobSummarySchema } from "@open-chords/contracts";
 import { canonicalSerialize } from "@open-chords/domain";
 import { z } from "zod";
 
@@ -65,21 +66,34 @@ const Attempt = z.strictObject({
   reason: Reason.optional(),
   counters: Counters,
 });
-const JobSchema = z.strictObject({
-  id: z.string().uuid(),
-  videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/u),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime(),
-  state: z.enum(["blocked", "running", "succeeded", "failed", "cancelled"]),
-  stage: z.enum(["acquiring", "validating", "publishing"]).optional(),
-  reason: Reason.optional(),
-  attempts: z.array(Attempt).max(10),
-  snapshotId: z
-    .string()
-    .regex(/^snapshot_[a-f0-9]{64}$/u)
-    .optional(),
-  sourceId: z.string().max(150).optional(),
-});
+const JobSchema = z
+  .strictObject({
+    id: z.string().uuid(),
+    videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/u),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+    state: z.enum(["blocked", "running", "succeeded", "failed", "cancelled"]),
+    stage: z.enum(["acquiring", "validating", "publishing"]).optional(),
+    reason: Reason.optional(),
+    attempts: z.array(Attempt).max(10),
+    snapshotId: z
+      .string()
+      .regex(/^snapshot_[a-f0-9]{64}$/u)
+      .optional(),
+    sourceId: z.string().max(150).optional(),
+  })
+  .superRefine(({ id, videoId, state, stage, reason, snapshotId, sourceId }, context) => {
+    const summary = AcquisitionJobSummarySchema.safeParse({
+      id,
+      videoId,
+      state,
+      ...(stage !== undefined ? { stage } : {}),
+      ...(reason !== undefined ? { reason } : {}),
+      ...(snapshotId !== undefined ? { snapshotId } : {}),
+    });
+    if (!summary.success || (state === "succeeded" ? !sourceId : sourceId !== undefined))
+      context.addIssue({ code: "custom", message: "Invalid acquisition lifecycle" });
+  });
 export type AcquisitionJob = z.infer<typeof JobSchema>;
 export type AcquisitionJobsOptions = {
   stateRoot: string;
@@ -94,28 +108,71 @@ export type AcquisitionJobsOptions = {
 const Catalog = z.strictObject({ version: z.literal(1), jobs: z.array(JobSchema).max(1000) });
 const Journal = z.strictObject({ decoderId: z.string().uuid() });
 
+export class AcquisitionJobsOpenError extends Error {
+  readonly code: "cleanup_unverified" | "state_unavailable";
+  constructor(code: "cleanup_unverified" | "state_unavailable") {
+    super(`acquisition_${code}`);
+    this.code = code;
+  }
+}
+
+async function recoverAcquisitionWorkspaces(root: string, runtime?: AcquisitionRuntimeOptions) {
+  await removeTemporaryRecords(root);
+  await removeTemporaryRecords(join(root, "workspaces"));
+  let count = 0;
+  for await (const entry of await opendir(join(root, "workspaces"))) {
+    if (
+      ++count > 64 ||
+      !entry.isFile() ||
+      !z.string().uuid().safeParse(entry.name).success ||
+      !runtime ||
+      (process.platform !== "darwin" && process.platform !== "win32")
+    )
+      throw new Error("acquisition_cleanup_unavailable");
+    const journal = Journal.parse(
+      JSON.parse(
+        (await readBoundedFile(join(root, "workspaces", entry.name), 1024)).toString("utf8"),
+      ),
+    );
+    const containment = verifyContainmentRuntime(
+      runtime.containmentRoot,
+      runtime.containmentManifestHash,
+      process.platform,
+      runtime.bridgePath,
+    );
+    cleanupPackagedWorkspace(process.platform, containment.helperPath, entry.name);
+    cleanupPackagedWorkspace(process.platform, containment.helperPath, journal.decoderId);
+    await rm(join(root, "workspaces", entry.name));
+    await syncDirectory(join(root, "workspaces"));
+  }
+}
+
 export async function openAcquisitionJobs(options: AcquisitionJobsOptions) {
   const root = join(options.stateRoot, "acquisition-jobs");
-  await mkdir(join(root, "workspaces"), { recursive: true, mode: 0o700 });
-  let jobs: AcquisitionJob[] = [];
+  let cleanupVerified = false;
+  let manager: AcquisitionJobs | undefined;
   try {
-    jobs = Catalog.parse(
-      JSON.parse((await readBoundedFile(join(root, "state.json"), 1024 * 1024)).toString("utf8")),
-    ).jobs;
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
-      // Persisted state can contain private paths; expose only the bounded failure.
-      // oxlint-disable-next-line preserve-caught-error
-      throw new Error("acquisition_state_invalid");
-  }
-  const manager = new AcquisitionJobs(root, options, jobs);
-  try {
+    await mkdir(join(root, "workspaces"), { recursive: true, mode: 0o700 });
+    await recoverAcquisitionWorkspaces(root, options.runtime);
+    cleanupVerified = true;
+    let jobs: AcquisitionJob[] = [];
+    try {
+      jobs = Catalog.parse(
+        JSON.parse((await readBoundedFile(join(root, "state.json"), 1024 * 1024)).toString("utf8")),
+      ).jobs;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    manager = new AcquisitionJobs(root, options, jobs);
     await manager.recover();
-  } catch (error) {
-    await manager.close().catch(() => undefined);
-    throw error;
+    return manager;
+  } catch {
+    await manager?.close().catch(() => undefined);
+    // Never retain private catalog contents, native paths, or original error causes.
+    throw new AcquisitionJobsOpenError(
+      cleanupVerified ? "state_unavailable" : "cleanup_unverified",
+    );
   }
-  return manager;
 }
 
 export class AcquisitionJobs {
@@ -183,37 +240,6 @@ export class AcquisitionJobs {
     this.#expiryTimer.unref();
   }
   async recover() {
-    await removeTemporaryRecords(this.#root);
-    await removeTemporaryRecords(join(this.#root, "workspaces"));
-    const runtime = this.#options.runtime;
-    let count = 0;
-    for await (const entry of await opendir(join(this.#root, "workspaces"))) {
-      if (
-        ++count > 64 ||
-        !entry.isFile() ||
-        !z.string().uuid().safeParse(entry.name).success ||
-        !runtime ||
-        (process.platform !== "darwin" && process.platform !== "win32")
-      )
-        throw new Error("acquisition_cleanup_unavailable");
-      const journal = Journal.parse(
-        JSON.parse(
-          (await readBoundedFile(join(this.#root, "workspaces", entry.name), 1024)).toString(
-            "utf8",
-          ),
-        ),
-      );
-      const containment = verifyContainmentRuntime(
-        runtime.containmentRoot,
-        runtime.containmentManifestHash,
-        process.platform,
-        runtime.bridgePath,
-      );
-      cleanupPackagedWorkspace(process.platform, containment.helperPath, entry.name);
-      cleanupPackagedWorkspace(process.platform, containment.helperPath, journal.decoderId);
-      await rm(join(this.#root, "workspaces", entry.name));
-      await syncDirectory(join(this.#root, "workspaces"));
-    }
     const sources = (await this.#options.library?.listYouTubeSources()) ?? [];
     const cutoff = this.#now().getTime() - RETENTION;
     this.#jobs = this.#jobs
@@ -366,7 +392,7 @@ export class AcquisitionJobs {
     // Starts paused in durable publication must hand off before we await attempts.
     await this.#write.catch(() => undefined);
     for (const active of this.#active.values()) active.abort.abort();
-    await Promise.all([...this.#active.values()].map((active) => active.done));
+    await Promise.allSettled([...this.#active.values()].map((active) => active.done));
     await this.#write.catch(() => undefined);
     if (this.#poisoned) throw new Error("acquisition_cleanup_failed");
   }

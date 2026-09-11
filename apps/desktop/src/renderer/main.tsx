@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState, useSyncExternalStore } from "react";
+import { StrictMode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
 import {
@@ -26,6 +26,7 @@ const getCommittedSnapshot = () => projectStore?.getSnapshot() ?? unavailable;
 function App() {
   const committed = useSyncExternalStore(subscribeCommitted, getCommittedSnapshot);
   const [busy, setBusy] = useState(false);
+  const choosingLocal = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,7 +45,14 @@ function App() {
   }, []);
 
   const chooseLocalRecording = async () => {
-    if (api === undefined || projectStore === null) return;
+    if (
+      choosingLocal.current ||
+      committed.kind === "loading" ||
+      api === undefined ||
+      projectStore === null
+    )
+      return;
+    choosingLocal.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -61,6 +69,7 @@ function App() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create the Project");
     } finally {
+      choosingLocal.current = false;
       setBusy(false);
     }
   };
@@ -81,7 +90,7 @@ function App() {
         <ProjectWorkspace
           api={api}
           key={committed.snapshot.project.id}
-          onChooseLocal={() => void chooseLocalRecording()}
+          {...(!busy ? { onChooseLocal: () => void chooseLocalRecording() } : {})}
           snapshot={committed.snapshot}
         />
       </>
@@ -90,7 +99,12 @@ function App() {
     <>
       <div className="empty-model-tools">
         <ModelPacks api={api} />
-        <YouTubeSource api={api} onChooseLocal={() => void chooseLocalRecording()} />
+        <YouTubeSource
+          api={api}
+          {...(!busy && committed.kind !== "loading"
+            ? { onChooseLocal: () => void chooseLocalRecording() }
+            : {})}
+        />
       </div>
       <EmptyWorkspace
         busy={busy || committed.kind === "loading"}

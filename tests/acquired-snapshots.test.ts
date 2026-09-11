@@ -81,14 +81,48 @@ it("keeps unrelated Sources accessible when one acquired manifest is damaged", a
     ).rejects.toThrow("cleanup_refused");
     expect(await readdir(join(library.activeRoot, "staging"))).toEqual([]);
     expect(await readdir(join(library.activeRoot, "source-snapshots"))).toHaveLength(2);
+    const established = await library.observeYouTubeSource("CCCCCCCCCCC", {
+      id: "metadata_preserved",
+      observedAt: "2026-09-11T00:00:00Z",
+      provider: "youtube",
+      title: "Preserved metadata",
+    });
+    const catalogPath = join(library.activeRoot, "youtube-sources.json");
+    const metadataBytes = await readFile(catalogPath);
     const manifestPath = join(library.activeRoot, "source-snapshots", first.id, "snapshot.json");
+    const intact = await readFile(manifestPath);
+    const conflicting = JSON.parse(intact.toString("utf8"));
+    conflicting.source.id = established.id;
+    await writeFile(manifestPath, JSON.stringify(conflicting));
+    for (let pass = 0; pass < 2; pass++) {
+      const isolated = await openProjectLibrary({ stateRoot });
+      const sources = await isolated.listYouTubeSources();
+      expect(
+        sources.some((source) => source.snapshots.some((snapshot) => snapshot.id === first.id)),
+      ).toBe(false);
+      expect(
+        sources.some((source) => source.snapshots.some((snapshot) => snapshot.id === second.id)),
+      ).toBe(true);
+      expect(isolated.getSourceById(established.id)?.metadataObservations).toEqual(
+        established.metadataObservations,
+      );
+      expect(await readFile(catalogPath)).toEqual(metadataBytes);
+    }
+    await writeFile(manifestPath, intact);
+
     const original = await readFile(manifestPath);
     await writeFile(manifestPath, original.subarray(0, 10));
     const reopened = await openProjectLibrary({ stateRoot });
-    expect((await reopened.listYouTubeSources()).map((source) => source.identity)).toEqual([
-      { kind: "youtube", provider: "youtube", videoId: "BBBBBBBBBBB" },
-    ]);
-    expect((await reopened.listYouTubeSources())[0]?.snapshots[0]?.id).toBe(second.id);
+    expect(
+      (await reopened.listYouTubeSources())
+        .filter((source) => source.snapshots.length)
+        .map((source) => source.identity),
+    ).toEqual([{ kind: "youtube", provider: "youtube", videoId: "BBBBBBBBBBB" }]);
+    expect(
+      (await reopened.listYouTubeSources())
+        .flatMap((source) => source.snapshots)
+        .map((snapshot) => snapshot.id),
+    ).toEqual([second.id]);
   } finally {
     await rm(stateRoot, { recursive: true, force: true });
   }

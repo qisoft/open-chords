@@ -280,6 +280,40 @@ test("acquisition history obeys Offline Mode and exposes local-file fallback", a
       "blocked — offline",
     );
     await application.evaluate(({ dialog }) => {
+      const state = globalThis as typeof globalThis & {
+        releaseAcquisitionPicker?: () => void;
+        acquisitionPickerCalls?: number;
+      };
+      state.acquisitionPickerCalls = 0;
+      dialog.showOpenDialog = async () => {
+        state.acquisitionPickerCalls!++;
+        await new Promise<void>((resolve) => {
+          state.releaseAcquisitionPicker = resolve;
+        });
+        return { canceled: true, filePaths: [] };
+      };
+    });
+    await primary.getByRole("button", { name: "Open authorized local recording" }).click();
+    await primary.getByRole("button", { name: "YouTube source", exact: true }).click();
+    await expect(
+      primary.getByRole("button", { name: "Open authorized local recording" }),
+    ).not.toBeVisible();
+    expect(
+      await application.evaluate(
+        () =>
+          (globalThis as typeof globalThis & { acquisitionPickerCalls?: number })
+            .acquisitionPickerCalls,
+      ),
+    ).toBe(1);
+    await application.evaluate(() =>
+      (
+        globalThis as typeof globalThis & { releaseAcquisitionPicker?: () => void }
+      ).releaseAcquisitionPicker?.(),
+    );
+    await expect(
+      primary.getByRole("button", { name: "Open authorized local recording" }),
+    ).toBeVisible();
+    await application.evaluate(({ dialog }) => {
       dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
     });
     await primary.getByRole("button", { name: "Open authorized local recording" }).click();
@@ -288,6 +322,13 @@ test("acquisition history obeys Offline Mode and exposes local-file fallback", a
     ).not.toBeVisible();
     await expect(primary.getByRole("heading", { name: "Open a local recording" })).toBeVisible();
   } finally {
+    await application
+      .evaluate(() =>
+        (
+          globalThis as typeof globalThis & { releaseAcquisitionPicker?: () => void }
+        ).releaseAcquisitionPicker?.(),
+      )
+      .catch(() => undefined);
     await application.close();
     rmSync(root, { recursive: true, force: true });
   }

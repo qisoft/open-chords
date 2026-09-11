@@ -294,67 +294,9 @@ def decode_canonical(
         raise CanonicalDecodeError("Canonical media decode failed", code=bounded_code) from error
 
 
-def _probe_acquisition(ffprobe: Path, input_path: Path, cancellation: threading.Event) -> dict[str, str]:
-    result = _run_tool([
-        str(ffprobe), "-v", "error", "-protocol_whitelist", "file,pipe",
-        "-probesize", "1048576", "-analyzeduration", "5000000",
-        "-show_entries", "format=format_name,duration:stream=codec_name,codec_type",
-        "-of", "json", str(input_path),
-    ], cancellation)
-    parsed = json.loads(result.stdout)
-    if not isinstance(parsed, dict) or not {"streams", "format"}.issubset(parsed) or not set(parsed).issubset({"streams", "format", "programs", "stream_groups"}):
-        raise CanonicalDecodeError("invalid acquired format")
-    if any(parsed.get(field, []) != [] for field in ("programs", "stream_groups")):
-        raise CanonicalDecodeError("invalid acquired grouped streams")
-    streams, media_format = parsed["streams"], parsed["format"]
-    if not isinstance(streams, list) or not 1 <= len(streams) <= 2 or not isinstance(media_format, dict):
-        raise CanonicalDecodeError("invalid acquired streams")
+def _probe_json(command: list[str], cancellation: threading.Event) -> object:
     try:
-        duration = float(media_format.get("duration", "nan"))
-    except (TypeError, ValueError):
-        raise CanonicalDecodeError("invalid acquired duration") from None
-    if not math.isfinite(duration) or not 0 < duration <= MAX_ACQUIRED_DURATION_SECONDS:
-        raise CanonicalDecodeError("acquired duration exceeds its bound")
-    if any(not isinstance(stream, dict) or set(stream) != {"codec_name", "codec_type"} or stream["codec_type"] not in ("audio", "video") for stream in streams):
-        raise CanonicalDecodeError("invalid acquired stream")
-    audio = [stream for stream in streams if stream["codec_type"] == "audio"]
-    formats = {"mov,mp4,m4a,3gp,3g2,mj2": "mp4", "matroska,webm": "webm"}
-    container = formats.get(media_format.get("format_name"))
-    if container is None or len(audio) != 1:
-        raise CanonicalDecodeError("unsupported acquired container")
-    codec = audio[0]["codec_name"]
-    if codec not in ({"aac"} if container == "mp4" else {"opus", "vorbis"}):
-        raise CanonicalDecodeError("unsupported acquired codec")
-    return {"container": container, "audioCodec": codec}
-
-
-def _probe_audio(
-    ffprobe: Path,
-    input_path: Path,
-    cancellation: threading.Event,
-) -> dict[str, object]:
-    try:
-        result = _run_tool(
-            [
-                str(ffprobe),
-                "-v",
-                "error",
-                "-protocol_whitelist",
-                "file,pipe",
-                "-probesize",
-                "1048576",
-                "-analyzeduration",
-                "5000000",
-                "-select_streams",
-                "a:0",
-                "-show_entries",
-                "stream=codec_type",
-                "-of",
-                "json",
-                str(input_path),
-            ],
-            cancellation,
-        )
+        result = _run_tool(command, cancellation)
     except CanonicalDecodeCancelled:
         raise
     except _NativeToolRuntimeError as error:
@@ -413,6 +355,65 @@ def _probe_audio(
             "ffprobe returned invalid bounded JSON",
             code=CanonicalDecodeFailureCode.PROBE_OUTPUT,
         ) from error
+    return parsed
+
+
+def _probe_acquisition(ffprobe: Path, input_path: Path, cancellation: threading.Event) -> dict[str, str]:
+    parsed = _probe_json([
+        str(ffprobe), "-v", "error", "-protocol_whitelist", "file,pipe",
+        "-probesize", "1048576", "-analyzeduration", "5000000",
+        "-show_entries", "format=format_name,duration:stream=codec_name,codec_type",
+        "-of", "json", str(input_path),
+    ], cancellation)
+    if not isinstance(parsed, dict) or not {"streams", "format"}.issubset(parsed) or not set(parsed).issubset({"streams", "format", "programs", "stream_groups"}):
+        raise CanonicalDecodeError("invalid acquired format")
+    if any(parsed.get(field, []) != [] for field in ("programs", "stream_groups")):
+        raise CanonicalDecodeError("invalid acquired grouped streams")
+    streams, media_format = parsed["streams"], parsed["format"]
+    if not isinstance(streams, list) or not 1 <= len(streams) <= 2 or not isinstance(media_format, dict):
+        raise CanonicalDecodeError("invalid acquired streams")
+    try:
+        duration = float(media_format.get("duration", "nan"))
+    except (TypeError, ValueError):
+        raise CanonicalDecodeError("invalid acquired duration") from None
+    if not math.isfinite(duration) or not 0 < duration <= MAX_ACQUIRED_DURATION_SECONDS:
+        raise CanonicalDecodeError("acquired duration exceeds its bound")
+    if any(not isinstance(stream, dict) or set(stream) != {"codec_name", "codec_type"} or stream["codec_type"] not in ("audio", "video") for stream in streams):
+        raise CanonicalDecodeError("invalid acquired stream")
+    audio = [stream for stream in streams if stream["codec_type"] == "audio"]
+    formats = {"mov,mp4,m4a,3gp,3g2,mj2": "mp4", "matroska,webm": "webm"}
+    container = formats.get(media_format.get("format_name"))
+    if container is None or len(audio) != 1:
+        raise CanonicalDecodeError("unsupported acquired container")
+    codec = audio[0]["codec_name"]
+    if codec not in ({"aac"} if container == "mp4" else {"opus", "vorbis"}):
+        raise CanonicalDecodeError("unsupported acquired codec")
+    return {"container": container, "audioCodec": codec}
+
+
+def _probe_audio(
+    ffprobe: Path,
+    input_path: Path,
+    cancellation: threading.Event,
+) -> dict[str, object]:
+    parsed = _probe_json([
+                str(ffprobe),
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "file,pipe",
+                "-probesize",
+                "1048576",
+                "-analyzeduration",
+                "5000000",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_type",
+                "-of",
+                "json",
+                str(input_path),
+            ], cancellation)
     if not isinstance(parsed, dict):
         raise CanonicalDecodeError(
             "ffprobe returned an invalid result",

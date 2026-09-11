@@ -1,5 +1,6 @@
 import {
   YouTubeActionSchema,
+  AcquisitionJobSummarySchema,
   type YouTubeAction,
   type YouTubePlayerState,
 } from "@open-chords/contracts";
@@ -133,14 +134,16 @@ export class YouTubeService {
         acquisitionJobs: (this.#options.acquisition?.list() ?? [])
           .slice(-100)
           .reverse()
-          .map(({ id, videoId, state, stage, reason, snapshotId }) => ({
-            id,
-            videoId,
-            state,
-            stage,
-            reason,
-            snapshotId,
-          })),
+          .map(({ id, videoId, state, stage, reason, snapshotId }) =>
+            AcquisitionJobSummarySchema.parse({
+              id,
+              videoId,
+              state,
+              ...(stage ? { stage } : {}),
+              ...(reason ? { reason } : {}),
+              ...(snapshotId ? { snapshotId } : {}),
+            }),
+          ),
       };
     } finally {
       if (!control) this.#busy = false;
