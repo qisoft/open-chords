@@ -40,6 +40,8 @@ export default defineConfig(({ mode }) => {
           .update(readFileSync(resolve("apps/desktop/src/main/acquisition-broker.ts")))
           .update(readFileSync(resolve("apps/desktop/src/main/acquisition-session.ts")))
           .update(readFileSync(resolve("sidecar/acquisition/entry.py")))
+          .update(readFileSync(resolve("apps/desktop/src/main/acquisition-validation.ts")))
+          .update(readFileSync(resolve("sidecar/open_chords_analysis/canonical_decode.py")))
           .digest("hex"),
       ),
       OPEN_CHORDS_EMBEDDED_ALIGNMENT_MANIFEST_SHA256: JSON.stringify(alignmentManifestHash),

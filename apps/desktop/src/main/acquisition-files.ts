@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 /** Copy a closed, regular media object while validating its bounded byte identity. */
 export async function copyAcquiredFile(
@@ -15,6 +16,7 @@ export async function copyAcquiredFile(
     !/^[a-f0-9]{64}$/u.test(expected.sha256)
   )
     throw new Error("invalid_acquisition_artifact");
+  const ancestors = await inspectAncestors(source, target);
   const before = await lstat(source, { bigint: true });
   if (!before.isFile() || before.nlink !== 1n || before.size !== BigInt(expected.bytes))
     throw new Error("invalid_acquisition_artifact");
@@ -52,11 +54,44 @@ export async function copyAcquiredFile(
         !current.isFile()
       )
         throw new Error("invalid_acquisition_artifact");
+      await verifyAncestors(ancestors);
       await output.sync();
     } finally {
       await output.close();
     }
   } finally {
     await input.close();
+  }
+}
+
+async function inspectAncestors(...paths: string[]) {
+  const ancestors = new Set<string>();
+  for (const path of paths) {
+    for (
+      let current = dirname(resolve(path));
+      current !== dirname(current);
+      current = dirname(current)
+    )
+      ancestors.add(current);
+  }
+  const identities = [];
+  for (const path of [...ancestors].sort((a, b) => a.length - b.length)) {
+    const stat = await lstat(path, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("invalid_acquisition_path");
+    identities.push({ path, dev: stat.dev, ino: stat.ino, mode: stat.mode });
+  }
+  return identities;
+}
+async function verifyAncestors(identities: Awaited<ReturnType<typeof inspectAncestors>>) {
+  for (const expected of identities) {
+    const stat = await lstat(expected.path, { bigint: true });
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stat.dev !== expected.dev ||
+      stat.ino !== expected.ino ||
+      stat.mode !== expected.mode
+    )
+      throw new Error("invalid_acquisition_path");
   }
 }

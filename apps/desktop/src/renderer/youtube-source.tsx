@@ -3,7 +3,13 @@ import type { DesktopResponse, OpenChordsDesktopApi, YouTubeAction } from "@open
 import { useEffect, useRef, useState } from "react";
 
 type Result = Extract<DesktopResponse, { type: "youtube.result" }>;
-export function YouTubeSource({ api }: { api: OpenChordsDesktopApi }) {
+export function YouTubeSource({
+  api,
+  onChooseLocal,
+}: {
+  api: OpenChordsDesktopApi;
+  onChooseLocal?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [seconds, setSeconds] = useState("0");
@@ -74,8 +80,9 @@ export function YouTubeSource({ api }: { api: OpenChordsDesktopApi }) {
             <Dialog.Close>Close controls</Dialog.Close>
           </header>
           <p>
-            Preview a public video or explicitly refresh its title and uploader. To create a Project
-            for analysis, open an authorized local recording.
+            Preview a public video, refresh its metadata, or explicitly acquire an authorized
+            recording. Acquisition verifies media and saves immutable Snapshot provenance. Temporary
+            media is removed; existing Projects stay unchanged.
           </p>
           <p>
             The separate player window stays open when you close these controls. Use Close player to
@@ -102,6 +109,27 @@ export function YouTubeSource({ api }: { api: OpenChordsDesktopApi }) {
           </label>
           <div className="youtube-actions">
             <button
+              disabled={
+                pending ||
+                offline ||
+                !url ||
+                result?.acquisitionJobs.some((job) => job.state === "running")
+              }
+              onClick={() => void perform({ type: "acquire", url })}
+            >
+              Acquire recording
+            </button>
+            {onChooseLocal && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onChooseLocal();
+                }}
+              >
+                Open authorized local recording
+              </button>
+            )}
+            <button
               disabled={pending || offline || !url}
               onClick={() => void perform({ type: "refresh", url })}
             >
@@ -126,6 +154,37 @@ export function YouTubeSource({ api }: { api: OpenChordsDesktopApi }) {
             )}
           </div>
           <p role="alert">{message}</p>
+          <section aria-label="Acquisition jobs">
+            <h3>Acquisition history</h3>
+            <p>
+              Public videos only. Sign-in and bot checks stop acquisition; use an authorized local
+              recording if acquisition is unavailable.
+            </p>
+            {result?.acquisitionJobs.map((job) => (
+              <article key={job.id}>
+                <p>
+                  {job.videoId}: {job.stage ?? job.state}
+                  {job.reason ? ` — ${job.reason.replaceAll("_", " ")}` : ""}
+                </p>
+                {job.state === "succeeded" && (
+                  <p>Snapshot provenance saved. Temporary media removed.</p>
+                )}
+                {job.state === "running" && (
+                  <button
+                    onClick={() => void perform({ type: "cancel_acquisition", jobId: job.id })}
+                  >
+                    Cancel acquisition
+                  </button>
+                )}
+              </article>
+            ))}
+            <button
+              disabled={pending}
+              onClick={() => void perform({ type: "clear_acquisition_history" })}
+            >
+              Clear failed acquisition history
+            </button>
+          </section>
           {player && (
             <section aria-label="YouTube playback">
               <output>
@@ -200,19 +259,20 @@ export function YouTubeSource({ api }: { api: OpenChordsDesktopApi }) {
               <button onClick={() => void perform({ type: "close_player" })}>Close player</button>
             </section>
           )}
-          <section aria-label="Observed YouTube sources">
-            <h3>Observed metadata</h3>
+          <section aria-label="YouTube sources">
+            <h3>Sources and Snapshots</h3>
             {result?.sources.map((source) => (
               <article key={source.id}>
                 <h4>{source.title ?? source.videoId}</h4>
                 <p>{source.uploader}</p>
+                <p>{source.snapshots.length} verified Snapshots; media is not retained.</p>
                 <p>Observed {source.observedAt ?? "unknown"}</p>
                 <button onClick={() => setUrl(`https://www.youtube.com/watch?v=${source.videoId}`)}>
                   Select {source.title ?? source.videoId}
                 </button>
               </article>
             ))}
-            {result?.sources.length === 0 && <p>No metadata observations yet.</p>}
+            {result?.sources.length === 0 && <p>No saved Sources yet.</p>}
           </section>
         </Dialog.Popup>
       </Dialog.Portal>

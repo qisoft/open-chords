@@ -170,8 +170,18 @@ export function createExecutableNativeContainmentBroker(
           },
         };
       } catch (cause) {
-        child.kill("SIGKILL");
-        await waitForExit(child, 5_000).catch(() => false);
+        if (child.pid !== undefined) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            /* Still require confirmed exit. */
+          }
+          if (!(await waitForExit(child, 5_000).catch(() => false)))
+            throw new SidecarSessionError(
+              "cleanup_failure",
+              "Native process termination was not confirmed",
+            );
+        }
         if (cause instanceof SidecarSessionError) throw cause;
         throw new SidecarSessionError("launch_failure", "Native containment setup failed", {
           cause,

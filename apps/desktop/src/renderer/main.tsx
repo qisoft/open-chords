@@ -76,17 +76,21 @@ function App() {
   }
   if (committed.kind === "ready")
     return (
-      <ProjectWorkspace
-        api={api}
-        key={committed.snapshot.project.id}
-        snapshot={committed.snapshot}
-      />
+      <>
+        {error && <p role="alert">{error}</p>}
+        <ProjectWorkspace
+          api={api}
+          key={committed.snapshot.project.id}
+          onChooseLocal={() => void chooseLocalRecording()}
+          snapshot={committed.snapshot}
+        />
+      </>
     );
   return (
     <>
       <div className="empty-model-tools">
         <ModelPacks api={api} />
-        <YouTubeSource api={api} />
+        <YouTubeSource api={api} onChooseLocal={() => void chooseLocalRecording()} />
       </div>
       <EmptyWorkspace
         busy={busy || committed.kind === "loading"}

@@ -19,6 +19,7 @@ export function mergeYouTubeSources(...groups: Source[][]): Source[] {
   const merged = new Map<string, Source>();
   const identities = new Map<string, string>();
   const observations = new Map<string, string>();
+  const snapshots = new Map<string, string>();
   for (const source of groups.flat()) {
     if (source.identity.kind !== "youtube") continue;
     const videoId = source.identity.videoId;
@@ -30,9 +31,10 @@ export function mergeYouTubeSources(...groups: Source[][]): Source[] {
       throw new Error("YouTube Source identity conflict");
     identities.set(source.id, videoId);
     for (const snapshot of source.snapshots) {
-      const prior = previous?.snapshots.find((item) => item.id === snapshot.id);
-      if (prior && canonicalSerialize(prior) !== canonicalSerialize(snapshot))
+      const content = canonicalSerialize({ videoId, snapshot });
+      if (snapshots.has(snapshot.id) && snapshots.get(snapshot.id) !== content)
         throw new Error("Source Snapshots are immutable");
+      snapshots.set(snapshot.id, content);
     }
     for (const observation of source.metadataObservations) {
       const content = canonicalSerialize({ videoId, observation });

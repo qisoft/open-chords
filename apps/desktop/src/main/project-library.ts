@@ -343,11 +343,10 @@ export class ProjectLibrary {
           this.#allYouTubeSources(),
           signal,
           (source) =>
-            assertSourceAuthorityAgainstEntries(
-              { sources: [source] },
-              this.#entries,
-              this.#youtubeCatalog,
-            ),
+            assertSourceAuthorityAgainstEntries({ sources: [source] }, this.#entries, [
+              ...this.#youtubeCatalog,
+              ...this.#acquiredCatalog,
+            ]),
         );
       } finally {
         this.#youtubeCatalog = await readYouTubeSources(this.#activeRoot);
@@ -1569,7 +1568,7 @@ export class ProjectLibrary {
     this.#acquiredCatalog = await readAcquiredSources(this.#activeRoot);
     try {
       const catalog = await readYouTubeSources(this.#activeRoot);
-      assertSourceAuthorityAgainstEntries({ sources: catalog }, entries);
+      assertSourceAuthorityAgainstEntries({ sources: catalog }, entries, this.#acquiredCatalog);
       mergeYouTubeSources(
         [...entries.values()].flatMap((entry) => entry.revision?.payload.records.sources ?? []),
         catalog,
@@ -2050,7 +2049,10 @@ export class ProjectLibrary {
     const payload = validateStoredPayload(rawPayload);
     if (payload.envelope.payload.id !== projectId)
       throw new Error("Project payload belongs to another Project");
-    assertSourceAuthorityAgainstEntries(payload.records, this.#entries, this.#youtubeCatalog);
+    assertSourceAuthorityAgainstEntries(payload.records, this.#entries, [
+      ...this.#youtubeCatalog,
+      ...this.#acquiredCatalog,
+    ]);
     mergeYouTubeSources(payload.records.sources, this.#allYouTubeSources());
     assertLocatorUpdates(payload.records, this.#locatorCatalog);
     const projectRevisionId = `projectrevision_${randomUUID().replaceAll("-", "")}`;

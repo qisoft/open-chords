@@ -241,3 +241,54 @@ test("the named player API opens an unprivileged surface and Offline Mode destro
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("acquisition history obeys Offline Mode and exposes local-file fallback", async () => {
+  const root = mkdtempSync(join(tmpdir(), "open-chords-acquisition-ui-"));
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env))
+    if (key !== "ELECTRON_RUN_AS_NODE" && value !== undefined) env[key] = value;
+  const application = await electron.launch({
+    args: [join(import.meta.dirname, "../.."), `--user-data-dir=${root}`],
+    env,
+  });
+  try {
+    const primary = await application.firstWindow();
+    await primary.getByRole("button", { name: "YouTube source", exact: true }).click();
+    await primary
+      .getByRole("textbox", { name: "YouTube video URL" })
+      .fill("https://youtu.be/aqz-KE-bpKQ");
+    await primary.getByRole("checkbox", { name: "Offline Mode", exact: true }).click();
+    await expect(
+      primary.getByRole("checkbox", { name: "Offline Mode", exact: true }),
+    ).toBeChecked();
+    await expect(
+      primary.getByRole("button", { name: "Acquire recording", exact: true }),
+    ).toBeDisabled();
+    expect(
+      await primary.evaluate(() =>
+        window.openChords!.youtube.perform({
+          type: "acquire",
+          url: "https://youtu.be/aqz-KE-bpKQ",
+        }),
+      ),
+    ).toMatchObject({ acquisitionJobs: [{ state: "blocked", reason: "offline" }] });
+    await expect(primary.getByRole("region", { name: "Acquisition jobs" })).toContainText(
+      "blocked — offline",
+    );
+    await primary.getByRole("button", { name: "Clear failed acquisition history" }).click();
+    await expect(primary.getByRole("region", { name: "Acquisition jobs" })).not.toContainText(
+      "blocked — offline",
+    );
+    await application.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+    });
+    await primary.getByRole("button", { name: "Open authorized local recording" }).click();
+    await expect(
+      primary.getByRole("dialog", { name: "YouTube source", exact: true }),
+    ).not.toBeVisible();
+    await expect(primary.getByRole("heading", { name: "Open a local recording" })).toBeVisible();
+  } finally {
+    await application.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, opendir, rename, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { canonicalSerialize } from "@open-chords/domain";
 import { z } from "zod";
 
-import { createAcquiredSnapshot } from "./acquired-snapshots.ts";
+import { createAcquiredSnapshot, AcquisitionPublicationUncertain } from "./acquired-snapshots.ts";
 import { type AcquisitionNetwork } from "./acquisition-broker.ts";
 import {
   openContainedAcquisitionAttempt,
@@ -15,7 +15,7 @@ import {
 import { AcquisitionSessionError } from "./acquisition-session.ts";
 import { openAcquisitionValidation } from "./acquisition-validation.ts";
 import { readBoundedFile } from "./bounded-file.ts";
-import { withCpuWork } from "./cpu-work.ts";
+import { withCpuWork, blockCpuWorkAfterIncompleteCleanup } from "./cpu-work.ts";
 import { syncDirectory } from "./filesystem-durability.ts";
 import type { NetworkMode } from "./network-mode.ts";
 import { cleanupPackagedWorkspace } from "./packaged-sidecar-proof-workspace.ts";
@@ -179,6 +179,8 @@ export class AcquisitionJobs {
     this.#expiryTimer.unref();
   }
   async recover() {
+    await removeTemporaryRecords(this.#root);
+    await removeTemporaryRecords(join(this.#root, "workspaces"));
     const runtime = this.#options.runtime;
     let count = 0;
     for await (const entry of await opendir(join(this.#root, "workspaces"))) {
@@ -394,98 +396,116 @@ export class AcquisitionJobs {
     let completed: { snapshotId: string; sourceId: string } | undefined;
     let failure: z.infer<typeof Reason> | undefined;
     try {
-      const file = await open(journal, "wx", 0o600);
-      try {
-        await file.writeFile(canonicalSerialize({ decoderId }));
-        await file.sync();
-      } finally {
-        await file.close();
-      }
-      await syncDirectory(join(this.#root, "workspaces"));
-      signal.throwIfAborted();
-      extractor = await openContainedAcquisitionAttempt(runtime, workspaceId);
-      const acquired = await extractor.run({
-        videoId: job.videoId,
-        signal,
-        ...(this.#options.networkTransport ? { network: this.#options.networkTransport } : {}),
-        onCounters: (value) => {
-          counters = {
-            requests: value.requests,
-            redirects: value.redirects,
-            responseBytes: value.responseBytes,
-            wallTimeMs: Math.min(600000, Math.max(1, Math.round(performance.now() - started))),
-          };
-        },
-      });
-      if (acquired.proof || !acquired.format) throw new Error("invalid_acquisition_artifact");
-      await this.#stage(job.id, "validating");
-      signal.throwIfAborted();
-      decoder = await openAcquisitionValidation(validation, decoderId);
-      const canonical = await withCpuWork(signal, () =>
-        decoder!.validate({
-          path: join(extractor!.workspace, acquired.artifact.path),
-          bytes: acquired.artifact.bytes,
-          sha256: acquired.artifact.sha256,
-          signal,
-        }),
-      );
-      signal.throwIfAborted();
-      const expectedCodec = acquired.format.audioCodec.startsWith("mp4a.")
-        ? "aac"
-        : acquired.format.audioCodec;
-      if (
-        canonical.format.container !== acquired.format.container ||
-        canonical.format.audioCodec !== expectedCodec
-      )
-        throw new Error("invalid_acquisition_format");
-      const snapshot = createAcquiredSnapshot({
-        id: "snapshot_pending",
-        byteFingerprint: `sha256:${acquired.artifact.sha256}`,
-        byteSize: acquired.artifact.bytes,
-        canonicalAudioFingerprint: canonical.canonicalAudioFingerprint,
-        durationSamples: canonical.durationSamples,
-        metadataObservationIds: [],
-        observedAt: this.#now().toISOString(),
-        selectedFormat: { ...acquired.format, ...canonical.format },
-        provenance: {
-          kind: "youtube_acquisition",
-          acquisitionAttemptId: attempt.id,
-          provider: "youtube",
-          videoId: job.videoId,
-          canonicalUrl: `https://www.youtube.com/watch?v=${job.videoId}`,
-          components: [
-            {
-              id: "open-chords-extractor-runtime",
-              version: "1",
-              hash: `sha256:${runtime.runtimeManifestHash}`,
+      await withCpuWork(signal, async () => {
+        try {
+          await writePrivateRecord(journal, canonicalSerialize({ decoderId }));
+          signal.throwIfAborted();
+          extractor = await openContainedAcquisitionAttempt(runtime, workspaceId);
+          const acquired = await extractor.run({
+            videoId: job.videoId,
+            signal,
+            ...(this.#options.networkTransport ? { network: this.#options.networkTransport } : {}),
+            onCounters: (value) => {
+              counters = {
+                requests: value.requests,
+                redirects: value.redirects,
+                responseBytes: value.responseBytes,
+                wallTimeMs: Math.min(600000, Math.max(1, Math.round(performance.now() - started))),
+              };
             },
-            {
-              id: "open-chords-offline-validation-runtime",
-              version: "1",
-              hash: `sha256:${validation.runtimeManifestHash}`,
+          });
+          if (acquired.proof || !acquired.format) throw new Error("invalid_acquisition_artifact");
+          await this.#stage(job.id, "validating");
+          signal.throwIfAborted();
+          decoder = await openAcquisitionValidation(validation, decoderId);
+          const canonical = await decoder.validate({
+            path: join(extractor.workspace, acquired.artifact.path),
+            bytes: acquired.artifact.bytes,
+            sha256: acquired.artifact.sha256,
+            signal,
+          });
+          signal.throwIfAborted();
+          const expectedCodec = acquired.format.audioCodec.startsWith("mp4a.")
+            ? "aac"
+            : acquired.format.audioCodec;
+          if (
+            canonical.format.container !== acquired.format.container ||
+            canonical.format.audioCodec !== expectedCodec
+          )
+            throw new Error("invalid_acquisition_format");
+          const snapshot = createAcquiredSnapshot({
+            id: "snapshot_pending",
+            byteFingerprint: `sha256:${acquired.artifact.sha256}`,
+            byteSize: acquired.artifact.bytes,
+            canonicalAudioFingerprint: canonical.canonicalAudioFingerprint,
+            durationSamples: canonical.durationSamples,
+            metadataObservationIds: [],
+            observedAt: this.#now().toISOString(),
+            selectedFormat: { ...acquired.format, ...canonical.format },
+            provenance: {
+              kind: "youtube_acquisition",
+              acquisitionAttemptId: attempt.id,
+              provider: "youtube",
+              videoId: job.videoId,
+              canonicalUrl: `https://www.youtube.com/watch?v=${job.videoId}`,
+              components: [
+                {
+                  id: "open-chords-extractor-runtime",
+                  version: "1",
+                  hash: `sha256:${runtime.runtimeManifestHash}`,
+                },
+                {
+                  id: "open-chords-offline-validation-runtime",
+                  version: "1",
+                  hash: `sha256:${validation.runtimeManifestHash}`,
+                },
+              ],
+              policy: {
+                id: "youtube-broker-provisional",
+                version: "1",
+                hash: `sha256:${policyHash}`,
+              },
+              brokerSummary: {
+                requestCount: counters.requests,
+                redirectCount: counters.redirects,
+                downloadedBytes: acquired.artifact.bytes,
+                wallTimeMs: counters.wallTimeMs,
+              },
             },
-          ],
-          policy: { id: "youtube-broker-provisional", version: "1", hash: `sha256:${policyHash}` },
-          brokerSummary: {
-            requestCount: counters.requests,
-            redirectCount: counters.redirects,
-            downloadedBytes: counters.responseBytes,
-            wallTimeMs: counters.wallTimeMs,
-          },
-        },
+          });
+          await this.#stage(job.id, "publishing");
+          const source = await library.publishYouTubeSnapshot({
+            snapshot,
+            mediaPath: canonical.acquiredPath,
+            canonicalPath: canonical.path,
+            canonicalBytes: canonical.byteSize,
+            canonicalHash: canonical.byteFingerprint.slice(7),
+            signal,
+            beforePublication: cleanup,
+          });
+          completed = { snapshotId: snapshot.id, sourceId: source.id };
+        } catch (error) {
+          if (error instanceof Error && "code" in error && error.code === "cleanup_failure") {
+            domainUnsafe = true;
+            this.#poisoned = true;
+          }
+          try {
+            await cleanup();
+          } catch (cleanupError) {
+            blockCpuWorkAfterIncompleteCleanup();
+            throw cleanupError;
+          }
+          throw error;
+        }
       });
-      await this.#stage(job.id, "publishing");
-      const source = await library.publishYouTubeSnapshot({
-        snapshot,
-        mediaPath: canonical.acquiredPath,
-        canonicalPath: canonical.path,
-        canonicalBytes: canonical.byteSize,
-        canonicalHash: canonical.byteFingerprint.slice(7),
-        signal,
-        beforePublication: cleanup,
-      });
-      completed = { snapshotId: snapshot.id, sourceId: source.id };
     } catch (error) {
+      if (error instanceof AcquisitionPublicationUncertain) {
+        // Keep the durable running Job as recovery intent. No further work may
+        // start until reopening reconciles the catalog with this Attempt.
+        this.#poisoned = true;
+        blockCpuWorkAfterIncompleteCleanup();
+        throw error;
+      }
       const code =
         error instanceof Error && "code" in error ? Reason.safeParse(error.code) : undefined;
       if (code?.success && code.data === "cleanup_failure") {
@@ -542,20 +562,39 @@ export class AcquisitionJobs {
   async #persist(jobs: AcquisitionJob[]) {
     const content = canonicalSerialize(Catalog.parse({ version: 1, jobs }));
     if (Buffer.byteLength(content) > 1024 * 1024) throw new Error("acquisition_history_full");
-    const temp = join(this.#root, `${randomUUID()}.tmp`);
+    await removeTemporaryRecords(this.#root);
+    await writePrivateRecord(join(this.#root, "state.json"), content);
+    this.#scheduleExpiry(jobs);
+  }
+}
+
+async function removeTemporaryRecords(root: string) {
+  let count = 0;
+  let removed = false;
+  for await (const entry of await opendir(root)) {
+    if (++count > 1100) throw new Error("acquisition_state_invalid");
+    if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.tmp$/u.test(entry.name)) continue;
+    if (!entry.isFile() && !entry.isSymbolicLink()) throw new Error("acquisition_state_invalid");
+    await rm(join(root, entry.name));
+    removed = true;
+  }
+  if (removed) await syncDirectory(root);
+}
+
+async function writePrivateRecord(destination: string, content: string) {
+  const root = dirname(destination);
+  const temp = join(root, `${randomUUID()}.tmp`);
+  try {
+    const file = await open(temp, "wx", 0o600);
     try {
-      const file = await open(temp, "wx", 0o600);
-      try {
-        await file.writeFile(content);
-        await file.sync();
-      } finally {
-        await file.close();
-      }
-      await rename(temp, join(this.#root, "state.json"));
-      await syncDirectory(this.#root);
-      this.#scheduleExpiry(jobs);
+      await file.writeFile(content);
+      await file.sync();
     } finally {
-      await rm(temp, { force: true });
+      await file.close();
     }
+    await rename(temp, destination);
+    await syncDirectory(root);
+  } finally {
+    await rm(temp, { force: true });
   }
 }

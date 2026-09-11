@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +31,29 @@ it("retains a canonical blocked Job without an Attempt when the runtime is unava
     ).rejects.toThrow("invalid_input");
     expect(JSON.stringify(reopened.list())).not.toContain("https:");
     await reopened.close();
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+it("recovers an interrupted journal write and removes abandoned copies of expired history", async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "open-chords-acquisition-crash-"));
+  let now = new Date("2026-09-01T00:00:00.000Z");
+  try {
+    const network = await openNetworkMode(stateRoot);
+    const jobs = await openAcquisitionJobs({ stateRoot, network, now: () => now });
+    await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" });
+    await jobs.close();
+    const root = join(stateRoot, "acquisition-jobs");
+    await writeFile(join(root, `${randomUUID()}.tmp`), await readFile(join(root, "state.json")));
+    await writeFile(join(root, "workspaces", `${randomUUID()}.tmp`), '{"decoderId":');
+    now = new Date("2026-09-08T00:00:00.000Z");
+    const recovered = await openAcquisitionJobs({ stateRoot, network, now: () => now });
+    expect(recovered.list()).toEqual([]);
+    await recovered.clearHistory();
+    await recovered.close();
+    expect((await readdir(root)).toSorted()).toEqual(["state.json", "workspaces"]);
+    expect(await readdir(join(root, "workspaces"))).toEqual([]);
   } finally {
     await rm(stateRoot, { recursive: true, force: true });
   }

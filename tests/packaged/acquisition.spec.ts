@@ -12,7 +12,9 @@ test.skip(
   "Installed native profiles",
 );
 test("installed Extractor Worker streams only through the broker with native network denial", async () => {
-  test.setTimeout(180000);
+  // Windows prepares a fresh AppContainer/runtime for each independent scenario.
+  const proofTimeout = process.platform === "win32" ? 450000 : 150000;
+  test.setTimeout(proofTimeout + 60000);
   const root = await mkdtemp(join(tmpdir(), "open-chords-installed-acquisition-"));
   try {
     await extractZip(
@@ -43,7 +45,7 @@ test("installed Extractor Worker streams only through the broker with native net
     const { stdout } = await promisify(execFile)(
       executable,
       ["--open-chords-acquisition-proof", `--user-data-dir=${join(root, "profile")}`],
-      { timeout: 150000, maxBuffer: 1024 * 1024, windowsHide: true },
+      { timeout: proofTimeout, maxBuffer: 1024 * 1024, windowsHide: true },
     );
     const report = JSON.parse(stdout.trim());
     expect(report).toMatchObject({
@@ -56,11 +58,14 @@ test("installed Extractor Worker streams only through the broker with native net
       workspaceRemoved: true,
       snapshotPublished: true,
       snapshotReopened: true,
+      snapshotProjectCompatible: true,
+      temporaryMediaRemoved: true,
       jobState: "succeeded",
       botCheckNoSnapshot: true,
       offlineCancellationClean: true,
       mismatchedMediaNoSnapshot: true,
       oversizedDurationNoSnapshot: true,
+      initializationCleanupRecoverable: true,
     });
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });

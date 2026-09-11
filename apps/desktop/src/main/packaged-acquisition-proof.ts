@@ -8,12 +8,14 @@ import {
   EXPECTED_ACQUISITION_MANIFEST_SHA256,
   EXPECTED_ACQUISITION_POLICY_SHA256,
 } from "./acquisition-build-metadata.ts";
-import { openAcquisitionJobs } from "./acquisition-jobs.ts";
+import { openAcquisitionJobs, type AcquisitionJobsOptions } from "./acquisition-jobs.ts";
 import { ACQUISITION_PROOF_MEDIA, oversizedDurationFixture } from "./acquisition-proof-fixture.ts";
 import { openContainedAcquisitionAttempt } from "./acquisition-runtime.ts";
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { openNetworkMode } from "./network-mode.ts";
+import { proveInitializationCleanupRecovery } from "./packaged-acquisition-fault-proof.ts";
 import { canonicalWavFixture } from "./packaged-sidecar-proof.ts";
+import { ProjectOwnedRecordsSchema } from "./project-library-records.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { EXPECTED_SIDECAR_MANIFEST_SHA256 } from "./sidecar-build-metadata.ts";
 
@@ -107,7 +109,7 @@ export async function runPackagedAcquisitionProof() {
   let stallMedia = false;
   let mediaRequested: () => void = () => undefined;
   let streamCancelled = false;
-  const jobs = await openAcquisitionJobs({
+  const jobOptions: AcquisitionJobsOptions = {
     stateRoot,
     library,
     network,
@@ -185,7 +187,8 @@ export async function runPackagedAcquisitionProof() {
         });
       },
     },
-  });
+  };
+  const jobs = await openAcquisitionJobs(jobOptions);
   process.stderr.write("Acquisition proof stage: jobs_ready\n");
   let job;
   let botCheckNoSnapshot = false;
@@ -261,9 +264,28 @@ export async function runPackagedAcquisitionProof() {
     source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
   );
   const reopened = await openProjectLibrary({ stateRoot });
+  const acquiredSource = (await reopened.listYouTubeSources()).find((source) =>
+    source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
+  );
+  const snapshotProjectCompatible =
+    acquiredSource !== undefined &&
+    ProjectOwnedRecordsSchema.safeParse({
+      analysisManifests: [],
+      exportReceipts: [],
+      extensions: {},
+      legacyManifestlessAnalysisRevisionIds: [],
+      projectRange: {
+        sourceId: acquiredSource.id,
+        startSourceSample: 0,
+        endSourceSample: acquiredSource.snapshots[0]!.durationSamples,
+      },
+      sources: [acquiredSource],
+    }).success;
   const snapshotReopened = (await reopened.listYouTubeSources()).some((source) =>
     source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
   );
+  await network.setOffline(false);
+  const initializationCleanupRecoverable = await proveInitializationCleanupRecovery(jobOptions);
   process.stdout.write(
     JSON.stringify({
       proof: "brokered-extractor",
@@ -274,11 +296,16 @@ export async function runPackagedAcquisitionProof() {
       workspaceRemoved: removed,
       snapshotPublished,
       snapshotReopened,
+      snapshotProjectCompatible,
       jobState: job.state,
       botCheckNoSnapshot,
       offlineCancellationClean,
       mismatchedMediaNoSnapshot,
       oversizedDurationNoSnapshot,
+      initializationCleanupRecoverable,
+      temporaryMediaRemoved:
+        (await readdir(join(library.activeRoot, "source-snapshots", job.snapshotId!))).join() ===
+        "snapshot.json",
     }) + "\n",
   );
 }

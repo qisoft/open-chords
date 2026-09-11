@@ -13,6 +13,7 @@ import { DesktopMessageIdSchema } from "./identifiers.ts";
 import {
   YouTubeActionSchema,
   YouTubePlayerStateSchema,
+  AcquisitionJobSummarySchema,
   YouTubeSourceSummarySchema,
 } from "./youtube.ts";
 export { DesktopMessageIdSchema } from "./identifiers.ts";
@@ -254,6 +255,7 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
   z.strictObject({
     ...correlatedEnvelope,
     type: z.literal("youtube.result"),
+    acquisitionJobs: z.array(AcquisitionJobSummarySchema).max(100),
     offline: z.boolean(),
     sources: z.array(YouTubeSourceSummarySchema).max(100),
     player: YouTubePlayerStateSchema.nullable(),

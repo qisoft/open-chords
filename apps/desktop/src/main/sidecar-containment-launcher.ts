@@ -51,7 +51,14 @@ export function createNativeContainmentLauncher(
     async launch(request, signal) {
       const launched = await broker.launchAndVerify(request, signal);
       if (!evidenceSatisfiesPlatform(launched.evidence, platform)) {
-        await launched.process.stop("launch_failure").catch(() => undefined);
+        try {
+          await launched.process.stop("launch_failure");
+        } catch {
+          throw new SidecarSessionError(
+            "cleanup_failure",
+            "Native process termination was not confirmed",
+          );
+        }
         throw new SidecarSessionError(
           "launch_failure",
           "Native containment could not be established and verified",

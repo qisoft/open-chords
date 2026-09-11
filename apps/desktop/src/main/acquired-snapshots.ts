@@ -6,6 +6,7 @@ import { canonicalSerialize } from "@open-chords/domain";
 import { z } from "zod";
 
 import { copyAcquiredFile } from "./acquisition-files.ts";
+import { AcquisitionSessionError } from "./acquisition-session.ts";
 import { readBoundedFile } from "./bounded-file.ts";
 import { syncDirectory } from "./filesystem-durability.ts";
 import { SourceRecordSchema, SourceSnapshotSchema } from "./project-library-records.ts";
@@ -36,47 +37,51 @@ export function createAcquiredSnapshot(input: unknown) {
 export async function readAcquiredSources(root: string) {
   const folder = join(root, "source-snapshots");
   try {
-    if (!(await lstat(folder)).isDirectory()) throw new Error("invalid_acquisition_catalog");
+    if (!(await lstat(folder)).isDirectory()) return [];
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
     throw error;
   }
   const sources: z.infer<typeof SourceRecordSchema>[] = [];
+  let inspected = 0;
   for await (const entry of await opendir(folder)) {
-    if (
-      !entry.isDirectory() ||
-      !/^snapshot_[a-f0-9]{64}$/u.test(entry.name) ||
-      sources.length >= 1000
-    )
-      throw new Error("invalid_acquisition_catalog");
-    const manifest = Manifest.parse(
-      JSON.parse(
-        (await readBoundedFile(join(folder, entry.name, "snapshot.json"), 65536)).toString("utf8"),
-      ),
-    );
-    const snapshot = manifest.source.snapshots[0];
-    if (
-      !snapshot ||
-      manifest.source.snapshots.length !== 1 ||
-      snapshot.id !== entry.name ||
-      snapshotId(snapshot) !== snapshot.id ||
-      manifest.source.identity.kind !== "youtube" ||
-      snapshot.provenance.kind !== "youtube_acquisition" ||
-      manifest.source.identity.videoId !== snapshot.provenance.videoId ||
-      snapshot.provenance.canonicalUrl !==
-        `https://www.youtube.com/watch?v=${snapshot.provenance.videoId}`
-    )
-      throw new Error("invalid_acquisition_catalog");
-    for (const [name, size] of [
-      ["media.bin", snapshot.byteSize],
-      ["canonical.wav", manifest.canonical.bytes],
-    ] as const) {
-      const file = await lstat(join(folder, entry.name, name));
-      if (!file.isFile() || file.size !== size) throw new Error("invalid_acquisition_catalog");
+    if (++inspected > 1000) break;
+    if (!entry.isDirectory() || !/^snapshot_[a-f0-9]{64}$/u.test(entry.name)) continue;
+    try {
+      const manifest = Manifest.parse(
+        JSON.parse(
+          (await readBoundedFile(join(folder, entry.name, "snapshot.json"), 65536)).toString(
+            "utf8",
+          ),
+        ),
+      );
+      const snapshot = manifest.source.snapshots[0];
+      if (
+        !snapshot ||
+        manifest.source.snapshots.length !== 1 ||
+        snapshot.id !== entry.name ||
+        snapshotId(snapshot) !== snapshot.id ||
+        manifest.source.identity.kind !== "youtube" ||
+        snapshot.provenance.kind !== "youtube_acquisition" ||
+        manifest.source.identity.videoId !== snapshot.provenance.videoId ||
+        snapshot.provenance.canonicalUrl !==
+          `https://www.youtube.com/watch?v=${snapshot.provenance.videoId}`
+      )
+        throw new Error("invalid_acquisition_catalog");
+      // Snapshot provenance survives independently of temporary acquisition media.
+      sources.push(manifest.source);
+    } catch {
+      // One damaged immutable entry must not prevent opening unrelated Projects.
+      // Their retained Source records still explain the unavailable Snapshot.
     }
-    sources.push(manifest.source);
   }
   return sources;
+}
+
+export class AcquisitionPublicationUncertain extends Error {
+  constructor() {
+    super("acquisition_publication_uncertain");
+  }
 }
 
 export type AcquiredSnapshotPublication = {
@@ -114,10 +119,10 @@ export async function publishAcquiredSnapshot(
     await mkdir(folder, { recursive: true, mode: 0o700 });
     if (!(await lstat(folder)).isDirectory()) throw new Error("invalid_acquisition_catalog");
   }
+  await syncDirectory(root);
   const staging = join(stagingRoot, `acquisition-${randomUUID()}`);
   const destination = join(publishedRoot, snapshot.id);
   await mkdir(staging, { mode: 0o700 });
-  let published = false;
   try {
     input.signal.throwIfAborted();
     await copyAcquiredFile(input.mediaPath, join(staging, "media.bin"), {
@@ -143,6 +148,10 @@ export async function publishAcquiredSnapshot(
     } finally {
       await file.close();
     }
+    // Snapshot storage contains provenance only. Full-source media is temporary,
+    // and must not silently become an opt-in Offline Media Cache entry.
+    await rm(join(staging, "media.bin"));
+    await rm(join(staging, "canonical.wav"));
     await syncDirectory(staging);
     await input.beforePublication();
     input.signal.throwIfAborted();
@@ -150,12 +159,22 @@ export async function publishAcquiredSnapshot(
     try {
       await syncDirectory(publishedRoot);
     } catch (error) {
-      await rename(destination, staging);
+      try {
+        await rename(destination, staging);
+        await syncDirectory(publishedRoot);
+      } catch {
+        throw new AcquisitionPublicationUncertain();
+      }
       throw error;
     }
-    published = true;
     return source;
-  } finally {
-    if (!published) await rm(staging, { recursive: true, force: true });
+  } catch (error) {
+    try {
+      await rm(staging, { recursive: true, force: true });
+    } catch {
+      if (error instanceof AcquisitionPublicationUncertain) throw error;
+      throw new AcquisitionSessionError("cleanup_failure");
+    }
+    throw error;
   }
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from importlib.metadata import version
+from importlib.metadata import version, distribution as get_distribution
 import json
 import os
 from pathlib import Path
@@ -17,6 +17,8 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from tools.runtime_licenses import _python_license, _pyinstaller_license
 
 
 def sha(path):
@@ -89,6 +91,10 @@ def main():
         # Wheel distribution metadata includes the extractor and EJS license texts.
         # Deno's MIT notice is pinned with its release source below.
         shutil.copy2(ROOT / "sidecar/acquisition/DENO-LICENSE.txt", notices)
+        shutil.copy2(_python_license(), notices / "CPython-PSF-2.0.txt")
+        shutil.copy2(ROOT / "LICENSE", notices / "Open-Chords-AGPL-3.0.txt")
+        pyinstaller = get_distribution("pyinstaller")
+        shutil.copy2(pyinstaller.locate_file(_pyinstaller_license(pyinstaller)), notices / "PyInstaller-COPYING.txt")
         if sys.platform == "darwin":
             subprocess.run([sys.executable, str(ROOT / "tools/sign-macos-analysis-runtime.py"), "--runtime-root", str(runtime), "--helper", "open-chords-extractor-worker", "--helper", "deno"], check=True)
         else:

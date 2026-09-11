@@ -6,9 +6,13 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { AcquisitionBroker, type AcquisitionNetwork } from "./acquisition-broker.ts";
-import { runAcquisitionSession } from "./acquisition-session.ts";
+import { runAcquisitionSession, AcquisitionSessionError } from "./acquisition-session.ts";
 import { readBoundedFile } from "./bounded-file.ts";
-import { preparePackagedWorkspace } from "./packaged-sidecar-proof-workspace.ts";
+import {
+  preparePackagedWorkspace,
+  packagedWorkspaceFailureCode,
+  type PreparedPackagedWorkspace,
+} from "./packaged-sidecar-proof-workspace.ts";
 import { verifyContainmentRuntime } from "./sidecar-containment-integrity.ts";
 import { createNativeContainmentLauncher } from "./sidecar-containment-launcher.ts";
 import { createExecutableNativeContainmentBroker } from "./sidecar-native-broker.ts";
@@ -129,13 +133,15 @@ export async function openContainedAcquisitionAttempt(
     platform,
     options.bridgePath,
   );
-  const prepared = preparePackagedWorkspace(
-    platform,
-    containment.helperPath,
-    options.runtimeRoot,
-    identifier,
-  );
+  let workspace: PreparedPackagedWorkspace | undefined;
   try {
+    const prepared = preparePackagedWorkspace(
+      platform,
+      containment.helperPath,
+      options.runtimeRoot,
+      identifier,
+    );
+    workspace = prepared;
     const runtime = await verifyAcquisitionRuntime(
       prepared.runtimeRoot,
       options.runtimeManifestHash,
@@ -194,7 +200,19 @@ export async function openContainedAcquisitionAttempt(
       },
     };
   } catch (error) {
-    prepared.cleanup();
+    try {
+      workspace?.cleanup();
+    } catch {
+      throw new AcquisitionSessionError("cleanup_failure");
+    }
+    if (hasWorkspaceCleanupFailure(error)) throw new AcquisitionSessionError("cleanup_failure");
     throw error;
   }
+}
+
+function hasWorkspaceCleanupFailure(error: unknown): boolean {
+  return (
+    packagedWorkspaceFailureCode(error) === "cleanup_failed" ||
+    (error instanceof AggregateError && error.errors.some(hasWorkspaceCleanupFailure))
+  );
 }

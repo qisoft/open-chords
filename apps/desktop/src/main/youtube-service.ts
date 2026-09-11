@@ -4,6 +4,7 @@ import {
   type YouTubePlayerState,
 } from "@open-chords/contracts";
 
+import type { AcquisitionJobs } from "./acquisition-jobs.ts";
 import type { NetworkMode } from "./network-mode.ts";
 import type { ProjectLibrary } from "./project-library.ts";
 import { canonicalYouTubeSource, type YouTubeMetadata } from "./youtube-source.ts";
@@ -19,6 +20,7 @@ export type YouTubePlayer = {
 
 type YouTubeServiceOptions = {
   library: ProjectLibrary;
+  acquisition?: AcquisitionJobs;
   network: NetworkMode;
   metadata: YouTubeMetadata;
   player?: YouTubePlayer;
@@ -55,10 +57,27 @@ export class YouTubeService {
   async perform(raw: YouTubeAction) {
     const action = YouTubeActionSchema.parse(raw);
     const { network, metadata, library, player } = this.#options;
-    const control = ["status", "cancel", "set_offline", "close_player"].includes(action.type);
+    const control = [
+      "status",
+      "cancel",
+      "set_offline",
+      "close_player",
+      "acquire",
+      "cancel_acquisition",
+      "clear_acquisition_history",
+    ].includes(action.type);
     if (!control && this.#busy) throw new Error("YouTube operation is busy");
     if (!control) this.#busy = true;
     try {
+      if (action.type === "acquire") {
+        if (!this.#options.acquisition)
+          throw new Error("Acquisition is unavailable. Open an authorized local recording.");
+        await this.#options.acquisition.start({ url: action.url });
+      }
+      if (action.type === "cancel_acquisition")
+        await this.#options.acquisition?.cancel(action.jobId);
+      if (action.type === "clear_acquisition_history")
+        await this.#options.acquisition?.clearHistory();
       if (action.type === "set_offline") await network.setOffline(action.offline);
       if (action.type === "cancel") this.cancel();
       if (action.type === "close_player") player?.close();
@@ -100,13 +119,29 @@ export class YouTubeService {
           const latest = source.metadataObservations.at(-1);
           return {
             id: source.id,
+            snapshots: source.snapshots.map(({ id, durationSamples }) => ({ id, durationSamples })),
             videoId: source.identity.videoId,
             title: latest?.title,
             uploader: latest?.uploader,
             observedAt: latest?.observedAt,
           };
         });
-      return { offline: network.offline, sources, player: (await player?.state()) ?? null };
+      return {
+        offline: network.offline,
+        sources,
+        player: (await player?.state()) ?? null,
+        acquisitionJobs: (this.#options.acquisition?.list() ?? [])
+          .slice(-100)
+          .reverse()
+          .map(({ id, videoId, state, stage, reason, snapshotId }) => ({
+            id,
+            videoId,
+            state,
+            stage,
+            reason,
+            snapshotId,
+          })),
+      };
     } finally {
       if (!control) this.#busy = false;
     }

@@ -45,10 +45,12 @@ import { YouTubeSource } from "./youtube-source.tsx";
 
 export function ProjectWorkspace({
   api,
+  onChooseLocal,
   snapshot,
 }: {
   api: OpenChordsDesktopApi;
   snapshot: ProjectSnapshotResponse;
+  onChooseLocal?: () => void;
 }) {
   const timeline = useMemo(() => buildWorkspaceTimeline(snapshot.project), [snapshot.project]);
   const content = useMemo(() => buildWorkspaceContent(snapshot.project), [snapshot.project]);
@@ -295,7 +297,7 @@ export function ProjectWorkspace({
         </div>
         <ExportProject api={api} snapshot={snapshot} />
         <ModelPacks api={api} />
-        <YouTubeSource api={api} />
+        <YouTubeSource api={api} {...(onChooseLocal ? { onChooseLocal } : {})} />
       </header>
 
       <section className="timeline-section" aria-labelledby="timeline-heading">
