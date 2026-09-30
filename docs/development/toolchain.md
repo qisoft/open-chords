@@ -30,4 +30,4 @@ Use the exact pnpm version declared in `package.json`. The workspace has one loc
 
 Domain/contract changes additionally run `pnpm contracts:schema:check`, `pnpm test:fixtures`, and `pnpm test:python`; see [Canonical domain contracts](./domain-contracts.md).
 
-CI runs the complete sequence on macOS 15 arm64 and Windows Server 2025 x64 with a frozen pnpm install.
+CI runs the complete sequence on macOS 15 arm64 and Windows Server 2025 x64 with a frozen pnpm install. After `pnpm make`, the native jobs also stage and verify the release manifest, SBOM, and notices described in [Unsigned release packaging](release-packaging.md).
