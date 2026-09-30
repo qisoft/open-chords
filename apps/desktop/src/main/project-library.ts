@@ -414,6 +414,16 @@ export class ProjectLibrary {
           return envelope;
         },
       },
+      {
+        fromVersion: "1.3",
+        toVersion: "1.4",
+        migrate: (input) => {
+          const envelope = structuredClone(ProjectEnvelopeSchema.parse(input));
+          envelope.schemaVersion = "1.4";
+          envelope.payload.schemaVersion = "1.4";
+          return envelope;
+        },
+      },
     ];
     validateMigrationGraph(this.#migrations);
     this.#now = options.now ?? (() => new Date());

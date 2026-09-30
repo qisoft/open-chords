@@ -413,6 +413,13 @@ export const PracticeStateSchema = z.strictObject({
     .nullable(),
 });
 
+export const ImportOriginSchema = z
+  .strictObject({
+    archiveManifestHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    projectId: StableIdSchema,
+  })
+  .meta({ id: "ImportOrigin" });
+
 export const ProjectContractSchema = z
   .strictObject({
     activeView: ActiveViewSchema.nullable(),
@@ -422,6 +429,7 @@ export const ProjectContractSchema = z
     extensions: z.record(z.string().regex(/^[a-z0-9]+(?:\.[a-z0-9-]+)+$/), z.unknown()),
     format: z.literal("open-chords/project"),
     id: StableIdSchema,
+    importOrigins: z.array(ImportOriginSchema).min(1).max(100).optional(),
     lyricsAlignments: z.array(LyricsAlignmentSchema),
     lyricsDocuments: z.array(LyricsDocumentSchema),
     practice: PracticeStateSchema.optional(),
@@ -436,6 +444,7 @@ export type AnalysisRevision = z.infer<typeof AnalysisRevisionSchema>;
 export type ChordEvent = z.infer<typeof ChordEventSchema>;
 export type ChordValue = z.infer<typeof ChordValueSchema>;
 export type EditLayer = z.infer<typeof EditLayerSchema>;
+export type ImportOrigin = z.infer<typeof ImportOriginSchema>;
 export type EditTransaction = z.infer<typeof EditTransactionSchema>;
 export type LyricsAlignment = z.infer<typeof LyricsAlignmentSchema>;
 export type LyricsDocument = z.infer<typeof LyricsDocumentSchema>;
