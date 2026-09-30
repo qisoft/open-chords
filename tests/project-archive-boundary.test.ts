@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { expect, it, vi } from "vitest";
@@ -51,9 +51,7 @@ function importGraph(entry: string): { local: string[]; packages: string[]; sour
 it("import has no network, model, credential, process or code-execution capability", () => {
   const graph = importGraph("apps/desktop/src/main/project-archive-imports.ts");
   expect(
-    graph.local
-      .map((path) => path.split("/").at(-1) ?? path)
-      .toSorted((left, right) => left.localeCompare(right)),
+    graph.local.map((path) => basename(path)).toSorted((left, right) => left.localeCompare(right)),
   ).toEqual([
     "bounded-file.ts",
     "filesystem-durability.ts",
