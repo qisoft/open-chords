@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import { buildGoldReference, parseGoldReference } from "./annotations.ts";
 import { goldFromJams, goldToJams } from "./jams.ts";
+import { calibrateFiles, sealedGateFiles, validatePolicyFiles } from "./release.ts";
 import {
   auditCorpusFiles,
   openSealedCorpus,
@@ -42,6 +43,22 @@ async function main() {
       args[1]!,
       await readFile(args[2]!, "utf8"),
       await readFile(args[3]!, "utf8"),
+    );
+  } else if (command === "calibrate") {
+    count(5);
+    await writeArtifact(args[4]!, await calibrateFiles(args[0]!, args[1]!, args[2]!, args[3]!));
+  } else if (command === "validate-policy") {
+    count(2);
+    await validatePolicyFiles(args[0]!, args[1]!);
+  } else if (command === "sealed-gate") {
+    count(6);
+    await sealedGateFiles(
+      args[0]!,
+      args[1]!,
+      args[2]!,
+      await readFile(args[3]!, "utf8"),
+      args[4]!,
+      args[5]!,
     );
   } else if (command === "open-sealed") {
     count(6);

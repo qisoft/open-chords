@@ -34,9 +34,28 @@ export const fixtureContext = {
   executionLocation: "local_reference",
 };
 
-export function fixtureGold(trackId = "track_fixture", audioHash = fixtureHash) {
-  const first = { ...rawAnnotation("first"), id: `${trackId}_first`, trackId, audioHash };
-  const second = { ...rawAnnotation("second"), id: `${trackId}_second`, trackId, audioHash };
+export function goldFor(
+  trackId: string,
+  audioHash: string,
+  content: { capability: string } & Record<string, unknown>,
+) {
+  const qualification = (base: ReturnType<typeof rawAnnotation>["annotator"]) => ({
+    ...base,
+    qualification: { ...base.qualification, capability: content.capability },
+  });
+  const raw = (person: string) => {
+    const base = rawAnnotation(person);
+    return {
+      ...base,
+      id: `${trackId}_${person}`,
+      trackId,
+      audioHash,
+      content,
+      annotator: qualification(base.annotator),
+    };
+  };
+  const first = raw("first"),
+    second = raw("second");
   return buildGoldReference({
     annotations: [first, second],
     adjudication: {
@@ -44,25 +63,30 @@ export function fixtureGold(trackId = "track_fixture", audioHash = fixtureHash) 
       id: `${trackId}_gold`,
       createdAt: "2026-09-09T01:00:00Z",
       guideHash: fixtureHash,
-      adjudicator: {
+      adjudicator: qualification({
         id: "person_third",
         qualification: {
           capability: "chords",
           evidenceHash: fixtureHash,
           reviewerId: "person_qualifier",
         },
-      },
+      }),
       rawHashes: [contentHash(first), contentHash(second)],
-      result: first.content,
+      result: content,
       decisions: [],
     },
   });
 }
-export function corpusFixture() {
-  const gold = [
+export function fixtureGold(trackId = "track_fixture", audioHash = fixtureHash) {
+  return goldFor(trackId, audioHash, rawAnnotation("first").content);
+}
+export function corpusFixture(
+  gold = [
     fixtureGold("track_calibration"),
     fixtureGold("track_sealed", `sha256:${"2".repeat(64)}`),
-  ];
+  ],
+  sealedFrom = 1,
+) {
   const tracks = gold.map((g, index) => {
     const raw = g.annotations[0];
     const recordingGroupId = `recording_${index}`,
@@ -84,7 +108,7 @@ export function corpusFixture() {
       recordingGroupId,
       compositionGroupId,
       artistGroupId: `artist_${index}`,
-      cohort: index === 0 ? "calibration" : "sealed",
+      cohort: index < sealedFrom ? "calibration" : "sealed",
       lyricsSubjectId: null,
       goldHashes: [g.hash],
       slices: {

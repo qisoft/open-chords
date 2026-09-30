@@ -31,4 +31,4 @@ The repository has a normative benchmark plan but no corpus inventory, grants, i
 
 ## Implemented tooling
 
-The Rights Ledger, Gold Reference/JAMS APIs, cohort audit and encrypted file CLI are implemented under `tools/benchmark/`. See [operator workflow](../benchmark-corpus-workflow.md) and [validation/review evidence](../benchmark-corpus-validation.md). Real-corpus acceptance remains open; no metric threshold or Support Claim is established.
+The Rights Ledger, Gold Reference/JAMS APIs, cohort audit and encrypted file CLI are implemented under `tools/benchmark/`. See [operator workflow](../benchmark-corpus-workflow.md) and [validation/review evidence](../benchmark-corpus-validation.md). Real-corpus acceptance remains open; no metric threshold or Support Claim is established. The metric and gate engine is planned in [benchmark metrics and gates](benchmark-metrics-gates.md).
