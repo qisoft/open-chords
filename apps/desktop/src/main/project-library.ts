@@ -16,11 +16,7 @@ import {
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-import {
-  CONTRACT_VERSION,
-  parseContractEnvelope,
-  ProjectEnvelopeSchema,
-} from "@open-chords/contracts";
+import { CONTRACT_VERSION, ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { addLyricsDocument, type LyricsInput, type LyricsOrigin } from "@open-chords/domain";
 import {
   applyPracticeAction,
@@ -58,6 +54,17 @@ import {
   type ProjectOwnedRecords,
 } from "./project-library-records.ts";
 import {
+  analysisManifestSourceIsVerified,
+  buildStoredPayload,
+  compareSchemaVersions,
+  hashContent,
+  parseSchemaVersion,
+  ProjectLibraryIncompatibleSchemaError,
+  StoredProjectPayloadSchema,
+  validateStoredPayload,
+  type StoredProjectPayload,
+} from "./project-payload.ts";
+import {
   appendYouTubeObservation,
   readYouTubeSources,
   mergeYouTubeSources,
@@ -76,12 +83,6 @@ const execFileAsync = promisify(execFile);
 
 const HashSchema = z.string().regex(HASH_PATTERN);
 const ProjectRevisionIdSchema = z.string().regex(PROJECT_REVISION_ID_PATTERN);
-const StoredProjectPayloadSchema = z.strictObject({
-  envelope: ProjectEnvelopeSchema,
-  format: z.literal("open-chords/project-library-payload"),
-  records: ProjectOwnedRecordsSchema,
-  schemaVersion: z.literal("1.0"),
-});
 const ProjectRevisionRecordSchema = z.strictObject({
   createdAt: z.iso.datetime({ offset: true }),
   format: z.literal("open-chords/project-revision"),
@@ -168,7 +169,6 @@ const SourceCatalogSchema = z.strictObject({
   schemaVersion: z.literal("1.0"),
 });
 
-type StoredProjectPayload = z.infer<typeof StoredProjectPayloadSchema>;
 type ProjectRevisionRecord = z.infer<typeof ProjectRevisionRecordSchema>;
 type SourceCatalog = z.infer<typeof SourceCatalogSchema>;
 type LocatorRecords = ProjectOwnedRecords["sources"][number]["locators"];
@@ -298,12 +298,7 @@ class ProjectLifecycleDurabilityError extends Error {
   }
 }
 
-export class ProjectLibraryIncompatibleSchemaError extends Error {
-  constructor(schemaVersion: string) {
-    super(`Project schema ${schemaVersion} has an unsupported major version`);
-    this.name = "ProjectLibraryIncompatibleSchemaError";
-  }
-}
+export { ProjectLibraryIncompatibleSchemaError };
 
 export async function openProjectLibrary(options: ProjectLibraryOptions): Promise<ProjectLibrary> {
   return ProjectLibrary.open(options);
@@ -2548,61 +2543,6 @@ function migrateStoredPayloadV1AnalysisProvenance(input: unknown): unknown {
   };
 }
 
-function validateStoredPayload(input: unknown): StoredProjectPayload {
-  const payload = StoredProjectPayloadSchema.parse(input);
-  const supportedMajor = parseSchemaVersion(CONTRACT_VERSION).major;
-  const envelopeMajor = parseSchemaVersion(payload.envelope.schemaVersion).major;
-  const projectMajor = parseSchemaVersion(payload.envelope.payload.schemaVersion).major;
-  if (envelopeMajor !== supportedMajor)
-    throw new ProjectLibraryIncompatibleSchemaError(payload.envelope.schemaVersion);
-  if (projectMajor !== supportedMajor)
-    throw new ProjectLibraryIncompatibleSchemaError(payload.envelope.payload.schemaVersion);
-  parseContractEnvelope(payload.envelope);
-  const manifestsByRevision = new Map(
-    payload.records.analysisManifests.map((record) => [record.analysisRevisionId, record]),
-  );
-  const legacyManifestless = new Set(payload.records.legacyManifestlessAnalysisRevisionIds);
-  for (const revision of payload.envelope.payload.analysisRevisions) {
-    const record = manifestsByRevision.get(revision.id);
-    if ((record === undefined) === !legacyManifestless.has(revision.id)) {
-      throw new Error("Analysis Revision must have exactly one Manifest or explicit legacy state");
-    }
-    if (record !== undefined && revision.manifestHash !== record.hash) {
-      throw new Error("Analysis Manifest record does not match its Analysis Revision");
-    }
-    if (record !== undefined) {
-      validateAnalysisManifestProvenance({
-        digest: hashContent,
-        manifest: record.manifest,
-        revision,
-      });
-      if (!analysisManifestSourceIsVerified(payload.records, record.manifest)) {
-        throw new Error("Analysis Manifest Source identity is not retained by Project authority");
-      }
-    }
-  }
-  for (const revisionId of [...manifestsByRevision.keys(), ...legacyManifestless]) {
-    if (!payload.envelope.payload.analysisRevisions.some(({ id }) => id === revisionId)) {
-      throw new Error("Analysis Manifest provenance references an unknown Analysis Revision");
-    }
-  }
-  const { projectRange } = payload.records;
-  if (
-    projectRange.endSourceSample - projectRange.startSourceSample !==
-    payload.envelope.payload.durationSamples
-  ) {
-    throw new Error("Project Range length must equal Project durationSamples");
-  }
-  const source = payload.records.sources.find(({ id }) => id === projectRange.sourceId);
-  if (
-    source === undefined ||
-    !source.snapshots.some(({ durationSamples }) => durationSamples >= projectRange.endSourceSample)
-  ) {
-    throw new Error("Project Range must fit a retained Source Snapshot");
-  }
-  return payload;
-}
-
 function inspectStoredPayloadCompatibility(input: unknown): { futureMinor: boolean } {
   const versions = z
     .object({
@@ -2622,32 +2562,6 @@ function inspectStoredPayloadCompatibility(input: unknown): { futureMinor: boole
       (version) => compareSchemaVersions(version, CONTRACT_VERSION) > 0,
     ),
   };
-}
-
-function buildStoredPayload(input: {
-  envelope: unknown;
-  records: ProjectOwnedRecords;
-}): StoredProjectPayload {
-  return validateStoredPayload({
-    envelope: input.envelope,
-    format: "open-chords/project-library-payload",
-    records: input.records,
-    schemaVersion: "1.0",
-  });
-}
-
-function analysisManifestSourceIsVerified(
-  records: ProjectOwnedRecords,
-  manifest: AnalysisManifest,
-): boolean {
-  const identity = manifest.candidateIdentity;
-  const source = records.sources.find(({ id }) => id === records.projectRange.sourceId);
-  const snapshot = source?.snapshots.find((candidate) =>
-    identity.sourceIdentityKind === "source_snapshot"
-      ? candidate.id === identity.sourceSnapshotId
-      : candidate.canonicalAudioFingerprint === identity.canonicalAudioFingerprint,
-  );
-  return snapshot?.canonicalAudioFingerprint === identity.canonicalAudioFingerprint;
 }
 
 function validateLibrarySourceAuthority(entries: ReadonlyMap<string, LibraryEntry>): void {
@@ -2940,10 +2854,6 @@ async function readRegularStorageFile(path: string): Promise<string> {
   return readFile(path, "utf8");
 }
 
-function hashContent(content: string): string {
-  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
-}
-
 async function writeDurableFile(
   path: string,
   content: string,
@@ -3164,19 +3074,6 @@ function decodeMountInfoPath(path: string): string {
 
 function isAtOrBelow(path: string, parent: string): boolean {
   return path === parent || path.startsWith(parent === sep ? sep : `${parent}${sep}`);
-}
-
-function parseSchemaVersion(version: string): { major: number; minor: number } {
-  const match = /^(\d+)\.(\d+)$/.exec(version);
-  if (match?.[1] === undefined || match[2] === undefined) throw new Error("Invalid schema version");
-  return { major: Number(match[1]), minor: Number(match[2]) };
-}
-
-function compareSchemaVersions(left: string, right: string): number {
-  const leftVersion = parseSchemaVersion(left);
-  const rightVersion = parseSchemaVersion(right);
-  if (leftVersion.major !== rightVersion.major) return leftVersion.major - rightVersion.major;
-  return leftVersion.minor - rightVersion.minor;
 }
 
 function isOlderCompatibleSchema(
