@@ -47,7 +47,10 @@ export function writeArchiveZip(entries: ReadonlyArray<{ name: string; bytes: Bu
   for (const { name, bytes } of entries) {
     const encodedName = Buffer.from(name, "utf8");
     const deflated = deflateRawSync(bytes, { level: 9 });
-    const method = deflated.length < bytes.length ? 8 : 0;
+    const method =
+      deflated.length < bytes.length && !exceedsCompressionRatio(bytes.length, deflated.length)
+        ? 8
+        : 0;
     const data = method === 8 ? deflated : bytes;
     const checksum = crc32(bytes);
     const local = Buffer.alloc(30);
@@ -173,12 +176,7 @@ export function readArchiveZip(bytes: Buffer): ArchiveZipEntry[] {
     totalBytes += size;
     if (totalBytes > ARCHIVE_ZIP_LIMITS.maxTotalBytes) reject("size_limit");
     if (method === 0 && compressedSize !== size) reject("malformed_zip");
-    if (
-      method === 8 &&
-      size > ARCHIVE_ZIP_LIMITS.ratioFloorBytes &&
-      size > compressedSize * ARCHIVE_ZIP_LIMITS.maxCompressionRatio
-    )
-      reject("compression_ratio");
+    if (method === 8 && exceedsCompressionRatio(size, compressedSize)) reject("compression_ratio");
 
     if (localOffset !== expectedLocal || localOffset + 30 > directoryStart) reject("malformed_zip");
     if (
@@ -205,8 +203,9 @@ export function readArchiveZip(bytes: Buffer): ArchiveZipEntry[] {
         let content: Buffer = compressed;
         if (method === 8) {
           try {
-            content = inflateRawSync(compressed, { maxOutputLength: Math.max(1, size) });
+            content = inflateWholeStream(compressed, size) ?? reject("malformed_zip");
           } catch (error) {
+            if (error instanceof ArchiveZipError) throw error;
             reject(error instanceof RangeError ? "size_limit" : "malformed_zip");
           }
         }
@@ -218,6 +217,39 @@ export function readArchiveZip(bytes: Buffer): ArchiveZipEntry[] {
   }
   if (cursor !== end || expectedLocal !== directoryStart) reject("malformed_zip");
   return entries;
+}
+
+// Node reports consumed input only through the untyped `info` result. Bytes hidden after
+// the end of the deflate stream make the entry malformed.
+function inflateWholeStream(compressed: Buffer, size: number): Buffer | null {
+  const result: unknown = inflateRawSync(compressed, {
+    info: true,
+    maxOutputLength: Math.max(1, size),
+  });
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    !("buffer" in result) ||
+    !("engine" in result)
+  )
+    return null;
+  const { buffer, engine } = result;
+  if (
+    !Buffer.isBuffer(buffer) ||
+    typeof engine !== "object" ||
+    engine === null ||
+    !("bytesWritten" in engine) ||
+    engine.bytesWritten !== compressed.length
+  )
+    return null;
+  return buffer;
+}
+
+function exceedsCompressionRatio(size: number, compressedSize: number): boolean {
+  return (
+    size > ARCHIVE_ZIP_LIMITS.ratioFloorBytes &&
+    size > compressedSize * ARCHIVE_ZIP_LIMITS.maxCompressionRatio
+  );
 }
 
 function isSafeEntryName(name: string): boolean {

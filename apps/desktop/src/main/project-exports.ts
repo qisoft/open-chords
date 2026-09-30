@@ -16,6 +16,7 @@ import { syncDirectory } from "./filesystem-durability.ts";
 import type { LocalMediaService } from "./local-media.ts";
 import {
   ARCHIVE_EXTENSION,
+  ArchiveTooLargeError,
   archivedProjectFor,
   receiptDisplayName,
   writePortableProjectArchive,
@@ -54,7 +55,14 @@ type Prepared = {
   omissions: string[];
   profileVersion: string;
 };
-type PublicationState = "saved" | "cancelled" | "receipt_pending";
+type PublicationState = "saved" | "cancelled" | "receipt_pending" | "too_large";
+
+class ExportTooLargeError extends Error {
+  constructor() {
+    super("Export exceeds its size budget");
+    this.name = "ExportTooLargeError";
+  }
+}
 
 class ExportMediaUnavailableError extends Error {
   constructor(cause: unknown) {
@@ -140,7 +148,7 @@ export class ProjectExports {
 
   saveJson(raw: unknown): Promise<{ state: PublicationState }> {
     const request = jsonRequestSchema.parse(raw);
-    return this.#publish(request, "open_chords_json", async () => {
+    return this.#publishWithinBudget(request, "open_chords_json", async () => {
       const selected = await this.#options.library.getSnapshot(request.projectId);
       if (selected?.projectRevisionId !== request.expectedProjectRevisionId)
         throw new Error("Export requires the current writable Project revision");
@@ -168,7 +176,7 @@ export class ProjectExports {
   async saveArchive(raw: unknown): Promise<{ state: PublicationState | "media_unavailable" }> {
     const request = archiveRequestSchema.parse(raw);
     try {
-      return await this.#publish(request, "project_archive", async () => {
+      return await this.#publishWithinBudget(request, "project_archive", async () => {
         const project = await this.#options.library.readProject(request.projectId);
         if (project.projectRevisionId !== request.expectedProjectRevisionId)
           throw new Error("Export requires the current writable Project revision");
@@ -217,6 +225,20 @@ export class ProjectExports {
     }
   }
 
+  async #publishWithinBudget(
+    request: { expectedProjectRevisionId: string; projectId: string },
+    format: ExportFormat,
+    prepare: () => Promise<Prepared>,
+  ): Promise<{ state: PublicationState }> {
+    try {
+      return await this.#publish(request, format, prepare);
+    } catch (error) {
+      if (error instanceof ArchiveTooLargeError || error instanceof ExportTooLargeError)
+        return { state: "too_large" };
+      throw error;
+    }
+  }
+
   async #publish(
     request: { expectedProjectRevisionId: string; projectId: string },
     format: ExportFormat,
@@ -241,8 +263,7 @@ export class ProjectExports {
         throw new Error("Export requires the current writable Project revision");
       const prepared = await prepare();
       const { content } = prepared;
-      if (content.length > TARGETS[format].maxBytes)
-        throw new Error("Export exceeds its size budget");
+      if (content.length > TARGETS[format].maxBytes) throw new ExportTooLargeError();
       signal.throwIfAborted();
       const target = await this.#options.pickTarget(format);
       signal.throwIfAborted();

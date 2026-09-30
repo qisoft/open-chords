@@ -48,7 +48,9 @@ const digest = (bytes: Buffer | string) =>
 
 export function offlineMediaEntryId(range: OfflineMediaRange): string {
   const identity = canonicalSerialize({
+    canonicalAudioFingerprint: range.canonicalAudioFingerprint,
     endSourceSample: range.endSourceSample,
+    sourceId: range.sourceId,
     sourceSnapshotId: range.sourceSnapshotId,
     startSourceSample: range.startSourceSample,
   });

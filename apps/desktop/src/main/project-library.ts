@@ -612,6 +612,19 @@ export class ProjectLibrary {
     });
   }
 
+  async migrateToCurrentSchema(input: {
+    envelope: unknown;
+    records: ProjectOwnedRecords;
+  }): Promise<{ envelope: StoredProjectPayload["envelope"]; records: ProjectOwnedRecords }> {
+    const payload = buildStoredPayload(input);
+    this.#assertRestorableSchema(payload.envelope);
+    const migrated =
+      this.#compatibilityFor(payload.envelope) === "writable"
+        ? payload
+        : await this.#prepareMigratedPayload(payload);
+    return { envelope: migrated.envelope, records: migrated.records };
+  }
+
   async readProject(projectId: string): Promise<{
     compatibility: "read_only" | "writable";
     envelope: z.infer<typeof ProjectEnvelopeSchema>;
@@ -1175,7 +1188,7 @@ export class ProjectLibrary {
         ({ revision }) => revision.projectRevisionId === targetProjectRevisionId,
       );
       if (target === undefined) throw new Error("Rollback Project Revision was not found");
-      const payload = await this.#prepareMigratedPayload(target);
+      const payload = await this.#prepareMigratedPayload(target.payload);
       const next = await this.#commitPayload(
         projectId,
         payload,
@@ -2197,7 +2210,7 @@ export class ProjectLibrary {
     initial: RevisionSnapshot,
   ): Promise<RevisionSnapshot> {
     if (this.#compatibilityFor(initial.payload.envelope) === "writable") return initial;
-    const migratedPayload = await this.#prepareMigratedPayload(initial);
+    const migratedPayload = await this.#prepareMigratedPayload(initial.payload);
     return this.#commitPayload(
       projectId,
       migratedPayload,
@@ -2207,8 +2220,8 @@ export class ProjectLibrary {
     );
   }
 
-  async #prepareMigratedPayload(initial: RevisionSnapshot): Promise<StoredProjectPayload> {
-    let envelope = structuredClone(initial.payload.envelope);
+  async #prepareMigratedPayload(initial: StoredProjectPayload): Promise<StoredProjectPayload> {
+    let envelope = structuredClone(initial.envelope);
     let completedSteps = 0;
     while (isOlderCompatibleSchema(envelope, this.#currentSchemaVersion)) {
       if (completedSteps >= this.#migrations.length)
@@ -2223,12 +2236,12 @@ export class ProjectLibrary {
         nextVersion !== migration.toVersion
       )
         throw new Error("Project migration did not advance its complete schema state");
-      buildStoredPayload({ envelope, records: initial.payload.records });
+      buildStoredPayload({ envelope, records: initial.records });
       completedSteps += 1;
     }
     const migratedPayload = buildStoredPayload({
       envelope,
-      records: initial.payload.records,
+      records: initial.records,
     });
     this.#assertCurrentWritableSchema(migratedPayload.envelope);
     return migratedPayload;

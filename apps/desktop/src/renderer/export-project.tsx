@@ -54,13 +54,15 @@ export function ExportProject({
             ? "Export saved"
             : response.state === "cancelled"
               ? "Export cancelled"
-              : response.state === "media_unavailable"
-                ? "The verified Project Range is unavailable. Relink the Source or export without media."
-                : response.state === "receipt_pending"
-                  ? "File saved; the export record needs recovery."
-                  : response.pendingRecovery > 0
-                    ? "An export needs recovery. Keep its destination available and retry recovery."
-                    : "",
+              : response.state === "too_large"
+                ? "This export is larger than its profile allows. Nothing was saved."
+                : response.state === "media_unavailable"
+                  ? "The verified Project Range is unavailable. Relink the Source or export without media."
+                  : response.state === "receipt_pending"
+                    ? "File saved; the export record needs recovery."
+                    : response.pendingRecovery > 0
+                      ? "An export needs recovery. Keep its destination available and retry recovery."
+                      : "",
         );
       }
     } catch {

@@ -87,6 +87,13 @@ export type ArchiveOmission =
   | "local_source_locators_omitted"
   | "receipt_locations_reduced_to_names";
 
+export class ArchiveTooLargeError extends Error {
+  constructor() {
+    super("Portable Project Archive exceeds its size budget");
+    this.name = "ArchiveTooLargeError";
+  }
+}
+
 export const sha256 = (bytes: Buffer | string) =>
   `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
@@ -168,8 +175,11 @@ export function writePortableProjectArchive(input: {
   media?: Omit<ArchiveMediaDeclaration, "byteSize" | "path" | "sha256"> & { bytes: Buffer };
 }): { archive: Buffer; manifestHash: string; projectHash: string } {
   const project = Buffer.from(canonicalSerialize(input.document), "utf8");
-  if (project.length > ARCHIVE_ENTRY_LIMITS.project)
-    throw new Error("Portable Project Archive exceeds its Project size budget");
+  if (
+    project.length > ARCHIVE_ENTRY_LIMITS.project ||
+    (input.media?.bytes.length ?? 0) > ARCHIVE_ENTRY_LIMITS.media
+  )
+    throw new ArchiveTooLargeError();
   const media =
     input.media === undefined
       ? undefined

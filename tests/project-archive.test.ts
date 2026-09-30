@@ -19,7 +19,7 @@ import {
   type ArchivedProject,
 } from "../apps/desktop/src/main/project-archive-format.ts";
 import { ProjectArchiveImports } from "../apps/desktop/src/main/project-archive-imports.ts";
-import { readArchiveZip } from "../apps/desktop/src/main/project-archive-zip.ts";
+import { readArchiveZip, writeArchiveZip } from "../apps/desktop/src/main/project-archive-zip.ts";
 import { openProjectExports } from "../apps/desktop/src/main/project-exports.ts";
 import {
   openProjectLibrary,
@@ -387,6 +387,102 @@ describe("Portable Project Archive media", () => {
     expect(await imports.importArchive()).toEqual({ reason: "hash_mismatch", state: "rejected" });
     expect(library.listProjects()).toEqual([]);
     expect(await cache.list()).toEqual([]);
+  });
+
+  it("removes newly cached media when Library publication fails after validation", async () => {
+    const root = await temporaryRoot("oc-archive-media-rollback-");
+    const library = await libraryWithGolden(root);
+    const document = goldenDocument();
+    const fingerprint = `sha256:${"f".repeat(64)}`;
+    document.envelope.payload.id = "project_foreign";
+    for (const revision of document.envelope.payload.analysisRevisions)
+      revision.projectId = "project_foreign";
+    const source = document.records.sources[0]!;
+    source.id = "source_foreign";
+    source.identity = { fingerprint, kind: "local_file" };
+    source.snapshots[0]!.byteFingerprint = fingerprint;
+    source.snapshots[0]!.durationSamples = 96_000;
+    document.records.projectRange.sourceId = "source_foreign";
+    const path = join(root, "rollback.ocarchive");
+    await writeFile(
+      path,
+      rawZip(
+        signedArchiveEntries(document, {
+          media: {
+            bytes: Buffer.alloc(96_000, 1),
+            declaration: {
+              channels: 1,
+              encoding: "pcm_s16le",
+              endSourceSample: 48_000,
+              sampleRate: 48_000,
+              sourceId: "source_foreign",
+              sourceSnapshotId: "snapshot_fixture",
+              startSourceSample: 0,
+            },
+          },
+        }),
+      ),
+    );
+    const { cache, imports } = await importerFor(root, () => path, library);
+    await expect(imports.importArchive()).rejects.toThrow(/Snapshot snapshot_fixture conflicts/);
+    expect(await cache.list()).toEqual([]);
+    expect(library.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
+  });
+});
+
+describe("Portable Project Archive Source authority and migration", () => {
+  it("uses the Library's Source record, so an archive cannot extend a known Source", async () => {
+    const root = await temporaryRoot("oc-archive-source-extend-");
+    const library = await libraryWithGolden(root);
+    const document = goldenDocument();
+    document.envelope.payload.id = "project_extending";
+    for (const revision of document.envelope.payload.analysisRevisions)
+      revision.projectId = "project_extending";
+    const snapshot = document.records.sources[0]!.snapshots[0]!;
+    document.records.sources[0]!.snapshots.push({ ...snapshot, id: "snapshot_injected" });
+    const path = join(root, "extend.ocarchive");
+    await writeFile(path, rawZip(signedArchiveEntries(document)));
+    const { imports } = await importerFor(root, () => path, library);
+    expect(await imports.importArchive()).toMatchObject({
+      projectId: "project_extending",
+      state: "imported",
+    });
+    const snapshotIds = (project: Awaited<ReturnType<ProjectLibrary["readProject"]>>) =>
+      project.records.sources[0]!.snapshots.map(({ id }) => id);
+    expect(snapshotIds(await library.readProject("project_extending"))).toEqual([
+      "snapshot_fixture",
+    ]);
+    expect(library.getSourceById("source_fixture")?.snapshots.map(({ id }) => id)).toEqual([
+      "snapshot_fixture",
+    ]);
+  });
+
+  it("migrates an older supported contract and treats its retry as already present", async () => {
+    const root = await temporaryRoot("oc-archive-older-minor-");
+    const document = goldenDocument();
+    document.envelope.schemaVersion = "1.3";
+    document.envelope.payload.schemaVersion = "1.3";
+    const path = join(root, "older.ocarchive");
+    await writeFile(path, rawZip(signedArchiveEntries(document)));
+    const { imports, library } = await importerFor(root, () => path);
+    expect(await imports.importArchive()).toMatchObject({
+      importedCopy: false,
+      state: "imported",
+    });
+    expect((await library.readProject("project_golden")).envelope.schemaVersion).toBe("1.4");
+    expect(await imports.importArchive()).toMatchObject({
+      importedCopy: false,
+      projectId: "project_golden",
+      state: "already_present",
+    });
+    expect(library.listProjects()).toHaveLength(1);
+  });
+
+  it("stores highly compressible media so the reader accepts the writer's own archive", () => {
+    const silence = Buffer.alloc(2 * 1024 * 1024);
+    const archive = writeArchiveZip([{ bytes: silence, name: "media/project-range.pcm" }]);
+    expect(archive.length).toBeGreaterThan(silence.length);
+    expect(readArchiveZip(archive)[0]!.read().equals(silence)).toBe(true);
   });
 });
 

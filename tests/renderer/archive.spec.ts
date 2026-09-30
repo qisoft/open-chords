@@ -48,10 +48,12 @@ test("the export dialog saves a Portable Project Archive and import creates a se
     }, archivePath);
     const page = await application.firstWindow();
     await page.getByRole("button", { name: "Export Project", exact: true }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "Portable Project Archive" })).toBeVisible();
+    const exportDialog = page.getByRole("dialog");
     await expect(
-      dialog.getByRole("checkbox", { name: "Include verified Project Range media" }),
+      exportDialog.getByRole("heading", { name: "Portable Project Archive" }),
+    ).toBeVisible();
+    await expect(
+      exportDialog.getByRole("checkbox", { name: "Include verified Project Range media" }),
     ).not.toBeChecked();
     await page.evaluate(axe.source);
     const audit = await page.evaluate(async () => {
@@ -66,18 +68,18 @@ test("the export dialog saves a Portable Project Archive and import creates a se
     });
     expect(audit.violations.map(({ id }) => id)).toEqual([]);
 
-    await dialog.getByRole("button", { name: "Save Project Archive", exact: true }).click();
+    await exportDialog.getByRole("button", { name: "Save Project Archive", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Export saved" })).toBeVisible();
-    await expect(dialog.getByText("song.ocarchive", { exact: true })).toBeVisible();
-    await dialog.getByText("Snapshot hashes and omissions").last().click();
+    await expect(exportDialog.getByText("song.ocarchive", { exact: true })).toBeVisible();
+    await exportDialog.getByText("Snapshot hashes and omissions").last().click();
     await expect(
-      dialog.getByText(
+      exportDialog.getByText(
         "Local file locations were omitted; the Source stays identified by its fingerprint.",
         { exact: true },
       ),
     ).toBeVisible();
     expect((await readFile(archivePath)).readUInt32LE(0)).toBe(0x04034b50);
-    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await exportDialog.getByRole("button", { name: "Close", exact: true }).click();
 
     await page.getByRole("button", { name: "Import Project Archive", exact: true }).click();
     await expect(

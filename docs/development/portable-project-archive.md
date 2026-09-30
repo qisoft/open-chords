@@ -20,7 +20,7 @@ The archive is a ZIP with the `.ocarchive` extension. Open Chords writes, and re
 | `project.json` | `open-chords/portable-project` 1.0: the Project envelope and Project-owned records. |
 | `media/project-range.pcm` | Optional. Canonical mono PCM16 little-endian samples of exactly the Project Range. |
 
-Every JSON entry is canonical: sorted keys, two-space indentation, UTF-8 and a final LF. Entries have fixed 1980-01-01 timestamps, no extra fields and no comments, so equal Projects produce equal bytes. The Receipt `activeViewHash` for this profile is the SHA-256 of `project.json`, which identifies the complete captured Project.
+Every JSON entry is canonical: sorted keys, two-space indentation, UTF-8 and a final LF. Entries have fixed 1980-01-01 timestamps, no extra fields and no comments, so equal Projects produce equal bytes. For this profile the Receipt field `activeViewHash` holds the SHA-256 of `project.json`. An archive captures the complete Project rather than one Active View, so that hash identifies the captured Project. Captures above the profile budget report `too_large` and write nothing.
 
 The document keeps the complete retained history: every Analysis Revision and Manifest, Edit Layer transaction history, Lyrics Documents and Alignments, practice state, Support Claims, namespaced extensions, Export Receipts, Source identity, Snapshots and Metadata Observations. Local file Locators are removed, because they are private paths. Earlier Receipt destinations are reduced to file names. Both removals are recorded as Receipt omissions. YouTube Locators are kept, because they are canonical public URLs rebuilt from the video ID.
 
@@ -55,11 +55,13 @@ Import reads the selected regular file through one no-follow descriptor with a 1
 | `source_conflict` | A Source or Snapshot that redefines one the Library already owns. |
 | `identity_exhausted` | 100 existing Imported Project Copies with different histories for one archive. |
 
+The writer stores an entry uncompressed when deflate would exceed the ratio limit, so silent media round-trips. The reader also rejects bytes hidden after the end of a deflate stream.
+
 The import module graph contains only archive, cache, records, payload and bounded file modules. A test walks its value imports and fails on Electron, Effect, process, network, DNS, TLS, VM, worker, model, acquisition, lyrics, YouTube and sidecar modules, and on `fetch`, `spawn`, `execFile`, `eval`, `safeStorage` or `openExternal` calls. A second test runs an import while `fetch` throws.
 
 ## Identity
 
-Source authority belongs to the Library. An archived Source that the Library does not know imports without Locators. It is an Unavailable Source: the Project opens, playback reports that the Source is unavailable, and a later relink to matching content restores it. When the Library already owns the Source, the imported Project uses the Library's retained Snapshot records and current Locators. A Source or Snapshot that disagrees with the Library is rejected.
+Source authority belongs to the Library. An archived Source that the Library does not know imports without Locators. It is an Unavailable Source: the Project opens, playback reports that the Source is unavailable, and a later relink to matching content restores it. When the Library already owns the Source, the archived Source record is replaced by the Library's complete record, so an archive can neither redefine nor extend it. A Source identity owned under another ID, or a Snapshot whose identity fields disagree, is rejected. The adopted document is validated again, so history that needs a Snapshot the Library does not retain is also rejected.
 
 Project identity is resolved without overwriting or merging:
 
@@ -67,13 +69,15 @@ Project identity is resolved without overwriting or merging:
 2. An active Project with that identity has exactly the archived history. The import reports `already_present` and changes nothing.
 3. Otherwise the import tries up to 100 deterministic Imported Project Copy identities, derived from the origin identity, the manifest hash and a counter. Each copy appends `{ projectId, archiveManifestHash }` to `importOrigins`. Contract 1.4 accepts Analysis Revisions and Alignment Recipes that belong to the Project or to one of its import origins, so history keeps its original provenance.
 
-Retrying one archive therefore converges on the copy it already created. A copy that was edited afterwards is a different history, so the next import creates another copy.
+The comparison migrates the archived Project to the current contract first, so an archive from an older supported version also converges. Retrying one archive therefore converges on the copy it already created. A copy that was edited afterwards is a different history, so the next import creates another copy.
+
+Import origins are declared provenance, not verified lineage. They only let an Imported Project Copy keep Analysis Revisions and Alignment Recipes whose Project identity is its origin.
 
 ## Offline Media Cache
 
 Media inclusion is an explicit export option. Export reads the Project Range through the same verified local-file path as playback, which rejects a changed or unavailable Source. When the Range cannot be verified, the export reports `media_unavailable` and writes nothing.
 
-On import, validated media becomes one entry in `offline-media-cache/` under application state, outside the Project Library. The entry records Source, Snapshot, Range, sample rate, byte size, SHA-256 and archive origin. It is written durably through a staging file before its record. Listing and reading verify the SHA-256 again, and a corrupt entry is treated as absent. An entry that already covers the same Range with different bytes rejects the import. The media never becomes a Source, Snapshot or Locator.
+On import, validated media becomes one entry in `offline-media-cache/` under application state, outside the Project Library. The entry is written only after identity resolution, and is removed again if Library publication then fails. The entry identity covers Source, Snapshot, canonical-audio fingerprint and Range. The record adds sample rate, byte size, SHA-256 and archive origin. It is written durably through a staging file before its record. Listing and reading verify the SHA-256 again, and a corrupt entry is treated as absent. An entry that already covers the same Range with different bytes rejects the import. The media never becomes a Source, Snapshot or Locator.
 
 ## Verification
 
