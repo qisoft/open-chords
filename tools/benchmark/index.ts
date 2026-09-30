@@ -24,3 +24,8 @@ export {
   auditCorpusFiles,
   CurrentRightsReviewSchema,
 } from "./storage.ts";
+export { scoreTrack, readOutput, METRICS, METRIC_IDS, type MetricId } from "./metrics.ts";
+export { parsePolicy, parseCalibrationReport, PolicySchema, ProcedureSchema } from "./policy.ts";
+export { BenchmarkRunSchema, ExecutionRecordSchema } from "./runs.ts";
+export { characterize, evaluateGates, type EvaluationInput } from "./gates.ts";
+export { calibrateFiles, sealedGateFiles, validatePolicyFiles } from "./release.ts";

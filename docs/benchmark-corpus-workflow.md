@@ -1,6 +1,6 @@
 # Benchmark Corpus tooling
 
-These engineering tools implement the Rights Ledger, Gold Reference interchange and corpus custody workflow for [issue 47](https://github.com/qisoft/open-chords/issues/47). They do not run analysis, select metric thresholds or authorize a Support Claim. The desktop application does not import this module.
+These engineering tools implement the Rights Ledger, Gold Reference interchange and corpus custody workflow for [issue 47](https://github.com/qisoft/open-chords/issues/47). They do not run analysis, select metric thresholds or authorize a Support Claim. The desktop application does not import this module. Metrics, calibration reports and the sealed verdict are described in the [release gate workflow](benchmark-release-gate-workflow.md).
 
 The user requested tools first. Only **synthetic workflow fixtures** are available. There are no 30–50 authorized recordings, independent human submissions, measured inter-annotator reliability or approved release policy in this change. Real-corpus acceptance remains open.
 

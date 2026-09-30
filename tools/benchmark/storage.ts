@@ -57,7 +57,7 @@ const indexSchema = z.strictObject({
     .max(2048),
   files: z.array(fileSchema).min(2).max(52),
 });
-const freezeSchema = z.strictObject({
+export const FreezeSchema = z.strictObject({
   declaration: z.strictObject({
     version: z.literal("1.0"),
     bundleHash: HashSchema,
@@ -80,9 +80,9 @@ export const CurrentRightsReviewSchema = z.strictObject({
     context: AuditContextSchema.omit({ at: true }),
     tracks: z.array(z.strictObject({ id: z.string(), rights: z.array(RightsGrantSchema) })).min(1),
   }),
-  signature: freezeSchema.shape.signature,
+  signature: FreezeSchema.shape.signature,
 });
-const sealedSchema = z.strictObject({
+export const SealedCorpusSchema = z.strictObject({
   input: inputSchema.omit({ media: true }),
   report: z.unknown(),
   media: z.array(
@@ -171,14 +171,14 @@ export async function writeArtifact(path: string, value: unknown) {
     await rm(stage, { recursive: true, force: true });
   }
 }
-async function bytesHash(path: string) {
+export async function bytesHash(path: string) {
   const stat = await lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Expected regular file");
   const hash = createHash("sha256");
   for await (const bytes of createReadStream(path)) hash.update(bytes);
   return `sha256:${hash.digest("hex")}`;
 }
-function publicKeyHash(pem: string) {
+export function publicKeyHash(pem: string) {
   return `sha256:${createHash("sha256")
     .update(createPublicKey(pem).export({ type: "spki", format: "der" }))
     .digest("hex")}`;
@@ -256,7 +256,7 @@ export async function publishCorpus(
   try {
     return await stageDirectory(destination, async (stage) => {
       const files: FileRecord[] = [],
-        sealedMedia: z.infer<typeof sealedSchema>["media"] = [],
+        sealedMedia: z.infer<typeof SealedCorpusSchema>["media"] = [],
         calibrationMedia: { trackId: string; storageName: string; hash: string }[] = [];
       for (const [position, media] of input.media.entries()) {
         const track = manifest.tracks.find((t) => t.id === media.trackId)!;
@@ -340,6 +340,35 @@ export async function verifyBundle(directory: string) {
   }
   return index;
 }
+export async function verifyFreeze(
+  rawFreeze: unknown,
+  trustedAuthorityPublicKey: string,
+  index: z.infer<typeof indexSchema>,
+  policyPath: string,
+) {
+  const freeze = FreezeSchema.parse(rawFreeze),
+    declaration = freeze.declaration,
+    trustedKey = createPublicKey(trustedAuthorityPublicKey);
+  if (
+    trustedKey.asymmetricKeyType !== "ed25519" ||
+    publicKeyHash(trustedAuthorityPublicKey) !== index.authorityHash ||
+    !verify(
+      null,
+      Buffer.from(canonicalSerialize(declaration)),
+      trustedKey,
+      Buffer.from(freeze.signature, "base64"),
+    )
+  )
+    throw new Error("Unauthenticated policy freeze");
+  if (
+    declaration.bundleHash !== contentHash(index) ||
+    declaration.corpusHash !== index.corpusHash ||
+    declaration.policyHash !== (await bytesHash(policyPath)) ||
+    Date.parse(declaration.frozenAt) > Date.now()
+  )
+    throw new Error("Policy freeze binding mismatch");
+  return freeze;
+}
 async function decryptFile(
   directory: string,
   record: FileRecord,
@@ -367,27 +396,9 @@ export async function openSealedCorpus(
   custodianPrivateKey: string,
 ) {
   const index = await verifyBundle(directory),
-    freeze = freezeSchema.parse(rawFreeze),
+    freeze = await verifyFreeze(rawFreeze, trustedAuthorityPublicKey, index, policyPath),
     declaration = freeze.declaration;
   const trustedKey = createPublicKey(trustedAuthorityPublicKey);
-  if (
-    trustedKey.asymmetricKeyType !== "ed25519" ||
-    publicKeyHash(trustedAuthorityPublicKey) !== index.authorityHash ||
-    !verify(
-      null,
-      Buffer.from(canonicalSerialize(declaration)),
-      trustedKey,
-      Buffer.from(freeze.signature, "base64"),
-    )
-  )
-    throw new Error("Unauthenticated policy freeze");
-  if (
-    declaration.bundleHash !== contentHash(index) ||
-    declaration.corpusHash !== index.corpusHash ||
-    declaration.policyHash !== (await bytesHash(policyPath)) ||
-    Date.parse(declaration.frozenAt) > Date.now()
-  )
-    throw new Error("Policy freeze binding mismatch");
   const rightsReview = CurrentRightsReviewSchema.parse(rawRightsReview),
     review = rightsReview.declaration;
   const now = Date.now();
@@ -426,7 +437,7 @@ export async function openSealedCorpus(
         key,
         join(stage, "sealed.json"),
       );
-      const sealed = sealedSchema.parse(await readJson(join(stage, "sealed.json")));
+      const sealed = SealedCorpusSchema.parse(await readJson(join(stage, "sealed.json")));
       const manifest = parseCorpusManifest(sealed.input.manifest);
       const original = auditCorpus(manifest, sealed.input.gold, sealed.input.context);
       if (
