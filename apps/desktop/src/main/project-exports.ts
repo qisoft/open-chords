@@ -13,14 +13,28 @@ import { z } from "zod";
 
 import { readBoundedFile } from "./bounded-file.ts";
 import { syncDirectory } from "./filesystem-durability.ts";
+import type { LocalMediaService } from "./local-media.ts";
+import {
+  ARCHIVE_EXTENSION,
+  archivedProjectFor,
+  receiptDisplayName,
+  writePortableProjectArchive,
+} from "./project-archive-format.ts";
+import { ARCHIVE_ZIP_LIMITS } from "./project-archive-zip.ts";
 import { ExportReceiptSchema } from "./project-library-records.ts";
 import type { ProjectLibrary } from "./project-library.ts";
 
-const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
-const requestSchema = JsonExportOptionsSchema.extend({
+export type ExportFormat = "open_chords_json" | "project_archive";
+const TARGETS: Record<ExportFormat, { extension: string; maxBytes: number }> = {
+  open_chords_json: { extension: ".json", maxBytes: 32 * 1024 * 1024 },
+  project_archive: { extension: ARCHIVE_EXTENSION, maxBytes: ARCHIVE_ZIP_LIMITS.maxArchiveBytes },
+};
+const revisionRequest = {
   projectId: StableIdSchema,
   expectedProjectRevisionId: z.string().regex(/^projectrevision_[a-f0-9]{32}$/),
-});
+};
+const jsonRequestSchema = JsonExportOptionsSchema.extend(revisionRequest);
+const archiveRequestSchema = z.strictObject({ ...revisionRequest, includeMedia: z.boolean() });
 const journalSchema = z.strictObject({
   version: z.literal(1),
   libraryRoot: z.string().min(1),
@@ -29,10 +43,26 @@ const journalSchema = z.strictObject({
 });
 type Options = {
   library: ProjectLibrary;
+  media?: Pick<LocalMediaService, "readVerifiedProjectRange">;
   stateRoot: string;
   protectedRoots?: string[];
-  pickTarget: () => Promise<string | null>;
+  pickTarget: (format: ExportFormat) => Promise<string | null>;
 };
+type Prepared = {
+  activeViewHash: string;
+  content: Buffer;
+  omissions: string[];
+  profileVersion: string;
+};
+type PublicationState = "saved" | "cancelled" | "receipt_pending";
+
+class ExportMediaUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("The verified Project Range is unavailable for this export", { cause });
+    this.name = "ExportMediaUnavailableError";
+  }
+}
+
 const hash = (value: string | Buffer) =>
   `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const missing = (error: unknown) =>
@@ -42,13 +72,13 @@ const nested = (root: string, target: string) => {
   return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
 };
 
-export async function openJsonExports(options: Options) {
-  const service = new JsonExports(options);
+export async function openProjectExports(options: Options) {
+  const service = new ProjectExports(options);
   await service.recover();
   return service;
 }
 
-export class JsonExports {
+export class ProjectExports {
   readonly #options: Options;
   readonly #journalRoot: string;
   #controller: AbortController | null = null;
@@ -73,10 +103,13 @@ export class JsonExports {
 
   async perform(raw: ExportAction) {
     const action = ExportActionSchema.parse(raw);
-    let state: "idle" | "saved" | "cancelled" | "cancelling" | "receipt_pending" = "idle";
+    let state: "idle" | "cancelling" | "media_unavailable" | PublicationState = "idle";
     if (action.type === "save_json") {
       const { type: _type, ...request } = action;
       state = (await this.saveJson(request)).state;
+    } else if (action.type === "save_archive") {
+      const { type: _type, ...request } = action;
+      state = (await this.saveArchive(request)).state;
     } else if (action.type === "cancel") {
       this.cancel();
       state = this.busy ? "cancelling" : "idle";
@@ -93,7 +126,7 @@ export class JsonExports {
         .slice(-100)
         .map(({ outputLocation, ...receipt }) => ({
           ...receipt,
-          displayName: basename(outputLocation).slice(0, 240) || "Export",
+          displayName: receiptDisplayName(outputLocation),
           profileVersion: receipt.profileVersion.slice(0, 100),
           omissions: receipt.omissions.slice(0, 100).map((omission) => omission.slice(0, 200)),
           detailsTruncated:
@@ -105,41 +138,14 @@ export class JsonExports {
     };
   }
 
-  async saveJson(raw: unknown): Promise<{ state: "saved" | "cancelled" | "receipt_pending" }> {
-    const request = requestSchema.parse(raw);
-    if (this.busy) throw new Error("An export is already running");
-    const controller = new AbortController();
-    this.#controller = controller;
-    const signal = controller.signal;
-    let temporary: string | undefined;
-    let journalPath: string | undefined;
-    let published = false;
-    try {
-      const { library } = this.#options;
-      const root = library.activeRoot;
-      const entry = library.listProjects().find((item) => item.projectId === request.projectId);
-      const selected = await library.getSnapshot(request.projectId);
-      if (
-        !selected ||
-        entry?.status !== "active" ||
-        entry.compatibility !== "writable" ||
-        selected.projectRevisionId !== request.expectedProjectRevisionId
-      )
+  saveJson(raw: unknown): Promise<{ state: PublicationState }> {
+    const request = jsonRequestSchema.parse(raw);
+    return this.#publish(request, "open_chords_json", async () => {
+      const selected = await this.#options.library.getSnapshot(request.projectId);
+      if (selected?.projectRevisionId !== request.expectedProjectRevisionId)
         throw new Error("Export requires the current writable Project revision");
       const snapshot = captureJsonExport(selected.project, { presentation: request.presentation });
-      const content = serializeJsonExport(snapshot);
-      if (Buffer.byteLength(content) > MAX_OUTPUT_BYTES)
-        throw new Error("Export exceeds its size budget");
-      signal.throwIfAborted();
-      const target = await this.#options.pickTarget();
-      signal.throwIfAborted();
-      if (target === null) return { state: "cancelled" };
-      const parent = await this.#validateTarget(target);
-      const parentIdentity = await lstat(parent);
-      const id = `export_${randomUUID().replaceAll("-", "")}`;
-      temporary = join(parent, `.${id}.tmp`);
-      const receipt = ExportReceiptSchema.parse({
-        id,
+      return {
         activeViewHash: hash(
           canonicalSerialize({
             project: snapshot.project,
@@ -152,12 +158,108 @@ export class JsonExports {
             ...(snapshot.lyrics ? { lyrics: snapshot.lyrics } : {}),
           }),
         ),
-        createdAt: new Date().toISOString(),
-        format: "open_chords_json",
+        content: Buffer.from(serializeJsonExport(snapshot), "utf8"),
         omissions: snapshot.omissions,
+        profileVersion: `open_chords_json/1.0/${request.presentation}`,
+      };
+    });
+  }
+
+  async saveArchive(raw: unknown): Promise<{ state: PublicationState | "media_unavailable" }> {
+    const request = archiveRequestSchema.parse(raw);
+    try {
+      return await this.#publish(request, "project_archive", async () => {
+        const project = await this.#options.library.readProject(request.projectId);
+        if (project.projectRevisionId !== request.expectedProjectRevisionId)
+          throw new Error("Export requires the current writable Project revision");
+        const { document, omissions } = archivedProjectFor(project);
+        const media = request.includeMedia
+          ? await this.#readProjectRange(request.projectId)
+          : undefined;
+        const { archive, projectHash } = writePortableProjectArchive({
+          document,
+          ...(media === undefined ? {} : { media }),
+        });
+        return {
+          activeViewHash: projectHash,
+          content: archive,
+          omissions,
+          profileVersion: `project_archive/1.0/${request.includeMedia ? "project_range_media" : "no_media"}`,
+        };
+      });
+    } catch (error) {
+      if (error instanceof ExportMediaUnavailableError) return { state: "media_unavailable" };
+      throw error;
+    }
+  }
+
+  async #readProjectRange(projectId: string) {
+    const media = this.#options.media;
+    if (media === undefined) throw new ExportMediaUnavailableError(undefined);
+    try {
+      return await media.readVerifiedProjectRange(projectId, async (range) => ({
+        bytes: Buffer.from(
+          await range.readCanonicalPcm({
+            endProjectSample: range.endSourceSample - range.startSourceSample,
+            startProjectSample: 0,
+          }),
+        ),
+        channels: 1 as const,
+        encoding: "pcm_s16le" as const,
+        endSourceSample: range.endSourceSample,
+        sampleRate: range.sampleRate,
+        sourceId: range.sourceId,
+        sourceSnapshotId: range.sourceSnapshotId,
+        startSourceSample: range.startSourceSample,
+      }));
+    } catch (error) {
+      throw new ExportMediaUnavailableError(error);
+    }
+  }
+
+  async #publish(
+    request: { expectedProjectRevisionId: string; projectId: string },
+    format: ExportFormat,
+    prepare: () => Promise<Prepared>,
+  ): Promise<{ state: PublicationState }> {
+    if (this.busy) throw new Error("An export is already running");
+    const controller = new AbortController();
+    this.#controller = controller;
+    const signal = controller.signal;
+    let temporary: string | undefined;
+    let journalPath: string | undefined;
+    let published = false;
+    try {
+      const { library } = this.#options;
+      const root = library.activeRoot;
+      const entry = library.listProjects().find((item) => item.projectId === request.projectId);
+      if (
+        entry?.status !== "active" ||
+        entry.compatibility !== "writable" ||
+        entry.projectRevisionId !== request.expectedProjectRevisionId
+      )
+        throw new Error("Export requires the current writable Project revision");
+      const prepared = await prepare();
+      const { content } = prepared;
+      if (content.length > TARGETS[format].maxBytes)
+        throw new Error("Export exceeds its size budget");
+      signal.throwIfAborted();
+      const target = await this.#options.pickTarget(format);
+      signal.throwIfAborted();
+      if (target === null) return { state: "cancelled" };
+      const parent = await this.#validateTarget(target, format);
+      const parentIdentity = await lstat(parent);
+      const id = `export_${randomUUID().replaceAll("-", "")}`;
+      temporary = join(parent, `.${id}.tmp`);
+      const receipt = ExportReceiptSchema.parse({
+        id,
+        activeViewHash: prepared.activeViewHash,
+        createdAt: new Date().toISOString(),
+        format,
+        omissions: prepared.omissions,
         outputHash: hash(content),
         outputLocation: resolve(target),
-        profileVersion: `open_chords_json/1.0/${request.presentation}`,
+        profileVersion: prepared.profileVersion,
       });
       await mkdir(this.#journalRoot, { recursive: true, mode: 0o700 });
       const journalRootStat = await lstat(this.#journalRoot);
@@ -180,7 +282,7 @@ export class JsonExports {
       await writeDurable(temporary, content);
       await syncDirectory(parent);
       signal.throwIfAborted();
-      await this.#validateTarget(target);
+      await this.#validateTarget(target, format);
       const currentParent = await lstat(parent);
       if (
         currentParent.dev !== parentIdentity.dev ||
@@ -254,18 +356,20 @@ export class JsonExports {
         const journal = journalSchema.parse(
           JSON.parse((await readBoundedFile(path, 64 * 1024)).toString("utf8")),
         );
+        const format = journal.receipt.format;
         if (
           name !== `${journal.receipt.id}.json` ||
           journal.libraryRoot !== this.#options.library.activeRoot ||
-          journal.receipt.format !== "open_chords_json"
+          !isExportFormat(format)
         )
           throw new Error("Export recovery identity mismatch");
-        const parent = await this.#validateTarget(journal.receipt.outputLocation);
+        const { maxBytes } = TARGETS[format];
+        const parent = await this.#validateTarget(journal.receipt.outputLocation, format);
         const temporary = join(parent, `.${journal.receipt.id}.tmp`);
         let targetMatches = false;
         try {
           targetMatches =
-            hash(await readBoundedFile(journal.receipt.outputLocation, MAX_OUTPUT_BYTES)) ===
+            hash(await readBoundedFile(journal.receipt.outputLocation, maxBytes)) ===
             journal.receipt.outputHash;
         } catch (error) {
           if (!missing(error)) throw error;
@@ -286,9 +390,7 @@ export class JsonExports {
           }
         }
         try {
-          if (
-            hash(await readBoundedFile(temporary, MAX_OUTPUT_BYTES)) !== journal.receipt.outputHash
-          )
+          if (hash(await readBoundedFile(temporary, maxBytes)) !== journal.receipt.outputHash)
             throw new Error("Unverified export staging file");
           await rm(temporary);
           await syncDirectory(parent);
@@ -303,13 +405,13 @@ export class JsonExports {
     }
   }
 
-  async #validateTarget(target: string) {
+  async #validateTarget(target: string, format: ExportFormat) {
     if (
       !isAbsolute(target) ||
-      !target.toLowerCase().endsWith(".json") ||
+      !target.toLowerCase().endsWith(TARGETS[format].extension) ||
       basename(target).length > 240
     )
-      throw new Error("Export requires an absolute JSON target");
+      throw new Error("Export requires an absolute target with the profile extension");
     const parent = dirname(resolve(target));
     // Reject symlinks/junctions in every component; never write through a replaced Locator.
     let current = parse(parent).root;
@@ -339,10 +441,14 @@ export class JsonExports {
   }
 }
 
-async function writeDurable(path: string, content: string) {
+function isExportFormat(format: string): format is ExportFormat {
+  return Object.hasOwn(TARGETS, format);
+}
+
+async function writeDurable(path: string, content: Buffer | string) {
   const file = await open(path, "wx", 0o600);
   try {
-    await file.writeFile(content, "utf8");
+    await file.writeFile(content);
     await file.sync();
   } finally {
     await file.close();

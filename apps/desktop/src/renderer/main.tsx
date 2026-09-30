@@ -1,12 +1,14 @@
 import { StrictMode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
+import { useArchiveImport } from "./archive-import.ts";
+
+import "./styles.css";
 import {
   createCommittedProjectStore,
   openFirstCommittedProject,
 } from "./committed-project-store.ts";
-
-import "./styles.css";
+import { ImportArchive } from "./import-archive.tsx";
 import { ModelPacks } from "./model-packs.tsx";
 import { EmptyWorkspace, ProjectWorkspace } from "./workspace.tsx";
 import { YouTubeSource } from "./youtube-source.tsx";
@@ -28,6 +30,16 @@ function App() {
   const [busy, setBusy] = useState(false);
   const choosingLocal = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const archiveImport = useArchiveImport(api, (projectId) =>
+    projectStore === null ? Promise.resolve() : projectStore.open(projectId),
+  );
+  const importTool = (
+    <ImportArchive
+      message={archiveImport.message}
+      onImport={() => void archiveImport.run()}
+      pending={archiveImport.pending}
+    />
+  );
 
   useEffect(() => {
     if (api === undefined || projectStore === null) return undefined;
@@ -90,6 +102,7 @@ function App() {
         <ProjectWorkspace
           api={api}
           key={committed.snapshot.project.id}
+          libraryTools={importTool}
           {...(!busy ? { onChooseLocal: () => void chooseLocalRecording() } : {})}
           snapshot={committed.snapshot}
         />
@@ -98,6 +111,7 @@ function App() {
   return (
     <>
       <div className="empty-model-tools">
+        {importTool}
         <ModelPacks api={api} />
         <YouTubeSource
           api={api}

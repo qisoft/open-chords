@@ -15,6 +15,7 @@ import {
 import { FolderOpen, Pause, Play, Repeat2, RotateCcw } from "lucide-react";
 import {
   type KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -45,10 +46,12 @@ import { YouTubeSource } from "./youtube-source.tsx";
 
 export function ProjectWorkspace({
   api,
+  libraryTools,
   onChooseLocal,
   snapshot,
 }: {
   api: OpenChordsDesktopApi;
+  libraryTools?: ReactNode;
   snapshot: ProjectSnapshotResponse;
   onChooseLocal?: () => void;
 }) {
@@ -296,6 +299,7 @@ export function ProjectWorkspace({
           </span>
         </div>
         <ExportProject api={api} snapshot={snapshot} />
+        {libraryTools}
         <ModelPacks api={api} />
         <YouTubeSource api={api} {...(onChooseLocal ? { onChooseLocal } : {})} />
       </header>

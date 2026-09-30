@@ -15,8 +15,9 @@ import {
   type LocalMediaAuthority,
   type ProjectAuthority,
 } from "./desktop-command-gateway.ts";
-import type { JsonExports } from "./json-exports.ts";
 import type { LyricsDiscovery } from "./lyrics-discovery.ts";
+import type { ProjectArchiveImports } from "./project-archive-imports.ts";
+import type { ProjectExports } from "./project-exports.ts";
 import type { YouTubeService } from "./youtube-service.ts";
 
 type CommandType = DesktopCommand["type"];
@@ -24,6 +25,7 @@ type CommandType = DesktopCommand["type"];
 const commandChannels = [
   [DESKTOP_IPC_CHANNELS.youtubePerform, "youtube.perform"],
   [DESKTOP_IPC_CHANNELS.exportsPerform, "exports.perform"],
+  [DESKTOP_IPC_CHANNELS.archivesImport, "archives.import"],
   [DESKTOP_IPC_CHANNELS.alignmentPerform, "alignment.perform"],
   [DESKTOP_IPC_CHANNELS.modelsPerform, "models.perform"],
   [DESKTOP_IPC_CHANNELS.lyricsPerform, "lyrics.perform"],
@@ -41,7 +43,8 @@ const commandChannels = [
 ] as const satisfies ReadonlyArray<readonly [string, CommandType]>;
 
 export type DesktopIpcOptions = {
-  exports?: JsonExports;
+  archives?: ProjectArchiveImports;
+  exports?: ProjectExports;
   youtube?: YouTubeService;
   alignment?: AlignmentService;
   models?: ModelGatewayService;
@@ -62,6 +65,7 @@ export function installDesktopIpc(authority: ProjectAuthority, options: DesktopI
     options.alignment,
     options.youtube,
     options.exports,
+    options.archives,
   );
 
   for (const [channel, expectedType] of commandChannels) {

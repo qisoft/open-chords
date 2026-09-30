@@ -1080,6 +1080,21 @@ button:disabled {
   flex-direction: column;
   gap: 0.5rem;
 }
+.export-project .export-option {
+  flex-direction: row;
+  align-items: center;
+}
+.import-archive {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 20rem;
+  overflow-wrap: anywhere;
+}
+.import-archive p,
+.import-archive output {
+  margin: 0;
+}
 .export-project select {
   min-width: 0;
   max-width: 100%;

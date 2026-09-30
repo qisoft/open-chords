@@ -22,7 +22,6 @@ import {
 
 import { AlignmentServiceError, type AlignmentService } from "./alignment-service.ts";
 import { APP_ENTRY_URL } from "./desktop-origin.ts";
-import type { JsonExports } from "./json-exports.ts";
 import type {
   LocalMediaPlayback,
   LocalMediaRelinkResult,
@@ -31,6 +30,8 @@ import type {
 import type { LyricsDiscovery } from "./lyrics-discovery.ts";
 import type { ModelStore } from "./model-store.ts";
 import type { NetworkMode } from "./network-mode.ts";
+import type { ProjectArchiveImports } from "./project-archive-imports.ts";
+import type { ProjectExports } from "./project-exports.ts";
 import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
 import type { YouTubeService } from "./youtube-service.ts";
 
@@ -131,7 +132,8 @@ export type ModelGatewayService = {
 };
 
 export class DesktopCommandGateway {
-  readonly #exports: JsonExports | undefined;
+  readonly #archives: ProjectArchiveImports | undefined;
+  readonly #exports: ProjectExports | undefined;
   readonly #youtube: YouTubeService | undefined;
   readonly #authority: ProjectAuthority;
   readonly #invalidCounts = new Map<string, number>();
@@ -160,8 +162,10 @@ export class DesktopCommandGateway {
     models?: ModelGatewayService,
     alignment?: AlignmentService,
     youtube?: YouTubeService,
-    exports?: JsonExports,
+    exports?: ProjectExports,
+    archives?: ProjectArchiveImports,
   ) {
+    this.#archives = archives;
     this.#authority = authority;
     this.#youtube = youtube;
     this.#exports = exports;
@@ -241,6 +245,30 @@ export class DesktopCommandGateway {
           response: errorResponse(
             "capability_unavailable",
             "Export unavailable. Check the destination and saved Project, then retry.",
+            true,
+            command,
+          ),
+        };
+      }
+    }
+    if (command.type === "archives.import") {
+      try {
+        if (!this.#archives) throw new Error("Unavailable");
+        const result = await this.#archives.importArchive();
+        return {
+          action: "none",
+          response: DesktopResponseSchema.parse({
+            ...responseEnvelope(command),
+            type: "archives.import_result",
+            result,
+          }),
+        };
+      } catch {
+        return {
+          action: "none",
+          response: errorResponse(
+            "capability_unavailable",
+            "Archive import unavailable. Check the archive file, then retry.",
             true,
             command,
           ),
