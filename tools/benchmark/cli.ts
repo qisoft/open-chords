@@ -51,14 +51,15 @@ async function main() {
     count(2);
     await validatePolicyFiles(args[0]!, args[1]!);
   } else if (command === "sealed-gate") {
-    count(6);
+    count(7);
     await sealedGateFiles(
       args[0]!,
       args[1]!,
       args[2]!,
-      await readFile(args[3]!, "utf8"),
-      args[4]!,
+      args[3]!,
+      await readFile(args[4]!, "utf8"),
       args[5]!,
+      args[6]!,
     );
   } else if (command === "open-sealed") {
     count(6);

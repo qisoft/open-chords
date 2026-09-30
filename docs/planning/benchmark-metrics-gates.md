@@ -33,12 +33,12 @@ Metric semantics follow `mir_eval` so that results stay comparable with MIREX. T
 ## Rules the engine enforces
 
 1. A failed or invalid output is scored as an empty prediction. An abstained or missing region counts as wrong in every unconditional quality metric. Failure and total abstention produce the same scores, so relabelling one as the other gains nothing.
-2. A missing track output is a hard `run_identity_and_inventory` failure. The track still counts as zero in the sealed report.
+2. A missing track output or a missing declared platform profile is a hard `run_identity_and_inventory` failure. A missing track still counts as zero in the sealed report.
 3. Every quality or calibration gate has a structurally required coverage gate for the same capability. The pair fails if either side fails.
-4. Gates use the track mean. A minimum bound uses the one-sided lower percentile bootstrap bound, a maximum bound uses the upper bound, and non-inferiority uses the lower bound of the paired candidate-minus-baseline difference against the negative margin. Fewer scored tracks than `minTracks` is `insufficient_evidence`.
+4. Gates use the track mean. Non-inferiority margins apply only to unconditional metrics. A minimum bound uses the one-sided lower percentile bootstrap bound, a maximum bound uses the upper bound, and non-inferiority uses the lower bound of the paired candidate-minus-baseline difference against the negative margin. Fewer scored tracks than `minTracks` is `insufficient_evidence`.
 5. Each profile needs two cold and one warm execution per track with identical outcomes that match the scored output. A mismatch fails. Missing repeats are insufficient evidence.
 6. Any failed gate, failed determinism check, exceeded resource cap or failed hard gate makes the verdict `fail`. Insufficient evidence narrows the named claim. A narrowed required claim or required profile blocks release with `insufficient_evidence`.
-7. The sealed gate evaluates only the policy bytes bound by the signed freeze in the opening receipt, only the frozen corpus, and writes exactly one `verdict.json` per opened release directory.
+7. The sealed gate verifies the freeze in the opening receipt with the same function as `open-sealed`, so the trusted key must match the bundle authority hash. It evaluates only those frozen policy bytes and the frozen corpus, and writes exactly one `verdict.json` per opened release directory.
 
 ## Acceptance gates and their tests
 
@@ -46,10 +46,10 @@ Metric semantics follow `mir_eval` so that results stay comparable with MIREX. T
 |---|---|
 | Abstention stays in denominators and cannot improve quality by deletion | `tests/benchmark-metrics.test.ts` "keeps abstained and failed duration in chord denominators"; `tests/benchmark-gates.test.ts` "keeps abstained, failed and deleted tracks in the sealed denominators" |
 | Quality and coverage gates are paired and non-compensating | `tests/benchmark-gates.test.ts` "binds every frozen number to paired coverage", "pairs quality with coverage so neither can compensate", "fails a paired non-inferiority margin" |
-| Sealed failure cannot be repaired by changing policy, deleting data or lowering thresholds | `tests/benchmark-release-gate.test.ts` real CLI and file run: lowered or narrowed policy, repeated verdict, edited sealed corpus and dropped track output |
+| Sealed failure cannot be repaired by changing policy, deleting data or lowering thresholds | `tests/benchmark-release-gate.test.ts` real CLI and file run: freeze forged with another key, lowered or narrowed policy, repeated verdict, edited sealed corpus and dropped track output; `tests/benchmark-gates.test.ts` "fails a run that omits a declared platform profile" |
 | Insufficient evidence narrows a named Support Claim or blocks release | `tests/benchmark-gates.test.ts` "narrows an optional Support Claim with insufficient evidence", "requires deterministic cold and warm repeats" |
 
-Each acceptance test was checked against a deliberate defect: counting abstention as ineligible, dropping the coverage side of a gate, skipping tracks without output and treating insufficient evidence as supported. Each defect turned the matching tests red.
+Each acceptance test was checked against a deliberate defect: counting abstention as ineligible, dropping the coverage side of a gate, skipping tracks without output, treating insufficient evidence as supported, skipping the bundle authority check, accepting a run without a declared profile and allowing a margin on a conditional metric. Each defect turned the matching tests red.
 
 ## Decisions to confirm with real data
 

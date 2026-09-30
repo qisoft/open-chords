@@ -138,6 +138,7 @@ it("freezes calibration-derived policy before opening and records one unrepairab
     const gate = (policyFile: string, candidateOutputs: Map<string, Output>) =>
       cli([
         "sealed-gate",
+        path("bundle"),
         release,
         policyFile,
         reportPath,
@@ -145,15 +146,41 @@ it("freezes calibration-derived policy before opening and records one unrepairab
         candidatePath(candidateOutputs),
         baseline,
       ]);
-    const repair = (policyFile: string, candidateOutputs: Map<string, Output>) =>
+    const repair = (
+      policyFile: string,
+      candidateOutputs: Map<string, Output>,
+      authorityKey = readFileSync(trustedKey, "utf8"),
+    ) =>
       sealedGateFiles(
+        path("bundle"),
         release,
         policyFile,
         reportPath,
-        readFileSync(trustedKey, "utf8"),
+        authorityKey,
         candidatePath(candidateOutputs),
         baseline,
       );
+    const lowered = structuredClone(policy);
+    lowered.qualityGates[0]!.quality.bound = threshold(0);
+    lowered.qualityGates[0]!.coverage.minimum = threshold(0);
+    const loweredPath = save("policy-lowered.json", lowered);
+    const receiptPath = join(release, "opening-receipt.json");
+    const receipt = readFileSync(receiptPath, "utf8");
+    const forger = generateKeyPairSync("ed25519");
+    const forgedReceipt = JSON.parse(receipt);
+    forgedReceipt.freeze = signed(
+      { ...forgedReceipt.freeze.declaration, policyHash: sha(readFileSync(loweredPath)) },
+      forger.privateKey,
+    );
+    writeFileSync(receiptPath, JSON.stringify(forgedReceipt));
+    await expect(
+      repair(
+        loweredPath,
+        outputs("sealed", halfAbstained),
+        forger.publicKey.export({ type: "spki", format: "pem" }),
+      ),
+    ).rejects.toThrow(/Unauthenticated policy freeze/);
+    writeFileSync(receiptPath, receipt);
     expect(gate(policyPath, outputs("sealed", halfAbstained))).toMatchObject({
       status: 0,
       stderr: "",
@@ -163,6 +190,7 @@ it("freezes calibration-derived policy before opening and records one unrepairab
     const recorded = JSON.parse(first.toString("utf8"));
     expect(recorded).toMatchObject({
       bundleHash: contentHash(index),
+      authorityHash: index.authorityHash,
       policyFileHash: sha(readFileSync(policyPath)),
       verdict: { verdict: "fail", releaseAuthority: false, syntheticEvidence: true },
     });
@@ -172,12 +200,9 @@ it("freezes calibration-derived policy before opening and records one unrepairab
       coverage: { n: 3, status: "fail" },
     });
 
-    const lowered = structuredClone(policy);
-    lowered.qualityGates[0]!.quality.bound = threshold(0);
-    lowered.qualityGates[0]!.coverage.minimum = threshold(0);
-    await expect(
-      repair(save("policy-lowered.json", lowered), outputs("sealed", perfect)),
-    ).rejects.toThrow(/differs from the frozen policy/);
+    await expect(repair(loweredPath, outputs("sealed", perfect))).rejects.toThrow(
+      /differs from the frozen policy/,
+    );
     const narrowed = structuredClone(policy);
     narrowed.supportClaims[0]!.required = false;
     await expect(

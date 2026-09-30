@@ -2,13 +2,15 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
-import { contentHash, parseGoldReference } from "./annotations.ts";
+import { contentHash } from "./annotations.ts";
 import { CorpusManifestSchema, parseCorpusManifest } from "./corpus.ts";
 import { characterize, evaluateGates } from "./gates.ts";
 import { parsePolicy, ProcedureSchema } from "./policy.ts";
+import { HashSchema } from "./rights.ts";
 import {
   bytesHash,
   FreezeSchema,
+  publicKeyHash,
   readJson,
   SealedCorpusSchema,
   verifyBundle,
@@ -53,6 +55,7 @@ export async function validatePolicyFiles(policyPath: string, reportPath: string
 }
 
 export async function sealedGateFiles(
+  bundle: string,
   release: string,
   policyPath: string,
   reportPath: string,
@@ -61,9 +64,11 @@ export async function sealedGateFiles(
   baselinePath: string,
 ) {
   const receipt = ReceiptSchema.parse(await readJson(join(release, "opening-receipt.json")));
-  const freeze = verifyFreeze(receipt.freeze, trustedAuthorityPublicKey).declaration;
-  if (freeze.policyHash !== (await bytesHash(policyPath)))
+  const index = await verifyBundle(bundle);
+  if (receipt.freeze.declaration.policyHash !== (await bytesHash(policyPath)))
     throw new Error("Policy differs from the frozen policy");
+  const freeze = (await verifyFreeze(receipt.freeze, trustedAuthorityPublicKey, index, policyPath))
+    .declaration;
   const policy = await validatePolicyFiles(policyPath, reportPath);
   const sealed = SealedCorpusSchema.parse(await readJson(join(release, "sealed.json")));
   const manifest = parseCorpusManifest(sealed.input.manifest);
@@ -80,9 +85,9 @@ export async function sealedGateFiles(
     purpose: manifest.purpose,
     cohort: "sealed",
     tracks: manifest.tracks.filter((track) => track.cohort === "sealed"),
-    gold: sealed.input.gold
-      .map(parseGoldReference)
-      .filter((reference) => sealedHashes.has(reference.hash)),
+    gold: sealed.input.gold.filter((reference) =>
+      sealedHashes.has(z.looseObject({ hash: HashSchema }).parse(reference).hash),
+    ),
     candidate: await readJson(candidatePath),
     baseline: await readJson(baselinePath),
   });
@@ -90,6 +95,7 @@ export async function sealedGateFiles(
     version: "1.0",
     bundleHash: freeze.bundleHash,
     policyFileHash: freeze.policyHash,
+    authorityHash: publicKeyHash(trustedAuthorityPublicKey),
     receiptHash: contentHash(receipt),
     verdict,
   };

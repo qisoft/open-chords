@@ -7,7 +7,6 @@ import {
   METRIC_IDS,
   readOutput,
   scoreTrack,
-  type CalibrationCell,
   type MetricId,
   type Outcome,
   type TrackScores,
@@ -40,14 +39,15 @@ type ScoredTrack = {
   slices: string[];
   outcome: Outcome | "missing";
   scores: TrackScores;
-  cells: Map<string, CalibrationCell[]>;
-  samples: number;
+  cells: Map<string, ReturnType<typeof calibrationCells>>;
 };
 type Role = "candidate" | "baseline";
 
 function bindGold(tracks: CorpusTrack[], rawGold: unknown[]) {
   const gold = rawGold.map(parseGoldReference);
   const expected = tracks.flatMap((track) => track.goldHashes);
+  if (new Set(gold.map((g) => g.hash)).size !== gold.length)
+    throw new Error("Duplicate Gold Reference");
   if (
     new Set(expected).size !== expected.length ||
     expected.length !== gold.length ||
@@ -88,7 +88,11 @@ function scoreRun(input: EvaluationInput, role: Role, gold: Map<string, Annotati
   )
     problems.push(`${role}:identity`);
   const ids = run.profiles.map((p) => p.profileId);
-  if (new Set(ids).size !== ids.length || ids.some((id) => !declared.includes(id)))
+  if (
+    new Set(ids).size !== ids.length ||
+    ids.length !== declared.length ||
+    ids.some((id) => !declared.includes(id))
+  )
     problems.push(`${role}:profile_inventory`);
   const profiles = new Map<string, { run: ProfileRun; tracks: ScoredTrack[] }>();
   for (const profile of run.profiles) {
@@ -121,7 +125,6 @@ function scoreRun(input: EvaluationInput, role: Role, gold: Map<string, Annotati
             calibrationCells(reference, read.view),
           ]),
         ),
-        samples: track.durationSamples,
       };
     });
     profiles.set(profile.profileId, { run: profile, tracks });
@@ -211,13 +214,16 @@ function characterizeScored(input: EvaluationInput) {
           }),
         ),
         calibration: input.procedure.confidence.map((spec) => {
-          const tracks = scored.tracks.filter((t) => t.cells.has(spec.capability));
+          const cells = scored.tracks.flatMap((t) => {
+            const found = t.cells.get(spec.capability);
+            return found ? [found] : [];
+          });
           return {
             capability: spec.capability,
             ...reliability(
-              tracks.flatMap((t) => t.cells.get(spec.capability)!),
+              cells.flatMap((c) => c.cells),
               spec.bins,
-              tracks.reduce((sum, t) => sum + t.samples, 0),
+              cells.reduce((sum, c) => sum + c.eligibleSamples, 0),
             ),
           };
         }),
@@ -301,8 +307,6 @@ function evaluateQualityGate(
     const differences = pairedDifferences(tracks, baseline, gate.quality.metric, gate.slice) ?? [];
     const oriented = differences.map((d) => (gate.quality.better === "higher" ? d : -d));
     nonInferiority = boundCheck(oriented, u, "higher", -gate.nonInferiorityMargin.value);
-    if (baseline === undefined)
-      nonInferiority = { ...nonInferiority, status: "insufficient_evidence" as const };
   }
   return {
     status: combine([

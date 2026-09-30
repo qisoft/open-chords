@@ -178,7 +178,7 @@ export async function bytesHash(path: string) {
   for await (const bytes of createReadStream(path)) hash.update(bytes);
   return `sha256:${hash.digest("hex")}`;
 }
-function publicKeyHash(pem: string) {
+export function publicKeyHash(pem: string) {
   return `sha256:${createHash("sha256")
     .update(createPublicKey(pem).export({ type: "spki", format: "der" }))
     .digest("hex")}`;
@@ -340,19 +340,33 @@ export async function verifyBundle(directory: string) {
   }
   return index;
 }
-export function verifyFreeze(rawFreeze: unknown, trustedAuthorityPublicKey: string) {
+export async function verifyFreeze(
+  rawFreeze: unknown,
+  trustedAuthorityPublicKey: string,
+  index: z.infer<typeof indexSchema>,
+  policyPath: string,
+) {
   const freeze = FreezeSchema.parse(rawFreeze),
+    declaration = freeze.declaration,
     trustedKey = createPublicKey(trustedAuthorityPublicKey);
   if (
     trustedKey.asymmetricKeyType !== "ed25519" ||
+    publicKeyHash(trustedAuthorityPublicKey) !== index.authorityHash ||
     !verify(
       null,
-      Buffer.from(canonicalSerialize(freeze.declaration)),
+      Buffer.from(canonicalSerialize(declaration)),
       trustedKey,
       Buffer.from(freeze.signature, "base64"),
     )
   )
     throw new Error("Unauthenticated policy freeze");
+  if (
+    declaration.bundleHash !== contentHash(index) ||
+    declaration.corpusHash !== index.corpusHash ||
+    declaration.policyHash !== (await bytesHash(policyPath)) ||
+    Date.parse(declaration.frozenAt) > Date.now()
+  )
+    throw new Error("Policy freeze binding mismatch");
   return freeze;
 }
 async function decryptFile(
@@ -382,18 +396,9 @@ export async function openSealedCorpus(
   custodianPrivateKey: string,
 ) {
   const index = await verifyBundle(directory),
-    freeze = verifyFreeze(rawFreeze, trustedAuthorityPublicKey),
+    freeze = await verifyFreeze(rawFreeze, trustedAuthorityPublicKey, index, policyPath),
     declaration = freeze.declaration;
   const trustedKey = createPublicKey(trustedAuthorityPublicKey);
-  if (publicKeyHash(trustedAuthorityPublicKey) !== index.authorityHash)
-    throw new Error("Unauthenticated policy freeze");
-  if (
-    declaration.bundleHash !== contentHash(index) ||
-    declaration.corpusHash !== index.corpusHash ||
-    declaration.policyHash !== (await bytesHash(policyPath)) ||
-    Date.parse(declaration.frozenAt) > Date.now()
-  )
-    throw new Error("Policy freeze binding mismatch");
   const rightsReview = CurrentRightsReviewSchema.parse(rawRightsReview),
     review = rightsReview.declaration;
   const now = Date.now();

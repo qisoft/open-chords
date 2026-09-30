@@ -158,6 +158,7 @@ type Definition = {
   capability: AnnotationContent["capability"];
   kind: "quality" | "coverage" | "calibration" | "diagnostic";
   better: "higher" | "lower";
+  conditional: boolean;
   unit: string;
   score: (context: Context) => MetricValue;
 };
@@ -167,7 +168,11 @@ const ratio = (numerator: number, denominator: number): MetricValue =>
   denominator === 0
     ? notApplicable
     : { state: "scored", value: numerator / denominator, pooled: [numerator, denominator] };
-const conditional = (values: number[], applicable: boolean, reduce: (v: number[]) => number) =>
+const conditionalValue = (
+  values: number[],
+  applicable: boolean,
+  reduce: (v: number[]) => number,
+) =>
   !applicable
     ? notApplicable
     : values.length === 0
@@ -416,15 +421,18 @@ function regionShare(
   return agreement(regions.gold, regions.predicted, (_g, p) => (include(p) ? "correct" : "wrong"));
 }
 export type CalibrationCell = { confidence: number; samples: number; correct: boolean };
-export function calibrationCells(gold: AnnotationContent, view: PredictionView): CalibrationCell[] {
+export function calibrationCells(gold: AnnotationContent, view: PredictionView) {
   const regions = regionsOf({ gold, view, sampleRate: 1 });
-  if (regions === null) return [];
   const cells: CalibrationCell[] = [];
-  sweep(regions.gold, regions.predicted, (g, p, samples) => {
-    if (asserted(p) && p.confidence !== null && !ignoredGold(g.value))
-      cells.push({ confidence: p.confidence, samples, correct: same(p.value, g.value) });
-  });
-  return cells;
+  let eligibleSamples = 0;
+  if (regions !== null)
+    sweep(regions.gold, regions.predicted, (g, p, samples) => {
+      if (ignoredGold(g.value)) return;
+      eligibleSamples += samples;
+      if (asserted(p) && p.confidence !== null)
+        cells.push({ confidence: p.confidence, samples, correct: same(p.value, g.value) });
+    });
+  return { cells, eligibleSamples };
 }
 function lyricErrors(context: Context, level: "tokens" | "lines", edge: "start" | "end" | "both") {
   const gold = context.gold;
@@ -448,6 +456,7 @@ function lyricCoverage(level: "tokens" | "lines"): Definition {
   return {
     capability: "lyrics_alignment",
     kind: "coverage",
+    conditional: false,
     better: "higher",
     unit: "ratio",
     score: (context) => {
@@ -464,13 +473,14 @@ function lyricError(
   return {
     capability: "lyrics_alignment",
     kind: "quality",
+    conditional: true,
     better: "lower",
     unit: "seconds",
     score: (context) => {
       const result = lyricErrors(context, level, edge);
       return result === null
         ? notApplicable
-        : conditional(result.errors, result.eligible > 0, reduce);
+        : conditionalValue(result.errors, result.eligible > 0, reduce);
     },
   };
 }
@@ -478,6 +488,7 @@ const maximum = (values: number[]) => Math.max(...values);
 const regionExactMetric = (capability: ConfidenceCapability): Definition => ({
   capability,
   kind: "quality",
+  conditional: false,
   better: "higher",
   unit: "duration_ratio",
   score: regionExact,
@@ -485,6 +496,7 @@ const regionExactMetric = (capability: ConfidenceCapability): Definition => ({
 const regionCoverage = (capability: ConfidenceCapability): Definition => ({
   capability,
   kind: "coverage",
+  conditional: false,
   better: "higher",
   unit: "duration_ratio",
   score: (context) => regionShare(context, asserted),
@@ -492,6 +504,7 @@ const regionCoverage = (capability: ConfidenceCapability): Definition => ({
 const lowConfidenceShare = (capability: ConfidenceCapability): Definition => ({
   capability,
   kind: "diagnostic",
+  conditional: false,
   better: "lower",
   unit: "duration_ratio",
   score: (context) => regionShare(context, (p) => p?.state === "low_confidence"),
@@ -499,6 +512,7 @@ const lowConfidenceShare = (capability: ConfidenceCapability): Definition => ({
 const selectiveError = (capability: ConfidenceCapability): Definition => ({
   capability,
   kind: "quality",
+  conditional: true,
   better: "lower",
   unit: "duration_ratio",
   score: (context) => {
@@ -519,11 +533,12 @@ const selectiveError = (capability: ConfidenceCapability): Definition => ({
 const brier = (capability: ConfidenceCapability): Definition => ({
   capability,
   kind: "calibration",
+  conditional: true,
   better: "lower",
   unit: "squared_probability",
   score: (context) => {
     if (regionsOf(context) === null) return notApplicable;
-    const cells = calibrationCells(context.gold, context.view);
+    const { cells } = calibrationCells(context.gold, context.view);
     const total = cells.reduce((sum, c) => sum + c.samples, 0);
     const loss = cells.reduce(
       (sum, c) => sum + c.samples * (c.confidence - (c.correct ? 1 : 0)) ** 2,
@@ -537,6 +552,7 @@ const brier = (capability: ConfidenceCapability): Definition => ({
 const diagnostic = (score: Definition["score"]): Definition => ({
   capability: "chords",
   kind: "diagnostic",
+  conditional: false,
   better: "higher",
   unit: "ratio",
   score,
@@ -546,7 +562,15 @@ const quality = (
   unit: string,
   score: Definition["score"],
   better: Definition["better"] = "higher",
-): Definition => ({ capability, kind: "quality", better, unit, score });
+  conditional = false,
+): Definition => ({
+  capability,
+  kind: "quality",
+  better,
+  conditional,
+  unit,
+  score,
+});
 const coverageMetric = (
   capability: Definition["capability"],
   unit: string,
@@ -554,6 +578,7 @@ const coverageMetric = (
 ): Definition => ({
   capability,
   kind: "coverage",
+  conditional: false,
   better: "higher",
   unit,
   score,
@@ -627,9 +652,10 @@ export const METRICS = {
       const result = tempoErrors(c);
       return result === null
         ? notApplicable
-        : conditional(result.errors, result.reference > 0, median);
+        : conditionalValue(result.errors, result.reference > 0, median);
     },
     "lower",
+    true,
   ),
   "rhythm.tempo_coverage": coverageMetric("rhythm", "ratio", (c) => {
     const result = tempoErrors(c);

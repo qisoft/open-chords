@@ -120,6 +120,14 @@ it("binds every frozen number to paired coverage and calibration-cohort evidence
   });
   expect(() => parsePolicy(unobserved, report)).toThrow(/calibration-cohort evidence/);
   expect(() => parsePolicy(basePolicy(), { ...report, syntheticEvidence: false })).toThrow(/hash/);
+  const selectiveMargin = basePolicy();
+  selectiveMargin.qualityGates[0]!.quality = {
+    metric: "chords.selective_error",
+    better: "lower",
+    aggregation: "track_mean",
+    bound: threshold(0.05),
+  };
+  expect(() => parsePolicy(selectiveMargin, report)).toThrow(/unconditional metric/);
 });
 
 it("passes synthetic evidence through every gate without granting release authority", () => {
@@ -283,4 +291,48 @@ it("requires deterministic cold and warm repeats and enforces resource caps per 
   const capped = verdictFor(slow);
   expect(capped.resources[0]).toMatchObject({ observedMax: 60, status: "fail" });
   expect(capped.verdict).toBe("fail");
+});
+
+it("fails a run that omits a declared platform profile instead of dropping that profile", () => {
+  const second = { id: "profile_second", os: "windows", arch: "x64", resourceProfile: "balanced" };
+  const base = procedure(corpusHash);
+  const twoProfiles = { ...base, platformProfiles: [...base.platformProfiles, second] };
+  const withSecond = (
+    subject: ReturnType<typeof run>,
+    cohort: Cohort,
+    output: (id: string) => Output = perfect,
+  ) => {
+    const extra = run(subject.role, corpusHash, outputs(cohort, output)).profiles[0]!;
+    return { ...subject, profiles: [...subject.profiles, { ...extra, profileId: second.id }] };
+  };
+  const twoInput = (cohort: Cohort, candidateRun: unknown, baselineRun: unknown) => ({
+    ...input(cohort, candidateRun, baselineRun),
+    procedure: ProcedureSchema.parse(twoProfiles),
+  });
+  const calibration = characterize(
+    twoInput(
+      "calibration",
+      withSecond(run("candidate", corpusHash, outputs("calibration")), "calibration"),
+      withSecond(run("baseline", corpusHash, outputs("calibration")), "calibration"),
+    ),
+  );
+  const policy = { ...policyFor(calibration, corpusHash), procedure: twoProfiles };
+  policy.supportClaims.push({
+    kind: "platform_profile",
+    id: "claim_second",
+    statement: "SYNTHETIC optional platform profile claim",
+    profileId: second.id,
+    required: false,
+  });
+  const parsed = parsePolicy(policy, calibration);
+  const baseline = withSecond(run("baseline", corpusHash, outputs("sealed")), "sealed");
+  const failingSecond = withSecond(candidate(perfect), "sealed", halfAbstained);
+  expect(evaluateGates(parsed, twoInput("sealed", failingSecond, baseline)).verdict).toBe("fail");
+  const dropped = evaluateGates(parsed, twoInput("sealed", candidate(perfect), baseline));
+  expect(dropped.verdict).toBe("fail");
+  expect(dropped.hardGates[0]).toEqual({
+    id: "run_identity_and_inventory",
+    status: "fail",
+    reasons: ["candidate:profile_inventory"],
+  });
 });

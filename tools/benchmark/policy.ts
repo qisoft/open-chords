@@ -161,8 +161,11 @@ export function parsePolicy(input: unknown, rawReport: unknown): Policy {
       !procedure.confidence.some((c) => c.capability === claim.capability)
     )
       throw new Error("Calibration gate without declared confidence evidence");
-    if (gate.nonInferiorityMargin !== null && gate.nonInferiorityMargin.value < 0)
-      throw new Error("Non-inferiority margin must be non-negative");
+    if (
+      gate.nonInferiorityMargin !== null &&
+      (gate.nonInferiorityMargin.value < 0 || quality.conditional)
+    )
+      throw new Error("Non-inferiority needs a non-negative margin on an unconditional metric");
     for (const profile of procedure.platformProfiles)
       if (
         !observed(profile.id, gate.quality.metric, gate.slice) ||

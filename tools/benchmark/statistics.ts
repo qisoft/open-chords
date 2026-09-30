@@ -31,8 +31,11 @@ export function trackInterval(values: number[], uncertainty: Uncertainty) {
       sum += values[Math.floor(random() * values.length)]!;
     return sum / values.length;
   }).sort((a, b) => a - b);
-  const rank = (quantile: number) => means[Math.floor(quantile * (means.length - 1))]!;
-  return { lower: rank(1 - uncertainty.confidence), upper: rank(uncertainty.confidence) };
+  const last = means.length - 1;
+  return {
+    lower: means[Math.floor((1 - uncertainty.confidence) * last)]!,
+    upper: means[Math.ceil(uncertainty.confidence * last)]!,
+  };
 }
 
 export function summarize(values: number[], pooled: [number, number][], uncertainty: Uncertainty) {
