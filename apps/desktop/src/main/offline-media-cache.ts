@@ -170,6 +170,10 @@ export class OfflineMediaCache {
         sha256,
         verification: input.verification,
       });
+      if (existing !== null) {
+        await rm(join(this.#root, `${id}.json`), { force: true });
+        await syncDirectory(this.#root);
+      }
       await this.#installDurably(`${id}.pcm`, input.bytes);
       await this.#installDurably(`${id}.json`, Buffer.from(canonicalSerialize(entry), "utf8"));
       return { entry, state: "cached" as const };
