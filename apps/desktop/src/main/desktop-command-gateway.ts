@@ -30,7 +30,7 @@ import type {
 import type { LyricsDiscovery } from "./lyrics-discovery.ts";
 import type { ModelStore } from "./model-store.ts";
 import type { NetworkMode } from "./network-mode.ts";
-import type { ProjectArchiveImports } from "./project-archive-imports.ts";
+import { ArchiveImportBusyError, type ProjectArchiveImports } from "./project-archive-imports.ts";
 import type { ProjectExports } from "./project-exports.ts";
 import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
 import type { YouTubeService } from "./youtube-service.ts";
@@ -254,7 +254,9 @@ export class DesktopCommandGateway {
     if (command.type === "archives.import") {
       try {
         if (!this.#archives) throw new Error("Unavailable");
-        const result = await this.#archives.importArchive();
+        const result = await this.#archives.importArchive({
+          adoptOfflineMedia: command.adoptOfflineMedia,
+        });
         return {
           action: "none",
           response: DesktopResponseSchema.parse({
@@ -263,7 +265,17 @@ export class DesktopCommandGateway {
             result,
           }),
         };
-      } catch {
+      } catch (error) {
+        if (error instanceof ArchiveImportBusyError)
+          return {
+            action: "none",
+            response: errorResponse(
+              "busy",
+              "An archive import is already running. Wait for it to finish.",
+              true,
+              command,
+            ),
+          };
         return {
           action: "none",
           response: errorResponse(

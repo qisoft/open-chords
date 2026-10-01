@@ -77,7 +77,21 @@ Import origins are declared provenance, not verified lineage. They only let an I
 
 Media inclusion is an explicit export option. Export reads the Project Range through the same verified local-file path as playback, which rejects a changed or unavailable Source. When the Range cannot be verified, the export reports `media_unavailable` and writes nothing.
 
-On import, validated media becomes one entry in `offline-media-cache/` under application state, outside the Project Library. The entry is written only after identity resolution, and is removed again if Library publication then fails. The entry identity covers Source, Snapshot, canonical-audio fingerprint and Range. The record adds sample rate, byte size, SHA-256 and archive origin. It is written durably through a staging file before its record. Listing and reading verify the SHA-256 again, and a corrupt entry is treated as absent. An entry that already covers the same Range with different bytes rejects the import. The media never becomes a Source, Snapshot or Locator.
+Adoption on import is also explicit. The import control has a separate option, off by default, to add included media to the Offline Media Cache. Without it the result reports `declined` and nothing is cached. The media never becomes a Source, Snapshot or Locator, and a refused or failed cache entry never undoes the imported Project.
+
+Archive bytes are never bound to a Source the Library already owns unless they prove themselves:
+
+| Case | Outcome |
+| --- | --- |
+| Known Source, full Range whose SHA-256 equals the retained Snapshot's canonical-audio fingerprint | Cached with `snapshot_fingerprint` verification. |
+| Known Source, any other Range | Blocked as `unverifiable_for_known_source`. |
+| Source introduced by this archive | Cached with `archive_attested` verification. Only the archive's own manifest vouches for the bytes, and the UI says so. |
+
+`snapshot_fingerprint` is as strong as the Library's Snapshot record. A Snapshot that itself arrived from an archive carries that archive's attestation.
+
+Entries live in `offline-media-cache/` under application state, outside the Project Library. The entry identity covers Source, Snapshot, canonical-audio fingerprint and Range. The record adds verification, sample rate, byte size, SHA-256 and archive origin. Entries are written durably through a staging file before their record. Listing and reading verify the SHA-256 again, and a corrupt entry is treated as absent. Only `snapshot_fingerprint` bytes may replace an existing `archive_attested` entry; any other disagreement blocks the new media as `conflicting_entry`.
+
+Following specification 6.3, new entries are blocked, never silently evicted, when they would exceed the fixed 2 GiB capacity or leave less than the 1 GiB free-disk reserve. The import control states both limits. There is no control yet to change the capacity or remove entries, so a full cache stays blocked until that lifecycle ships.
 
 ## Verification
 
@@ -92,5 +106,5 @@ The installed macOS and Windows test reopens JSON and archive Export Receipts an
 ## Not yet covered
 
 - Native save and open dialog interaction for archives on macOS and Windows has not been observed.
-- The Offline Media Cache has no user-visible inspection, removal or quota controls, and playback does not read from it yet. Imported media is stored and verified, not used.
+- The Offline Media Cache has no user-visible inspection, removal or capacity-change controls, and playback does not read from it yet. Imported media is stored with its verification kind, not used.
 - Import does not report which declared requirements are missing from the local Model Store.

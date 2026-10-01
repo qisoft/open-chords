@@ -211,6 +211,7 @@ export function writePortableProjectArchive(input: {
     ),
     "utf8",
   );
+  if (manifest.length > ARCHIVE_ENTRY_LIMITS.manifest) throw new ArchiveTooLargeError();
   return {
     archive: writeArchiveZip([
       { name: ARCHIVE_ENTRIES.manifest, bytes: manifest },

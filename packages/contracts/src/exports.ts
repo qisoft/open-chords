@@ -52,3 +52,23 @@ export const ArchiveImportRejectionSchema = z.enum([
   "unsupported_zip_feature",
 ]);
 export type ArchiveImportRejection = z.infer<typeof ArchiveImportRejectionSchema>;
+export const OfflineMediaOutcomeSchema = z.discriminatedUnion("state", [
+  z.strictObject({ state: z.enum(["declined", "not_included"]) }),
+  z.strictObject({
+    state: z.enum(["already_cached", "cached"]),
+    verification: z.enum(["archive_attested", "snapshot_fingerprint"]),
+  }),
+  z.strictObject({
+    state: z.literal("blocked"),
+    reason: z.enum([
+      "capacity",
+      "conflicting_entry",
+      "disk_space",
+      "unverifiable_for_known_source",
+      "write_failed",
+    ]),
+  }),
+]);
+export type OfflineMediaOutcome = z.infer<typeof OfflineMediaOutcomeSchema>;
+export const OFFLINE_MEDIA_CACHE_CAPACITY_BYTES = 2 * 1024 * 1024 * 1024;
+export const OFFLINE_MEDIA_FREE_DISK_RESERVE_BYTES = 1024 * 1024 * 1024;

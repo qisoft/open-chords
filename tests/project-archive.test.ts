@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalMediaService } from "../apps/desktop/src/main/local-media.ts";
 import { openOfflineMediaCache } from "../apps/desktop/src/main/offline-media-cache.ts";
 import {
+  ArchiveTooLargeError,
   ArchivedProjectSchema,
   archivedProjectFor,
   ArchiveManifestSchema,
@@ -140,7 +141,7 @@ describe("Portable Project Archive round trip", () => {
     );
     expect(await imports.importArchive()).toEqual({
       importedCopy: false,
-      offlineMedia: "not_included",
+      offlineMedia: { state: "not_included" },
       projectId: "project_golden",
       state: "imported",
     });
@@ -188,7 +189,7 @@ describe("Portable Project Archive round trip", () => {
     const document = goldenDocument();
     const component = { hash: `sha256:${"1".repeat(64)}`, id: "rhythm-model", version: "1.0.0" };
     const backend = { hash: `sha256:${"2".repeat(64)}`, id: "numpy", version: "2.4.2" };
-    const manifestProject = withAnalysisManifest(document, component, backend);
+    const manifestProject = withAnalysisManifest(document, [component], backend);
     const archive = writePortableProjectArchive({ document: manifestProject });
     const manifest = ArchiveManifestSchema.parse(
       JSON.parse(readEntry(archive.archive, "manifest.json").toString("utf8")),
@@ -293,7 +294,7 @@ describe("Portable Project Archive identity", () => {
 });
 
 describe("Portable Project Archive media", () => {
-  it("includes only the verified Project Range, which imports as verified Offline Media Cache", async () => {
+  it("includes only the verified Project Range, which imports as archive-attested Offline Media Cache on request", async () => {
     const origin = await temporaryRoot("oc-archive-media-origin-");
     const mediaPath = join(origin, "recording.wav");
     await writeFile(mediaPath, monoPcmWav([10, 20, 30, 40, 50, 60]));
@@ -322,9 +323,9 @@ describe("Portable Project Archive media", () => {
 
     const destination = await temporaryRoot("oc-archive-media-destination-");
     const { cache, imports, library: imported } = await importerFor(destination, () => target);
-    expect(await imports.importArchive()).toEqual({
+    expect(await imports.importArchive({ adoptOfflineMedia: true })).toEqual({
       importedCopy: false,
-      offlineMedia: "cached",
+      offlineMedia: { state: "cached", verification: "archive_attested" },
       projectId: created.projectId,
       state: "imported",
     });
@@ -478,6 +479,20 @@ describe("Portable Project Archive Source authority and migration", () => {
     expect(library.listProjects()).toHaveLength(1);
   });
 
+  it("refuses to write a manifest larger than the reader accepts", () => {
+    const components = Array.from({ length: 400 }, (_, index) => ({
+      hash: `sha256:${index.toString(16).padStart(64, "0")}`,
+      id: `component-${String(index)}-${"x".repeat(150)}`,
+      version: "1.0.0",
+    }));
+    const document = withAnalysisManifest(goldenDocument(), components, {
+      hash: `sha256:${"2".repeat(64)}`,
+      id: "numpy",
+      version: "2.4.2",
+    });
+    expect(() => writePortableProjectArchive({ document })).toThrow(ArchiveTooLargeError);
+  });
+
   it("stores highly compressible media so the reader accepts the writer's own archive", () => {
     const silence = Buffer.alloc(2 * 1024 * 1024);
     const archive = writeArchiveZip([{ bytes: silence, name: "media/project-range.pcm" }]);
@@ -488,14 +503,14 @@ describe("Portable Project Archive Source authority and migration", () => {
 
 function withAnalysisManifest(
   document: ArchivedProject,
-  component: { hash: string; id: string; version: string },
+  components: Array<{ hash: string; id: string; version: string }>,
   backend: { hash: string; id: string; version: string },
 ): ArchivedProject {
   const next = structuredClone(document);
   const revision = next.envelope.payload.analysisRevisions[0]!;
   const recipe = {
     capabilities: ["rhythm" as const],
-    components: [component],
+    components,
     numericalBackend: backend,
     pipeline: [
       "preflight" as const,
@@ -532,7 +547,7 @@ function withAnalysisManifest(
     format: "open-chords/analysis-manifest" as const,
     recipe,
     reproducibilityConditions: {
-      componentHashes: [component.hash],
+      componentHashes: components.map(({ hash }) => hash),
       numericalBackendHash: backend.hash,
       profileHash: recipe.profile.hash,
       seedsHash: hashCanonical(recipe.seeds),

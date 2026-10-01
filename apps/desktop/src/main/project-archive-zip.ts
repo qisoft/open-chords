@@ -120,7 +120,7 @@ export function readArchiveZip(bytes: Buffer): ArchiveZipEntry[] {
   if (count === 0 || directoryStart + directorySize !== end) reject("malformed_zip");
   if (count > ARCHIVE_ZIP_LIMITS.maxEntries) reject("size_limit");
 
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const collisionKeys = new Set<string>();
   const entries: ArchiveZipEntry[] = [];
   let totalBytes = 0;

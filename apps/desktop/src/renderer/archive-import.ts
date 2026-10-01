@@ -1,6 +1,7 @@
 import type {
   ArchiveImportRejection,
   ArchiveImportResponse,
+  OfflineMediaOutcome,
   OpenChordsDesktopApi,
 } from "@open-chords/contracts";
 import { useRef, useState } from "react";
@@ -30,6 +31,29 @@ const rejectionLabels: Record<ArchiveImportRejection, string> = {
   unsupported_zip_feature: "it uses ZIP features Open Chords does not accept",
 };
 
+const blockedMediaLabels: Record<
+  Extract<OfflineMediaOutcome, { state: "blocked" }>["reason"],
+  string
+> = {
+  capacity: "the Offline Media Cache capacity would be exceeded",
+  conflicting_entry: "the Offline Media Cache already holds different media for this Project Range",
+  disk_space: "adding it would leave less than the required free disk reserve",
+  unverifiable_for_known_source: "it cannot be verified against the Source already in this Library",
+  write_failed: "the Offline Media Cache could not store it",
+};
+
+function offlineMediaMessage(outcome: OfflineMediaOutcome): string {
+  if ("verification" in outcome)
+    return outcome.verification === "snapshot_fingerprint"
+      ? " Its Project Range media matched the Source fingerprint in this Library and is in the Offline Media Cache."
+      : " Its Project Range media is in the Offline Media Cache. It is attested only by the archive and was not verified against a local Source.";
+  if ("reason" in outcome)
+    return ` Its Project Range media was not added to the Offline Media Cache because ${blockedMediaLabels[outcome.reason]}.`;
+  return outcome.state === "declined"
+    ? " Its Project Range media was not added to the Offline Media Cache."
+    : "";
+}
+
 export function archiveImportMessage(
   result: ArchiveImportResponse["result"],
 ): ArchiveImportMessage {
@@ -39,10 +63,7 @@ export function archiveImportMessage(
       text: `Archive rejected because ${rejectionLabels[result.reason]}. Nothing was imported.`,
       tone: "alert",
     };
-  const media =
-    result.offlineMedia === "cached"
-      ? " Its Project Range media is available in the Offline Media Cache."
-      : "";
+  const media = offlineMediaMessage(result.offlineMedia);
   if (result.state === "already_present")
     return {
       text: `This Library already contains this exact Project history.${media}`,
@@ -62,6 +83,7 @@ export function useArchiveImport(
 ) {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<ArchiveImportMessage | null>(null);
+  const [adoptOfflineMedia, setAdoptOfflineMedia] = useState(false);
   const running = useRef(false);
   const run = async () => {
     if (api === undefined || running.current) return;
@@ -69,7 +91,7 @@ export function useArchiveImport(
     setPending(true);
     setMessage({ text: "Choose a Portable Project Archive…", tone: "status" });
     try {
-      const response = await api.archives.import();
+      const response = await api.archives.import({ adoptOfflineMedia });
       if (response.type === "desktop.error") {
         setMessage({ text: response.message, tone: "alert" });
         return;
@@ -83,5 +105,5 @@ export function useArchiveImport(
       setPending(false);
     }
   };
-  return { message, pending, run };
+  return { adoptOfflineMedia, message, pending, run, setAdoptOfflineMedia };
 }

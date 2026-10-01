@@ -14,7 +14,7 @@ import {
 } from "../apps/desktop/src/main/project-archive-format.ts";
 import { ProjectArchiveImports } from "../apps/desktop/src/main/project-archive-imports.ts";
 import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
-import { rawZip, signedArchiveEntries, type RawZipEntry } from "./support/archive-zip.ts";
+import { rawZip, sha256, signedArchiveEntries, type RawZipEntry } from "./support/archive-zip.ts";
 import { goldenRecords } from "./support/editor-fixture.ts";
 
 const roots: string[] = [];
@@ -38,7 +38,40 @@ const withDocument = (change: (value: ArchivedProject) => void) => {
 const replaceEntry = (entries: RawZipEntry[], name: string, change: Partial<RawZipEntry>) =>
   entries.map((entry) => (entry.name === name ? { ...entry, ...change } : entry));
 
+const deeplyNestedExtension = () => {
+  const entries = valid();
+  const depth = 200_000;
+  const project = Buffer.from(
+    entries[1]!.data
+      .toString("utf8")
+      .replace(
+        '"extensions": {}',
+        `"extensions": {"org.x": ${"[".repeat(depth)}${"]".repeat(depth)}}`,
+      ),
+    "utf8",
+  );
+  return rawZip(
+    signedArchiveEntries(document(), {
+      manifest: (manifest) => ({
+        ...manifest,
+        project: { byteSize: project.length, path: "project.json", sha256: sha256(project) },
+      }),
+    }).map((entry) => (entry.name === "project.json" ? { ...entry, data: project } : entry)),
+  );
+};
+
 const hostileArchives: Array<[string, () => Buffer, string]> = [
+  [
+    "byte-order mark in a name",
+    () =>
+      rawZip(
+        replaceEntry(valid(), "manifest.json", {
+          name: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("manifest.json")]),
+        }),
+      ),
+    "unsafe_path",
+  ],
+  ["deeply nested extension JSON", deeplyNestedExtension, "schema_invalid"],
   [
     "parent traversal",
     () => rawZip([...valid(), { name: "../escape.json", data: Buffer.from("{}") }]),

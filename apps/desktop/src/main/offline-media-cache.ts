@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, rename, rm, statfs } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  OFFLINE_MEDIA_CACHE_CAPACITY_BYTES,
+  OFFLINE_MEDIA_FREE_DISK_RESERVE_BYTES,
+} from "@open-chords/contracts";
 import { canonicalSerialize, StableIdSchema } from "@open-chords/domain";
 import { z } from "zod";
 
@@ -38,8 +42,10 @@ const EntryRecordSchema = z.strictObject({
   range: OfflineMediaRangeSchema,
   schemaVersion: z.literal("1.0"),
   sha256: Sha256Schema,
+  verification: z.enum(["archive_attested", "snapshot_fingerprint"]),
 });
 
+export type OfflineMediaVerification = z.infer<typeof EntryRecordSchema>["verification"];
 export type OfflineMediaRange = z.infer<typeof OfflineMediaRangeSchema>;
 export type OfflineMediaCacheEntry = z.infer<typeof EntryRecordSchema>;
 
@@ -57,57 +63,101 @@ export function offlineMediaEntryId(range: OfflineMediaRange): string {
   return `cache_${digest(identity).slice("sha256:".length, "sha256:".length + 32)}`;
 }
 
-export class OfflineMediaConflictError extends Error {
-  constructor() {
-    super("A different verified Offline Media Cache entry already covers this Project Range");
-    this.name = "OfflineMediaConflictError";
+export type OfflineMediaBlockReason = "capacity" | "conflicting_entry" | "disk_space";
+
+export class OfflineMediaBlockedError extends Error {
+  readonly reason: OfflineMediaBlockReason;
+  constructor(reason: OfflineMediaBlockReason) {
+    super(`Offline Media Cache entry blocked: ${reason}`);
+    this.name = "OfflineMediaBlockedError";
+    this.reason = reason;
   }
 }
 
-export async function openOfflineMediaCache(options: { stateRoot: string; now?: () => Date }) {
+type CacheOptions = {
+  capacityBytes?: number;
+  freeDiskBytes?: (root: string) => Promise<number>;
+  now?: () => Date;
+  reserveBytes?: number;
+  stateRoot: string;
+};
+
+export async function openOfflineMediaCache(options: CacheOptions) {
   const root = join(options.stateRoot, "offline-media-cache");
   await mkdir(root, { recursive: true, mode: 0o700 });
   const stat = await lstat(root);
   if (!stat.isDirectory() || stat.isSymbolicLink())
     throw new Error("Invalid Offline Media Cache directory");
-  return new OfflineMediaCache(root, options.now ?? (() => new Date()));
+  return new OfflineMediaCache(root, {
+    capacityBytes: options.capacityBytes ?? OFFLINE_MEDIA_CACHE_CAPACITY_BYTES,
+    freeDiskBytes: options.freeDiskBytes ?? freeDiskBytes,
+    now: options.now ?? (() => new Date()),
+    reserveBytes: options.reserveBytes ?? OFFLINE_MEDIA_FREE_DISK_RESERVE_BYTES,
+  });
+}
+
+async function freeDiskBytes(root: string): Promise<number> {
+  const stats = await statfs(root);
+  return stats.bavail * stats.bsize;
 }
 
 export class OfflineMediaCache {
   readonly #root: string;
-  readonly #now: () => Date;
+  readonly #options: Required<Omit<CacheOptions, "stateRoot">>;
   #tail: Promise<unknown> = Promise.resolve();
 
-  constructor(root: string, now: () => Date) {
+  constructor(root: string, options: Required<Omit<CacheOptions, "stateRoot">>) {
     this.#root = root;
-    this.#now = now;
+    this.#options = options;
   }
 
+  get capacityBytes() {
+    return this.#options.capacityBytes;
+  }
+
+  // A cache entry never replaces an equal or stronger attestation. Only bytes proven
+  // against a retained Snapshot fingerprint may replace an archive-attested entry.
   store(input: {
     archiveManifestHash: string;
     bytes: Buffer;
     range: OfflineMediaRange;
+    verification: OfflineMediaVerification;
   }): Promise<{ entry: OfflineMediaCacheEntry; state: "cached" | "already_cached" }> {
     return this.#serialize(async () => {
       const range = OfflineMediaRangeSchema.parse(input.range);
       const sampleCount = range.endSourceSample - range.startSourceSample;
       if (input.bytes.length !== sampleCount * 2 || input.bytes.length > MAX_ENTRY_BYTES)
         throw new Error("Offline Media Cache bytes do not cover the Project Range");
+      if (
+        input.verification === "snapshot_fingerprint" &&
+        (range.startSourceSample !== 0 || digest(input.bytes) !== range.canonicalAudioFingerprint)
+      )
+        throw new Error("Snapshot-fingerprint media must equal the Snapshot canonical audio");
       const id = offlineMediaEntryId(range);
       const sha256 = digest(input.bytes);
       const existing = await this.#verified(id);
       if (existing !== null) {
-        if (
-          existing.sha256 !== sha256 ||
-          canonicalSerialize(existing.range) !== canonicalSerialize(range)
-        )
-          throw new OfflineMediaConflictError();
-        return { entry: existing, state: "already_cached" as const };
+        const stronger =
+          existing.verification === "archive_attested" &&
+          input.verification === "snapshot_fingerprint";
+        if (existing.sha256 === sha256 && !stronger)
+          return { entry: existing, state: "already_cached" as const };
+        if (!stronger) throw new OfflineMediaBlockedError("conflicting_entry");
       }
+      const used = (await this.list())
+        .filter((entry) => entry.id !== id)
+        .reduce((total, entry) => total + entry.byteSize, 0);
+      if (used + input.bytes.length > this.#options.capacityBytes)
+        throw new OfflineMediaBlockedError("capacity");
+      if (
+        (await this.#options.freeDiskBytes(this.#root)) - input.bytes.length <
+        this.#options.reserveBytes
+      )
+        throw new OfflineMediaBlockedError("disk_space");
       const entry = EntryRecordSchema.parse({
         byteSize: input.bytes.length,
         channels: 1,
-        createdAt: this.#now().toISOString(),
+        createdAt: this.#options.now().toISOString(),
         encoding: "pcm_s16le",
         format: "open-chords/offline-media-cache-entry",
         id,
@@ -118,6 +168,7 @@ export class OfflineMediaCache {
         range,
         schemaVersion: "1.0",
         sha256,
+        verification: input.verification,
       });
       await this.#installDurably(`${id}.pcm`, input.bytes);
       await this.#installDurably(`${id}.json`, Buffer.from(canonicalSerialize(entry), "utf8"));

@@ -12,6 +12,7 @@ import {
   ArchiveImportRejectionSchema,
   ExportActionSchema,
   ExportReceiptSummarySchema,
+  OfflineMediaOutcomeSchema,
 } from "./exports.ts";
 import { DesktopMessageIdSchema } from "./identifiers.ts";
 import {
@@ -191,6 +192,7 @@ export const AlignmentCommandSchema = z.strictObject({
 
 export const ImportArchiveCommandSchema = z.strictObject({
   ...correlatedEnvelope,
+  adoptOfflineMedia: z.boolean(),
   type: z.literal("archives.import"),
 });
 
@@ -263,7 +265,7 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
       z.strictObject({
         state: z.enum(["already_present", "imported"]),
         importedCopy: z.boolean(),
-        offlineMedia: z.enum(["cached", "not_included"]),
+        offlineMedia: OfflineMediaOutcomeSchema,
         projectId: DesktopProjectIdSchema,
       }),
     ]),
@@ -458,7 +460,9 @@ export type ArchiveImportResponse = Extract<DesktopResponse, { type: "archives.i
 
 export type OpenChordsDesktopApi = {
   archives: {
-    import(): Promise<DesktopErrorResponse | ArchiveImportResponse>;
+    import(options: {
+      adoptOfflineMedia: boolean;
+    }): Promise<DesktopErrorResponse | ArchiveImportResponse>;
   };
   exports: {
     perform(

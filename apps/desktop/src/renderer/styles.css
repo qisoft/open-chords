@@ -1091,6 +1091,11 @@ button:disabled {
   max-width: 20rem;
   overflow-wrap: anywhere;
 }
+.import-archive-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
 .import-archive p,
 .import-archive output {
   margin: 0;

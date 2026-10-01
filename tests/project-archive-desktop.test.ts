@@ -81,7 +81,11 @@ test("archive export and import run only through main-owned named capabilities",
         includeMedia: false,
       },
     };
-    const importCommand = { ...envelope("request_archive_import"), type: "archives.import" };
+    const importCommand = {
+      ...envelope("request_archive_import"),
+      adoptOfflineMedia: false,
+      type: "archives.import",
+    };
 
     expect(
       (await gateway.execute(importCommand, { ...sender, frameUrl: "https://www.youtube.com" }))
@@ -118,10 +122,53 @@ test("archive export and import run only through main-owned named capabilities",
     const imported = (await gateway.execute(importCommand, sender)).response;
     expect(imported).toMatchObject({
       type: "archives.import_result",
-      result: { importedCopy: true, offlineMedia: "not_included", state: "imported" },
+      result: { importedCopy: true, offlineMedia: { state: "not_included" }, state: "imported" },
     });
     expect(JSON.stringify(imported)).not.toContain(root);
     expect(library.listProjects()).toHaveLength(2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a second archive import while one is choosing a file reports busy", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "oc-archive-busy-")));
+  try {
+    const stateRoot = join(root, "state");
+    const library = await openProjectLibrary({ stateRoot });
+    let release!: (path: string | null) => void;
+    const archives = new ProjectArchiveImports({
+      cache: await openOfflineMediaCache({ stateRoot }),
+      library,
+      pickArchive: () =>
+        new Promise<string | null>((resolve) => {
+          release = resolve;
+        }),
+    });
+    const gateway = new DesktopCommandGateway(
+      library,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      archives,
+    );
+    const command = (requestId: string) => ({
+      ...envelope(requestId),
+      adoptOfflineMedia: false,
+      type: "archives.import",
+    });
+    const first = gateway.execute(command("request_import_first"), sender);
+    expect(
+      (await gateway.execute(command("request_import_second"), sender)).response,
+    ).toMatchObject({ code: "busy", retryable: true, type: "desktop.error" });
+    release(null);
+    expect((await first).response).toMatchObject({
+      result: { state: "cancelled" },
+      type: "archives.import_result",
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

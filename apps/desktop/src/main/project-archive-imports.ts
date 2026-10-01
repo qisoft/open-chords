@@ -3,7 +3,12 @@ import { lstat } from "node:fs/promises";
 import { canonicalSerialize } from "@open-chords/domain";
 
 import { readBoundedFile } from "./bounded-file.ts";
-import { OfflineMediaConflictError, type OfflineMediaCache } from "./offline-media-cache.ts";
+import {
+  OfflineMediaBlockedError,
+  type OfflineMediaBlockReason,
+  type OfflineMediaCache,
+  type OfflineMediaVerification,
+} from "./offline-media-cache.ts";
 import { archivedProjectFor, sha256, type ArchivedProject } from "./project-archive-format.ts";
 import {
   ArchiveRejectionError,
@@ -23,18 +28,33 @@ export type ProjectArchiveImportRejection =
   | "source_conflict"
   | "unreadable_archive";
 
+export type OfflineMediaOutcome =
+  | { state: "declined" | "not_included" }
+  | { state: "already_cached" | "cached"; verification: OfflineMediaVerification }
+  | {
+      reason: OfflineMediaBlockReason | "unverifiable_for_known_source" | "write_failed";
+      state: "blocked";
+    };
+
 export type ProjectArchiveImportResult =
   | { state: "cancelled" }
   | { reason: ProjectArchiveImportRejection; state: "rejected" }
   | {
       importedCopy: boolean;
-      offlineMedia: "cached" | "not_included";
+      offlineMedia: OfflineMediaOutcome;
       projectId: string;
       state: "already_present" | "imported";
     };
 
+export class ArchiveImportBusyError extends Error {
+  constructor() {
+    super("An archive import is already running");
+    this.name = "ArchiveImportBusyError";
+  }
+}
+
 type Options = {
-  cache: Pick<OfflineMediaCache, "remove" | "store">;
+  cache: Pick<OfflineMediaCache, "store">;
   library: Pick<
     ProjectLibrary,
     | "findLocalFileSourceByFingerprint"
@@ -68,13 +88,15 @@ export class ProjectArchiveImports {
     return this.#busy;
   }
 
-  async importArchive(): Promise<ProjectArchiveImportResult> {
-    if (this.#busy) throw new Error("An archive import is already running");
+  async importArchive(
+    options: { adoptOfflineMedia: boolean } = { adoptOfflineMedia: false },
+  ): Promise<ProjectArchiveImportResult> {
+    if (this.#busy) throw new ArchiveImportBusyError();
     this.#busy = true;
     try {
       const path = await this.#options.pickArchive();
       if (path === null) return { state: "cancelled" };
-      return await this.#import(await readQuarantineCopy(path));
+      return await this.#import(await readQuarantineCopy(path), options.adoptOfflineMedia);
     } catch (error) {
       if (error instanceof ArchiveRejectionError || error instanceof ImportRejected)
         return { reason: error.reason, state: "rejected" };
@@ -84,23 +106,22 @@ export class ProjectArchiveImports {
     }
   }
 
-  async #import(bytes: Buffer): Promise<ProjectArchiveImportResult> {
+  async #import(bytes: Buffer, adoptOfflineMedia: boolean): Promise<ProjectArchiveImportResult> {
     const inspected = inspectPortableProjectArchive(bytes);
+    const knownSourceIds = new Set(
+      inspected.document.records.sources
+        .filter(({ id }) => this.#options.library.getSourceById(id) !== undefined)
+        .map(({ id }) => id),
+    );
     const document = await this.#adoptLibrarySources(inspected.document);
     const { candidate, state } = await this.#resolveIdentity(document, inspected.manifestHash);
-    const cached = await this.#cacheMedia(inspected, document);
-    if (state === "imported") {
-      try {
-        await this.#options.library.restoreProjectRevision(candidate);
-      } catch (error) {
-        if (cached.state === "cached") await this.#options.cache.remove(cached.entry.id);
-        throw error;
-      }
-    }
+    if (state === "imported") await this.#options.library.restoreProjectRevision(candidate);
     const projectId = candidate.envelope.payload.id;
     return {
       importedCopy: projectId !== document.envelope.payload.id,
-      offlineMedia: cached.state === "not_included" ? "not_included" : "cached",
+      offlineMedia: adoptOfflineMedia
+        ? await this.#adoptMedia(inspected, document, knownSourceIds)
+        : { state: inspected.media === undefined ? "not_included" : "declined" },
       projectId,
       state,
     };
@@ -185,20 +206,30 @@ export class ProjectArchiveImports {
     return adopted;
   }
 
-  async #cacheMedia(
+  // Bytes proven only by the archive's own manifest must never be bound to a Source the
+  // Library already owns. Only a full Range equal to a retained Snapshot fingerprint is
+  // verified; media for a Source the archive introduces is recorded as archive-attested.
+  async #adoptMedia(
     inspected: InspectedArchive,
     document: ArchivedProject,
-  ): Promise<Awaited<ReturnType<OfflineMediaCache["store"]>> | { state: "not_included" }> {
+    knownSourceIds: ReadonlySet<string>,
+  ): Promise<OfflineMediaOutcome> {
     if (inspected.media === undefined) return { state: "not_included" };
-    const { declaration } = inspected.media;
+    const { bytes, declaration } = inspected.media;
     const snapshot = document.records.sources
       .find(({ id }) => id === declaration.sourceId)
       ?.snapshots.find(({ id }) => id === declaration.sourceSnapshotId);
-    if (snapshot === undefined) throw new ImportRejected("reference_invalid");
+    if (snapshot === undefined) return { reason: "write_failed", state: "blocked" };
+    const known = knownSourceIds.has(declaration.sourceId);
+    const fullRange =
+      declaration.startSourceSample === 0 &&
+      declaration.endSourceSample === snapshot.durationSamples &&
+      sha256(bytes) === snapshot.canonicalAudioFingerprint;
+    if (known && !fullRange) return { reason: "unverifiable_for_known_source", state: "blocked" };
     try {
-      return await this.#options.cache.store({
+      const stored = await this.#options.cache.store({
         archiveManifestHash: inspected.manifestHash,
-        bytes: inspected.media.bytes,
+        bytes,
         range: {
           canonicalAudioFingerprint: snapshot.canonicalAudioFingerprint,
           endSourceSample: declaration.endSourceSample,
@@ -207,10 +238,14 @@ export class ProjectArchiveImports {
           sourceSnapshotId: declaration.sourceSnapshotId,
           startSourceSample: declaration.startSourceSample,
         },
+        verification: known ? "snapshot_fingerprint" : "archive_attested",
       });
+      return { state: stored.state, verification: stored.entry.verification };
     } catch (error) {
-      if (error instanceof OfflineMediaConflictError) throw new ImportRejected("hash_mismatch");
-      throw error;
+      return {
+        reason: error instanceof OfflineMediaBlockedError ? error.reason : "write_failed",
+        state: "blocked",
+      };
     }
   }
 }

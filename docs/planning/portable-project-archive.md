@@ -20,7 +20,7 @@ Export one complete retained Project as a versioned, hash-manifested ZIP and imp
 - Carry complete retained Project history: every Analysis Revision and Manifest, Edit Layer transaction history, Lyrics Document and Alignment, practice state, Export Receipts, Source identity, Snapshots and Metadata Observations.
 - Remove machine-local authority. Local file Locators and private receipt destinations never leave the Library.
 - Declare exact analysis components, numerical backends, alignment Model Artifacts and alignment runtimes. Import never installs, downloads or resolves them.
-- Include Source media only on explicit request, only from a verified Source, and only for the Project Range. Imported media becomes a verified Offline Media Cache entry, never a new Source or Locator.
+- Include Source media only on explicit request, only from a verified Source, and only for the Project Range. On explicit request at import, included media becomes an Offline Media Cache entry labelled with how it was verified, never a new Source or Locator.
 - Never overwrite or merge histories. An identity conflict creates an Imported Project Copy that keeps its origin identity as provenance.
 - Reuse the Export Receipt, destination validation, publication journal and recovery of the JSON export slice.
 

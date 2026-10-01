@@ -35,7 +35,9 @@ function App() {
   );
   const importTool = (
     <ImportArchive
+      adoptOfflineMedia={archiveImport.adoptOfflineMedia}
       message={archiveImport.message}
+      onAdoptOfflineMediaChange={archiveImport.setAdoptOfflineMedia}
       onImport={() => void archiveImport.run()}
       pending={archiveImport.pending}
     />

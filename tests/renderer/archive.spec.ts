@@ -81,6 +81,9 @@ test("the export dialog saves a Portable Project Archive and import creates a se
     expect((await readFile(archivePath)).readUInt32LE(0)).toBe(0x04034b50);
     await exportDialog.getByRole("button", { name: "Close", exact: true }).click();
 
+    await expect(
+      page.getByRole("checkbox", { name: /Add included media to the Offline Media Cache/ }),
+    ).not.toBeChecked();
     await page.getByRole("button", { name: "Import Project Archive", exact: true }).click();
     await expect(
       page.getByText(
