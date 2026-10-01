@@ -34,7 +34,6 @@ export const DARWIN_COMPONENT_IDS = [
   "acquisition-runtime",
   "containment",
   "analysis-sidecar-resources-copy",
-  "containment-resources-copy",
   "application",
   "notices",
   "electron-shell",

@@ -17,7 +17,6 @@ it("attributes every macOS entry to the first matching component", () => {
     file(`${service}/Resources/open-chords-alignment/bin/mfa`, 200),
     file(`${service}/Resources/open-chords-acquisition/deno`, 300),
     file(`${service}/MacOS/open-chords-analysis-service`, 4),
-    file(`${contents}/MacOS/containment/containment-manifest.json`, 5),
     file(`${contents}/MacOS/open-chords-containment-bridge`, 6),
     file(`${contents}/Resources/open-chords-analysis/open-chords-analysis`, 70),
     file(`${contents}/Resources/containment/containment-manifest.json`, 8),
@@ -33,16 +32,15 @@ it("attributes every macOS entry to the first matching component", () => {
 
   expect(measureDarwinSizes(entries, 1234)).toEqual({
     downloadBytes: 1234,
-    installedBytes: 2603,
-    installedFiles: 12,
+    installedBytes: 2598,
+    installedFiles: 11,
     longestPathCharacters: 127,
     components: [
       { id: "analysis-sidecar", bytes: 100, files: 1 },
       { id: "alignment-runtime", bytes: 200, files: 1 },
       { id: "acquisition-runtime", bytes: 300, files: 1 },
-      { id: "containment", bytes: 15, files: 3 },
+      { id: "containment", bytes: 18, files: 3 },
       { id: "analysis-sidecar-resources-copy", bytes: 70, files: 1 },
-      { id: "containment-resources-copy", bytes: 8, files: 1 },
       { id: "application", bytes: 900, files: 1 },
       { id: "notices", bytes: 10, files: 1 },
       { id: "electron-shell", bytes: 1000, files: 2 },

@@ -18,10 +18,9 @@ const DARWIN_CONTENTS_RULES: ReadonlyArray<readonly [prefix: string, id: DarwinC
   [`${DARWIN_SERVICE_RESOURCES}open-chords-alignment/`, "alignment-runtime"],
   [`${DARWIN_SERVICE_RESOURCES}open-chords-acquisition/`, "acquisition-runtime"],
   ["XPCServices/", "containment"],
-  ["MacOS/containment/", "containment"],
   ["MacOS/open-chords-containment-bridge", "containment"],
   ["Resources/open-chords-analysis/", "analysis-sidecar-resources-copy"],
-  ["Resources/containment/", "containment-resources-copy"],
+  ["Resources/containment/", "containment"],
   ["Resources/app.asar", "application"],
   ["Resources/notices/", "notices"],
 ];

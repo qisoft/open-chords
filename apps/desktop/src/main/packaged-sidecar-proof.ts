@@ -213,10 +213,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
   );
   process.stderr.write("Packaged sidecar proof stage: runtime_verified\n");
   const containment = verifyContainmentRuntime(
-    join(
-      process.resourcesPath,
-      platform === "darwin" ? join("..", "MacOS", "containment") : "containment",
-    ),
+    join(process.resourcesPath, "containment"),
     EXPECTED_CONTAINMENT_MANIFEST_SHA256,
     platform,
     platform === "darwin"

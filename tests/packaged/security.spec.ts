@@ -1252,10 +1252,7 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
           "open-chords-alignment",
         )
       : join(resourcesPath, "open-chords-alignment");
-  const containmentRoot =
-    process.platform === "darwin"
-      ? join(resourcesPath, "..", "MacOS", "containment")
-      : join(resourcesPath, "containment");
+  const containmentRoot = join(resourcesPath, "containment");
   const digestFile = (path: string) =>
     createHash("sha256").update(readFileSync(path)).digest("hex");
   const worker = createContainedAlignmentWorker({

@@ -25,7 +25,6 @@ const EXPECTED_COMPONENTS = {
     "acquisition-runtime",
     "containment",
     "analysis-sidecar-resources-copy",
-    "containment-resources-copy",
     "application",
     "notices",
     "electron-shell",

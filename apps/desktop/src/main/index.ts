@@ -193,10 +193,7 @@ if (
             : process.resourcesPath;
         const acquisitionContainment = {
           containmentRoot: app.isPackaged
-            ? join(
-                process.resourcesPath,
-                process.platform === "darwin" ? "../MacOS/containment" : "containment",
-              )
+            ? join(process.resourcesPath, "containment")
             : join(app.getAppPath(), "dist/containment"),
           containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
           ...(app.isPackaged && process.platform === "darwin"
@@ -266,10 +263,7 @@ if (
           await recoverAlignmentWorkspaces({
             stateRoot,
             containmentRoot: app.isPackaged
-              ? join(
-                  process.resourcesPath,
-                  process.platform === "darwin" ? "../MacOS/containment" : "containment",
-                )
+              ? join(process.resourcesPath, "containment")
               : join(app.getAppPath(), "dist/containment"),
             containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
             ...(app.isPackaged && process.platform === "darwin"
@@ -295,10 +289,7 @@ if (
                 : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
               runtimeManifestHash: EXPECTED_ALIGNMENT_MANIFEST_SHA256,
               containmentRoot: app.isPackaged
-                ? join(
-                    process.resourcesPath,
-                    process.platform === "darwin" ? "../MacOS/containment" : "containment",
-                  )
+                ? join(process.resourcesPath, "containment")
                 : join(app.getAppPath(), "dist/containment"),
               containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
               ...(app.isPackaged && process.platform === "darwin"

@@ -50,7 +50,7 @@ export const INSTALLED_LAYOUT = {
     resources: `${DARWIN_CONTENTS}/Resources`,
     trustAnchors: [
       `${DARWIN_SERVICE}/Contents/Resources/open-chords-analysis/runtime-manifest.json`,
-      `${DARWIN_CONTENTS}/MacOS/containment/containment-manifest.json`,
+      `${DARWIN_CONTENTS}/Resources/containment/containment-manifest.json`,
       `${DARWIN_SERVICE}/Contents/Resources/open-chords-alignment/runtime-info.json`,
       `${DARWIN_SERVICE}/Contents/Resources/open-chords-acquisition/runtime-info.json`,
     ],

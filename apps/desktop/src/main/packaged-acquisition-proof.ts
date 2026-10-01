@@ -30,9 +30,7 @@ export async function runPackagedAcquisitionProof() {
         )
       : join(process.resourcesPath, "open-chords-acquisition"),
     runtimeManifestHash: EXPECTED_ACQUISITION_MANIFEST_SHA256,
-    containmentRoot: mac
-      ? join(process.resourcesPath, "../MacOS/containment")
-      : join(process.resourcesPath, "containment"),
+    containmentRoot: join(process.resourcesPath, "containment"),
     containmentManifestHash: EXPECTED_CONTAINMENT_MANIFEST_SHA256,
     ...(mac
       ? { bridgePath: join(process.resourcesPath, "../MacOS/open-chords-containment-bridge") }
