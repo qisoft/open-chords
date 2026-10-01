@@ -232,7 +232,10 @@
         "leftStatus": "truncated",
         "newBarId": "bar_collision_split",
         "newDownbeatId": "beat_collision_split",
-        "rightMeter": { "numerator": 1, "denominator": 4 },
+        "rightMeter": {
+          "numerator": 1,
+          "denominator": 4
+        },
         "rightStatus": "complete"
       }
     ]
@@ -270,5 +273,28 @@
     "name": "supported Support Claim lacks sealed Benchmark Run evidence",
     "path": ["payload", "supportClaims", 0, "evidenceStatus"],
     "value": "supported"
+  },
+  {
+    "expectedErrorType": "DomainInvariantError",
+    "name": "Analysis Revision belongs to an unrelated Project",
+    "path": ["payload", "analysisRevisions", 0, "projectId"],
+    "value": "project_unrelated"
+  },
+  {
+    "expectedErrorType": "DomainInvariantError",
+    "name": "import origin repeats the current Project identity",
+    "path": ["payload", "importOrigins"],
+    "value": [
+      {
+        "archiveManifestHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "projectId": "project_golden"
+      }
+    ]
+  },
+  {
+    "expectedErrorType": "ZodError",
+    "name": "import origin list is empty",
+    "path": ["payload", "importOrigins"],
+    "value": []
   }
 ]

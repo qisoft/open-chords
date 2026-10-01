@@ -7,7 +7,7 @@ import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { expect, test } from "vitest";
 
 import { DesktopCommandGateway } from "../apps/desktop/src/main/desktop-command-gateway.ts";
-import { openJsonExports } from "../apps/desktop/src/main/json-exports.ts";
+import { openProjectExports } from "../apps/desktop/src/main/project-exports.ts";
 import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "./support/editor-fixture.ts";
 
@@ -24,7 +24,7 @@ test("only the primary named export capability can publish; renderer paths are r
       ),
       records: goldenRecords(),
     });
-    const service = await openJsonExports({
+    const service = await openProjectExports({
       library,
       stateRoot,
       pickTarget: async () => join(root, "result.json"),

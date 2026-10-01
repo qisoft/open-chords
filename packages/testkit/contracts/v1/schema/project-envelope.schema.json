@@ -905,6 +905,23 @@
       "minimum": 0,
       "type": "integer"
     },
+    "ImportOrigin": {
+      "additionalProperties": false,
+      "properties": {
+        "archiveManifestHash": {
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "projectId": {
+          "$ref": "#/$defs/StableId"
+        }
+      },
+      "required": [
+        "archiveManifestHash",
+        "projectId"
+      ],
+      "type": "object"
+    },
     "KeyRegion": {
       "additionalProperties": false,
       "properties": {
@@ -1563,6 +1580,14 @@
         "id": {
           "$ref": "#/$defs/StableId"
         },
+        "importOrigins": {
+          "items": {
+            "$ref": "#/$defs/ImportOrigin"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
         "lyricsAlignments": {
           "items": {
             "$ref": "#/$defs/LyricsAlignment"
@@ -2028,6 +2053,6 @@
     "schemaVersion",
     "type"
   ],
-  "title": "Open Chords project contract envelope v1.3",
+  "title": "Open Chords project contract envelope v1.4",
   "type": "object"
 }

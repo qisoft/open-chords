@@ -9,7 +9,7 @@ import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { chromium, expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 
-import { openJsonExports } from "../../apps/desktop/src/main/json-exports.ts";
+import { openProjectExports } from "../../apps/desktop/src/main/project-exports.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 
@@ -18,7 +18,7 @@ test.skip(
   "Installed desktop profiles",
 );
 
-test("installed application reopens durable Export Receipts through the bounded capability", async () => {
+test("installed application reopens durable JSON and archive Export Receipts through the bounded capability", async () => {
   test.setTimeout(120000);
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-installed-export-")));
   try {
@@ -34,16 +34,24 @@ test("installed application reopens durable Export Receipts through the bounded 
     });
     // Prepare persisted input through the public service. This is a Receipt reopen test,
     // not evidence of an installed native save-dialog interaction.
-    const service = await openJsonExports({
+    const service = await openProjectExports({
       library,
       stateRoot,
-      pickTarget: async () => join(root, "score.json"),
+      pickTarget: async (format) =>
+        join(root, format === "project_archive" ? "song.ocarchive" : "score.json"),
     });
     expect(
       await service.saveJson({
         projectId: "project_golden",
         expectedProjectRevisionId: (await library.getSnapshot("project_golden"))!.projectRevisionId,
         presentation: "current",
+      }),
+    ).toEqual({ state: "saved" });
+    expect(
+      await service.saveArchive({
+        projectId: "project_golden",
+        expectedProjectRevisionId: (await library.getSnapshot("project_golden"))!.projectRevisionId,
+        includeMedia: false,
       }),
     ).toEqual({ state: "saved" });
     await extractZip(
@@ -97,12 +105,22 @@ test("installed application reopens durable Export Receipts through the bounded 
           .find((candidate) => candidate.url().startsWith("open-chords://"))!;
         await page.getByRole("button", { name: "Export Project", exact: true }).click();
         await expect(page.getByText("score.json", { exact: true })).toBeVisible();
+        await expect(page.getByText("song.ocarchive", { exact: true })).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Save Project Archive", exact: true }),
+        ).toBeEnabled();
+        expect(await page.evaluate(() => typeof window.openChords!.archives.import)).toBe(
+          "function",
+        );
         const receipt = await page.evaluate(() =>
           window.openChords!.exports.perform({ type: "list", projectId: "project_golden" }),
         );
         expect(receipt).toMatchObject({
           type: "exports.result",
-          receipts: [{ displayName: "score.json", profileVersion: "open_chords_json/1.0/current" }],
+          receipts: [
+            { displayName: "score.json", profileVersion: "open_chords_json/1.0/current" },
+            { displayName: "song.ocarchive", profileVersion: "project_archive/1.0/no_media" },
+          ],
         });
         expect(JSON.stringify(receipt)).not.toContain(root);
         await page.getByRole("button", { name: "Close", exact: true }).click();

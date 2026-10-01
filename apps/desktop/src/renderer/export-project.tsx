@@ -15,6 +15,10 @@ const omissionLabels: Record<string, string> = {
     "Free-form benchmark descriptions were omitted to protect private data.",
   alignment_recipe_omitted:
     "Alignment runtime details were omitted; verification hashes are included.",
+  local_source_locators_omitted:
+    "Local file locations were omitted; the Source stays identified by its fingerprint.",
+  receipt_locations_reduced_to_names:
+    "Earlier export destinations were reduced to file names to protect private paths.",
 };
 
 type Result = Extract<DesktopResponse, { type: "exports.result" }>;
@@ -30,13 +34,15 @@ export function ExportProject({
   const [pending, setPending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [presentation, setPresentation] = useState<"current" | "original">("current");
+  const [includeMedia, setIncludeMedia] = useState(false);
   const [message, setMessage] = useState("");
   const version = useRef(0);
   const perform = async (action: Parameters<typeof api.exports.perform>[0]) => {
     const current = ++version.current;
     setPending(true);
-    setSaving(action.type === "save_json");
-    setMessage(action.type === "save_json" ? "Choose a destination…" : "Checking exports…");
+    const isSave = action.type === "save_json" || action.type === "save_archive";
+    setSaving(isSave);
+    setMessage(isSave ? "Choose a destination…" : "Checking exports…");
     try {
       const response = await api.exports.perform(action);
       if (current !== version.current) return;
@@ -48,11 +54,15 @@ export function ExportProject({
             ? "Export saved"
             : response.state === "cancelled"
               ? "Export cancelled"
-              : response.state === "receipt_pending"
-                ? "File saved; the export record needs recovery."
-                : response.pendingRecovery > 0
-                  ? "An export needs recovery. Keep its destination available and retry recovery."
-                  : "",
+              : response.state === "too_large"
+                ? "This export is larger than its profile allows. Nothing was saved."
+                : response.state === "media_unavailable"
+                  ? "The verified Project Range is unavailable. Relink the Source or export without media."
+                  : response.state === "receipt_pending"
+                    ? "File saved; the export record needs recovery."
+                    : response.pendingRecovery > 0
+                      ? "An export needs recovery. Keep its destination available and retry recovery."
+                      : "",
         );
       }
     } catch {
@@ -119,6 +129,37 @@ export function ExportProject({
             }
           >
             Save JSON
+          </button>
+          <h3>Portable Project Archive</h3>
+          <p>
+            The archive keeps every retained Analysis Revision, edit, Lyrics Document, practice
+            setting and Export Receipt. Source media stays outside it unless you include the
+            verified Project Range.
+          </p>
+          <label className={"export-option"}>
+            <input
+              type={"checkbox"}
+              checked={includeMedia}
+              disabled={pending}
+              onChange={(event) => setIncludeMedia(event.target.checked)}
+              data-testid={"exports.archive.include-media"}
+            />
+            Include verified Project Range media
+          </label>
+          <button
+            type={"button"}
+            disabled={pending}
+            onClick={() =>
+              void perform({
+                type: "save_archive",
+                projectId: snapshot.project.id,
+                expectedProjectRevisionId: snapshot.projectRevisionId,
+                includeMedia,
+              })
+            }
+            data-testid={"exports.archive.save"}
+          >
+            Save Project Archive
           </button>
           {saving && (
             <button type="button" onClick={() => void cancel()}>

@@ -1080,6 +1080,33 @@ button:disabled {
   flex-direction: column;
   gap: 0.5rem;
 }
+.export-project .export-option {
+  flex-direction: row;
+  align-items: center;
+}
+.import-archive {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 20rem;
+  overflow-wrap: anywhere;
+}
+.import-archive-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+.import-archive-option input[type="checkbox"],
+.export-project .export-option input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+}
+.import-archive p,
+.import-archive output {
+  margin: 0;
+}
 .export-project select {
   min-width: 0;
   max-width: 100%;
