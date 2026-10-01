@@ -1,10 +1,29 @@
-import { ActiveViewSchema, ChordValueSchema, type ActiveView, type ChordValue } from "./schema.ts";
+import {
+  ActiveViewSchema,
+  ChordValueSchema,
+  type ActiveView,
+  type ChordValue,
+  type PitchClass,
+} from "./schema.ts";
 
 const sharpNotes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 const flatNotes = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"] as const;
 export function pitchClassNumber(note: string): number {
   const result = sharpNotes.findIndex((name) => name === note);
   return result >= 0 ? result : flatNotes.findIndex((name) => name === note);
+}
+
+export function presentPitchClass(
+  note: PitchClass,
+  presentation: ActiveView["presentation"],
+  contextNote: PitchClass = note,
+): PitchClass {
+  const notes =
+    presentation.enharmonicPreference === "flat" ||
+    (presentation.enharmonicPreference === "contextual" && contextNote.includes("b"))
+      ? flatNotes
+      : sharpNotes;
+  return notes[(pitchClassNumber(note) + presentation.transposeSemitones + 12) % 12]!;
 }
 
 export function presentChord(
@@ -14,15 +33,9 @@ export function presentChord(
   const value = structuredClone(ChordValueSchema.parse(input));
   const presentation = ActiveViewSchema.shape.presentation.parse(rawPresentation);
   if (value.kind === "no_chord") return value;
-  const notes =
-    presentation.enharmonicPreference === "flat" ||
-    (presentation.enharmonicPreference === "contextual" && value.root.includes("b"))
-      ? flatNotes
-      : sharpNotes;
-  const shift = (note: string) =>
-    notes[(pitchClassNumber(note) + presentation.transposeSemitones + 12) % 12]!;
-  value.root = shift(value.root);
-  if (value.bass !== undefined) value.bass = shift(value.bass);
+  const spelling = value.root;
+  value.root = presentPitchClass(value.root, presentation, spelling);
+  if (value.bass !== undefined) value.bass = presentPitchClass(value.bass, presentation, spelling);
   if (
     presentation.beginnerView &&
     value.alterations.length === 0 &&
