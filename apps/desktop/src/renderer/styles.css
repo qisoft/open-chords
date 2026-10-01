@@ -1096,6 +1096,13 @@ button:disabled {
   align-items: flex-start;
   gap: 0.4rem;
 }
+.import-archive-option input[type="checkbox"],
+.export-project .export-option input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+}
 .import-archive p,
 .import-archive output {
   margin: 0;
