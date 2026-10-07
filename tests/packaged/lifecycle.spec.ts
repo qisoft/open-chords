@@ -70,7 +70,11 @@ async function installed(installation: string, state: string) {
   }
   const child = spawn(
     executable,
-    [`--user-data-dir=${state}`, `--remote-debugging-port=${address.port}`],
+    [
+      `--user-data-dir=${state}`,
+      `--remote-debugging-port=${address.port}`,
+      "--open-chords-startup-diagnostics",
+    ],
     { env, stdio: ["ignore", "pipe", "pipe"] },
   );
   let diagnostics = "";
