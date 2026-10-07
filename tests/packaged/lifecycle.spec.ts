@@ -104,9 +104,18 @@ async function installed(installation: string, state: string) {
     try {
       const context = browser.contexts()[0]!;
       await expect
-        .poll(() => context.pages().some((page) => page.url().startsWith("open-chords://")), {
-          timeout: 30000,
-        })
+        .poll(
+          () => {
+            if (child.exitCode !== null || child.signalCode !== null)
+              throw new Error(
+                `Installed application exited before renderer: code=${child.exitCode} signal=${child.signalCode}; ${diagnostics}`,
+              );
+            return context.pages().some((page) => page.url().startsWith("open-chords://"));
+          },
+          {
+            timeout: 30000,
+          },
+        )
         .toBe(true);
       const page = context
         .pages()
