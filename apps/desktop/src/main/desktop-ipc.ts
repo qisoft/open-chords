@@ -19,11 +19,13 @@ import type { LyricsDiscovery } from "./lyrics-discovery.ts";
 import type { ManualUpdates } from "./manual-updates.ts";
 import type { ProjectArchiveImports } from "./project-archive-imports.ts";
 import type { ProjectExports } from "./project-exports.ts";
+import type { ProjectRecovery } from "./project-recovery.ts";
 import type { YouTubeService } from "./youtube-service.ts";
 
 type CommandType = DesktopCommand["type"];
 
 const commandChannels = [
+  [DESKTOP_IPC_CHANNELS.recoveryPerform, "recovery.perform"],
   [DESKTOP_IPC_CHANNELS.updatesPerform, "updates.perform"],
   [DESKTOP_IPC_CHANNELS.youtubePerform, "youtube.perform"],
   [DESKTOP_IPC_CHANNELS.exportsPerform, "exports.perform"],
@@ -45,6 +47,7 @@ const commandChannels = [
 ] as const satisfies ReadonlyArray<readonly [string, CommandType]>;
 
 export type DesktopIpcOptions = {
+  recovery?: ProjectRecovery;
   updates?: ManualUpdates;
   archives?: ProjectArchiveImports;
   exports?: ProjectExports;
@@ -70,6 +73,7 @@ export function installDesktopIpc(authority: ProjectAuthority, options: DesktopI
     options.exports,
     options.archives,
     options.updates,
+    options.recovery,
   );
 
   for (const [channel, expectedType] of commandChannels) {

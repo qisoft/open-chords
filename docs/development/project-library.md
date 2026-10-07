@@ -50,3 +50,13 @@ pnpm validate
 ```
 
 The focused suite covers durable reopen, subscriber ordering, crash injection, Head-to-ledger verification, unpublished initial revision cleanup, corrupt-Head recovery, damaged visibility, newer-minor read-only behavior, startup migration and migration failure, migration/rollback history, reference-aware deletion and startup collection, Trash validation, relocation reconciliation and canonicalization, and index rebuilding.
+
+## User-visible recovery
+
+**Project recovery** is available beside the Library tools even when a Project cannot open. Named `recovery.perform` commands list active/damaged Projects and inspect only one selected Project. The renderer receives safe IDs, timestamps, revision reasons, compatibility and a structured Head recovery report; raw migration exceptions, paths, Source records and retained payloads are omitted. The most recent 100 revisions are listed, with an explicit count of earlier retained revisions. The list is bounded to 10,000 Projects and explicitly reports truncation.
+
+A failed migration is shown as preserved read-only state. A newer unsupported schema is shown separately, and both cases refuse rollback and all normal writes. A damaged Project has no invented active Revision; the dialog directs the user to preserve the Library and import a compatible Portable Project Archive through the existing separate-copy workflow. **Open preserved Project** uses the existing bounded Project read capability.
+
+On a writable Project, the user selects a previous Revision and confirms that exact selection before **Restore selected backup** becomes available. Main validates the confirmation and passes the current expected Head to the existing serialized Library rollback. A stale Head or an unavailable/foreign Revision cannot be published. The selected payload is migrated and validated under the current schema, then atomically committed as a new rollback Revision; existing history is retained. A failure requires refreshing the current Project state before another explicit attempt. No retry or downgrade runs automatically.
+
+Service tests cover exact confirmation, stale Head refusal, durable reopen, migration failure with no leaked exception text, newer-schema write refusal and damaged-state reporting. Renderer CI tests explicit confirmation and the accessible dialog through real IPC. Installed CI performs a selected backup rollback through the bounded capability, terminates the application, and reopens its durable result. Native screen-reader acceptance remains a separate release gate.

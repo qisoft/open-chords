@@ -33,6 +33,7 @@ import type { ModelStore } from "./model-store.ts";
 import type { NetworkMode } from "./network-mode.ts";
 import { ArchiveImportBusyError, type ProjectArchiveImports } from "./project-archive-imports.ts";
 import type { ProjectExports } from "./project-exports.ts";
+import type { ProjectRecovery } from "./project-recovery.ts";
 import type { DesktopSecurityConfiguration } from "./renderer-security.ts";
 import type { YouTubeService } from "./youtube-service.ts";
 
@@ -133,6 +134,7 @@ export type ModelGatewayService = {
 };
 
 export class DesktopCommandGateway {
+  readonly #recovery: ProjectRecovery | undefined;
   readonly #updates: ManualUpdates | undefined;
   readonly #archives: ProjectArchiveImports | undefined;
   readonly #exports: ProjectExports | undefined;
@@ -167,7 +169,9 @@ export class DesktopCommandGateway {
     exports?: ProjectExports,
     archives?: ProjectArchiveImports,
     updates?: ManualUpdates,
+    recovery?: ProjectRecovery,
   ) {
+    this.#recovery = recovery;
     this.#updates = updates;
     this.#archives = archives;
     this.#authority = authority;
@@ -309,6 +313,30 @@ export class DesktopCommandGateway {
           response: errorResponse(
             "capability_unavailable",
             "YouTube operation unavailable. Check Offline Mode or open the video on YouTube.",
+            true,
+            command,
+          ),
+        };
+      }
+    }
+    if (command.type === "recovery.perform") {
+      try {
+        if (!this.#recovery) throw new Error("Recovery unavailable");
+        const result = await this.#recovery.perform(command.action);
+        return {
+          action: "none",
+          response: DesktopResponseSchema.parse({
+            ...responseEnvelope(command),
+            type: "recovery.result",
+            ...result,
+          }),
+        };
+      } catch {
+        return {
+          action: "none",
+          response: errorResponse(
+            "capability_unavailable",
+            "Recovery operation failed. Inspect the current Project Revision before retrying.",
             true,
             command,
           ),
