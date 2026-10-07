@@ -524,7 +524,7 @@ it("migrates existing 1.2 Projects before storing Alignment provenance and ancho
   await older.createProject({ envelope, records: goldenRecords() });
   const current = await openProjectLibrary({ stateRoot });
   const saved = await current.readProject(envelope.payload.id);
-  expect(saved.envelope.schemaVersion).toBe("1.3");
+  expect(saved.envelope.schemaVersion).toBe("1.4");
   expect(saved.envelope.payload.lyricsDocuments).toEqual(envelope.payload.lyricsDocuments);
   expect(saved.envelope.payload.lyricsAlignments).toEqual(envelope.payload.lyricsAlignments);
   expect(saved.revisions.map((item) => item.reason)).toEqual(["created", "migration"]);

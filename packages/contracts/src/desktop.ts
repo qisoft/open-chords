@@ -8,7 +8,12 @@ import {
 import { z } from "zod";
 
 import { AlignmentActionSchema, AlignmentJobSummarySchema } from "./alignment.ts";
-import { ExportActionSchema, ExportReceiptSummarySchema } from "./exports.ts";
+import {
+  ArchiveImportRejectionSchema,
+  ExportActionSchema,
+  ExportReceiptSummarySchema,
+  OfflineMediaOutcomeSchema,
+} from "./exports.ts";
 import { DesktopMessageIdSchema } from "./identifiers.ts";
 import {
   YouTubeActionSchema,
@@ -30,6 +35,7 @@ export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
   youtubePerform: "open-chords:youtube:perform",
   exportsPerform: "open-chords:exports:perform",
+  archivesImport: "open-chords:archives:import",
   alignmentPerform: "open-chords:alignment:perform",
   modelsPerform: "open-chords:models:perform",
   lyricsPerform: "open-chords:lyrics:perform",
@@ -184,7 +190,14 @@ export const AlignmentCommandSchema = z.strictObject({
   action: AlignmentActionSchema,
 });
 
+export const ImportArchiveCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  adoptOfflineMedia: z.boolean(),
+  type: z.literal("archives.import"),
+});
+
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
+  ImportArchiveCommandSchema,
   z.strictObject({
     ...correlatedEnvelope,
     type: z.literal("exports.perform"),
@@ -245,9 +258,31 @@ const mediaSelectionEnvelope = {
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
   z.strictObject({
     ...correlatedEnvelope,
+    type: z.literal("archives.import_result"),
+    result: z.discriminatedUnion("state", [
+      z.strictObject({ state: z.literal("cancelled") }),
+      z.strictObject({ state: z.literal("rejected"), reason: ArchiveImportRejectionSchema }),
+      z.strictObject({
+        state: z.enum(["already_present", "imported"]),
+        importedCopy: z.boolean(),
+        offlineMedia: OfflineMediaOutcomeSchema,
+        projectId: DesktopProjectIdSchema,
+      }),
+    ]),
+  }),
+  z.strictObject({
+    ...correlatedEnvelope,
     type: z.literal("exports.result"),
     projectId: DesktopProjectIdSchema,
-    state: z.enum(["idle", "saved", "cancelled", "cancelling", "receipt_pending"]),
+    state: z.enum([
+      "idle",
+      "saved",
+      "cancelled",
+      "cancelling",
+      "media_unavailable",
+      "receipt_pending",
+      "too_large",
+    ]),
     busy: z.boolean(),
     pendingRecovery: z.number().int().nonnegative(),
     receipts: z.array(ExportReceiptSummarySchema).max(100),
@@ -421,7 +456,14 @@ export type MediaPlaybackResponse = Extract<
   { type: "media.playback_ready" | "media.source_unavailable" }
 >;
 
+export type ArchiveImportResponse = Extract<DesktopResponse, { type: "archives.import_result" }>;
+
 export type OpenChordsDesktopApi = {
+  archives: {
+    import(options: {
+      adoptOfflineMedia: boolean;
+    }): Promise<DesktopErrorResponse | ArchiveImportResponse>;
+  };
   exports: {
     perform(
       action: z.infer<typeof ExportActionSchema>,

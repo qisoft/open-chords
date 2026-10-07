@@ -310,8 +310,12 @@ def validate_domain(envelope: dict[str, Any]) -> None:
     unique_ids(project["supportClaims"], "Support Claims")
     revisions = {item["id"]: item for item in project["analysisRevisions"]}
     claims = {item["id"] for item in project["supportClaims"]}
+    origins = [item["projectId"] for item in project.get("importOrigins", [])]
+    history_project_ids = {project["id"], *origins}
+    if len(history_project_ids) != len(origins) + 1:
+        raise ContractError("Import origins must name distinct earlier Project identities")
     for revision in project["analysisRevisions"]:
-        if revision["projectId"] != project["id"] or not set(revision["supportClaimIds"]) <= claims:
+        if revision["projectId"] not in history_project_ids or not set(revision["supportClaimIds"]) <= claims:
             raise ContractError("invalid Analysis Revision reference")
         validate_timeline(revision["timeline"], duration)
     layers = {item["id"]: item for item in project["editLayers"]}
