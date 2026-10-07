@@ -17,3 +17,7 @@ JSON is bounded to 32 MiB, ChordPro to 8 MiB, LRC to 4 MiB and PDF to 64 MiB. PD
 ## Evidence boundaries
 
 Domain projection and public service tests cover exact symbols, omitted lines, hashes, persistent Receipts and unavailable LRC. Renderer CI saves all formats through real IPC with only the external native-picker response substituted. Installed CI reopens all formats' Receipts and checks available controls; that test alone does not demonstrate an actual installed native save-dialog interaction. PDF bytes are also rendered for visual inspection. Tagged structure does not establish PDF/UA, PDF/A, or native screen-reader acceptance, and no such conformance is claimed.
+
+## Runtime notices
+
+The pinned npm archives for `brotli@1.3.3`, `dfa@1.2.0` and `fontkit@2.0.4` declare MIT in their manifests/READMEs but omit separate license files. Version-bound pnpm patches add the package author, exact upstream tag commit and full MIT terms. The Brotli supplement also preserves the decoder source copyright notice and full Apache-2.0 terms. These are additional notices only; runtime code is unchanged. The strict release-notice collector still rejects every package without a license file. A regression checks the texts in the installed patched dependencies.
