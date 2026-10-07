@@ -429,19 +429,31 @@ export class ProjectLibrary {
   static async open(options: ProjectLibraryOptions): Promise<ProjectLibrary> {
     if (!isAbsolute(options.stateRoot))
       throw new Error("Project Library state root must be absolute");
+    const diagnose = (stage: string) => {
+      if (process.argv.includes("--open-chords-startup-diagnostics"))
+        console.info(`Desktop Library startup stage: ${stage}`);
+    };
     const stateRoot = resolve(options.stateRoot);
+    diagnose("state_directory");
     await ensureDurableDirectory(stateRoot);
+    diagnose("relocation_journal");
     await inspectRelocationJournal(stateRoot);
     const locationPath = join(stateRoot, LIBRARY_LOCATION_FILE);
+    diagnose("location");
     const configuredRoot = await readLibraryLocation(
       locationPath,
       join(stateRoot, DEFAULT_LIBRARY_DIRECTORY),
     );
+    diagnose("canonical_path");
     const activeRoot = await canonicalizeLibraryPath(configuredRoot);
     const library = new ProjectLibrary(options, activeRoot);
+    diagnose("local_volume");
     await library.#assertLocalPath(activeRoot);
+    diagnose("initialize");
     await library.#initializeRoot();
+    diagnose("relocation_cleanup");
     await library.#cleanupCompletedRelocation();
+    diagnose("ready");
     return library;
   }
 
