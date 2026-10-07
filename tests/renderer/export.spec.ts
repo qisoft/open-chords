@@ -85,16 +85,17 @@ test("the export dialog saves a committed JSON view and reopens its Receipt", as
     });
     await page.getByRole("button", { name: "Save JSON", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Export cancelled" })).toBeVisible();
-    expect(
-      await page.evaluate(() =>
-        window.openChords!.exports.perform({ type: "list", projectId: "project_golden" }),
-      ),
-    ).toMatchObject({
-      receipts: expect.arrayContaining([
-        { displayName: "score.json" },
-        { displayName: "score.pdf" },
-      ]),
-    });
+    const response = await page.evaluate(() =>
+      window.openChords!.exports.perform({ type: "list", projectId: "project_golden" }),
+    );
+    expect(response.type).toBe("exports.result");
+    if (response.type !== "exports.result") throw new Error("Receipt listing failed");
+    expect(response.receipts.map(({ displayName }) => displayName)).toEqual([
+      "score.json",
+      "score.cho",
+      "score.lrc",
+      "score.pdf",
+    ]);
   } finally {
     await application.close();
     await rm(root, { recursive: true, force: true });
