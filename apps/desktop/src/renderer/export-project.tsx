@@ -65,7 +65,7 @@ export function ExportProject({
                 : response.state === "media_unavailable"
                   ? "The verified Project Range is unavailable. Relink the Source or export without media."
                   : response.state === "unavailable"
-                    ? "LRC needs validated lyric-line timing. Select or align lyrics before exporting."
+                    ? "No lyric lines can be exported safely to LRC. Review the selected lyric text and line timing."
                     : response.state === "receipt_pending"
                       ? "File saved; the export record needs recovery."
                       : response.pendingRecovery > 0
