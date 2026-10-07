@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   workflow_dispatch:
   pull_request:
   push:
@@ -46,12 +47,14 @@ jobs:
             os: macos-15
             arch: arm64
             profile: darwin-arm64
+            release-target: macos-arm64
           - name: Windows Server 2025 x64 build profile
             os: windows-2025
             arch: x64
             profile: windows-server-2025-x64
+            release-target: windows-x64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 55
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -168,8 +171,30 @@ jobs:
             dist/alignment-runtime/open-chords-alignment/runtime-info.json
       - name: Build installable Forge artifact
         run: pnpm make -- --arch=${{ matrix.arch }}
+      - name: Stage release assets and measure the installed tree
+        run: node tools/release/cli.ts stage
+      - id: syft
+        uses: anchore/sbom-action/download-syft@v0
+        with:
+          syft-version: v1.52.0
+      - name: Catalogue shipped components into SPDX and CycloneDX SBOMs
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          stem="out/release/assets/open-chords-${version}-${{ matrix.release-target }}"
+          "${{ steps.syft.outputs.cmd }}" scan "dir:out/release/scan/${{ matrix.release-target }}" \
+            --source-name "Open Chords" \
+            --source-version "$version" \
+            -o "spdx-json=${stem}.spdx.json" \
+            -o "cyclonedx-json=${stem}.cdx.json"
       - name: Verify installed trust boundary
         run: pnpm test:packaged --retries=0
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.release-target }}
+          path: out/release/assets/
+          if-no-files-found: error
       - name: Observe live installed YouTube playback
         if: github.event_name == 'workflow_dispatch'
         env:

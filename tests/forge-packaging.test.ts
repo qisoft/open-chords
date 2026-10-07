@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
 
-it("installs macOS containment in the host executable domain", () => {
+it("keeps the macOS containment root out of the signed executable folder", () => {
   const root = mkdtempSync(join(tmpdir(), "open-chords-forge-packaging-"));
   const application = join(root, "Open Chords.app");
   const buildPath = join(application, "Contents", "Resources", "app");
@@ -72,12 +72,7 @@ it("installs macOS containment in the host executable domain", () => {
   expect(signedService).toBe(
     join(application, "Contents", "XPCServices", "OpenChordsAnalysisService.xpc"),
   );
-  expect(
-    readFileSync(
-      join(application, "Contents", "MacOS", "containment", "open-chords-containment-bridge"),
-      "utf8",
-    ),
-  ).toBe("signed-bridge");
+  expect(existsSync(join(application, "Contents", "MacOS", "containment"))).toBe(false);
   expect(
     readFileSync(join(application, "Contents", "MacOS", "open-chords-containment-bridge"), "utf8"),
   ).toBe("signed-bridge");
@@ -134,7 +129,7 @@ it("preserves separately signed and hashed containment payloads", () => {
   ).toBe(true);
   expect(
     Reflect.apply(ignores, undefined, [
-      "/Open Chords.app/Contents/MacOS/containment/open-chords-containment-bridge",
+      "/Open Chords.app/Contents/Resources/containment/containment-manifest.json",
     ]),
   ).toBe(true);
   expect(

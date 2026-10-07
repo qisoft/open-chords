@@ -14,8 +14,10 @@ import { z } from "zod";
 
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof-constants.ts";
+import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/packaged-sidecar-proof-evidence.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
 test.skip(
   process.platform !== "darwin" && process.platform !== "win32",
@@ -126,17 +128,28 @@ test("installed artifact runs contained analysis, publishes Revisions, and reaps
     windowsHide: true,
   });
   let output = "";
+  let evidenceTranscript = "";
   const capture = (chunk: Buffer) => {
     output = `${output}${chunk.toString("utf8")}`.slice(-64 * 1024);
   };
   proof.stdout.on("data", capture);
   proof.stderr.on("data", capture);
+  proof.stderr.on("data", (chunk: Buffer) => {
+    evidenceTranscript = `${evidenceTranscript}${chunk.toString("utf8")}`;
+  });
 
   const exit = await waitForApplicationExit(proof, 290_000).finally(() => {
     process.stdout.write(output);
   });
   expect(exit, output).toEqual({ code: 0, signal: null });
   expect(output).toContain("Packaged sidecar proof stage: publication_completed");
+  const evidenceLine = evidenceTranscript
+    .split(/\r?\n/)
+    .find((line) => line.startsWith(CONTAINMENT_EVIDENCE_LINE_PREFIX));
+  expect(evidenceLine, "containment evidence was reported").toBeDefined();
+  expect(JSON.parse(evidenceLine!.slice(CONTAINMENT_EVIDENCE_LINE_PREFIX.length))).toEqual(
+    (await readStagedReleaseManifest()).containment.evidence,
+  );
 });
 
 test("installed editor and practice save through named IPC with a durable reopened result", async () => {
@@ -1249,10 +1262,7 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
           "open-chords-alignment",
         )
       : join(resourcesPath, "open-chords-alignment");
-  const containmentRoot =
-    process.platform === "darwin"
-      ? join(resourcesPath, "..", "MacOS", "containment")
-      : join(resourcesPath, "containment");
+  const containmentRoot = join(resourcesPath, "containment");
   const digestFile = (path: string) =>
     createHash("sha256").update(readFileSync(path)).digest("hex");
   const worker = createContainedAlignmentWorker({

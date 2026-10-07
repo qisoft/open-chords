@@ -86,6 +86,10 @@ module.exports = {
         join(__dirname, "dist", "acquisition-runtime", "open-chords-acquisition"),
       );
     },
+    packageAfterPrune: async (_forgeConfig, buildPath, _electronVersion, platform) => {
+      const { writeReleaseNotices } = await import("./tools/release/notices.ts");
+      writeReleaseNotices({ buildPath, platform, repositoryRoot: __dirname });
+    },
   },
   plugins: [
     new FusesPlugin({

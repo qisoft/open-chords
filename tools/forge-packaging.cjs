@@ -42,9 +42,6 @@ function installStagedMacOSContainment(
     );
   }
   signService(service, serviceEntitlements);
-  cpSync(containmentSource, join(contents, "MacOS", "containment"), {
-    recursive: true,
-  });
   cpSync(
     join(containmentSource, "open-chords-containment-bridge"),
     join(contents, "MacOS", "open-chords-containment-bridge"),
@@ -75,7 +72,6 @@ function isPreverifiedContainmentPath(path) {
     path.includes("/Contents/Resources/open-chords-alignment/") ||
     path.includes("/Contents/Resources/open-chords-acquisition/") ||
     path.includes("/Contents/Resources/containment/") ||
-    path.includes("/Contents/MacOS/containment/") ||
     path.endsWith("/Contents/MacOS/open-chords-containment-bridge") ||
     path.includes("/Contents/XPCServices/OpenChordsAnalysisService.xpc/")
   );

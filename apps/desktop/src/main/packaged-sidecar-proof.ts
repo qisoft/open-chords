@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { runPackagedAnalysisPublicationProof } from "./packaged-analysis-publication-proof.ts";
+import { reportFirstContainmentEvidence } from "./packaged-sidecar-proof-evidence.ts";
 import { throwCombinedFailures } from "./packaged-sidecar-proof-failures.ts";
 import {
   packagedWorkspaceFailureCode,
@@ -212,10 +213,7 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
   );
   process.stderr.write("Packaged sidecar proof stage: runtime_verified\n");
   const containment = verifyContainmentRuntime(
-    join(
-      process.resourcesPath,
-      platform === "darwin" ? join("..", "MacOS", "containment") : "containment",
-    ),
+    join(process.resourcesPath, "containment"),
     EXPECTED_CONTAINMENT_MANIFEST_SHA256,
     platform,
     platform === "darwin"
@@ -245,24 +243,27 @@ async function runPackagedSidecarProofInternal(): Promise<void> {
       join(workspace, "input", "analysis-recipe.json"),
       JSON.stringify(packagedAnalysisRecipe()),
     );
+    const reportEvidence = reportFirstContainmentEvidence((line) => process.stderr.write(line));
     const createLauncher = (
       args: readonly string[],
       acceptedExitCodes: readonly number[] = [0],
       sessionWorkspace = workspace,
     ) =>
       createNativeContainmentLauncher(
-        createExecutableNativeContainmentBroker({
-          acceptedExitCodes,
-          args,
-          containment,
-          executablePath: containedRuntime.executablePath,
-          platform,
-          runtimeRoot: containedRuntime.runtimeRoot,
-          ...(prepared.windowsProfile === undefined
-            ? {}
-            : { windowsProfile: prepared.windowsProfile }),
-          workspace: sessionWorkspace,
-        }),
+        reportEvidence(
+          createExecutableNativeContainmentBroker({
+            acceptedExitCodes,
+            args,
+            containment,
+            executablePath: containedRuntime.executablePath,
+            platform,
+            runtimeRoot: containedRuntime.runtimeRoot,
+            ...(prepared.windowsProfile === undefined
+              ? {}
+              : { windowsProfile: prepared.windowsProfile }),
+            workspace: sessionWorkspace,
+          }),
+        ),
         platform,
       );
     stage = "adversarial_probe_failed";

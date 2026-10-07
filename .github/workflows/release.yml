@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - feature/46-self-contained-packages
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Check the release version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require the tag to name the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v${version}" || {
+            echo "::error::Tag $GITHUB_REF_NAME does not match package version v${version}"
+            exit 1
+          }
+
+  build:
+    name: Build
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  attest:
+    name: Checksum, attest, and verify
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Activate exact pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.30.1 --activate
+      - name: Install reviewed dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          merge-multiple: true
+          path: release
+      - name: Write SHA256SUMS and cross-check every release manifest
+        run: node tools/release/cli.ts checksums release
+      - name: Attest build provenance for every asset
+        uses: actions/attest@v4
+        with:
+          subject-checksums: release/SHA256SUMS
+      - name: Resolve asset names
+        id: names
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Attest the macOS SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: release/open-chords-${{ steps.names.outputs.version }}-macos-arm64.zip
+          sbom-path: release/open-chords-${{ steps.names.outputs.version }}-macos-arm64.spdx.json
+      - name: Attest the Windows SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: release/open-chords-${{ steps.names.outputs.version }}-windows-x64.zip
+          sbom-path: release/open-chords-${{ steps.names.outputs.version }}-windows-x64.spdx.json
+      - name: Verify the attestations of every archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for archive in release/*.zip; do
+            gh attestation verify "$archive" --repo "${{ github.repository }}"
+          done
+      - name: Write release notes from the measured manifests
+        run: node tools/release/cli.ts release-notes release > release/RELEASE-NOTES.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.run_id }}
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    name: Publish draft GitHub Release
+    needs: attest
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ github.run_id }}
+          path: release
+      - name: Create the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          --repo "${{ github.repository }}"
+          --draft
+          --verify-tag
+          --title "Open Chords ${GITHUB_REF_NAME#v} (unsigned community build)"
+          --notes-file release/RELEASE-NOTES.md
+          release/*.zip release/*.json release/SHA256SUMS
