@@ -73,3 +73,13 @@ Every installed application contains a `notices` folder. It holds the Open Chord
 
 - On macOS, the folder is `Open Chords.app/Contents/Resources/notices`.
 - On Windows, the folder is `resources\notices` in the extracted folder.
+
+## Check for updates from the application
+
+Open **Updates**, then choose **Check for updates**. Opening the dialog only reads local status. The explicit check makes one credential-free request to `api.github.com/repos/qisoft/open-chords/releases/latest`, with redirects refused, a 15-second deadline and a 1 MiB response limit. No published release, incomplete platform assets, missing checksums, malformed metadata and a failed check have distinct visible outcomes. There is no background polling or automatic retry.
+
+The dialog shows your installed version, the latest published release tag/date, plain-text release notes, the archive for your native platform, its size, and a SHA-256 digest when GitHub supplies one. A missing digest is shown as missing, never inferred. The release page contains `SHA256SUMS`; compare the actual download with those checksums and verify its build attestation using the instructions above. Metadata alone is not download verification, and the dialog does not claim that a latest published version is necessarily newer than a custom installed build.
+
+**Cancel update check**, closing the dialog, replacing the renderer or quitting cancels an active request. Enabling Offline Mode cancels it too and prevents update checks or opening external instructions/release pages. In Offline Mode the local status and controls remain available. The application never downloads or installs an update, restarts, or changes installed models; **Open release on GitHub** and **Open verification instructions** open a fixed repository page only after an explicit click.
+
+This flow implements the manual-update portion of #51. Category-confirmed full cleanup and user-visible migration/rollback recovery remain separate work; OS application removal continues to preserve user data.

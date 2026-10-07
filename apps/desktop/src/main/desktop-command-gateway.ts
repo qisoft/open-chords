@@ -28,6 +28,7 @@ import type {
   LocalMediaSelection,
 } from "./local-media.ts";
 import type { LyricsDiscovery } from "./lyrics-discovery.ts";
+import type { ManualUpdates } from "./manual-updates.ts";
 import type { ModelStore } from "./model-store.ts";
 import type { NetworkMode } from "./network-mode.ts";
 import { ArchiveImportBusyError, type ProjectArchiveImports } from "./project-archive-imports.ts";
@@ -132,6 +133,7 @@ export type ModelGatewayService = {
 };
 
 export class DesktopCommandGateway {
+  readonly #updates: ManualUpdates | undefined;
   readonly #archives: ProjectArchiveImports | undefined;
   readonly #exports: ProjectExports | undefined;
   readonly #youtube: YouTubeService | undefined;
@@ -164,7 +166,9 @@ export class DesktopCommandGateway {
     youtube?: YouTubeService,
     exports?: ProjectExports,
     archives?: ProjectArchiveImports,
+    updates?: ManualUpdates,
   ) {
+    this.#updates = updates;
     this.#archives = archives;
     this.#authority = authority;
     this.#youtube = youtube;
@@ -305,6 +309,30 @@ export class DesktopCommandGateway {
           response: errorResponse(
             "capability_unavailable",
             "YouTube operation unavailable. Check Offline Mode or open the video on YouTube.",
+            true,
+            command,
+          ),
+        };
+      }
+    }
+    if (command.type === "updates.perform") {
+      try {
+        if (!this.#updates) throw new Error("Updates unavailable");
+        const result = await this.#updates.perform(command.action);
+        return {
+          action: "none",
+          response: DesktopResponseSchema.parse({
+            ...responseEnvelope(command),
+            type: "updates.result",
+            ...result,
+          }),
+        };
+      } catch {
+        return {
+          action: "none",
+          response: errorResponse(
+            "capability_unavailable",
+            "Update operation unavailable. Check Offline Mode and try again.",
             true,
             command,
           ),

@@ -15,6 +15,7 @@ import {
   OfflineMediaOutcomeSchema,
 } from "./exports.ts";
 import { DesktopMessageIdSchema } from "./identifiers.ts";
+import { UpdateActionSchema, UpdateStatusSchema } from "./updates.ts";
 import {
   YouTubeActionSchema,
   YouTubePlayerStateSchema,
@@ -33,6 +34,7 @@ import {
 export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
+  updatesPerform: "open-chords:updates:perform",
   youtubePerform: "open-chords:youtube:perform",
   exportsPerform: "open-chords:exports:perform",
   archivesImport: "open-chords:archives:import",
@@ -196,7 +198,14 @@ export const ImportArchiveCommandSchema = z.strictObject({
   type: z.literal("archives.import"),
 });
 
+export const UpdatesCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  type: z.literal("updates.perform"),
+  action: UpdateActionSchema,
+});
+
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
+  UpdatesCommandSchema,
   ImportArchiveCommandSchema,
   z.strictObject({
     ...correlatedEnvelope,
@@ -256,6 +265,7 @@ const mediaSelectionEnvelope = {
 };
 
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
+  UpdateStatusSchema.extend({ ...correlatedEnvelope, type: z.literal("updates.result") }),
   z.strictObject({
     ...correlatedEnvelope,
     type: z.literal("archives.import_result"),
@@ -460,6 +470,11 @@ export type MediaPlaybackResponse = Extract<
 export type ArchiveImportResponse = Extract<DesktopResponse, { type: "archives.import_result" }>;
 
 export type OpenChordsDesktopApi = {
+  updates: {
+    perform(
+      action: z.infer<typeof UpdateActionSchema>,
+    ): Promise<DesktopErrorResponse | Extract<DesktopResponse, { type: "updates.result" }>>;
+  };
   archives: {
     import(options: {
       adoptOfflineMedia: boolean;
