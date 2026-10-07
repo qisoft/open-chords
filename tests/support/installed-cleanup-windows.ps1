@@ -14,6 +14,7 @@ $labels = @{
   result = 'Selected cleanup completed'
 }
 $seen = @{}
+$probe = @{ windows = 0; elements = 0; checkboxes = 0; buttons = 0; recognized = 0; actions = 0 }
 $events = [System.Collections.Generic.List[object]]::new()
 $deadline = [DateTime]::UtcNow.AddSeconds(90)
 while ([DateTime]::UtcNow -lt $deadline) {
@@ -22,8 +23,18 @@ while ([DateTime]::UtcNow -lt $deadline) {
     exit 0
   }
   $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)
+  $probe.windows = [Math]::Max($probe.windows, $windows.Count)
   foreach ($window in $windows) {
     $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $probe.elements = [Math]::Max($probe.elements, $elements.Count)
+    $checkboxCount = 0
+    $buttonCount = 0
+    foreach ($element in $elements) {
+      if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::CheckBox) { $checkboxCount++ }
+      if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button) { $buttonCount++ }
+    }
+    $probe.checkboxes = [Math]::Max($probe.checkboxes, $checkboxCount)
+    $probe.buttons = [Math]::Max($probe.buttons, $buttonCount)
     $category = $null
     foreach ($key in $labels.Keys) {
       foreach ($element in $elements) {
@@ -32,6 +43,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
       if ($null -ne $category) { break }
     }
     if ($null -eq $category) { continue }
+    $probe.recognized++
     $identity = ($window.GetRuntimeId() -join '-') + ':' + $category
     if ($seen.ContainsKey($identity)) { continue }
     $checkbox = $null
@@ -55,10 +67,13 @@ while ([DateTime]::UtcNow -lt $deadline) {
         if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) { throw 'Native confirmation did not toggle' }
       }
     }
+    $probe.actions++
+    [Console]::Error.WriteLine("Native cleanup probe: action=$category")
     $events.Add(@{ category = $category; checked = ($selectModels -or $confirmFinal); action = $buttonName })
     $seen[$identity] = $true
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
   }
   Start-Sleep -Milliseconds 100
 }
+[Console]::Error.WriteLine("Native cleanup probe: " + (ConvertTo-Json -InputObject $probe -Compress))
 throw 'Installed cleanup native dialog driver timed out'
