@@ -14,7 +14,7 @@ $labels = @{
   result = 'Selected cleanup completed'
 }
 $seen = @{}
-$probe = @{ windows = 0; elements = 0; checkboxes = 0; buttons = 0; recognized = 0; actions = 0 }
+$probe = @{ windows = 0; elements = 0; checkboxes = 0; buttons = 0; recognized = 0; actions = 0; actionLabels = 0; invokableActions = 0; controlTypes = @{} }
 $events = [System.Collections.Generic.List[object]]::new()
 $deadline = [DateTime]::UtcNow.AddSeconds(90)
 while ([DateTime]::UtcNow -lt $deadline) {
@@ -30,6 +30,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $checkboxCount = 0
     $buttonCount = 0
     foreach ($element in $elements) {
+      $typeId = [string]$element.Current.ControlType.Id
+      $probe.controlTypes[$typeId] = $true
       if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::CheckBox) { $checkboxCount++ }
       if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button) { $buttonCount++ }
     }
@@ -48,6 +50,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     if ($seen.ContainsKey($identity)) { continue }
     $checkbox = $null
     $button = $null
+    $invoke = $null
     $selectModels = $category -eq 'models' -and $Scenario -ne 'unchecked'
     $confirmFinal = $category -eq 'final' -and $Scenario -eq 'confirm-models'
     $buttonName = if ($category -eq 'result') { 'Close' } elseif ($category -eq 'final') {
@@ -55,7 +58,15 @@ while ([DateTime]::UtcNow -lt $deadline) {
     } elseif ($category -eq 'models') { 'Select for deletion' } else { 'Preserve category' }
     foreach ($element in $elements) {
       if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::CheckBox) { $checkbox = $element }
-      if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $element.Current.Name -eq $buttonName) { $button = $element }
+      if ($element.Current.Name -eq $buttonName) {
+        $probe.actionLabels++
+        $candidateInvoke = $null
+        if ($element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$candidateInvoke)) {
+          $probe.invokableActions++
+          $button = $element
+          $invoke = $candidateInvoke
+        }
+      }
     }
     if ($null -eq $button) { continue }
     if ($category -ne 'result') {
@@ -71,7 +82,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     [Console]::Error.WriteLine("Native cleanup probe: action=$category")
     $events.Add(@{ category = $category; checked = ($selectModels -or $confirmFinal); action = $buttonName })
     $seen[$identity] = $true
-    $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $invoke.Invoke()
   }
   Start-Sleep -Milliseconds 100
 }
