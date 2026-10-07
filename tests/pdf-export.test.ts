@@ -26,8 +26,9 @@ it("renders byte-identical PDF bytes pinned to a golden hash", async () => {
   const first = await render(leadSheetProject());
   const second = await render(leadSheetProject());
   expect(first.bytes.equals(second.bytes)).toBe(true);
+  expect(first.bytes.toString("latin1")).not.toContain("/FlateDecode");
   expect(sha256(first.bytes)).toBe(
-    "47ec0b527db35d0e42ae169ad80c88fd7e75e21ba6121e8eb22f3eeb01da872e",
+    "3c834d61c9f05666fac4090bb5287fa676eaef34d94c463565c076f77a86cefa",
   );
   expect(first.losses).toEqual([
     "abstained_chord_marked_unknown",

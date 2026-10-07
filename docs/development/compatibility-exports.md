@@ -12,7 +12,7 @@ The current/original presentation selection applies to lead sheets. Original rem
 
 ## Bounds and determinism
 
-JSON is bounded to 32 MiB, ChordPro to 8 MiB, LRC to 4 MiB and PDF to 64 MiB. PDF golden tests pin deterministic bytes and inspect embedded fonts, tags, language, diagram alternatives and page text. Long unbroken words and paragraphs spanning pages have geometry regressions. Missing font glyphs are reported in the Receipt instead of claiming full script coverage. Noto font hashes are checked at runtime and its OFL license ships in release notices.
+JSON is bounded to 32 MiB, ChordPro to 8 MiB, LRC to 4 MiB and PDF to 64 MiB. PDF streams are uncompressed so different host zlib versions cannot change exported bytes. The golden fixture has been checked under Node 24.10 and 24.20. PDF golden tests pin deterministic bytes and inspect embedded fonts, tags, language, diagram alternatives and page text. Long unbroken words and paragraphs spanning pages have geometry regressions. Missing font glyphs are reported in the Receipt instead of claiming full script coverage. Noto font hashes are checked at runtime and its OFL license ships in release notices.
 
 ## Evidence boundaries
 

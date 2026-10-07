@@ -83,7 +83,8 @@ export function renderLeadSheetPdf(
     displayTitle: true,
     // An empty default font keeps pdfkit from loading any standard (non-embedded) AFM font.
     font: "",
-    compress: true,
+    // Host zlib versions emit different bytes; this profile uses uncompressed PDF streams.
+    compress: false,
     bufferPages: true,
     info: {
       Title: sheet.title,
