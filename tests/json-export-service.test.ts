@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { expect, it } from "vitest";
 
-import { openJsonExports } from "../apps/desktop/src/main/json-exports.ts";
+import { openProjectExports } from "../apps/desktop/src/main/project-exports.ts";
 import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "./support/editor-fixture.ts";
 
@@ -35,7 +35,7 @@ it("publishes the captured view after later edits and retains a matching Receipt
     const picking = new Promise<void>((resolve) => {
       entered = resolve;
     });
-    const service = await openJsonExports({
+    const service = await openProjectExports({
       library,
       stateRoot,
       pickTarget: async () => {
@@ -90,7 +90,7 @@ it("retains full output and recovers its Receipt after a Library publication fai
       },
     });
     await library.createProject({ envelope: envelope(), records: goldenRecords() });
-    const service = await openJsonExports({
+    const service = await openProjectExports({
       library,
       stateRoot,
       pickTarget: async () => join(root, "export.json"),
@@ -110,7 +110,7 @@ it("retains full output and recovers its Receipt after a Library publication fai
       "open-chords/json-snapshot",
     );
     const reopened = await openProjectLibrary({ stateRoot });
-    await openJsonExports({ library: reopened, stateRoot, pickTarget: async () => null });
+    await openProjectExports({ library: reopened, stateRoot, pickTarget: async () => null });
     expect(reopened.listExportReceipts("project_golden")).toHaveLength(1);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -124,7 +124,11 @@ it("cancels without a Receipt and refuses a directory target without replacing i
     const library = await openProjectLibrary({ stateRoot });
     await library.createProject({ envelope: envelope(), records: goldenRecords() });
     let target: string | null = null;
-    const service = await openJsonExports({ library, stateRoot, pickTarget: async () => target });
+    const service = await openProjectExports({
+      library,
+      stateRoot,
+      pickTarget: async () => target,
+    });
     const request = {
       projectId: "project_golden",
       expectedProjectRevisionId: (await library.getSnapshot("project_golden"))!.projectRevisionId,
@@ -153,7 +157,7 @@ it("honors cancellation while the picker is open and rejects stale or protected 
     const picking = new Promise<void>((resolve) => {
       entered = resolve;
     });
-    const service = await openJsonExports({
+    const service = await openProjectExports({
       library,
       stateRoot,
       pickTarget: async () => {
@@ -178,7 +182,7 @@ it("honors cancellation while the picker is open and rejects stale or protected 
     choose(target);
     expect(await saving).toEqual({ state: "cancelled" });
     expect(await readFile(target, "utf8")).toBe("existing output");
-    const protectedService = await openJsonExports({
+    const protectedService = await openProjectExports({
       library,
       stateRoot,
       pickTarget: async () => join(stateRoot, "forbidden.json"),
@@ -209,7 +213,11 @@ it.skipIf(process.platform === "win32")(
       const target = join(destination, "existing.json");
       await writeFile(target, "existing complete file");
       await chmod(destination, 0o500);
-      const service = await openJsonExports({ library, stateRoot, pickTarget: async () => target });
+      const service = await openProjectExports({
+        library,
+        stateRoot,
+        pickTarget: async () => target,
+      });
       await expect(
         service.saveJson({
           projectId: "project_golden",

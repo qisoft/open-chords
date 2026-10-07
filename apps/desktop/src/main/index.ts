@@ -26,15 +26,18 @@ import { createContainedAlignmentWorker, recoverAlignmentWorkspaces } from "./al
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { blockCpuWorkAfterIncompleteCleanup } from "./cpu-work.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
-import { openJsonExports, type JsonExports } from "./json-exports.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
 import { openModelStore, type ModelStore } from "./model-store.ts";
 import { openNetworkMode } from "./network-mode.ts";
+import { openOfflineMediaCache } from "./offline-media-cache.ts";
 import { runPackagedAcquisitionProof } from "./packaged-acquisition-proof.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-constants.ts";
 import { packagedProofFailureCode, runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
+import { ARCHIVE_EXTENSION } from "./project-archive-format.ts";
+import { ProjectArchiveImports } from "./project-archive-imports.ts";
+import { openProjectExports, type ProjectExports } from "./project-exports.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
 import {
@@ -113,7 +116,7 @@ if (
   let lyricsDiscovery: LyricsDiscovery | null = null;
   let youtube: YouTubeService | null = null;
   let acquisition: AcquisitionJobs | null = null;
-  let jsonExports: JsonExports | null = null;
+  let projectExports: ProjectExports | null = null;
   let mainWindow: BrowserWindow | null = null;
   let localMediaAuthority: LocalMediaService | null = null;
   const rendererContexts = new Map<
@@ -131,7 +134,7 @@ if (
       "before-quit",
       createMediaCleanupBeforeQuitHandler({
         dispose: async () => {
-          jsonExports?.cancel();
+          projectExports?.cancel();
           youtube?.close();
           try {
             await acquisition?.close();
@@ -170,19 +173,6 @@ if (
       .then(async () => {
         const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
         const stateRoot = app.getPath("userData");
-        jsonExports = await openJsonExports({
-          library: projectLibrary,
-          stateRoot,
-          protectedRoots: [app.getAppPath(), process.resourcesPath, dirname(process.execPath)],
-          pickTarget: async () => {
-            const result = await dialog.showSaveDialog(getOrCreateWindow(), {
-              title: "Export Open Chords JSON",
-              defaultPath: "Open Chords.json",
-              filters: [{ name: "Open Chords JSON", extensions: ["json"] }],
-            });
-            return result.canceled ? null : result.filePath;
-          },
-        });
         const network = await openNetworkMode(stateRoot);
         const packagedNativeRoot =
           process.platform === "darwin"
@@ -259,6 +249,39 @@ if (
           },
         });
         localMediaAuthority = localMedia;
+        projectExports = await openProjectExports({
+          library: projectLibrary,
+          media: localMedia,
+          stateRoot,
+          protectedRoots: [app.getAppPath(), process.resourcesPath, dirname(process.execPath)],
+          pickTarget: async (format) => {
+            const archive = format === "project_archive";
+            const result = await dialog.showSaveDialog(getOrCreateWindow(), {
+              title: archive ? "Export Portable Project Archive" : "Export Open Chords JSON",
+              defaultPath: archive ? `Open Chords${ARCHIVE_EXTENSION}` : "Open Chords.json",
+              filters: [
+                archive
+                  ? { name: "Portable Project Archive", extensions: [ARCHIVE_EXTENSION.slice(1)] }
+                  : { name: "Open Chords JSON", extensions: ["json"] },
+              ],
+            });
+            return result.canceled ? null : result.filePath;
+          },
+        });
+        const archiveImports = new ProjectArchiveImports({
+          cache: await openOfflineMediaCache({ stateRoot }),
+          library: projectLibrary,
+          pickArchive: async () => {
+            const result = await dialog.showOpenDialog(getOrCreateWindow(), {
+              filters: [
+                { name: "Portable Project Archive", extensions: [ARCHIVE_EXTENSION.slice(1)] },
+              ],
+              properties: ["openFile"],
+              title: "Import Portable Project Archive",
+            });
+            return result.canceled || result.filePaths.length !== 1 ? null : result.filePaths[0]!;
+          },
+        });
         try {
           await recoverAlignmentWorkspaces({
             stateRoot,
@@ -336,7 +359,8 @@ if (
           );
         });
         installDesktopIpc(projectLibrary, {
-          exports: jsonExports,
+          archives: archiveImports,
+          exports: projectExports,
           youtube,
           ...(alignmentService ? { alignment: alignmentService } : {}),
           models: {
@@ -395,7 +419,7 @@ if (
   }
 
   function revokeRendererGeneration(webContentsId: number): void {
-    jsonExports?.cancel();
+    projectExports?.cancel();
     youtube?.cancel();
     lyricsDiscovery?.cancel();
     modelStore?.cancel();

@@ -296,6 +296,20 @@ function reportDispatchError(error: unknown): void {
 }
 
 const api: OpenChordsDesktopApi = {
+  archives: Object.freeze({
+    import: async (options) =>
+      invokeCapability(
+        DESKTOP_IPC_CHANNELS.archivesImport,
+        DesktopCommandSchema.parse({
+          ...envelope(),
+          adoptOfflineMedia: options.adoptOfflineMedia,
+          type: "archives.import",
+        }),
+        (response): response is Extract<DesktopResponse, { type: "archives.import_result" }> =>
+          response.type === "archives.import_result",
+        "Unexpected archive import response",
+      ),
+  }),
   exports: Object.freeze({
     perform: async (action) =>
       invokeCapability(

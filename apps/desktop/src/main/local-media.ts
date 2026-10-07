@@ -429,20 +429,22 @@ export const nodeLocalMediaFileSystem: LocalMediaFileSystem = {
   open,
 };
 
+export type LocalMediaProjectRange = {
+  canonicalAudioFingerprint: string;
+  endSourceSample: number;
+  projectId: string;
+  readCanonicalPcm: (range: {
+    endProjectSample: number;
+    startProjectSample: number;
+  }) => Promise<Uint8Array>;
+  sampleRate: number;
+  sourceId: string;
+  sourceSnapshotId: string;
+  startSourceSample: number;
+};
+
 export type LocalMediaRangeCache = {
-  cacheProjectRange(input: {
-    canonicalAudioFingerprint: string;
-    endSourceSample: number;
-    projectId: string;
-    readCanonicalPcm: (range: {
-      endProjectSample: number;
-      startProjectSample: number;
-    }) => Promise<Uint8Array>;
-    sampleRate: number;
-    sourceId: string;
-    sourceSnapshotId: string;
-    startSourceSample: number;
-  }): Promise<void>;
+  cacheProjectRange(input: LocalMediaProjectRange): Promise<void>;
 };
 
 export class LocalMediaService {
@@ -876,12 +878,23 @@ export class LocalMediaService {
   }
 
   cacheProjectRange(projectId: string): Promise<void> {
-    return this.#runServiceOperation(() => this.#cacheProjectRange(projectId));
+    const rangeCache = this.#rangeCache;
+    if (rangeCache === undefined)
+      return Promise.reject(new Error("Local media range cache is not configured"));
+    return this.readVerifiedProjectRange(projectId, (range) => rangeCache.cacheProjectRange(range));
   }
 
-  async #cacheProjectRange(projectId: string): Promise<void> {
-    if (this.#rangeCache === undefined)
-      throw new Error("Local media range cache is not configured");
+  readVerifiedProjectRange<T>(
+    projectId: string,
+    consume: (range: LocalMediaProjectRange) => Promise<T>,
+  ): Promise<T> {
+    return this.#runServiceOperation(() => this.#readVerifiedProjectRange(projectId, consume));
+  }
+
+  async #readVerifiedProjectRange<T>(
+    projectId: string,
+    consume: (range: LocalMediaProjectRange) => Promise<T>,
+  ): Promise<T> {
     const project = await this.#library.readProject(projectId);
     const range = project.records.projectRange;
     const source = project.records.sources.find(({ id }) => id === range.sourceId);
@@ -903,7 +916,7 @@ export class LocalMediaService {
         throw new Error("Project Source Locator no longer matches its identity");
       }
       const durationSamples = range.endSourceSample - range.startSourceSample;
-      await this.#rangeCache.cacheProjectRange({
+      return await consume({
         canonicalAudioFingerprint: snapshot.canonicalAudioFingerprint,
         endSourceSample: range.endSourceSample,
         projectId,

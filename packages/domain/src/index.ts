@@ -48,11 +48,13 @@ export { materializeEffectiveTimeline, type EffectiveTimeline } from "./projecti
 export {
   AnalysisRevisionSchema,
   EditTransactionSchema,
+  ImportOriginSchema,
   MusicalTimelineSchema,
   ProjectContractSchema,
   StableIdSchema,
   type AnalysisRevision,
   type EditTransaction,
+  type ImportOrigin,
   type LyricsAlignment,
   type LyricsDocument,
   type MusicalTimeline,

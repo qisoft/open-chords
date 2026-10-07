@@ -203,9 +203,16 @@ export function validateProjectInvariants(project: ProjectContract): void {
     project.lyricsAlignments.map((alignment) => [alignment.id, alignment]),
   );
   const supportClaims = new Set(project.supportClaims.map(({ id }) => id));
+  const historyProjectIds = new Set([
+    project.id,
+    ...(project.importOrigins ?? []).map(({ projectId }) => projectId),
+  ]);
+  if (historyProjectIds.size !== (project.importOrigins?.length ?? 0) + 1)
+    issues.push("Import origins must name distinct earlier Project identities");
 
   for (const revision of project.analysisRevisions) {
-    if (revision.projectId !== project.id) issues.push(`${revision.id} belongs to another Project`);
+    if (!historyProjectIds.has(revision.projectId))
+      issues.push(`${revision.id} belongs to another Project`);
     for (const claimId of revision.supportClaimIds) {
       if (!supportClaims.has(claimId))
         issues.push(`${revision.id} references unknown Support Claim ${claimId}`);
@@ -318,7 +325,7 @@ export function validateProjectInvariants(project: ProjectContract): void {
     const recipe = alignment.provenance?.recipe;
     if (recipe) {
       if (
-        recipe.projectId !== project.id ||
+        !historyProjectIds.has(recipe.projectId) ||
         recipe.lyricsDocumentId !== alignment.lyricsDocumentId ||
         recipe.analysisRevisionId !== alignment.analysisRevisionId ||
         recipe.sampleRate !== project.sampleRate ||
