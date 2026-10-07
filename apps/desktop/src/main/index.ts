@@ -229,11 +229,19 @@ if (
       if (process.platform !== "darwin") app.quit();
     });
 
+    let startupStage = "library";
+    const startupDiagnostics = process.argv.includes("--open-chords-startup-diagnostics");
+    function recordStartupStage(stage: string) {
+      startupStage = stage;
+      if (startupDiagnostics) console.info(`Desktop startup stage: ${stage}`);
+    }
     const desktopReady = app
       .whenReady()
       .then(async () => {
+        recordStartupStage("library");
         const projectLibrary = await openProjectLibrary({ stateRoot: app.getPath("userData") });
         const stateRoot = app.getPath("userData");
+        recordStartupStage("network_mode");
         const network = await openNetworkMode(stateRoot);
         const packagedNativeRoot =
           process.platform === "darwin"
@@ -294,12 +302,14 @@ if (
           openExternal: (url) => shell.openExternal(url),
         });
         lyricsDiscovery = await openLyricsDiscovery({ stateRoot, network });
+        recordStartupStage("alignment_runtime");
         const runtime = await inspectAlignmentRuntime(
           app.isPackaged
             ? packagedAlignmentRuntimeRoot(process.resourcesPath)
             : join(app.getAppPath(), "dist/alignment-runtime/open-chords-alignment"),
           EXPECTED_ALIGNMENT_MANIFEST_SHA256,
         );
+        recordStartupStage("model_store");
         modelStore = await openModelStore({
           stateRoot,
           packs: ALIGNMENT_PACKS,
@@ -317,6 +327,7 @@ if (
           },
         });
         localMediaAuthority = localMedia;
+        recordStartupStage("exports");
         projectExports = await openProjectExports({
           library: projectLibrary,
           media: localMedia,
@@ -332,6 +343,7 @@ if (
             return result.canceled ? null : result.filePath;
           },
         });
+        recordStartupStage("archive_cache");
         const archiveImports = new ProjectArchiveImports({
           cache: await openOfflineMediaCache({ stateRoot }),
           library: projectLibrary,
@@ -440,10 +452,20 @@ if (
           onSenderAction: (_action, sender) => replaceCompromisedRenderer(sender),
           rendererContextFor: (sender) => rendererContexts.get(sender.id) ?? null,
         });
+        recordStartupStage("renderer");
         getOrCreateWindow();
+        recordStartupStage("window_created");
         return undefined;
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
+        const rawCode: unknown =
+          cause instanceof Error
+            ? Object.getOwnPropertyDescriptor(cause, "code")?.value
+            : undefined;
+        const allowedCodes = new Set(["ENOENT", "EACCES", "EPERM", "ENOSPC", "EINVAL", "EIO"]);
+        const code = typeof rawCode === "string" && allowedCodes.has(rawCode) ? rawCode : "unknown";
+        // Only fixed stages/codes are logged; exception messages may contain private paths or content.
+        console.error(`Desktop startup failed: ${startupStage}.${code}`);
         app.exit(1);
       });
   }

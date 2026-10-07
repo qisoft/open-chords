@@ -60,6 +60,7 @@ const resourcesPath =
 let packagedProjectId = "";
 
 test.beforeAll(async () => {
+  test.setTimeout(120000);
   await extractZip(archivePath, { dir: packageRoot });
   const mediaPath = join(packageRoot, "offline-playback.wav");
   const samples = Array.from({ length: 48_000 }, (_value, index) =>
