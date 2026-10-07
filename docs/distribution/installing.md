@@ -82,4 +82,29 @@ The dialog shows your installed version, the latest published release tag/date, 
 
 **Cancel update check**, closing the dialog, replacing the renderer or quitting cancels an active request. Enabling Offline Mode cancels it too and prevents update checks or opening external instructions/release pages. In Offline Mode the local status and controls remain available. The application never downloads or installs an update, restarts, or changes installed models; **Open release on GitHub** and **Open verification instructions** open a fixed repository page only after an explicit click.
 
-This flow implements the manual-update portion of #51. Category-confirmed full cleanup and user-visible migration/rollback recovery remain separate work; OS application removal continues to preserve user data.
+Project recovery is available from **Project recovery** in the application. Inspect the preserved revisions, select a backup, and confirm that exact revision before restoring it. A successful restore publishes a new revision and preserves history. Read-only or damaged Projects are reported without silently rewriting them. OS application removal continues to preserve user data.
+
+
+## Explicit data cleanup
+
+Quit Open Chords first. Before removing the application, start its dedicated cleanup mode:
+
+```sh
+# macOS (adjust the application path if needed)
+"/Applications/Open Chords.app/Contents/MacOS/Open Chords" --open-chords-cleanup
+```
+
+```powershell
+# Windows (adjust the extracted application path if needed)
+& "C:\Apps\Open Chords\Open Chords.exe" --open-chords-cleanup
+```
+
+This mode opens no Project Library, renderer, analysis/alignment/acquisition workers or update/model services. It refuses to run alongside another Open Chords instance. It displays native confirmation dialogs for five separate categories: Projects and preserved revisions/Library Trash/Source records; installed models/language packs; Offline Media Cache; settings/completed acquisition history; and application caches/logs/browser state. Every dialog enumerates the concrete locations. The default action preserves the category. Selecting deletion requires both the deletion button and an unchecked-by-default category confirmation. A final confirmation lists all selected categories and requires a second explicit checkbox before any deletion. Cancel at the final step to preserve everything.
+
+Back up Projects as Portable Project Archives before selecting the irreplaceable Project category. Model artifacts can be downloaded again; removing offline copies can make offline playback unavailable. Deleting settings resets Offline Mode to its fresh-install default on the next normal launch. Cleanup does not download replacements or restart the application.
+
+Only the enumerated locations are deleted. The default Library copy and a recorded relocated active Library are inspected. Original Source media, exports, archives and older Library copies outside those locations remain. Unknown files and Library root directories remain and are reported; Open Chords does not recursively delete the whole user data folder. Unrecorded previous relocation copies require separate manual inspection. An external Library containing unexpected files, symlinks/special files, changed inventory, oversized inventory, pending exports/relocation, or unrecovered native-workspace journals blocks cleanup. Open normally to recover interrupted work, quit, then inspect and confirm again.
+
+Deletion claims each selected location under a unique adjacent name before removal, stops on the first failure, and reports removed and failed locations. Already removed locations cannot be undone; a failed claim may remain at its reported `.open-chords-cleanup-*` path. There is no automatic retry. Preserve or inspect that path manually before a new attempt. Removing the application is a separate step.
+
+Module tests cover category isolation, final cancellation, stale inventories, relocation, unknown/external file preservation, symlink refusal and interrupted work. Native CI exercises the cold-start entry point with a controlled dialog adapter; this is not evidence of consumer uninstall behavior, native dialog keyboard/screen-reader usability or an installed cleanup interaction. Those #51/#46/#48 gates remain open until their native evidence is recorded.

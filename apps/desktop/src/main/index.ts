@@ -25,6 +25,7 @@ import { openAlignmentService, type AlignmentService } from "./alignment-service
 import { createContainedAlignmentWorker, recoverAlignmentWorkspaces } from "./alignment-worker.ts";
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { blockCpuWorkAfterIncompleteCleanup } from "./cpu-work.ts";
+import { CLEANUP_ARGUMENT, runDataCleanup } from "./data-cleanup.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
@@ -107,6 +108,61 @@ if (
         app.exit(1);
       },
     );
+} else if (process.argv.includes(CLEANUP_ARGUMENT)) {
+  // No Library, IPC, model downloads or media workers are opened in this mode.
+  if (!app.requestSingleInstanceLock()) {
+    void app.whenReady().then(async () => {
+      await dialog.showMessageBox({
+        type: "warning",
+        message: "Quit Open Chords before cleaning up data",
+        buttons: ["Close"],
+      });
+      app.exit(1);
+      return undefined;
+    });
+  } else {
+    void app.whenReady().then(async () => {
+      try {
+        const cleanup = await runDataCleanup(app.getPath("userData"), async (request) => {
+          const result = await dialog.showMessageBox({
+            type: request.kind === "result" ? "info" : "warning",
+            message: request.message,
+            detail: request.detail,
+            buttons:
+              request.kind === "result"
+                ? ["Close"]
+                : request.kind === "category"
+                  ? ["Preserve category", "Select for deletion"]
+                  : ["Cancel", "Permanently delete"],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+            ...(request.kind === "result"
+              ? {}
+              : {
+                  checkboxLabel:
+                    request.kind === "category"
+                      ? "I confirm deletion of this category and its listed locations"
+                      : "I understand that the selected data cannot be recovered",
+                  checkboxChecked: false,
+                }),
+          });
+          return result.response === 1 && result.checkboxChecked;
+        });
+        app.exit(cleanup?.failed.length ? 1 : 0);
+      } catch {
+        await dialog.showMessageBox({
+          type: "error",
+          message: "Cleanup could not proceed",
+          detail:
+            "Data may have changed, a location may be unsafe, or interrupted work may require recovery. Open Open Chords normally to recover interrupted work, quit it, then inspect and confirm cleanup again. No automatic retry was performed.",
+          buttons: ["Close"],
+        });
+        app.exit(1);
+      }
+      return undefined;
+    });
+  }
 } else {
   if (process.platform === "win32") app.setAppUserModelId("io.github.qisoft.open-chords");
   registerRendererScheme();
