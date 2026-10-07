@@ -45,7 +45,7 @@ async function installed(installation: string, state: string) {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Debug port unavailable");
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  // No PATH, Python/Conda/Homebrew configuration or developer runtime variables.
+  // No inherited developer PATH, Python/Conda/Homebrew configuration or runtime variables.
   const env: Record<string, string> = {};
   for (const key of [
     "SystemRoot",
@@ -58,6 +58,16 @@ async function installed(installation: string, state: string) {
     "LOCALAPPDATA",
   ])
     if (process.env[key] !== undefined) env[key] = process.env[key];
+  if (process.platform === "win32") {
+    const windowsRoot = env.SystemRoot ?? env.WINDIR;
+    if (!windowsRoot) throw new Error("Windows system directory is unavailable");
+    // Library path policy needs the OS PowerShell/CIM tools, not a developer runtime.
+    env.PATH = [
+      join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
+      join(windowsRoot, "System32"),
+      windowsRoot,
+    ].join(";");
+  }
   const child = spawn(
     executable,
     [`--user-data-dir=${state}`, `--remote-debugging-port=${address.port}`],
