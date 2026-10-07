@@ -153,7 +153,7 @@ async function installed(installation: string, state: string) {
         },
       };
     } catch (error) {
-      await browser.close();
+      void browser.close().catch(() => undefined);
       throw error;
     }
   } catch (error) {
