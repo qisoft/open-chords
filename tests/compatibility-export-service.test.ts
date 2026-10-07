@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { expect, it } from "vitest";
 
-import { exportTarget, openProjectExports } from "../apps/desktop/src/main/project-exports.ts";
 import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "./support/editor-fixture.ts";
+import { loadExportFixtureService } from "./support/export-service-loader.ts";
 import { inspectPdf } from "./support/pdf-inspection.ts";
 
 it("publishes each compatibility projection with matching durable hashes and losses", async () => {
@@ -25,6 +25,7 @@ it("publishes each compatibility projection with matching durable hashes and los
       ),
       records: goldenRecords(),
     });
+    const { exportTarget, openProjectExports } = await loadExportFixtureService();
     const service = await openProjectExports({
       library,
       stateRoot,
@@ -76,6 +77,7 @@ it("does not open a picker or publish a Receipt when LRC has no selected lyrics"
     delete envelope.payload.activeView!.lyricsAlignmentId;
     await library.createProject({ envelope, records: goldenRecords() });
     let picked = false;
+    const { openProjectExports } = await loadExportFixtureService();
     const service = await openProjectExports({
       library,
       stateRoot,

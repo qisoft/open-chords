@@ -9,9 +9,9 @@ import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { chromium, expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 
-import { exportTarget, openProjectExports } from "../../apps/desktop/src/main/project-exports.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { loadExportFixtureService } from "../support/export-service-loader.ts";
 
 test.skip(
   process.platform !== "darwin" && process.platform !== "win32",
@@ -34,6 +34,7 @@ test("installed application reopens durable JSON and archive Export Receipts thr
     });
     // Prepare persisted input through the public service. This is a Receipt reopen test,
     // not evidence of an installed native save-dialog interaction.
+    const { exportTarget, openProjectExports } = await loadExportFixtureService();
     const service = await openProjectExports({
       library,
       stateRoot,
