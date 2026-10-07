@@ -1,16 +1,18 @@
 import { JsonExportOptionsSchema, StableIdSchema } from "@open-chords/domain";
 import { z } from "zod";
 
+const revisionRequest = {
+  projectId: StableIdSchema,
+  expectedProjectRevisionId: z.string().regex(/^projectrevision_[a-f0-9]{32}$/),
+};
 export const ExportActionSchema = z.discriminatedUnion("type", [
-  JsonExportOptionsSchema.extend({
-    type: z.literal("save_json"),
-    projectId: StableIdSchema,
-    expectedProjectRevisionId: z.string().regex(/^projectrevision_[a-f0-9]{32}$/),
-  }),
+  JsonExportOptionsSchema.extend({ type: z.literal("save_json"), ...revisionRequest }),
+  JsonExportOptionsSchema.extend({ type: z.literal("save_chordpro"), ...revisionRequest }),
+  JsonExportOptionsSchema.extend({ type: z.literal("save_pdf"), ...revisionRequest }),
+  z.strictObject({ type: z.literal("save_lrc"), ...revisionRequest }),
   z.strictObject({
     type: z.literal("save_archive"),
-    projectId: StableIdSchema,
-    expectedProjectRevisionId: z.string().regex(/^projectrevision_[a-f0-9]{32}$/),
+    ...revisionRequest,
     includeMedia: z.boolean(),
   }),
   z.strictObject({ type: z.literal("list"), projectId: StableIdSchema }),

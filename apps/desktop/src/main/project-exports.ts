@@ -3,17 +3,23 @@ import { lstat, mkdir, open, readdir, realpath, rename, rm } from "node:fs/promi
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 import { ExportActionSchema, type ExportAction } from "@open-chords/contracts";
-import { canonicalSerialize, StableIdSchema } from "@open-chords/domain";
 import {
+  canonicalSerialize,
   captureJsonExport,
   JsonExportOptionsSchema,
+  projectLeadSheet,
+  projectLrc,
+  serializeChordPro,
   serializeJsonExport,
+  StableIdSchema,
+  type OpenChordsJsonSnapshot,
 } from "@open-chords/domain";
 import { z } from "zod";
 
 import { readBoundedFile } from "./bounded-file.ts";
 import { syncDirectory } from "./filesystem-durability.ts";
 import type { LocalMediaService } from "./local-media.ts";
+import { renderLeadSheetPdf } from "./pdf-lead-sheet.ts";
 import {
   ARCHIVE_EXTENSION,
   ArchiveTooLargeError,
@@ -25,16 +31,29 @@ import { ARCHIVE_ZIP_LIMITS } from "./project-archive-zip.ts";
 import { ExportReceiptSchema } from "./project-library-records.ts";
 import type { ProjectLibrary } from "./project-library.ts";
 
-export type ExportFormat = "open_chords_json" | "project_archive";
-const TARGETS: Record<ExportFormat, { extension: string; maxBytes: number }> = {
-  open_chords_json: { extension: ".json", maxBytes: 32 * 1024 * 1024 },
-  project_archive: { extension: ARCHIVE_EXTENSION, maxBytes: ARCHIVE_ZIP_LIMITS.maxArchiveBytes },
+export type ExportFormat = "open_chords_json" | "chordpro" | "lrc" | "pdf" | "project_archive";
+const MiB = 1024 * 1024;
+const TARGETS: Record<ExportFormat, { extension: string; label: string; maxBytes: number }> = {
+  open_chords_json: { extension: ".json", label: "Open Chords JSON", maxBytes: 32 * MiB },
+  chordpro: { extension: ".cho", label: "ChordPro", maxBytes: 8 * MiB },
+  lrc: { extension: ".lrc", label: "LRC lyrics", maxBytes: 4 * MiB },
+  pdf: { extension: ".pdf", label: "PDF lead sheet", maxBytes: 64 * MiB },
+  project_archive: {
+    extension: ARCHIVE_EXTENSION,
+    label: "Portable Project Archive",
+    maxBytes: ARCHIVE_ZIP_LIMITS.maxArchiveBytes,
+  },
 };
+export const exportTarget = (format: ExportFormat) => ({
+  label: TARGETS[format].label,
+  extension: TARGETS[format].extension.slice(1),
+});
 const revisionRequest = {
   projectId: StableIdSchema,
   expectedProjectRevisionId: z.string().regex(/^projectrevision_[a-f0-9]{32}$/),
 };
-const jsonRequestSchema = JsonExportOptionsSchema.extend(revisionRequest);
+const snapshotRequestSchema = JsonExportOptionsSchema.extend(revisionRequest);
+const lrcRequestSchema = z.strictObject(revisionRequest);
 const archiveRequestSchema = z.strictObject({ ...revisionRequest, includeMedia: z.boolean() });
 const journalSchema = z.strictObject({
   version: z.literal(1),
@@ -55,7 +74,8 @@ type Prepared = {
   omissions: string[];
   profileVersion: string;
 };
-type PublicationState = "saved" | "cancelled" | "receipt_pending" | "too_large";
+type Projection = Omit<Prepared, "activeViewHash">;
+type PublicationState = "saved" | "cancelled" | "receipt_pending" | "too_large" | "unavailable";
 
 class ExportTooLargeError extends Error {
   constructor() {
@@ -73,6 +93,19 @@ class ExportMediaUnavailableError extends Error {
 
 const hash = (value: string | Buffer) =>
   `sha256:${createHash("sha256").update(value).digest("hex")}`;
+const activeViewHash = (snapshot: OpenChordsJsonSnapshot) =>
+  hash(
+    canonicalSerialize({
+      project: snapshot.project,
+      provenance: snapshot.provenance,
+      userAuthorship: snapshot.userAuthorship,
+      selection: snapshot.selection,
+      original: snapshot.original,
+      effectiveTimeline: snapshot.effectiveTimeline,
+      presentation: snapshot.presentation,
+      ...(snapshot.lyrics ? { lyrics: snapshot.lyrics } : {}),
+    }),
+  );
 const missing = (error: unknown) =>
   error instanceof Error && "code" in error && error.code === "ENOENT";
 const nested = (root: string, target: string) => {
@@ -109,22 +142,24 @@ export class ProjectExports {
     return this.#options.library.listExportReceipts(projectId);
   }
 
-  async perform(raw: ExportAction) {
-    const action = ExportActionSchema.parse(raw);
-    let state: "idle" | "cancelling" | "media_unavailable" | PublicationState = "idle";
-    if (action.type === "save_json") {
-      const { type: _type, ...request } = action;
-      state = (await this.saveJson(request)).state;
-    } else if (action.type === "save_archive") {
-      const { type: _type, ...request } = action;
-      state = (await this.saveArchive(request)).state;
-    } else if (action.type === "cancel") {
+  async #performAction(action: ExportAction) {
+    if (action.type === "list") return "idle";
+    if (action.type === "cancel") {
       this.cancel();
-      state = this.busy ? "cancelling" : "idle";
-    } else if (action.type === "recover") {
+      return this.busy ? "cancelling" : "idle";
+    }
+    if (action.type === "recover") {
       if (this.busy) throw new Error("Export is running");
       await this.recover();
+      return "idle";
     }
+    const { type, ...request } = action;
+    return (await this[saveMethods[type]](request)).state;
+  }
+
+  async perform(raw: ExportAction) {
+    const action = ExportActionSchema.parse(raw);
+    const state = await this.#performAction(action);
     return {
       projectId: action.projectId,
       state,
@@ -147,29 +182,72 @@ export class ProjectExports {
   }
 
   saveJson(raw: unknown): Promise<{ state: PublicationState }> {
-    const request = jsonRequestSchema.parse(raw);
-    return this.#publishWithinBudget(request, "open_chords_json", async () => {
+    const request = snapshotRequestSchema.parse(raw);
+    return this.#publishSnapshot(request, "open_chords_json", async (snapshot) => ({
+      content: Buffer.from(serializeJsonExport(snapshot), "utf8"),
+      omissions: snapshot.omissions,
+      profileVersion: `open_chords_json/1.0/${request.presentation}`,
+    }));
+  }
+
+  saveChordPro(raw: unknown): Promise<{ state: PublicationState }> {
+    const request = snapshotRequestSchema.parse(raw);
+    return this.#publishSnapshot(request, "chordpro", async (snapshot) => {
+      const { text, losses } = serializeChordPro(
+        projectLeadSheet(snapshot, { title: snapshot.project.id }),
+      );
+      return {
+        content: Buffer.from(text, "utf8"),
+        omissions: losses,
+        profileVersion: `chordpro/1.0/${request.presentation}`,
+      };
+    });
+  }
+
+  savePdf(raw: unknown): Promise<{ state: PublicationState }> {
+    const request = snapshotRequestSchema.parse(raw);
+    return this.#publishSnapshot(request, "pdf", async (snapshot) => {
+      const { bytes, losses } = await renderLeadSheetPdf(
+        projectLeadSheet(snapshot, { title: snapshot.project.id }),
+      );
+      return {
+        content: bytes,
+        omissions: losses,
+        profileVersion: `pdf/1.0/a4/${request.presentation}`,
+      };
+    });
+  }
+
+  saveLrc(raw: unknown): Promise<{ state: PublicationState }> {
+    const request = lrcRequestSchema.parse(raw);
+    return this.#publishSnapshot(
+      { ...request, presentation: "current" },
+      "lrc",
+      async (snapshot) => {
+        const lrc = projectLrc(snapshot, { title: snapshot.project.id });
+        return lrc.kind === "unavailable"
+          ? null
+          : {
+              content: Buffer.from(lrc.text, "utf8"),
+              omissions: lrc.losses,
+              profileVersion: "lrc/1.0",
+            };
+      },
+    );
+  }
+
+  #publishSnapshot(
+    request: z.infer<typeof snapshotRequestSchema>,
+    format: ExportFormat,
+    project: (snapshot: OpenChordsJsonSnapshot) => Promise<Projection | null>,
+  ): Promise<{ state: PublicationState }> {
+    return this.#publishWithinBudget(request, format, async () => {
       const selected = await this.#options.library.getSnapshot(request.projectId);
       if (selected?.projectRevisionId !== request.expectedProjectRevisionId)
         throw new Error("Export requires the current writable Project revision");
       const snapshot = captureJsonExport(selected.project, { presentation: request.presentation });
-      return {
-        activeViewHash: hash(
-          canonicalSerialize({
-            project: snapshot.project,
-            provenance: snapshot.provenance,
-            userAuthorship: snapshot.userAuthorship,
-            selection: snapshot.selection,
-            original: snapshot.original,
-            effectiveTimeline: snapshot.effectiveTimeline,
-            presentation: snapshot.presentation,
-            ...(snapshot.lyrics ? { lyrics: snapshot.lyrics } : {}),
-          }),
-        ),
-        content: Buffer.from(serializeJsonExport(snapshot), "utf8"),
-        omissions: snapshot.omissions,
-        profileVersion: `open_chords_json/1.0/${request.presentation}`,
-      };
+      const projection = await project(snapshot);
+      return projection && { ...projection, activeViewHash: activeViewHash(snapshot) };
     });
   }
 
@@ -228,7 +306,7 @@ export class ProjectExports {
   async #publishWithinBudget(
     request: { expectedProjectRevisionId: string; projectId: string },
     format: ExportFormat,
-    prepare: () => Promise<Prepared>,
+    prepare: () => Promise<Prepared | null>,
   ): Promise<{ state: PublicationState }> {
     try {
       return await this.#publish(request, format, prepare);
@@ -242,7 +320,7 @@ export class ProjectExports {
   async #publish(
     request: { expectedProjectRevisionId: string; projectId: string },
     format: ExportFormat,
-    prepare: () => Promise<Prepared>,
+    prepare: () => Promise<Prepared | null>,
   ): Promise<{ state: PublicationState }> {
     if (this.busy) throw new Error("An export is already running");
     const controller = new AbortController();
@@ -262,6 +340,7 @@ export class ProjectExports {
       )
         throw new Error("Export requires the current writable Project revision");
       const prepared = await prepare();
+      if (prepared === null) return { state: "unavailable" };
       const { content } = prepared;
       if (content.length > TARGETS[format].maxBytes) throw new ExportTooLargeError();
       signal.throwIfAborted();
@@ -461,6 +540,14 @@ export class ProjectExports {
     return parent;
   }
 }
+
+const saveMethods = {
+  save_json: "saveJson",
+  save_chordpro: "saveChordPro",
+  save_pdf: "savePdf",
+  save_lrc: "saveLrc",
+  save_archive: "saveArchive",
+} as const;
 
 function isExportFormat(format: string): format is ExportFormat {
   return Object.hasOwn(TARGETS, format);
