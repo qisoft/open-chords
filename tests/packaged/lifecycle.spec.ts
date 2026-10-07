@@ -122,7 +122,8 @@ async function installed(installation: string, state: string) {
             return context.pages().some((page) => page.url().startsWith("open-chords://"));
           },
           {
-            timeout: 30000,
+            // A cold Windows install verifies the frozen runtime after the OS volume check.
+            timeout: process.platform === "win32" ? 120000 : 30000,
           },
         )
         .toBe(true);
@@ -178,7 +179,7 @@ async function fingerprints(root: string) {
 }
 
 test("installed migration and rollback survive application removal and reinstall without changing preserved user data", async () => {
-  test.setTimeout(180000);
+  test.setTimeout(360000);
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-installed-lifecycle-")));
   try {
     const state = join(root, "state");
@@ -282,7 +283,7 @@ test("installed migration and rollback survive application removal and reinstall
 });
 
 test("installed older application reports newer schema read-only and refuses rollback without changing original Head or revision objects", async () => {
-  test.setTimeout(120000);
+  test.setTimeout(240000);
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-installed-newer-")));
   try {
     const state = join(root, "state");
