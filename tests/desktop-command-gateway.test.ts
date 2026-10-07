@@ -13,6 +13,8 @@ import {
 } from "../apps/desktop/src/main/desktop-command-gateway.ts";
 import { ManualUpdates } from "../apps/desktop/src/main/manual-updates.ts";
 import { openNetworkMode } from "../apps/desktop/src/main/network-mode.ts";
+import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
+import { ProjectRecovery } from "../apps/desktop/src/main/project-recovery.ts";
 
 const sender = {
   frameUrl: "open-chords://app/index.html",
@@ -720,6 +722,49 @@ it("authorizes and validates manual-update IPC before any release request", asyn
       release: null,
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("rejects untrusted recovery commands before inspecting the Library", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-recovery-gateway-"));
+  try {
+    const recovery = new ProjectRecovery(await openProjectLibrary({ stateRoot: root }));
+    const gateway = new DesktopCommandGateway(
+      createAuthority(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      recovery,
+    );
+    const command = {
+      ...commandEnvelope("request_recovery"),
+      type: "recovery.perform",
+      action: { type: "list" },
+    };
+    expect(
+      (await gateway.execute(command, { ...sender, isMainFrame: false })).response,
+    ).toMatchObject({ type: "desktop.error", code: "unauthorized_sender" });
+    expect(
+      (
+        await gateway.execute(
+          { ...command, action: { type: "inspect", projectId: "../../private" } },
+          sender,
+        )
+      ).response,
+    ).toMatchObject({ type: "desktop.error", code: "invalid_command" });
+    expect((await gateway.execute(command, sender, "recovery.perform")).response).toMatchObject({
+      type: "recovery.result",
+      projects: [],
+      detail: null,
+      requestId: "request_recovery",
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

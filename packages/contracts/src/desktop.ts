@@ -15,6 +15,7 @@ import {
   OfflineMediaOutcomeSchema,
 } from "./exports.ts";
 import { DesktopMessageIdSchema } from "./identifiers.ts";
+import { RecoveryActionSchema, RecoveryResultSchema } from "./recovery.ts";
 import { UpdateActionSchema, UpdateStatusSchema } from "./updates.ts";
 import {
   YouTubeActionSchema,
@@ -34,6 +35,7 @@ import {
 export const DESKTOP_IPC_PROTOCOL = "open-chords/desktop-ipc";
 export const DESKTOP_IPC_VERSION = "1.0";
 export const DESKTOP_IPC_CHANNELS = {
+  recoveryPerform: "open-chords:recovery:perform",
   updatesPerform: "open-chords:updates:perform",
   youtubePerform: "open-chords:youtube:perform",
   exportsPerform: "open-chords:exports:perform",
@@ -198,6 +200,12 @@ export const ImportArchiveCommandSchema = z.strictObject({
   type: z.literal("archives.import"),
 });
 
+export const RecoveryCommandSchema = z.strictObject({
+  ...correlatedEnvelope,
+  type: z.literal("recovery.perform"),
+  action: RecoveryActionSchema,
+});
+
 export const UpdatesCommandSchema = z.strictObject({
   ...correlatedEnvelope,
   type: z.literal("updates.perform"),
@@ -205,6 +213,7 @@ export const UpdatesCommandSchema = z.strictObject({
 });
 
 export const DesktopCommandSchema = z.discriminatedUnion("type", [
+  RecoveryCommandSchema,
   UpdatesCommandSchema,
   ImportArchiveCommandSchema,
   z.strictObject({
@@ -265,6 +274,7 @@ const mediaSelectionEnvelope = {
 };
 
 export const DesktopResponseSchema = z.discriminatedUnion("type", [
+  RecoveryResultSchema.extend({ ...correlatedEnvelope, type: z.literal("recovery.result") }),
   UpdateStatusSchema.extend({ ...correlatedEnvelope, type: z.literal("updates.result") }),
   z.strictObject({
     ...correlatedEnvelope,
@@ -470,6 +480,11 @@ export type MediaPlaybackResponse = Extract<
 export type ArchiveImportResponse = Extract<DesktopResponse, { type: "archives.import_result" }>;
 
 export type OpenChordsDesktopApi = {
+  recovery: {
+    perform(
+      action: z.infer<typeof RecoveryActionSchema>,
+    ): Promise<DesktopErrorResponse | Extract<DesktopResponse, { type: "recovery.result" }>>;
+  };
   updates: {
     perform(
       action: z.infer<typeof UpdateActionSchema>,

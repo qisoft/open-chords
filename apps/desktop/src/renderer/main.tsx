@@ -11,6 +11,7 @@ import {
 import { ImportArchive } from "./import-archive.tsx";
 import { ManualUpdates } from "./manual-updates.tsx";
 import { ModelPacks } from "./model-packs.tsx";
+import { ProjectRecovery } from "./project-recovery.tsx";
 import { EmptyWorkspace, ProjectWorkspace } from "./workspace.tsx";
 import { YouTubeSource } from "./youtube-source.tsx";
 
@@ -108,6 +109,7 @@ function App() {
           libraryTools={
             <>
               {importTool}
+              <ProjectRecovery api={api} onOpen={(projectId) => projectStore.open(projectId)} />
               <ManualUpdates api={api} />
             </>
           }
@@ -120,6 +122,7 @@ function App() {
     <>
       <div className="empty-model-tools">
         {importTool}
+        <ProjectRecovery api={api} onOpen={(projectId) => projectStore.open(projectId)} />
         <ManualUpdates api={api} />
         <ModelPacks api={api} />
         <YouTubeSource

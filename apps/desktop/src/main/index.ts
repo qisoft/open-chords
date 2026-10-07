@@ -40,6 +40,7 @@ import { ARCHIVE_EXTENSION } from "./project-archive-format.ts";
 import { ProjectArchiveImports } from "./project-archive-imports.ts";
 import { exportTarget, openProjectExports, type ProjectExports } from "./project-exports.ts";
 import { openProjectLibrary } from "./project-library.ts";
+import { ProjectRecovery } from "./project-recovery.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
 import {
   PRIMARY_RENDERER_SECURITY_CONFIGURATION,
@@ -367,6 +368,7 @@ if (
         });
         installDesktopIpc(projectLibrary, {
           updates,
+          recovery: new ProjectRecovery(projectLibrary),
           archives: archiveImports,
           exports: projectExports,
           youtube,

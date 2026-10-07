@@ -289,6 +289,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
         "media",
         "models",
         "project",
+        "recovery",
         "shell",
         "updates",
         "youtube",

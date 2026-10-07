@@ -64,3 +64,5 @@ export * from "./youtube.ts";
 export * from "./exports.ts";
 
 export * from "./updates.ts";
+
+export * from "./recovery.ts";

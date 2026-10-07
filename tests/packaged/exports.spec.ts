@@ -168,11 +168,49 @@ test("installed application reopens durable JSON and archive Export Receipts thr
           release: null,
         });
         await updateDialog.getByRole("button", { name: "Close", exact: true }).click();
+        const recovery = await page.evaluate(() =>
+          window.openChords!.recovery.perform({ type: "inspect", projectId: "project_golden" }),
+        );
+        if (recovery.type !== "recovery.result" || !recovery.detail)
+          throw new Error("Installed recovery metadata unavailable");
+        const backupRevision = recovery.detail.revisions.at(-1)!;
+        const inspectedRevisionId = recovery.detail.project.projectRevisionId!;
+        expect(
+          await page.evaluate(
+            ({ target, expected }) =>
+              window.openChords!.recovery.perform({
+                type: "rollback",
+                projectId: "project_golden",
+                expectedProjectRevisionId: expected,
+                targetProjectRevisionId: target,
+                confirmedTargetProjectRevisionId: target,
+              }),
+            { target: backupRevision.projectRevisionId, expected: inspectedRevisionId },
+          ),
+        ).toMatchObject({
+          type: "recovery.result",
+          detail: {
+            revisions: expect.arrayContaining([expect.objectContaining({ reason: "rollback" })]),
+          },
+        });
+        expect(
+          await page.evaluate(() =>
+            window.openChords!.recovery.perform({ type: "inspect", projectId: "project_golden" }),
+          ),
+        ).toMatchObject({
+          type: "recovery.result",
+          detail: { project: { compatibility: "writable" } },
+        });
         const cdp = await browser.newBrowserCDPSession();
         void cdp.send("Browser.close").catch(() => undefined);
         await expect
           .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
           .toBe(true);
+        expect(
+          (
+            await (await openProjectLibrary({ stateRoot })).readProject("project_golden")
+          ).revisions.at(-1)?.reason,
+        ).toBe("rollback");
       } finally {
         await browser.close();
       }
