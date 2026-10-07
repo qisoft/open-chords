@@ -59,6 +59,22 @@ test("the export dialog saves a committed JSON view and reopens its Receipt", as
     expect(JSON.parse(await readFile(join(root, "score.json"), "utf8")).lyrics.document.text).toBe(
       "go go\nhome go",
     );
+    await page.setViewportSize({ width: 1024, height: 768 });
+    for (const [label, file] of [
+      ["Save ChordPro", "score.cho"],
+      ["Save LRC", "score.lrc"],
+      ["Save PDF", "score.pdf"],
+    ]) {
+      await application.evaluate(
+        ({ dialog }, filePath) => {
+          dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+        },
+        join(root, file!),
+      );
+      await page.getByRole("button", { name: label!, exact: true }).click();
+      await expect(page.getByText(file!, { exact: true })).toBeVisible();
+      expect((await readFile(join(root, file!))).length).toBeGreaterThan(0);
+    }
     await application.close();
     application = await launch();
     page = await application.firstWindow();
@@ -73,7 +89,12 @@ test("the export dialog saves a committed JSON view and reopens its Receipt", as
       await page.evaluate(() =>
         window.openChords!.exports.perform({ type: "list", projectId: "project_golden" }),
       ),
-    ).toMatchObject({ receipts: [{ displayName: "score.json" }] });
+    ).toMatchObject({
+      receipts: expect.arrayContaining([
+        { displayName: "score.json" },
+        { displayName: "score.pdf" },
+      ]),
+    });
   } finally {
     await application.close();
     await rm(root, { recursive: true, force: true });

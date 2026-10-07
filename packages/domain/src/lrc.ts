@@ -50,6 +50,10 @@ export function projectLrc(
     return monotonic ? null : "non_monotonic";
   };
   const losses: ExportLoss[] = [
+    "analysis_provenance_not_represented",
+    "edit_history_not_represented",
+    "lyrics_mismatch_not_represented",
+    "sample_timing_not_represented",
     "stable_identity_not_represented",
     "line_end_timing_not_represented",
   ];

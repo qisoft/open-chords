@@ -154,3 +154,18 @@ it("reports missing glyphs and paginates with page artifacts", async () => {
   expect(pages.map(({ text }) => text.at(-1))).toEqual(["Page 1 of 2", "Page 2 of 2"]);
   expect(pages[1]!.text[0]).toMatch(/^Notice: Notice \d+ /);
 });
+
+it("keeps long unbroken text and paragraphs spanning pages inside the print geometry", async () => {
+  const project = goldenProject();
+  project.lyricsDocuments[0]!.notices = ["longword".repeat(80), "many words ".repeat(1200)];
+  const { bytes } = await render(project);
+  const { pages } = await inspectPdf(bytes);
+  expect(pages.length).toBeGreaterThan(2);
+  for (const page of pages)
+    for (const box of page.textBounds) {
+      expect(box.left).toBeGreaterThanOrEqual(55);
+      expect(box.left + box.width).toBeLessThanOrEqual(540);
+      expect(box.bottom).toBeGreaterThan(20);
+      expect(box.bottom + box.height).toBeLessThan(810);
+    }
+});

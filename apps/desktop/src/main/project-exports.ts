@@ -247,7 +247,13 @@ export class ProjectExports {
         throw new Error("Export requires the current writable Project revision");
       const snapshot = captureJsonExport(selected.project, { presentation: request.presentation });
       const projection = await project(snapshot);
-      return projection && { ...projection, activeViewHash: activeViewHash(snapshot) };
+      return (
+        projection && {
+          ...projection,
+          omissions: [...new Set([...snapshot.omissions, ...projection.omissions])].sort(),
+          activeViewHash: activeViewHash(snapshot),
+        }
+      );
     });
   }
 

@@ -140,10 +140,11 @@ export function renderLeadSheetPdf(
     options: PDFKit.Mixins.StructureElementOptions = {},
   ) => {
     const lines = wrapWords(text, style);
-    ensure(lines.length * style.leading);
+    ensure(style.leading);
     root.add(
       doc.struct(tag, options, () => {
         for (const line of lines) {
+          ensure(style.leading);
           draw(line, style, page.margin, y);
           y += style.leading;
         }
@@ -156,7 +157,17 @@ export function renderLeadSheetPdf(
       const last = lines.at(-1);
       if (last !== undefined && measure(`${last}${word}`.trimEnd(), style) <= contentWidth)
         lines[lines.length - 1] = `${last}${word}`;
-      else lines.push(word);
+      else {
+        let part = "";
+        for (const character of word) {
+          if (part !== "" && measure(part + character, style) > contentWidth) {
+            lines.push(part);
+            part = "";
+          }
+          part += character;
+        }
+        lines.push(part);
+      }
     }
     return lines.map((line) => line.trimEnd());
   };
@@ -183,7 +194,9 @@ export function renderLeadSheetPdf(
     chord === null ? 0 : measure(chord.symbol, styles.chord) + 6;
   const lyricUnits = (row: Extract<LeadSheetRow, { kind: "lyric" }>): Unit[] =>
     row.segments.flatMap(({ chord, text }) => {
-      const words = lyricText(row.lineId, text).match(/\S+\s*|\s+/g) ?? [""];
+      const words = (lyricText(row.lineId, text).match(/\S+\s*|\s+/g) ?? [""]).flatMap((word) =>
+        measure(word, styles.lyric) > contentWidth ? wrapWords(word, styles.lyric) : [word],
+      );
       return words.map((word, index) => {
         const unitChord = index === 0 ? chord : null;
         return {
@@ -198,13 +211,14 @@ export function renderLeadSheetPdf(
     const directives = directiveText(row.directives);
     const directiveHeight = directives === "" ? 0 : styles.meta.leading;
     if (row.kind === "grid") {
-      const lines = gridLines(row);
+      const lines = gridLines(row).flatMap((line) => wrapWords(line, styles.grid));
       ensure(directiveHeight + styles.grid.leading);
       if (directives !== "") paragraph(directives, styles.meta);
-      ensure(lines.length * styles.grid.leading);
+      ensure(styles.grid.leading);
       root.add(
         doc.struct("P", { actual: gridSummary(row) }, () => {
           for (const line of lines) {
+            ensure(styles.grid.leading);
             draw(line, styles.grid, page.margin, y);
             y += styles.grid.leading;
           }

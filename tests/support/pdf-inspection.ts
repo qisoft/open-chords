@@ -8,6 +8,12 @@ type StructNode = {
   children?: StructNode[];
 };
 
+function coordinate(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value))
+    throw new Error("Invalid PDF coordinate");
+  return value;
+}
+
 function outline(node: StructNode): string {
   const children = (node.children ?? []).filter((child) => child.role !== undefined);
   return `${node.role ?? ""}${node.lang ? `{${node.lang}}` : ""}${node.alt ? `[${node.alt}]` : ""}${
@@ -41,6 +47,18 @@ export async function inspectPdf(bytes: Buffer) {
           "str" in item && item.str.trim() !== "" ? [item.str] : [],
         ),
         fonts,
+        textBounds: content.items.flatMap((item) =>
+          "str" in item && item.str.trim() !== ""
+            ? [
+                {
+                  left: coordinate(item.transform[4]),
+                  bottom: coordinate(item.transform[5]),
+                  width: item.width,
+                  height: item.height,
+                },
+              ]
+            : [],
+        ),
       };
     }),
   );

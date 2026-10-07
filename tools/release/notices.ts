@@ -31,6 +31,7 @@ export function renderNoticesReadme(platform: string): string {
     "  OPEN-CHORDS-LICENSE.txt  The Open Chords license (AGPL-3.0-only).",
     "  ELECTRON-LICENSE.txt     The Electron license.",
     "  CHROMIUM-LICENSES.html   Licenses of Chromium and its components, shipped with Electron.",
+    "  NOTO-SANS-OFL.txt       License of the embedded PDF fonts.",
     "  JAVASCRIPT-PACKAGES.txt  License texts of every JavaScript package inside app.asar.",
     "",
     "Notices of the bundled native runtimes, relative to the extracted download:",
@@ -51,6 +52,10 @@ export function writeReleaseNotices(options: {
   copyFileSync(join(options.repositoryRoot, "LICENSE"), join(notices, "OPEN-CHORDS-LICENSE.txt"));
   copyFileSync(join(electron, "LICENSE"), join(notices, "ELECTRON-LICENSE.txt"));
   copyFileSync(join(electron, "LICENSES.chromium.html"), join(notices, "CHROMIUM-LICENSES.html"));
+  copyFileSync(
+    join(options.repositoryRoot, "apps/desktop/src/main/fonts/NotoSans-OFL.txt"),
+    join(notices, "NOTO-SANS-OFL.txt"),
+  );
   writeFileSync(
     join(notices, "JAVASCRIPT-PACKAGES.txt"),
     renderJavaScriptPackageNotices(
