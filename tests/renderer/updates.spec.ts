@@ -41,7 +41,7 @@ test("manual update controls respect persisted Offline Mode through named IPC", 
       checkedAt: null,
       release: null,
     });
-    await page.addScriptTag({ content: axe.source });
+    await page.evaluate(axe.source);
     expect(
       await page.evaluate(async () =>
         (await window.axe!.run(document.querySelector('[role="dialog"]')!)).violations.map(
