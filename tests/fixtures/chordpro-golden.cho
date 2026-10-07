@@ -1,0 +1,23 @@
+{title: project_golden}
+{key: Gm}
+{time: 4/4}
+{tempo: 360}
+{capo: 2}
+{copyright: Test fixture only}
+{comment: Capo 2: these shapes match the Original recording.}
+{comment: Current presentation: transposed -2 semitones}
+{comment: Lyrics: User-supplied fixture text}
+{comment: Lyrics source: user}
+{define: F7 base-fret 1 frets 1 3 1 2 1 1}
+
+{start_of_grid: label="Intro" shape="2x2"}
+| Gm9add9add11/D . |
+{time: 3/4}
+| ? . . |
+{end_of_grid}
+
+{start_of_chorus: label="Chorus"}
+go go
+[N.C.]home go
+[F7]
+{end_of_chorus}

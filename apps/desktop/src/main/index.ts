@@ -37,7 +37,7 @@ import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-consta
 import { packagedProofFailureCode, runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
 import { ARCHIVE_EXTENSION } from "./project-archive-format.ts";
 import { ProjectArchiveImports } from "./project-archive-imports.ts";
-import { openProjectExports, type ProjectExports } from "./project-exports.ts";
+import { exportTarget, openProjectExports, type ProjectExports } from "./project-exports.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { installRendererProtocol, registerRendererScheme } from "./renderer-protocol.ts";
 import {
@@ -255,15 +255,11 @@ if (
           stateRoot,
           protectedRoots: [app.getAppPath(), process.resourcesPath, dirname(process.execPath)],
           pickTarget: async (format) => {
-            const archive = format === "project_archive";
+            const { label, extension } = exportTarget(format);
             const result = await dialog.showSaveDialog(getOrCreateWindow(), {
-              title: archive ? "Export Portable Project Archive" : "Export Open Chords JSON",
-              defaultPath: archive ? `Open Chords${ARCHIVE_EXTENSION}` : "Open Chords.json",
-              filters: [
-                archive
-                  ? { name: "Portable Project Archive", extensions: [ARCHIVE_EXTENSION.slice(1)] }
-                  : { name: "Open Chords JSON", extensions: ["json"] },
-              ],
+              title: `Export ${label}`,
+              defaultPath: `Open Chords.${extension}`,
+              filters: [{ name: label, extensions: [extension] }],
             });
             return result.canceled ? null : result.filePath;
           },

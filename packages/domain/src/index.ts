@@ -102,7 +102,26 @@ export {
   type PracticeState,
 } from "./practice.ts";
 export { reconcilePracticeState } from "./practice.ts";
-export { presentChord, capoGuidance, pitchClassNumber } from "./presentation.ts";
+export { presentChord, presentPitchClass, capoGuidance, pitchClassNumber } from "./presentation.ts";
+export { chordSpokenName, chordSymbol, isPortableChordSymbol } from "./chord-symbol.ts";
+export {
+  EXPORT_LOSS_CODES,
+  exportLoss,
+  parseExportLoss,
+  receiptLosses,
+  type ExportLoss,
+  type ExportLossCode,
+} from "./export-losses.ts";
+export {
+  projectLeadSheet,
+  type ChordCell,
+  type LeadSheet,
+  type LeadSheetRow,
+  type LeadSheetSection,
+} from "./lead-sheet.ts";
+export { type LeadSheetDiagram } from "./lead-sheet-diagrams.ts";
+export { serializeChordPro } from "./chordpro.ts";
+export { projectLrc, type LrcProjection } from "./lrc.ts";
 export { chordDiagram, type ChordDiagram } from "./diagrams.ts";
 export { practiceCountIn, practiceNavigation } from "./practice.ts";
 export {

@@ -282,6 +282,7 @@ export const DesktopResponseSchema = z.discriminatedUnion("type", [
       "media_unavailable",
       "receipt_pending",
       "too_large",
+      "unavailable",
     ]),
     busy: z.boolean(),
     pendingRecovery: z.number().int().nonnegative(),

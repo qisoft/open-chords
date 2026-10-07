@@ -33,7 +33,13 @@ export default defineConfig(({ mode }) => {
     mode === "packaged",
   );
   return {
+    // The main process is Node: bundle Node builds (pdfkit/fontkit ship divergent browser builds).
+    resolve: {
+      conditions: ["node", "module", "import", "default"],
+      mainFields: ["module", "main"],
+    },
     define: {
+      "import.meta.url": "require('node:url').pathToFileURL(__filename).href",
       OPEN_CHORDS_EMBEDDED_ACQUISITION_MANIFEST_SHA256: JSON.stringify(acquisitionManifestHash),
       OPEN_CHORDS_EMBEDDED_ACQUISITION_POLICY_SHA256: JSON.stringify(
         createHash("sha256")

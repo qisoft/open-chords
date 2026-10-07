@@ -21,6 +21,12 @@ const omissionLabels: Record<string, string> = {
     "Earlier export destinations were reduced to file names to protect private paths.",
 };
 
+function omissionLabel(omission: string): string {
+  const [code, ...details] = omission.split(":");
+  const label = omissionLabels[code!] ?? code!.replaceAll("_", " ");
+  return details.length === 0 ? label : `${label}: ${details.join(":")}`;
+}
+
 type Result = Extract<DesktopResponse, { type: "exports.result" }>;
 
 export function ExportProject({
@@ -40,7 +46,7 @@ export function ExportProject({
   const perform = async (action: Parameters<typeof api.exports.perform>[0]) => {
     const current = ++version.current;
     setPending(true);
-    const isSave = action.type === "save_json" || action.type === "save_archive";
+    const isSave = action.type.startsWith("save_");
     setSaving(isSave);
     setMessage(isSave ? "Choose a destination…" : "Checking exports…");
     try {
@@ -58,11 +64,13 @@ export function ExportProject({
                 ? "This export is larger than its profile allows. Nothing was saved."
                 : response.state === "media_unavailable"
                   ? "The verified Project Range is unavailable. Relink the Source or export without media."
-                  : response.state === "receipt_pending"
-                    ? "File saved; the export record needs recovery."
-                    : response.pendingRecovery > 0
-                      ? "An export needs recovery. Keep its destination available and retry recovery."
-                      : "",
+                  : response.state === "unavailable"
+                    ? "No lyric lines can be exported safely to LRC. Review the selected lyric text and line timing."
+                    : response.state === "receipt_pending"
+                      ? "File saved; the export record needs recovery."
+                      : response.pendingRecovery > 0
+                        ? "An export needs recovery. Keep its destination available and retry recovery."
+                        : "",
         );
       }
     } catch {
@@ -130,6 +138,36 @@ export function ExportProject({
           >
             Save JSON
           </button>
+          <h3>Lead sheet and lyrics</h3>
+          <p>
+            ChordPro and PDF keep exact chord symbols and selected lyrics. PDF uses an embedded-font
+            A4 layout that you can print from your PDF viewer. LRC includes only validated
+            lyric-line onsets. Each Receipt reports the details its format cannot preserve.
+          </p>
+          {(
+            [
+              ["save_chordpro", "Save ChordPro"],
+              ["save_pdf", "Save PDF"],
+              ["save_lrc", "Save LRC"],
+            ] as const
+          ).map(([type, label]) => (
+            <button
+              key={type}
+              type="button"
+              disabled={pending || snapshot.project.activeView === null}
+              onClick={() => {
+                const request = {
+                  projectId: snapshot.project.id,
+                  expectedProjectRevisionId: snapshot.projectRevisionId,
+                };
+                void perform(
+                  type === "save_lrc" ? { ...request, type } : { ...request, type, presentation },
+                );
+              }}
+            >
+              {label}
+            </button>
+          ))}
           <h3>Portable Project Archive</h3>
           <p>
             The archive keeps every retained Analysis Revision, edit, Lyrics Document, practice
@@ -195,9 +233,7 @@ export function ExportProject({
                 <p className="model-reference">Output SHA-256: {receipt.outputHash}</p>
                 <p className="model-reference">Active View SHA-256: {receipt.activeViewHash}</p>
                 {receipt.omissions.map((omission, index) => (
-                  <p key={`${index}:${omission}`}>
-                    {omissionLabels[omission] ?? "This export profile recorded an omission."}
-                  </p>
+                  <p key={`${index}:${omission}`}>{omissionLabel(omission)}</p>
                 ))}
               </details>
             </section>

@@ -9,9 +9,9 @@ import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { chromium, expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 
-import { openProjectExports } from "../../apps/desktop/src/main/project-exports.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { loadExportFixtureService } from "../support/export-service-loader.ts";
 
 test.skip(
   process.platform !== "darwin" && process.platform !== "win32",
@@ -34,11 +34,17 @@ test("installed application reopens durable JSON and archive Export Receipts thr
     });
     // Prepare persisted input through the public service. This is a Receipt reopen test,
     // not evidence of an installed native save-dialog interaction.
+    const { exportTarget, openProjectExports } = await loadExportFixtureService();
     const service = await openProjectExports({
       library,
       stateRoot,
       pickTarget: async (format) =>
-        join(root, format === "project_archive" ? "song.ocarchive" : "score.json"),
+        join(
+          root,
+          format === "project_archive"
+            ? "song.ocarchive"
+            : `score.${exportTarget(format).extension}`,
+        ),
     });
     expect(
       await service.saveJson({
@@ -54,6 +60,21 @@ test("installed application reopens durable JSON and archive Export Receipts thr
         includeMedia: false,
       }),
     ).toEqual({ state: "saved" });
+    for (const type of ["save_chordpro", "save_lrc", "save_pdf"] as const) {
+      const request = {
+        projectId: "project_golden",
+        expectedProjectRevisionId: (await library.getSnapshot("project_golden"))!.projectRevisionId,
+      };
+      expect(
+        (
+          await service.perform(
+            type === "save_lrc"
+              ? { ...request, type }
+              : { ...request, type, presentation: "current" },
+          )
+        ).state,
+      ).toBe("saved");
+    }
     await extractZip(
       join(
         process.cwd(),
@@ -120,6 +141,9 @@ test("installed application reopens durable JSON and archive Export Receipts thr
           receipts: [
             { displayName: "score.json", profileVersion: "open_chords_json/1.0/current" },
             { displayName: "song.ocarchive", profileVersion: "project_archive/1.0/no_media" },
+            { displayName: "score.cho", profileVersion: "chordpro/1.0/current" },
+            { displayName: "score.lrc", profileVersion: "lrc/1.0" },
+            { displayName: "score.pdf", profileVersion: "pdf/1.0/a4/current" },
           ],
         });
         expect(JSON.stringify(receipt)).not.toContain(root);

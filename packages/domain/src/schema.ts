@@ -440,6 +440,7 @@ export const ProjectContractSchema = z
   .meta({ id: "ProjectContract" });
 
 export type ActiveView = z.infer<typeof ActiveViewSchema>;
+export type PitchClass = z.infer<typeof PitchClassSchema>;
 export type AnalysisRevision = z.infer<typeof AnalysisRevisionSchema>;
 export type ChordEvent = z.infer<typeof ChordEventSchema>;
 export type ChordValue = z.infer<typeof ChordValueSchema>;
