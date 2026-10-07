@@ -73,6 +73,10 @@ for (const scenario of ["unchecked", "cancel-final", "confirm-models"] as const)
       });
       await mkdir(join(state, "models"));
       await writeFile(join(state, "models", "preserved-fixture"), "model preservation fixture");
+      await mkdir(join(state, "offline-media-cache"));
+      const offlineMediaFixture = join(state, "offline-media-cache", "preserved-fixture");
+      await writeFile(offlineMediaFixture, "offline media preservation fixture");
+      const originalOfflineMedia = await readFile(offlineMediaFixture);
       await writeFile(join(state, "unknown-private-file"), "unknown user data");
       await writeFile(join(root, "external-source.wav"), "external fixture bytes");
       const originalLibrary = await fingerprints(join(state, "project-library"));
@@ -131,6 +135,11 @@ for (const scenario of ["unchecked", "cancel-final", "confirm-models"] as const)
         checked: scenario !== "unchecked",
         action: "Select for deletion",
       });
+      expect(events.find((event) => event.category === "offline_media")).toEqual({
+        category: "offline_media",
+        checked: false,
+        action: "Preserve category",
+      });
       expect(events.find((event) => event.category === "final")).toEqual(
         scenario === "unchecked"
           ? undefined
@@ -154,6 +163,7 @@ for (const scenario of ["unchecked", "cancel-final", "confirm-models"] as const)
       expect(await exit).toBe(0);
       expect(await fingerprints(join(state, "project-library"))).toEqual(originalLibrary);
       expect(await readFile(join(state, "network-mode.json"))).toEqual(settings);
+      expect(await readFile(offlineMediaFixture)).toEqual(originalOfflineMedia);
       expect(await readFile(join(state, "unknown-private-file"), "utf8")).toBe("unknown user data");
       expect(await readFile(join(root, "external-source.wav"), "utf8")).toBe(
         "external fixture bytes",
