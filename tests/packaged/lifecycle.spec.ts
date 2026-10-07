@@ -92,11 +92,16 @@ async function installed(installation: string, state: string) {
   try {
     await expect
       .poll(
-        () =>
-          fetch(`${endpoint}/json/version`).then(
+        () => {
+          if (child.exitCode !== null || child.signalCode !== null)
+            throw new Error(
+              `Installed application exited before debug endpoint: code=${child.exitCode} signal=${child.signalCode}; ${diagnostics}`,
+            );
+          return fetch(`${endpoint}/json/version`).then(
             (response) => response.ok,
             () => false,
-          ),
+          );
+        },
         { timeout: 30000 },
       )
       .toBe(true);
