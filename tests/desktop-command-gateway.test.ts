@@ -4,13 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parseProjectContract } from "@open-chords/domain";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   DesktopCommandGateway,
   type LocalMediaAuthority,
   type ProjectAuthority,
 } from "../apps/desktop/src/main/desktop-command-gateway.ts";
+import { ManualUpdates } from "../apps/desktop/src/main/manual-updates.ts";
+import { openNetworkMode } from "../apps/desktop/src/main/network-mode.ts";
 
 const sender = {
   frameUrl: "open-chords://app/index.html",
@@ -668,5 +670,57 @@ it.each([
   } finally {
     discovery.cancel();
     await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+it("authorizes and validates manual-update IPC before any release request", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-update-gateway-"));
+  try {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(null, { status: 404 }));
+    const updates = new ManualUpdates({
+      network: await openNetworkMode(root),
+      fetch: fetcher,
+      currentVersion: "0.0.0",
+      platform: "darwin",
+      arch: "arm64",
+      openExternal: async () => {},
+    });
+    const gateway = new DesktopCommandGateway(
+      createAuthority(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      updates,
+    );
+    const command = {
+      ...commandEnvelope("request_update"),
+      type: "updates.perform",
+      action: { type: "check" },
+    };
+    expect(
+      (await gateway.execute(command, { ...sender, isMainFrame: false })).response,
+    ).toMatchObject({ type: "desktop.error", code: "unauthorized_sender" });
+    expect(
+      (
+        await gateway.execute(
+          { ...command, action: { type: "check", url: "https://evil.example" } },
+          sender,
+        )
+      ).response,
+    ).toMatchObject({ type: "desktop.error", code: "invalid_command" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect((await gateway.execute(command, sender, "updates.perform")).response).toMatchObject({
+      type: "updates.result",
+      requestId: "request_update",
+      state: "not_published",
+      release: null,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

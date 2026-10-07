@@ -62,3 +62,5 @@ export * from "./models.ts";
 export * from "./alignment.ts";
 export * from "./youtube.ts";
 export * from "./exports.ts";
+
+export * from "./updates.ts";

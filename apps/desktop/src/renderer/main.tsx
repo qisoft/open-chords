@@ -9,6 +9,7 @@ import {
   openFirstCommittedProject,
 } from "./committed-project-store.ts";
 import { ImportArchive } from "./import-archive.tsx";
+import { ManualUpdates } from "./manual-updates.tsx";
 import { ModelPacks } from "./model-packs.tsx";
 import { EmptyWorkspace, ProjectWorkspace } from "./workspace.tsx";
 import { YouTubeSource } from "./youtube-source.tsx";
@@ -104,7 +105,12 @@ function App() {
         <ProjectWorkspace
           api={api}
           key={committed.snapshot.project.id}
-          libraryTools={importTool}
+          libraryTools={
+            <>
+              {importTool}
+              <ManualUpdates api={api} />
+            </>
+          }
           {...(!busy ? { onChooseLocal: () => void chooseLocalRecording() } : {})}
           snapshot={committed.snapshot}
         />
@@ -114,6 +120,7 @@ function App() {
     <>
       <div className="empty-model-tools">
         {importTool}
+        <ManualUpdates api={api} />
         <ModelPacks api={api} />
         <YouTubeSource
           api={api}

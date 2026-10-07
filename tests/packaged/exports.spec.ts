@@ -9,6 +9,7 @@ import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { chromium, expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 
+import { openNetworkMode } from "../../apps/desktop/src/main/network-mode.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { loadExportFixtureService } from "../support/export-service-loader.ts";
@@ -23,6 +24,7 @@ test("installed application reopens durable JSON and archive Export Receipts thr
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-installed-export-")));
   try {
     const stateRoot = join(root, "state");
+    await (await openNetworkMode(stateRoot)).setOffline(true);
     const library = await openProjectLibrary({ stateRoot });
     await library.createProject({
       envelope: ProjectEnvelopeSchema.parse(
@@ -150,6 +152,22 @@ test("installed application reopens durable JSON and archive Export Receipts thr
         await page.getByRole("button", { name: "Close", exact: true }).click();
         await page.getByRole("button", { name: "Export Project", exact: true }).click();
         await expect(page.getByText("score.json", { exact: true })).toBeVisible();
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await page.getByRole("button", { name: "Updates", exact: true }).click();
+        const updateDialog = page.getByRole("dialog", { name: "Manual updates" });
+        await expect(
+          updateDialog.getByRole("button", { name: "Check for updates", exact: true }),
+        ).toBeDisabled();
+        expect(
+          await page.evaluate(() => window.openChords!.updates.perform({ type: "check" })),
+        ).toMatchObject({
+          type: "updates.result",
+          state: "offline",
+          offline: true,
+          checkedAt: null,
+          release: null,
+        });
+        await updateDialog.getByRole("button", { name: "Close", exact: true }).click();
         const cdp = await browser.newBrowserCDPSession();
         void cdp.send("Browser.close").catch(() => undefined);
         await expect

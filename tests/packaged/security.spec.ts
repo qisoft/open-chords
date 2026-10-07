@@ -290,6 +290,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
         "models",
         "project",
         "shell",
+        "updates",
         "youtube",
       ],
       modelsKeys: ["perform"],

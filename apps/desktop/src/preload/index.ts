@@ -1,4 +1,5 @@
 import {
+  UpdatesCommandSchema,
   AlignmentCommandSchema,
   ModelsCommandSchema,
   LyricsCommandSchema,
@@ -140,6 +141,17 @@ async function changeEditHistory(
       { type: "project.history_changed" | "project.edit_conflicts" }
     > => response.type === "project.history_changed" || response.type === "project.edit_conflicts",
     "Unexpected edit history response",
+  );
+}
+
+async function performUpdates(action: Parameters<OpenChordsDesktopApi["updates"]["perform"]>[0]) {
+  const command = UpdatesCommandSchema.parse({ ...envelope(), action, type: "updates.perform" });
+  return invokeCapability(
+    DESKTOP_IPC_CHANNELS.updatesPerform,
+    command,
+    (response): response is Extract<DesktopResponse, { type: "updates.result" }> =>
+      response.type === "updates.result",
+    "Unexpected update operation response",
   );
 }
 
@@ -346,6 +358,7 @@ const api: OpenChordsDesktopApi = {
       );
     },
   }),
+  updates: Object.freeze({ perform: performUpdates }),
   models: Object.freeze({ perform: performModels }),
   lyrics: Object.freeze({ perform: performLyrics }),
   media: {

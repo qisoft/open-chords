@@ -28,6 +28,7 @@ import { blockCpuWorkAfterIncompleteCleanup } from "./cpu-work.ts";
 import { installDesktopIpc, publishProjectEvent } from "./desktop-ipc.ts";
 import { LocalMediaService } from "./local-media.ts";
 import { openLyricsDiscovery, type LyricsDiscovery } from "./lyrics-discovery.ts";
+import { ManualUpdates } from "./manual-updates.ts";
 import { createMediaCleanupBeforeQuitHandler } from "./media-shutdown.ts";
 import { openModelStore, type ModelStore } from "./model-store.ts";
 import { openNetworkMode } from "./network-mode.ts";
@@ -111,6 +112,7 @@ if (
 
   const MEDIA_CLEANUP_TIMEOUT_MS = 30_000;
   const ownsSingleInstance = app.requestSingleInstanceLock();
+  let updates: ManualUpdates | null = null;
   let modelStore: ModelStore | null = null;
   let alignmentService: AlignmentService | null = null;
   let lyricsDiscovery: LyricsDiscovery | null = null;
@@ -134,6 +136,7 @@ if (
       "before-quit",
       createMediaCleanupBeforeQuitHandler({
         dispose: async () => {
+          updates?.cancel();
           projectExports?.cancel();
           youtube?.close();
           try {
@@ -164,6 +167,7 @@ if (
 
     app.on("window-all-closed", () => {
       lyricsDiscovery?.cancel();
+      updates?.cancel();
       modelStore?.cancel();
       if (process.platform !== "darwin") app.quit();
     });
@@ -223,6 +227,13 @@ if (
           network,
           metadata: new YouTubeMetadata({ network }),
           player: new IsolatedYouTubePlayer(),
+          openExternal: (url) => shell.openExternal(url),
+        });
+        updates = new ManualUpdates({
+          network,
+          currentVersion: app.getVersion(),
+          platform: process.platform,
+          arch: process.arch,
           openExternal: (url) => shell.openExternal(url),
         });
         lyricsDiscovery = await openLyricsDiscovery({ stateRoot, network });
@@ -355,6 +366,7 @@ if (
           );
         });
         installDesktopIpc(projectLibrary, {
+          updates,
           archives: archiveImports,
           exports: projectExports,
           youtube,
@@ -381,6 +393,7 @@ if (
   function getOrCreateWindow() {
     if (mainWindow === null || mainWindow.isDestroyed()) {
       lyricsDiscovery?.cancel();
+      updates?.cancel();
       modelStore?.cancel();
       const generationId = `generation_${randomUUID().replaceAll("-", "")}`;
       const window = createDesktopWindow(generationId);
@@ -418,6 +431,7 @@ if (
     projectExports?.cancel();
     youtube?.cancel();
     lyricsDiscovery?.cancel();
+    updates?.cancel();
     modelStore?.cancel();
     const context = rendererContexts.get(webContentsId);
     rendererContexts.delete(webContentsId);
