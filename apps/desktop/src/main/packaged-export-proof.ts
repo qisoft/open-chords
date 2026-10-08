@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import { runPackagedExportDiskProof } from "./packaged-export-disk-proof.ts";
 import { runPackagedExportFailureProof } from "./packaged-export-failure-proof.ts";
+import { runPackagedExportRecoveryProof } from "./packaged-export-recovery-proof.ts";
 import { exportTarget, openProjectExports } from "./project-exports.ts";
 import { openProjectLibrary } from "./project-library.ts";
 
@@ -68,6 +69,9 @@ export async function runPackagedExportProof(stateRoot: string, includeDiskFailu
   const diskFailures = includeDiskFailures
     ? await runPackagedExportDiskProof(library, stateRoot)
     : {};
+  const recovery = includeDiskFailures
+    ? await runPackagedExportRecoveryProof(library, stateRoot)
+    : {};
   const reopened = await openProjectLibrary({ stateRoot });
   if (reopened.listExportReceipts(projectId).length !== 5)
     throw new Error("export_proof_reopen_failed");
@@ -77,5 +81,6 @@ export async function runPackagedExportProof(stateRoot: string, includeDiskFailu
     durableReceipts: 5,
     ...failures,
     ...diskFailures,
+    ...recovery,
   };
 }

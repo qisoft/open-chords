@@ -89,6 +89,9 @@ test("installed application generates golden projections and reopens durable Exp
       cancelledTargetUnchanged: true,
       diskFailureRefusals: 3,
       diskFailureRetryDurable: true,
+      publishedReceiptPending: true,
+      recoveredReceiptDurable: true,
+      recoveryIdempotent: true,
     });
     const outputRoot = join(root, "packaged-export-output");
     const outputBytes = await Promise.all(

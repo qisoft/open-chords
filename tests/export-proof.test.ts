@@ -31,6 +31,9 @@ it("exports the synthetic fixture through the production service with cancelled 
       cancelledTargetUnchanged: true,
       diskFailureRefusals: 3,
       diskFailureRetryDurable: true,
+      publishedReceiptPending: true,
+      recoveredReceiptDurable: true,
+      recoveryIdempotent: true,
     });
     expect(await readFile(join(root, "packaged-export-output/score.cho"), "utf8")).toBe(
       await readFile("tests/fixtures/chordpro-golden.cho", "utf8"),
