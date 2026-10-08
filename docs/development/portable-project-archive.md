@@ -101,7 +101,9 @@ pnpm build:test && pnpm exec playwright test tests/renderer/archive.spec.ts
 pnpm validate
 ```
 
-The installed macOS and Windows test reopens JSON and archive Export Receipts and checks the named archive capability. Like the JSON profile, it does not claim interaction with the native save or open dialogs.
+Installed macOS and Windows CI generates exports using the bundled production service and reopens the JSON/archive Export Receipts through named IPC. A separate `--open-chords-archive-proof` journey imports that installed-generated archive into a fresh Library using the production quarantine and import service with fixed synthetic inputs. It compares the complete retained envelope/records, verifies duplicate and cancelled imports, and rejects traversal, symlink, name-collision, executable, hash-tampered, future-version, oversized and encrypted archives. Hashes of every Library file must remain unchanged after each duplicate, cancellation and rejection; reopening must retain the single imported Project. Host assertions also preserve an external file marker and refuse any traversal output. The installed executable runs with an OS-only environment and emits only fixed stages and summary counts.
+
+Native execution belongs to GitHub CI. Local tests exercise the module harness and hostile fixtures; they do not launch the application. Fixed archive selection is a module-interface check and does not establish interaction with native save or open dialogs. Current-head native CI is required before claiming installed archive evidence.
 
 ## Not yet covered
 
