@@ -106,7 +106,10 @@ if (
         process.argv.includes(PACKAGED_ARCHIVE_PROOF_ARGUMENT)
         ? async () => {
             const stateRoot = app.getPath("userData");
-            const exports = await runPackagedExportProof(stateRoot);
+            const exports = await runPackagedExportProof(
+              stateRoot,
+              process.argv.includes(PACKAGED_EXPORT_PROOF_ARGUMENT),
+            );
             const report = process.argv.includes(PACKAGED_ARCHIVE_PROOF_ARGUMENT)
               ? await runPackagedArchiveProof(stateRoot)
               : exports;

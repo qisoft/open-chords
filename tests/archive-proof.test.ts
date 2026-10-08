@@ -13,7 +13,7 @@ it("imports the generated archive and leaves durable Library bytes unchanged on 
   try {
     const stateRoot = join(root, "state");
     await prepareArchiveProofFixture(stateRoot);
-    await runPackagedExportProof(stateRoot);
+    await runPackagedExportProof(stateRoot, false);
     expect(await runPackagedArchiveProof(stateRoot)).toEqual({
       proof: "installed-archives",
       roundtrip: true,
@@ -25,4 +25,4 @@ it("imports the generated archive and leaves durable Library bytes unchanged on 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 30000);
