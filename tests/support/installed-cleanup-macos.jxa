@@ -1,0 +1,107 @@
+function run(argv) {
+  var applicationPid = Number(argv[0]);
+  var scenario = argv[1];
+  if (!Number.isInteger(applicationPid) || applicationPid <= 0 ||
+      ['unchecked', 'cancel-final', 'confirm-models'].indexOf(scenario) === -1) {
+    throw new Error('Invalid native cleanup driver arguments');
+  }
+  var systemEvents = Application('System Events');
+  var labels = {
+    projects: 'Projects, revisions, Library Trash and Source records (irreplaceable)',
+    models: 'Installed language packs and models (can be downloaded again)',
+    offline_media: 'Offline Media Cache (offline playback copies will be lost)',
+    settings: 'Settings and completed acquisition history',
+    application_state: 'Application caches, logs and browser state',
+    final: 'Permanently delete the selected data?',
+    result: 'Selected cleanup completed'
+  };
+  var seen = {};
+  var events = [];
+  var deadline = Date.now() + 90000;
+  function attribute(element, name) {
+    try { return element[name](); } catch (_) { return null; }
+  }
+  function waitForAttribute(element, name, expected) {
+    var waitDeadline = Math.min(deadline, Date.now() + 2000);
+    while (Date.now() < waitDeadline) {
+      if (attribute(element, name) === expected) return true;
+      delay(0.1);
+    }
+    return attribute(element, name) === expected;
+  }
+  while (Date.now() < deadline) {
+    var processes;
+    try {
+      processes = systemEvents.processes.whose({ unixId: applicationPid })();
+    } catch (_) {
+      throw new Error('Native cleanup accessibility process discovery unavailable');
+    }
+    if (processes.length === 0) {
+      if (events.length > 0) return JSON.stringify(events);
+      delay(0.1);
+      continue;
+    }
+    if (processes.length !== 1) throw new Error('Native cleanup process was ambiguous');
+    var process = processes[0];
+    var windows;
+    try { windows = process.windows(); } catch (_) {
+      throw new Error('Native cleanup accessibility window discovery unavailable');
+    }
+    if (windows.length > 16) throw new Error('Native cleanup window budget exceeded');
+    for (var w = 0; w < windows.length; w++) {
+      var elements;
+      try { elements = windows[w].entireContents(); } catch (_) {
+        throw new Error('Native cleanup accessibility element discovery unavailable');
+      }
+      if (elements.length > 256) throw new Error('Native cleanup element budget exceeded');
+      var category = null;
+      var keys = Object.keys(labels);
+      for (var k = 0; k < keys.length && category === null; k++) {
+        for (var e = 0; e < elements.length; e++) {
+          if (attribute(elements[e], 'value') === labels[keys[k]] ||
+              attribute(elements[e], 'name') === labels[keys[k]]) {
+            category = keys[k];
+            break;
+          }
+        }
+      }
+      if (category === null || seen[category]) continue;
+      var selectModels = category === 'models' && scenario !== 'unchecked';
+      var confirmFinal = category === 'final' && scenario === 'confirm-models';
+      var buttonName = category === 'result' ? 'Close' : category === 'final' ?
+        (confirmFinal ? 'Permanently delete' : 'Cancel') :
+        category === 'models' ? 'Select for deletion' : 'Preserve category';
+      var checkboxes = [];
+      var buttons = [];
+      for (var i = 0; i < elements.length; i++) {
+        var role = attribute(elements[i], 'role');
+        if (role === 'AXCheckBox') checkboxes.push(elements[i]);
+        if (role === 'AXButton' && attribute(elements[i], 'name') === buttonName &&
+            attribute(elements[i], 'enabled') === true) buttons.push(elements[i]);
+      }
+      if (buttons.length === 0) continue;
+      if (buttons.length !== 1) throw new Error('Native cleanup action was ambiguous');
+      if (category !== 'result') {
+        if (checkboxes.length !== 1) throw new Error('Native confirmation checkbox unavailable');
+        if (attribute(checkboxes[0], 'value') !== 0) {
+          throw new Error('Native confirmation was not unchecked by default');
+        }
+        if (selectModels || confirmFinal) {
+          try { checkboxes[0].click(); } catch (_) {
+            throw new Error('Native confirmation could not toggle');
+          }
+          if (!waitForAttribute(checkboxes[0], 'value', 1)) {
+            throw new Error('Native confirmation did not toggle');
+          }
+        }
+      }
+      try { buttons[0].click(); } catch (_) {
+        throw new Error('Native cleanup action could not be pressed');
+      }
+      events.push({ category: category, checked: selectModels || confirmFinal, action: buttonName });
+      seen[category] = true;
+    }
+    delay(0.1);
+  }
+  throw new Error('Installed cleanup native dialog driver timed out');
+}

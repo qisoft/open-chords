@@ -14,8 +14,11 @@ import { openNetworkMode } from "../../apps/desktop/src/main/network-mode.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 
-// UI Automation drives actual Windows OS dialogs; macOS native interaction remains a gate.
-test.skip(process.platform !== "win32", "Windows installed native cleanup dialogs");
+// System accessibility clients drive the installed native dialogs without replacing Electron APIs.
+test.skip(
+  process.platform !== "win32" && process.platform !== "darwin",
+  "Installed native desktop cleanup dialogs",
+);
 const execute = promisify(execFile);
 let installation: string;
 
@@ -25,9 +28,10 @@ test.beforeAll(async () => {
   await extractZip(
     join(
       process.cwd(),
-      "out/make/zip/win32",
+      "out/make/zip",
+      process.platform,
       process.arch,
-      `Open Chords-win32-${process.arch}-0.0.0.zip`,
+      `Open Chords-${process.platform}-${process.arch}-0.0.0.zip`,
     ),
     { dir: installation },
   );
@@ -55,7 +59,7 @@ async function fingerprints(root: string) {
 }
 
 for (const scenario of ["unchecked", "cancel-final", "confirm-models"] as const) {
-  test(`installed Windows cleanup native confirmation: ${scenario}`, async () => {
+  test(`installed ${process.platform} cleanup native confirmation: ${scenario}`, async () => {
     test.setTimeout(180000);
     const root = await realpath(await mkdtemp(join(tmpdir(), "oc-cleanup-data-")));
     const state = join(root, "state");
@@ -82,25 +86,30 @@ for (const scenario of ["unchecked", "cancel-final", "confirm-models"] as const)
       const originalLibrary = await fingerprints(join(state, "project-library"));
       const settings = await readFile(join(state, "network-mode.json"));
       const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR;
-      if (!windowsRoot) throw new Error("Windows system directory unavailable");
+      if (process.platform === "win32" && !windowsRoot)
+        throw new Error("Windows system directory unavailable");
       const env: Record<string, string> = {};
       for (const key of [
         "SystemRoot",
         "WINDIR",
         "TEMP",
         "TMP",
+        "HOME",
         "USERPROFILE",
         "APPDATA",
         "LOCALAPPDATA",
       ])
         if (process.env[key] !== undefined) env[key] = process.env[key];
-      env.PATH = [
-        join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
-        join(windowsRoot, "System32"),
-        windowsRoot,
-      ].join(";");
+      if (process.platform === "win32")
+        env.PATH = [
+          join(windowsRoot!, "System32", "WindowsPowerShell", "v1.0"),
+          join(windowsRoot!, "System32"),
+          windowsRoot!,
+        ].join(";");
       child = spawn(
-        join(installation, "Open Chords.exe"),
+        process.platform === "darwin"
+          ? join(installation, "Open Chords.app/Contents/MacOS/Open Chords")
+          : join(installation, "Open Chords.exe"),
         ["--open-chords-cleanup", `--user-data-dir=${state}`],
         { env, stdio: "ignore" },
       );
@@ -109,23 +118,44 @@ for (const scenario of ["unchecked", "cancel-final", "confirm-models"] as const)
         child!.once("exit", resolve);
       });
       if (!child.pid) throw new Error("Installed cleanup process unavailable");
-      const { stdout } = await execute(
-        join(windowsRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-        [
-          "-NoLogo",
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          join(process.cwd(), "tests/support/installed-cleanup-windows.ps1"),
-          "-ApplicationPid",
-          String(child.pid),
-          "-Scenario",
-          scenario,
-        ],
-        { timeout: 100000, maxBuffer: 16384 },
-      );
+      const driver =
+        process.platform === "darwin"
+          ? {
+              command: "/usr/bin/osascript",
+              args: [
+                "-l",
+                "JavaScript",
+                join(process.cwd(), "tests/support/installed-cleanup-macos.jxa"),
+                String(child.pid),
+                scenario,
+              ],
+            }
+          : {
+              command: join(
+                windowsRoot!,
+                "System32",
+                "WindowsPowerShell",
+                "v1.0",
+                "powershell.exe",
+              ),
+              args: [
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                join(process.cwd(), "tests/support/installed-cleanup-windows.ps1"),
+                "-ApplicationPid",
+                String(child.pid),
+                "-Scenario",
+                scenario,
+              ],
+            };
+      const { stdout } = await execute(driver.command, driver.args, {
+        timeout: 100000,
+        maxBuffer: 16384,
+      });
       const events = z
         .array(z.object({ category: z.string(), checked: z.boolean(), action: z.string() }))
         .parse(JSON.parse(stdout));
