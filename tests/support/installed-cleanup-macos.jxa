@@ -28,7 +28,11 @@ function run(argv) {
     } catch (_) {
       throw new Error('Native cleanup accessibility process discovery unavailable');
     }
-    if (processes.length === 0) return JSON.stringify(events);
+    if (processes.length === 0) {
+      if (events.length > 0) return JSON.stringify(events);
+      delay(0.1);
+      continue;
+    }
     if (processes.length !== 1) throw new Error('Native cleanup process was ambiguous');
     var process = processes[0];
     var windows;
