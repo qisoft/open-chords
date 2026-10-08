@@ -42,11 +42,42 @@ test("installed Extractor Worker streams only through the broker with native net
       process.platform === "darwin"
         ? join(root, "Open Chords.app/Contents/MacOS/Open Chords")
         : join(root, "Open Chords.exe");
-    const { stdout } = await promisify(execFile)(
+    const env: NodeJS.ProcessEnv = {};
+    for (const key of [
+      "SystemRoot",
+      "WINDIR",
+      "TEMP",
+      "TMP",
+      "HOME",
+      "USERPROFILE",
+      "APPDATA",
+      "LOCALAPPDATA",
+    ]) {
+      if (process.env[key] !== undefined) env[key] = process.env[key];
+    }
+    if (process.platform === "win32") {
+      const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR;
+      if (!windowsRoot) throw new Error("installed_windows_root_missing");
+      env.PATH = [
+        join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
+        join(windowsRoot, "System32"),
+        windowsRoot,
+      ].join(";");
+    }
+    const { stdout, stderr } = await promisify(execFile)(
       executable,
       ["--open-chords-acquisition-proof", `--user-data-dir=${join(root, "profile")}`],
-      { timeout: proofTimeout, maxBuffer: 1024 * 1024, windowsHide: true },
+      { env, timeout: proofTimeout, maxBuffer: 1024 * 1024, windowsHide: true },
     );
+    for (const privateValue of [
+      root,
+      "offline-private-token",
+      "private-playlist",
+      "private-provider-token",
+      "Private fixture title",
+    ]) {
+      expect(stdout + stderr).not.toContain(privateValue);
+    }
     const report = JSON.parse(stdout.trim());
     expect(report).toMatchObject({
       proof: "brokered-extractor",
@@ -63,6 +94,10 @@ test("installed Extractor Worker streams only through the broker with native net
       jobState: "succeeded",
       botCheckNoSnapshot: true,
       offlineCancellationClean: true,
+      offlineReopenDnsCalls: 0,
+      offlineReopenHttpCalls: 0,
+      offlineReopenLibraryUnchanged: true,
+      offlineHistoryRedacted: true,
       mismatchedMediaNoSnapshot: true,
       oversizedDurationNoSnapshot: true,
       initializationCleanupRecoverable: true,

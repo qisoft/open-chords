@@ -15,6 +15,7 @@ import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metada
 import { openNetworkMode } from "./network-mode.ts";
 import { proveInitializationCleanupRecovery } from "./packaged-acquisition-fault-proof.ts";
 import { proveAcquisitionStartCancellation } from "./packaged-acquisition-start-proof.ts";
+import { proveOfflineAcquisitionReopen } from "./packaged-offline-acquisition-proof.ts";
 import { canonicalWavFixture } from "./packaged-sidecar-proof.ts";
 import { ProjectOwnedRecordsSchema } from "./project-library-records.ts";
 import { openProjectLibrary } from "./project-library.ts";
@@ -108,6 +109,7 @@ export async function runPackagedAcquisitionProof() {
   let stallMedia = false;
   let mediaRequested: () => void = () => undefined;
   let streamCancelled = false;
+  const transportCalls = { dns: 0, http: 0 };
   const jobOptions: AcquisitionJobsOptions = {
     stateRoot,
     library,
@@ -125,8 +127,12 @@ export async function runPackagedAcquisitionProof() {
     },
     policyHash: EXPECTED_ACQUISITION_POLICY_SHA256,
     networkTransport: {
-      resolve: async () => ({ aliases: [], addresses: ["142.250.74.206"] }),
+      resolve: async () => {
+        transportCalls.dns++;
+        return { aliases: [], addresses: ["142.250.74.206"] };
+      },
       request: async ({ url }) => {
+        transportCalls.http++;
         const responseMedia = mismatchedMedia
           ? canonicalWavFixture()
           : oversizedDuration
@@ -246,6 +252,7 @@ export async function runPackagedAcquisitionProof() {
     ]);
     await network.setOffline(true);
     const cancelled = await jobs.wait(interrupted.id);
+    const callsBeforeBlocked = { ...transportCalls };
     const blocked = await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" });
     offlineCancellationClean =
       cancelled.state === "cancelled" &&
@@ -253,6 +260,8 @@ export async function runPackagedAcquisitionProof() {
       blocked.state === "blocked" &&
       blocked.reason === "offline" &&
       blocked.attempts.length === 0 &&
+      transportCalls.dns === callsBeforeBlocked.dns &&
+      transportCalls.http === callsBeforeBlocked.http &&
       JSON.stringify(await library.listYouTubeSources()) === before &&
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
   } finally {
@@ -283,6 +292,7 @@ export async function runPackagedAcquisitionProof() {
   const snapshotReopened = (await reopened.listYouTubeSources()).some((source) =>
     source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
   );
+  const offlineReopen = await proveOfflineAcquisitionReopen(jobOptions);
   await network.setOffline(false);
   const startCancellation = await proveAcquisitionStartCancellation(jobOptions);
   const initializationCleanupRecoverable = await proveInitializationCleanupRecovery(jobOptions);
@@ -300,6 +310,7 @@ export async function runPackagedAcquisitionProof() {
       jobState: job.state,
       botCheckNoSnapshot,
       offlineCancellationClean,
+      ...offlineReopen,
       mismatchedMediaNoSnapshot,
       oversizedDurationNoSnapshot,
       initializationCleanupRecoverable,
