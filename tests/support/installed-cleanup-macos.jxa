@@ -21,6 +21,14 @@ function run(argv) {
   function attribute(element, name) {
     try { return element[name](); } catch (_) { return null; }
   }
+  function waitForAttribute(element, name, expected) {
+    var waitDeadline = Math.min(deadline, Date.now() + 2000);
+    while (Date.now() < waitDeadline) {
+      if (attribute(element, name) === expected) return true;
+      delay(0.1);
+    }
+    return attribute(element, name) === expected;
+  }
   while (Date.now() < deadline) {
     var processes;
     try {
@@ -82,7 +90,7 @@ function run(argv) {
           try { checkboxes[0].click(); } catch (_) {
             throw new Error('Native confirmation could not toggle');
           }
-          if (attribute(checkboxes[0], 'value') !== 1) {
+          if (!waitForAttribute(checkboxes[0], 'value', 1)) {
             throw new Error('Native confirmation did not toggle');
           }
         }
