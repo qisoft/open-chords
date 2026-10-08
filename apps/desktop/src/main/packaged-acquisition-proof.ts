@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { writeSync } from "node:fs";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -9,6 +10,7 @@ import {
   EXPECTED_ACQUISITION_POLICY_SHA256,
 } from "./acquisition-build-metadata.ts";
 import { openAcquisitionJobs, type AcquisitionJobsOptions } from "./acquisition-jobs.ts";
+import { acquisitionProofFailureCode } from "./acquisition-proof-diagnostics.ts";
 import { ACQUISITION_PROOF_MEDIA, oversizedDurationFixture } from "./acquisition-proof-fixture.ts";
 import { openContainedAcquisitionAttempt } from "./acquisition-runtime.ts";
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
@@ -21,7 +23,33 @@ import { ProjectOwnedRecordsSchema } from "./project-library-records.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { EXPECTED_SIDECAR_MANIFEST_SHA256 } from "./sidecar-build-metadata.ts";
 
+type AcquisitionProofStage =
+  | "application_ready"
+  | "runtime_setup"
+  | "extractor_run"
+  | "artifact_verification"
+  | "extractor_cleanup"
+  | "jobs";
+
 export async function runPackagedAcquisitionProof() {
+  let stage: AcquisitionProofStage = "application_ready";
+  const reportStage = (next: AcquisitionProofStage) => {
+    stage = next;
+    writeSync(2, `Acquisition proof stage: ${stage}\n`);
+  };
+  reportStage(stage);
+  try {
+    await runAcquisitionProof(reportStage);
+  } catch (cause) {
+    writeSync(
+      2,
+      `Acquisition proof diagnostic: stage=${stage} code=${acquisitionProofFailureCode(cause)}\n`,
+    );
+    throw cause;
+  }
+}
+
+async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) => void) {
   const mac = process.platform === "darwin";
   const runtimeOptions = {
     runtimeRoot: mac
@@ -37,10 +65,12 @@ export async function runPackagedAcquisitionProof() {
       ? { bridgePath: join(process.resourcesPath, "../MacOS/open-chords-containment-bridge") }
       : {}),
   };
+  reportStage("runtime_setup");
   const attempt = await openContainedAcquisitionAttempt(runtimeOptions);
   const media = Buffer.alloc(50_000, 42);
   let result;
   try {
+    reportStage("extractor_run");
     result = await attempt.run({
       videoId: "aqz-KE-bpKQ",
       proof: true,
@@ -58,6 +88,7 @@ export async function runPackagedAcquisitionProof() {
               }),
       },
     });
+    reportStage("artifact_verification");
     const artifact = await readFile(join(attempt.workspace, "media.bin"));
     if (
       !artifact.equals(media) ||
@@ -68,6 +99,7 @@ export async function runPackagedAcquisitionProof() {
   } finally {
     attempt.cleanup();
   }
+  reportStage("extractor_cleanup");
   const removed = await lstat(attempt.workspace).then(
     () => false,
     (error: unknown) => error instanceof Error && "code" in error && error.code === "ENOENT",
@@ -75,6 +107,7 @@ export async function runPackagedAcquisitionProof() {
   if (!removed) throw new Error("acquisition_proof_cleanup_failed");
   process.stderr.write("Acquisition proof stage: extractor_reaped\n");
 
+  reportStage("jobs");
   const stateRoot = app.getPath("userData");
   const library = await openProjectLibrary({ stateRoot });
   const network = await openNetworkMode(stateRoot);
