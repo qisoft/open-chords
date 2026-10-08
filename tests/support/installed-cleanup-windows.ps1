@@ -101,6 +101,11 @@ while ([DateTime]::UtcNow -lt $deadline) {
       if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) { throw 'Native confirmation was not unchecked by default' }
       if ($selectModels -or $confirmFinal) {
         $toggle.Toggle()
+        $toggleDeadline = [DateTime]::UtcNow.AddSeconds(2)
+        if ($toggleDeadline -gt $deadline) { $toggleDeadline = $deadline }
+        while ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On -and [DateTime]::UtcNow -lt $toggleDeadline) {
+          Start-Sleep -Milliseconds 100
+        }
         if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) { throw 'Native confirmation did not toggle' }
       }
     }
