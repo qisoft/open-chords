@@ -788,10 +788,12 @@ async function runLifecycleContainmentProbe(
     requestId: `request-containment-${mode}`,
     timeoutMs: 15_000,
   });
+  const probeStartedAt = performance.now();
+  const probeSignal = AbortSignal.timeout(15_000);
   const process = await createLauncher(
     [`--containment-lifecycle-probe=${plan}`],
     mode === "crash" ? [73] : [0],
-  ).launch(request, AbortSignal.timeout(15_000));
+  ).launch(request, probeSignal);
   let primaryFailure: { cause: unknown } | undefined;
   let evidence: z.infer<typeof LifecycleEvidenceSchema> | undefined;
   const iterator = process.stdout[Symbol.asyncIterator]();
@@ -802,6 +804,22 @@ async function runLifecycleContainmentProbe(
     }
     if (mode === "crash") await drainOutput(iterator);
   } catch (cause) {
+    const exit =
+      cause instanceof SidecarSessionError
+        ? z
+            .object({
+              exitCode: z.number().int().nullable(),
+              exitSignal: z
+                .string()
+                .regex(/^SIG[A-Z0-9]+$/)
+                .nullable(),
+            })
+            .safeParse(cause.cause)
+        : undefined;
+    writeSync(
+      2,
+      `Packaged lifecycle probe failure: mode=${mode} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"}\n`,
+    );
     primaryFailure = { cause };
   }
   const cleanupFailures: unknown[] = [];

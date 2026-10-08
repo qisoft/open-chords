@@ -35,6 +35,8 @@ import { openModelStore, type ModelStore } from "./model-store.ts";
 import { openNetworkMode } from "./network-mode.ts";
 import { openOfflineMediaCache } from "./offline-media-cache.ts";
 import { runPackagedAcquisitionProof } from "./packaged-acquisition-proof.ts";
+import { PACKAGED_ARCHIVE_PROOF_ARGUMENT } from "./packaged-archive-proof-constants.ts";
+import { runPackagedArchiveProof } from "./packaged-archive-proof.ts";
 import { PACKAGED_EXPORT_PROOF_ARGUMENT, runPackagedExportProof } from "./packaged-export-proof.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "./packaged-sidecar-proof-constants.ts";
 import { packagedProofFailureCode, runPackagedSidecarProof } from "./packaged-sidecar-proof.ts";
@@ -58,7 +60,8 @@ import { YouTubeMetadata } from "./youtube-source.ts";
 if (
   process.argv.includes(PACKAGED_SIDECAR_PROOF_ARGUMENT) ||
   process.argv.includes("--open-chords-acquisition-proof") ||
-  process.argv.includes(PACKAGED_EXPORT_PROOF_ARGUMENT)
+  process.argv.includes(PACKAGED_EXPORT_PROOF_ARGUMENT) ||
+  process.argv.includes(PACKAGED_ARCHIVE_PROOF_ARGUMENT)
 ) {
   // Electron otherwise opens a modal error dialog, hiding native CI failures
   // behind the outer process timeout. Never continue after an uncaught error.
@@ -99,9 +102,14 @@ if (
   void app
     .whenReady()
     .then(
-      process.argv.includes(PACKAGED_EXPORT_PROOF_ARGUMENT)
+      process.argv.includes(PACKAGED_EXPORT_PROOF_ARGUMENT) ||
+        process.argv.includes(PACKAGED_ARCHIVE_PROOF_ARGUMENT)
         ? async () => {
-            const report = await runPackagedExportProof(app.getPath("userData"));
+            const stateRoot = app.getPath("userData");
+            const exports = await runPackagedExportProof(stateRoot);
+            const report = process.argv.includes(PACKAGED_ARCHIVE_PROOF_ARGUMENT)
+              ? await runPackagedArchiveProof(stateRoot)
+              : exports;
             process.stdout.write(`${JSON.stringify(report)}\n`);
           }
         : process.argv.includes("--open-chords-acquisition-proof")
