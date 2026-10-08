@@ -16,7 +16,9 @@ JSON is bounded to 32 MiB, ChordPro to 8 MiB, LRC to 4 MiB and PDF to 64 MiB. PD
 
 ## Evidence boundaries
 
-Domain projection and public service tests cover exact symbols, omitted lines, hashes, persistent Receipts and unavailable LRC. Renderer CI saves all formats through real IPC with only the external native-picker response substituted. Installed CI reopens all formats' Receipts and checks available controls; that test alone does not demonstrate an actual installed native save-dialog interaction. PDF bytes are also rendered for visual inspection. Tagged structure does not establish PDF/UA, PDF/A, or native screen-reader acceptance, and no such conformance is claimed.
+Domain projection and public service tests cover exact symbols, omitted lines, hashes, persistent Receipts and unavailable LRC. Renderer CI saves all formats through real IPC with only the external native-picker response substituted. The installed export journey runs the ZIP executable with an OS-only environment and the explicit `--open-chords-export-proof` flag. It reads a synthetic Project seeded by the host, cancels one export without creating a revision, and invokes the bundled production publication service for JSON, archive, ChordPro, LRC and PDF. Fixed output targets sit outside the protected user-data directory, and an existing output directory is refused. The host checks canonical JSON, golden ChordPro/LRC, the golden PDF hash, embedded fonts and tags, archive validation, Receipt hashes/losses, and exclusion of private fixture markers. A second normal installed launch reopens those Receipts through named IPC and renderer controls.
+
+This journey exercises the installed projections and publication service with fixed test targets; it does not establish native Save dialog interaction. Native execution belongs to GitHub CI, while local checks cover the service harness, build and test discovery only. Current-head native CI must pass before claiming installed evidence. PDF bytes are also rendered for visual inspection. Tagged structure does not establish PDF/UA, PDF/A, or native screen-reader acceptance, and no such conformance is claimed.
 
 ## Runtime notices
 

@@ -1,82 +1,43 @@
-import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
+import { captureJsonExport, serializeJsonExport } from "@open-chords/domain";
 import { chromium, expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 
 import { openNetworkMode } from "../../apps/desktop/src/main/network-mode.ts";
+import { inspectPortableProjectArchive } from "../../apps/desktop/src/main/project-archive-inspection.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
-import { loadExportFixtureService } from "../support/export-service-loader.ts";
+import { leadSheetProject } from "../support/export-fixture.ts";
+import { inspectPdf } from "../support/pdf-inspection.ts";
 
 test.skip(
   process.platform !== "darwin" && process.platform !== "win32",
   "Installed desktop profiles",
 );
 
-test("installed application reopens durable JSON and archive Export Receipts through the bounded capability", async () => {
-  test.setTimeout(120000);
+test("installed application generates golden projections and reopens durable Export Receipts through the bounded capability", async () => {
+  test.setTimeout(360000);
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-installed-export-")));
   try {
     const stateRoot = join(root, "state");
     await (await openNetworkMode(stateRoot)).setOffline(true);
     const library = await openProjectLibrary({ stateRoot });
-    await library.createProject({
-      envelope: ProjectEnvelopeSchema.parse(
-        JSON.parse(
-          readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8"),
-        ),
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(
+        await readFile("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8"),
       ),
-      records: goldenRecords(),
-    });
-    // Prepare persisted input through the public service. This is a Receipt reopen test,
-    // not evidence of an installed native save-dialog interaction.
-    const { exportTarget, openProjectExports } = await loadExportFixtureService();
-    const service = await openProjectExports({
-      library,
-      stateRoot,
-      pickTarget: async (format) =>
-        join(
-          root,
-          format === "project_archive"
-            ? "song.ocarchive"
-            : `score.${exportTarget(format).extension}`,
-        ),
-    });
-    expect(
-      await service.saveJson({
-        projectId: "project_golden",
-        expectedProjectRevisionId: (await library.getSnapshot("project_golden"))!.projectRevisionId,
-        presentation: "current",
-      }),
-    ).toEqual({ state: "saved" });
-    expect(
-      await service.saveArchive({
-        projectId: "project_golden",
-        expectedProjectRevisionId: (await library.getSnapshot("project_golden"))!.projectRevisionId,
-        includeMedia: false,
-      }),
-    ).toEqual({ state: "saved" });
-    for (const type of ["save_chordpro", "save_lrc", "save_pdf"] as const) {
-      const request = {
-        projectId: "project_golden",
-        expectedProjectRevisionId: (await library.getSnapshot("project_golden"))!.projectRevisionId,
-      };
-      expect(
-        (
-          await service.perform(
-            type === "save_lrc"
-              ? { ...request, type }
-              : { ...request, type, presentation: "current" },
-          )
-        ).state,
-      ).toBe("saved");
-    }
+    );
+    envelope.payload = leadSheetProject();
+    envelope.payload.extensions = { "private.test": { path: root, token: "export-private-token" } };
+    await library.createProject({ envelope, records: goldenRecords() });
     await extractZip(
       join(
         process.cwd(),
@@ -93,6 +54,87 @@ test("installed application reopens durable JSON and archive Export Receipts thr
       process.platform === "darwin"
         ? join(root, "installed", "Open Chords.app", "Contents", "MacOS", "Open Chords")
         : join(root, "installed", "Open Chords.exe");
+    const env: NodeJS.ProcessEnv = {};
+    for (const key of [
+      "SystemRoot",
+      "WINDIR",
+      "TEMP",
+      "TMP",
+      "HOME",
+      "USERPROFILE",
+      "APPDATA",
+      "LOCALAPPDATA",
+    ]) {
+      if (process.env[key]) env[key] = process.env[key];
+    }
+    if (process.platform === "win32") {
+      const windows = process.env.SystemRoot ?? process.env.WINDIR;
+      if (!windows) throw new Error("Windows OS directory unavailable");
+      env.PATH = [
+        join(windows, "System32", "WindowsPowerShell", "v1.0"),
+        join(windows, "System32"),
+        windows,
+      ].join(";");
+    }
+    const { stdout, stderr } = await promisify(execFile)(
+      executable,
+      ["--open-chords-export-proof", `--user-data-dir=${stateRoot}`],
+      { env, timeout: 120000, maxBuffer: 16384, windowsHide: true },
+    );
+    expect(JSON.parse(stdout.trim())).toEqual({
+      proof: "installed-exports",
+      cancelledWithoutRevision: true,
+      durableReceipts: 5,
+    });
+    const outputRoot = join(root, "packaged-export-output");
+    const outputBytes = await Promise.all(
+      ["score.json", "song.ocarchive", "score.cho", "score.lrc", "score.pdf"].map((name) =>
+        readFile(join(outputRoot, name)),
+      ),
+    );
+    const receipts = (await openProjectLibrary({ stateRoot })).listExportReceipts("project_golden");
+    for (const [index, receipt] of receipts.entries()) {
+      expect(receipt.outputHash).toBe(
+        `sha256:${createHash("sha256").update(outputBytes[index]!).digest("hex")}`,
+      );
+    }
+    expect(outputBytes[0]!.toString()).toBe(
+      serializeJsonExport(captureJsonExport(envelope.payload, { presentation: "current" })),
+    );
+    expect(outputBytes[2]!.toString()).toBe(
+      await readFile("tests/fixtures/chordpro-golden.cho", "utf8"),
+    );
+    expect(outputBytes[3]!.toString()).toBe("[ti:project_golden]\n[00:00.41]home go\n");
+    expect(createHash("sha256").update(outputBytes[4]!).digest("hex")).toBe(
+      "3c834d61c9f05666fac4090bb5287fa676eaef34d94c463565c076f77a86cefa",
+    );
+    const pdf = await inspectPdf(outputBytes[4]!);
+    expect(pdf.pages).toHaveLength(1);
+    expect(pdf.pages[0]!.fonts.length).toBeGreaterThan(0);
+    expect(pdf.pages[0]!.fonts.every((font) => font.embedded)).toBe(true);
+    expect(pdf.pages[0]!.structure).toContain("H1");
+    expect(pdf.info).toMatchObject({ Language: "en", Title: "project_golden" });
+    const archived = inspectPortableProjectArchive(outputBytes[1]!).document;
+    expect(archived.envelope.payload.id).toBe("project_golden");
+    expect(archived.records.sources[0]!.locators).toEqual([]);
+    expect(JSON.stringify(archived.records)).not.toContain(root);
+    expect(archived.records.exportReceipts[0]!.outputLocation).toBe("score.json");
+    for (const bytes of [
+      outputBytes[0]!,
+      outputBytes[2]!,
+      outputBytes[3]!,
+      outputBytes[4]!,
+      Buffer.from(stdout + stderr),
+    ]) {
+      expect(bytes.includes(Buffer.from(root))).toBe(false);
+      expect(bytes.includes(Buffer.from("export-private-token"))).toBe(false);
+      expect(bytes.includes(Buffer.from("/unavailable/golden-fixture.wav"))).toBe(false);
+    }
+    for (const storedReceipt of receipts.filter((candidate) =>
+      ["chordpro", "lrc", "pdf"].includes(candidate.format),
+    )) {
+      expect(storedReceipt.omissions).toContain("stable_identity_not_represented");
+    }
     const server = createServer();
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -101,27 +143,43 @@ test("installed application reopens durable JSON and archive Export Receipts thr
     const child = spawn(
       executable,
       [`--user-data-dir=${stateRoot}`, `--remote-debugging-port=${address.port}`],
-      { stdio: "ignore" },
+      { stdio: "ignore", env },
     );
+    let startupFailed = false;
+    child.on("error", () => {
+      startupFailed = true;
+    });
+    const assertAlive = () => {
+      if (startupFailed || child.exitCode !== null || child.signalCode !== null)
+        throw new Error("Installed export application exited before renderer readiness");
+    };
     const endpoint = `http://127.0.0.1:${address.port}`;
     try {
       await expect
         .poll(
-          () =>
-            fetch(`${endpoint}/json/version`).then(
+          () => {
+            assertAlive();
+            return fetch(`${endpoint}/json/version`).then(
               (response) => response.ok,
               () => false,
-            ),
-          { timeout: 30000 },
+            );
+          },
+          { timeout: 120000 },
         )
         .toBe(true);
       const browser = await chromium.connectOverCDP(endpoint);
       try {
         const context = browser.contexts()[0]!;
         await expect
-          .poll(() => context.pages().some((page) => page.url().startsWith("open-chords://")), {
-            timeout: 30000,
-          })
+          .poll(
+            () => {
+              assertAlive();
+              return context.pages().some((page) => page.url().startsWith("open-chords://"));
+            },
+            {
+              timeout: 120000,
+            },
+          )
           .toBe(true);
         const page = context
           .pages()
@@ -215,7 +273,7 @@ test("installed application reopens durable JSON and archive Export Receipts thr
         await browser.close();
       }
     } finally {
-      if (child.exitCode === null && child.signalCode === null) {
+      if (!startupFailed && child.exitCode === null && child.signalCode === null) {
         child.kill();
         await expect
           .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
