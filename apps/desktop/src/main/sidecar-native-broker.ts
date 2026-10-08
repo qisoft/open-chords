@@ -208,7 +208,10 @@ async function* containedProcessStdout(
   throw new SidecarSessionError(
     "process_failure",
     `Contained sidecar exited before completing its protocol (exit=${status.code ?? "none"}, reason=${failureCode ?? "unclassified"})`,
-    failureCode === null ? undefined : { remoteCode: failureCode },
+    {
+      cause: { exitCode: status.code, exitSignal: status.signal },
+      ...(failureCode === null ? {} : { remoteCode: failureCode }),
+    },
   );
 }
 
