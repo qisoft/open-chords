@@ -18,20 +18,17 @@ export async function proveOfflineAcquisitionReopen(options: AcquisitionJobsOpti
   const baseline = canonicalSerialize(await proofTreeHashes(options.library.activeRoot));
   let dnsCalls = 0;
   let httpCalls = 0;
-  const jobs = await openAcquisitionJobs({
-    ...options,
-    network,
-    networkTransport: {
-      resolve: async () => {
-        dnsCalls++;
-        throw new Error("offline_proof_dns_called");
-      },
-      request: async () => {
-        httpCalls++;
-        throw new Error("offline_proof_http_called");
-      },
+  const networkTransport: NonNullable<AcquisitionJobsOptions["networkTransport"]> = {
+    resolve: async () => {
+      dnsCalls++;
+      throw new Error("offline_proof_dns_called");
     },
-  });
+    request: async () => {
+      httpCalls++;
+      throw new Error("offline_proof_http_called");
+    },
+  };
+  const jobs = await openAcquisitionJobs({ ...options, network, networkTransport });
   let blocked;
   try {
     blocked = await jobs.start({
@@ -42,7 +39,7 @@ export async function proveOfflineAcquisitionReopen(options: AcquisitionJobsOpti
   } finally {
     await jobs.close();
   }
-  const reopened = await openAcquisitionJobs({ ...options, network });
+  const reopened = await openAcquisitionJobs({ ...options, network, networkTransport });
   try {
     if (
       canonicalSerialize(reopened.list().find((job) => job.id === blocked.id)) !==
