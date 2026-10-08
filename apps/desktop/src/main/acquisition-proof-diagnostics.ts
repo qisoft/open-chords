@@ -48,3 +48,24 @@ export function acquisitionProofFailureCode(cause: unknown): string {
   }
   return "unknown";
 }
+
+/** Inspect only bounded internal cause chains and print allowlisted categories. */
+export function acquisitionProofFailureChain(cause: unknown, depth = 0): string {
+  if (depth >= 4) return "truncated";
+  if (cause !== null && typeof cause === "object" && !(cause instanceof Error)) {
+    const exitCode: unknown = Object.getOwnPropertyDescriptor(cause, "exitCode")?.value;
+    if (typeof exitCode === "number" && Number.isSafeInteger(exitCode)) return `exit_${exitCode}`;
+  }
+  const code = acquisitionProofFailureCode(cause);
+  if (cause instanceof AggregateError) {
+    return `${code}[${cause.errors
+      .slice(0, 4)
+      .map((error: unknown) => acquisitionProofFailureChain(error, depth + 1))
+      .join(",")}]`;
+  }
+  if (cause instanceof Error) {
+    const nested: unknown = Object.getOwnPropertyDescriptor(cause, "cause")?.value;
+    if (nested !== undefined) return `${code}[${acquisitionProofFailureChain(nested, depth + 1)}]`;
+  }
+  return code;
+}

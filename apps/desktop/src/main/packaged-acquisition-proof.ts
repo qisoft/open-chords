@@ -10,7 +10,7 @@ import {
   EXPECTED_ACQUISITION_POLICY_SHA256,
 } from "./acquisition-build-metadata.ts";
 import { openAcquisitionJobs, type AcquisitionJobsOptions } from "./acquisition-jobs.ts";
-import { acquisitionProofFailureCode } from "./acquisition-proof-diagnostics.ts";
+import { acquisitionProofFailureChain } from "./acquisition-proof-diagnostics.ts";
 import { ACQUISITION_PROOF_MEDIA, oversizedDurationFixture } from "./acquisition-proof-fixture.ts";
 import { openContainedAcquisitionAttempt } from "./acquisition-runtime.ts";
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
@@ -43,7 +43,7 @@ export async function runPackagedAcquisitionProof() {
   } catch (cause) {
     writeSync(
       2,
-      `Acquisition proof diagnostic: stage=${stage} code=${acquisitionProofFailureCode(cause)}\n`,
+      `Acquisition proof diagnostic: stage=${stage} code=${acquisitionProofFailureChain(cause)}\n`,
     );
     throw cause;
   }

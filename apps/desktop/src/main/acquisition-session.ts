@@ -93,8 +93,8 @@ export class AcquisitionSessionError extends Error {
     | "provider_unavailable"
     | "bot_check"
     | "unsupported_delivery";
-  constructor(code: AcquisitionSessionError["code"]) {
-    super(code);
+  constructor(code: AcquisitionSessionError["code"], options?: ErrorOptions) {
+    super(code, options);
     this.code = code;
   }
 }
