@@ -3,21 +3,28 @@ import { writeSync } from "node:fs";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { canonicalSerialize } from "@open-chords/domain";
 import { app } from "electron";
 
 import {
   EXPECTED_ACQUISITION_MANIFEST_SHA256,
   EXPECTED_ACQUISITION_POLICY_SHA256,
 } from "./acquisition-build-metadata.ts";
-import { openAcquisitionJobs, type AcquisitionJobsOptions } from "./acquisition-jobs.ts";
+import {
+  openAcquisitionJobs,
+  type AcquisitionJobsOptions,
+  type AcquisitionJob,
+} from "./acquisition-jobs.ts";
 import { acquisitionProofFailureChain } from "./acquisition-proof-diagnostics.ts";
 import { ACQUISITION_PROOF_MEDIA, oversizedDurationFixture } from "./acquisition-proof-fixture.ts";
 import { openContainedAcquisitionAttempt } from "./acquisition-runtime.ts";
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { openNetworkMode } from "./network-mode.ts";
 import { proveInitializationCleanupRecovery } from "./packaged-acquisition-fault-proof.ts";
+import { proveAcquisitionFailureHistoryReopen } from "./packaged-acquisition-history-proof.ts";
 import { proveAcquisitionStartCancellation } from "./packaged-acquisition-start-proof.ts";
 import { proveOfflineAcquisitionReopen } from "./packaged-offline-acquisition-proof.ts";
+import { proofTreeHashes } from "./packaged-proof-tree.ts";
 import { canonicalWavFixture } from "./packaged-sidecar-proof.ts";
 import { ProjectOwnedRecordsSchema } from "./project-library-records.ts";
 import { openProjectLibrary } from "./project-library.ts";
@@ -229,6 +236,8 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
   const jobs = await openAcquisitionJobs(jobOptions);
   process.stderr.write("Acquisition proof stage: jobs_ready\n");
   let job;
+  const failedJobs: AcquisitionJob[] = [];
+  let libraryBaseline = "";
   let botCheckNoSnapshot = false;
   let offlineCancellationClean = false;
   let mismatchedMediaNoSnapshot = false;
@@ -240,6 +249,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
     process.stderr.write(`Acquisition proof Job: ${job.state}:${job.reason ?? "none"}\n`);
     if (job.state !== "succeeded") throw new Error("acquisition_proof_failed");
     const before = JSON.stringify(await library.listYouTubeSources());
+    libraryBaseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
     botCheck = true;
     const rejected = await jobs.wait(
       (await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" })).id,
@@ -251,6 +261,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
       !JSON.stringify(jobs.list()).includes("private-provider-token") &&
       !JSON.stringify(jobs.list()).includes("Private fixture title") &&
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
+    failedJobs.push(rejected);
     botCheck = false;
     mismatchedMedia = true;
     const invalidMedia = await jobs.wait(
@@ -261,6 +272,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
       invalidMedia.reason === "invalid_output" &&
       JSON.stringify(await library.listYouTubeSources()) === before &&
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
+    failedJobs.push(invalidMedia);
     mismatchedMedia = false;
     oversizedDuration = true;
     const overlong = await jobs.wait(
@@ -271,6 +283,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
       overlong.reason === "invalid_output" &&
       JSON.stringify(await library.listYouTubeSources()) === before &&
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
+    failedJobs.push(overlong);
     oversizedDuration = false;
     stallMedia = true;
     const requested = new Promise<void>((resolveRequest) => {
@@ -286,6 +299,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
     const callsBeforeSwitch = { ...transportCalls };
     await network.setOffline(true);
     const cancelled = await jobs.wait(interrupted.id);
+    failedJobs.push(cancelled);
     const switchTransportUnchanged =
       transportCalls.dns === callsBeforeSwitch.dns &&
       transportCalls.http === callsBeforeSwitch.http;
@@ -330,6 +344,11 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
   const snapshotReopened = (await reopened.listYouTubeSources()).some((source) =>
     source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
   );
+  const failureHistory = await proveAcquisitionFailureHistoryReopen(
+    jobOptions,
+    failedJobs,
+    libraryBaseline,
+  );
   const offlineReopen = await proveOfflineAcquisitionReopen(jobOptions);
   await network.setOffline(false);
   const startCancellation = await proveAcquisitionStartCancellation(jobOptions);
@@ -349,6 +368,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
       botCheckNoSnapshot,
       offlineCancellationClean,
       ...offlineReopen,
+      ...failureHistory,
       mismatchedMediaNoSnapshot,
       oversizedDurationNoSnapshot,
       initializationCleanupRecoverable,
