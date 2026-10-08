@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { canonicalSerialize } from "@open-chords/domain";
@@ -7,28 +5,12 @@ import { canonicalSerialize } from "@open-chords/domain";
 import { readBoundedFile } from "./bounded-file.ts";
 import { openOfflineMediaCache } from "./offline-media-cache.ts";
 import { ARCHIVE_PROOF_CASES } from "./packaged-archive-proof-constants.ts";
+import { proofTreeHashes } from "./packaged-proof-tree.ts";
 import { archivedProjectFor } from "./project-archive-format.ts";
 import { ProjectArchiveImports } from "./project-archive-imports.ts";
 import { inspectPortableProjectArchive } from "./project-archive-inspection.ts";
 import { ARCHIVE_ZIP_LIMITS } from "./project-archive-zip.ts";
 import { openProjectLibrary } from "./project-library.ts";
-
-async function treeHashes(root: string): Promise<Record<string, string>> {
-  const result: Record<string, string> = {};
-  for (const entry of (await readdir(root, { withFileTypes: true })).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  )) {
-    if (entry.isDirectory()) {
-      for (const [name, hash] of Object.entries(await treeHashes(join(root, entry.name))))
-        result[`${entry.name}/${name}`] = hash;
-    } else if (entry.isFile()) {
-      result[entry.name] = createHash("sha256")
-        .update(await readFile(join(root, entry.name)))
-        .digest("hex");
-    } else throw new Error("archive_proof_special_file");
-  }
-  return result;
-}
 
 // Uses only fixed synthetic inputs prepared by native CI. Selection is a module
 // interface, so this proof does not claim native Open dialog interaction.
@@ -54,9 +36,9 @@ export async function runPackagedArchiveProof(stateRoot: string) {
   if (canonicalSerialize(actual) !== canonicalSerialize(expected))
     throw new Error("archive_proof_roundtrip_failed");
   process.stderr.write("Archive proof stage: roundtrip_verified\n");
-  const baseline = canonicalSerialize(await treeHashes(library.activeRoot));
+  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
   const unchanged = async () => {
-    if (canonicalSerialize(await treeHashes(library.activeRoot)) !== baseline)
+    if (canonicalSerialize(await proofTreeHashes(library.activeRoot)) !== baseline)
       throw new Error("archive_proof_library_changed");
   };
   const duplicate = await importer(archive).importArchive();
