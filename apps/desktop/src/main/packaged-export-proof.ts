@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+import { runPackagedExportFailureProof } from "./packaged-export-failure-proof.ts";
 import { exportTarget, openProjectExports } from "./project-exports.ts";
 import { openProjectLibrary } from "./project-library.ts";
 
@@ -57,8 +58,19 @@ export async function runPackagedExportProof(stateRoot: string) {
     );
     if (result.state !== "saved") throw new Error("export_proof_publication_failed");
   }
+  const failures = await runPackagedExportFailureProof({
+    library,
+    stateRoot,
+    outputRoot,
+    initialRevisionId: initial.projectRevisionId,
+  });
   const reopened = await openProjectLibrary({ stateRoot });
   if (reopened.listExportReceipts(projectId).length !== 5)
     throw new Error("export_proof_reopen_failed");
-  return { proof: "installed-exports", cancelledWithoutRevision: true, durableReceipts: 5 };
+  return {
+    proof: "installed-exports",
+    cancelledWithoutRevision: true,
+    durableReceipts: 5,
+    ...failures,
+  };
 }
