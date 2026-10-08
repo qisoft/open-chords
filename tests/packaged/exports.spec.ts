@@ -1,10 +1,9 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
 import { captureJsonExport, serializeJsonExport } from "@open-chords/domain";
@@ -16,6 +15,7 @@ import { inspectPortableProjectArchive } from "../../apps/desktop/src/main/proje
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
+import { runInstalledExportProcess } from "../support/installed-export-process.ts";
 import { inspectPdf } from "../support/pdf-inspection.ts";
 
 test.skip(
@@ -76,10 +76,10 @@ test("installed application generates golden projections and reopens durable Exp
         windows,
       ].join(";");
     }
-    const { stdout, stderr } = await promisify(execFile)(
+    const { stdout, stderr } = await runInstalledExportProcess(
       executable,
       ["--open-chords-export-proof", `--user-data-dir=${stateRoot}`],
-      { env, timeout: 120000, maxBuffer: 16384, windowsHide: true },
+      env,
     );
     expect(JSON.parse(stdout.trim())).toEqual({
       proof: "installed-exports",

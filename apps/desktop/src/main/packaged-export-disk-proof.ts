@@ -13,6 +13,45 @@ import { openProjectLibrary, type ProjectLibrary } from "./project-library.ts";
 // Inject ENOSPC at the filesystem boundary of the installed production service.
 // This proves error handling, not actual volume exhaustion or native Save selection.
 export async function runPackagedExportDiskProof(source: ProjectLibrary, stateRoot: string) {
+  const started = performance.now();
+  const stage = (name: string) =>
+    process.stderr.write(
+      `Export disk proof stage: ${name} duration_ms=${Math.round(performance.now() - started)}\n`,
+    );
+  try {
+    return await runDiskProof(source, stateRoot, stage);
+  } catch (error) {
+    const known = new Set([
+      "export_disk_proof_fixture_invalid",
+      "export_disk_proof_content_invalid",
+      "export_disk_proof_preservation_failed",
+      "export_disk_proof_retry_failed",
+      "export_disk_proof_retry_not_durable",
+      "export_disk_proof_retry_not_recovered",
+    ]);
+    const osCodes = new Set(["ENOSPC", "ENOENT", "EACCES", "EPERM", "EIO", "EBUSY"]);
+    const code =
+      error instanceof Error && known.has(error.message)
+        ? error.message
+        : error instanceof Error &&
+            "code" in error &&
+            typeof error.code === "string" &&
+            osCodes.has(error.code)
+          ? error.code
+          : "unknown";
+    process.stderr.write(
+      `Export disk proof failure: code=${code} duration_ms=${Math.round(performance.now() - started)}\n`,
+    );
+    throw error;
+  }
+}
+
+async function runDiskProof(
+  source: ProjectLibrary,
+  stateRoot: string,
+  stage: (name: string) => void,
+) {
+  stage("started");
   const projectId = "project_golden";
   const sourceBaseline = canonicalSerialize(await proofTreeHashes(stateRoot));
   const fixture = await source.readProject(projectId);
@@ -101,20 +140,27 @@ export async function runPackagedExportDiskProof(source: ProjectLibrary, stateRo
       canonicalSerialize(await proofTreeHashes(output)) !== targets
     )
       throw new Error("export_disk_proof_preservation_failed");
-    process.stderr.write(`Export disk proof stage: preserved_${phase}\n`);
+    stage(`preserved_${phase}`);
   }
+  stage("retry_service_opening");
   const retry = await openProjectExports({
     library,
     stateRoot: root,
-    pickTarget: async () => target,
+    pickTarget: async () => {
+      stage("retry_target_selected");
+      return target;
+    },
   });
+  stage("retry_saving");
   if (
     (await retry.saveJson(request)).state !== "saved" ||
     retry.busy ||
     retry.pendingRecovery !== 0
   )
     throw new Error("export_disk_proof_retry_failed");
+  stage("retry_saved");
   const reopened = await openProjectLibrary({ stateRoot: root });
+  stage("retry_library_reopened");
   const receipts = reopened.listExportReceipts(projectId);
   const bytes = await readFile(target);
   if (
@@ -126,6 +172,7 @@ export async function runPackagedExportDiskProof(source: ProjectLibrary, stateRo
     canonicalSerialize(await proofTreeHashes(stateRoot)) !== sourceBaseline
   )
     throw new Error("export_disk_proof_retry_not_durable");
+  stage("retry_output_verified");
   const recovered = await openProjectExports({
     library: reopened,
     stateRoot: root,
@@ -133,5 +180,6 @@ export async function runPackagedExportDiskProof(source: ProjectLibrary, stateRo
   });
   if (recovered.pendingRecovery !== 0 || recovered.busy)
     throw new Error("export_disk_proof_retry_not_recovered");
+  stage("retry_recovery_verified");
   return { diskFailureRefusals: 3, diskFailureRetryDurable: true };
 }

@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm, writeFile, lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
@@ -10,6 +8,7 @@ import extractZip from "extract-zip";
 import { PACKAGED_ARCHIVE_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-archive-proof-constants.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { prepareArchiveProofFixture } from "../support/archive-proof-fixture.ts";
+import { runInstalledExportProcess } from "../support/installed-export-process.ts";
 
 test.skip(
   process.platform !== "darwin" && process.platform !== "win32",
@@ -59,10 +58,10 @@ test("installed archive round-trip, cancellation and hostile corpus preserve dur
         windows,
       ].join(";");
     }
-    const { stdout, stderr } = await promisify(execFile)(
+    const { stdout, stderr } = await runInstalledExportProcess(
       executable,
       [PACKAGED_ARCHIVE_PROOF_ARGUMENT, `--user-data-dir=${stateRoot}`],
-      { env, timeout: 120000, maxBuffer: 16384, windowsHide: true },
+      env,
     );
     expect(JSON.parse(stdout.trim())).toEqual({
       proof: "installed-archives",
