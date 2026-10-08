@@ -70,7 +70,7 @@ function installedExportProofStages(error: unknown): string[] {
     .flatMap((line) => {
       const match = /^Export disk proof stage: ([a-z_]+) duration_ms=([0-9]{1,9})$/.exec(line);
       if (match && names.has(match[1]!)) return [line];
-      return /^Export recovery proof stage: (started|published_pending|recovered|idempotent) duration_ms=[0-9]{1,9}$/.test(
+      return /^Export recovery proof stage: (started|published_pending|refused_changed_output|refused_missing_output|recovered|idempotent) duration_ms=[0-9]{1,9}$/.test(
         line,
       )
         ? [line]

@@ -90,6 +90,7 @@ test("installed application generates golden projections and reopens durable Exp
       diskFailureRefusals: 3,
       diskFailureRetryDurable: true,
       publishedReceiptPending: true,
+      recoveryRefusalsUnchanged: 2,
       recoveredReceiptDurable: true,
       recoveryIdempotent: true,
     });
