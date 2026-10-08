@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { writeSync } from "node:fs";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -9,18 +10,46 @@ import {
   EXPECTED_ACQUISITION_POLICY_SHA256,
 } from "./acquisition-build-metadata.ts";
 import { openAcquisitionJobs, type AcquisitionJobsOptions } from "./acquisition-jobs.ts";
+import { acquisitionProofFailureChain } from "./acquisition-proof-diagnostics.ts";
 import { ACQUISITION_PROOF_MEDIA, oversizedDurationFixture } from "./acquisition-proof-fixture.ts";
 import { openContainedAcquisitionAttempt } from "./acquisition-runtime.ts";
 import { EXPECTED_CONTAINMENT_MANIFEST_SHA256 } from "./containment-build-metadata.ts";
 import { openNetworkMode } from "./network-mode.ts";
 import { proveInitializationCleanupRecovery } from "./packaged-acquisition-fault-proof.ts";
 import { proveAcquisitionStartCancellation } from "./packaged-acquisition-start-proof.ts";
+import { proveOfflineAcquisitionReopen } from "./packaged-offline-acquisition-proof.ts";
 import { canonicalWavFixture } from "./packaged-sidecar-proof.ts";
 import { ProjectOwnedRecordsSchema } from "./project-library-records.ts";
 import { openProjectLibrary } from "./project-library.ts";
 import { EXPECTED_SIDECAR_MANIFEST_SHA256 } from "./sidecar-build-metadata.ts";
 
+type AcquisitionProofStage =
+  | "application_ready"
+  | "runtime_setup"
+  | "extractor_run"
+  | "artifact_verification"
+  | "extractor_cleanup"
+  | "jobs";
+
 export async function runPackagedAcquisitionProof() {
+  let stage: AcquisitionProofStage = "application_ready";
+  const reportStage = (next: AcquisitionProofStage) => {
+    stage = next;
+    writeSync(2, `Acquisition proof stage: ${stage}\n`);
+  };
+  reportStage(stage);
+  try {
+    await runAcquisitionProof(reportStage);
+  } catch (cause) {
+    writeSync(
+      2,
+      `Acquisition proof diagnostic: stage=${stage} code=${acquisitionProofFailureChain(cause)}\n`,
+    );
+    throw cause;
+  }
+}
+
+async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) => void) {
   const mac = process.platform === "darwin";
   const runtimeOptions = {
     runtimeRoot: mac
@@ -36,10 +65,12 @@ export async function runPackagedAcquisitionProof() {
       ? { bridgePath: join(process.resourcesPath, "../MacOS/open-chords-containment-bridge") }
       : {}),
   };
+  reportStage("runtime_setup");
   const attempt = await openContainedAcquisitionAttempt(runtimeOptions);
   const media = Buffer.alloc(50_000, 42);
   let result;
   try {
+    reportStage("extractor_run");
     result = await attempt.run({
       videoId: "aqz-KE-bpKQ",
       proof: true,
@@ -57,6 +88,7 @@ export async function runPackagedAcquisitionProof() {
               }),
       },
     });
+    reportStage("artifact_verification");
     const artifact = await readFile(join(attempt.workspace, "media.bin"));
     if (
       !artifact.equals(media) ||
@@ -67,6 +99,7 @@ export async function runPackagedAcquisitionProof() {
   } finally {
     attempt.cleanup();
   }
+  reportStage("extractor_cleanup");
   const removed = await lstat(attempt.workspace).then(
     () => false,
     (error: unknown) => error instanceof Error && "code" in error && error.code === "ENOENT",
@@ -74,6 +107,7 @@ export async function runPackagedAcquisitionProof() {
   if (!removed) throw new Error("acquisition_proof_cleanup_failed");
   process.stderr.write("Acquisition proof stage: extractor_reaped\n");
 
+  reportStage("jobs");
   const stateRoot = app.getPath("userData");
   const library = await openProjectLibrary({ stateRoot });
   const network = await openNetworkMode(stateRoot);
@@ -108,6 +142,7 @@ export async function runPackagedAcquisitionProof() {
   let stallMedia = false;
   let mediaRequested: () => void = () => undefined;
   let streamCancelled = false;
+  const transportCalls = { dns: 0, http: 0 };
   const jobOptions: AcquisitionJobsOptions = {
     stateRoot,
     library,
@@ -125,8 +160,12 @@ export async function runPackagedAcquisitionProof() {
     },
     policyHash: EXPECTED_ACQUISITION_POLICY_SHA256,
     networkTransport: {
-      resolve: async () => ({ aliases: [], addresses: ["142.250.74.206"] }),
+      resolve: async () => {
+        transportCalls.dns++;
+        return { aliases: [], addresses: ["142.250.74.206"] };
+      },
       request: async ({ url }) => {
+        transportCalls.http++;
         const responseMedia = mismatchedMedia
           ? canonicalWavFixture()
           : oversizedDuration
@@ -244,15 +283,23 @@ export async function runPackagedAcquisitionProof() {
         throw new Error("acquisition_proof_failed");
       }),
     ]);
+    const callsBeforeSwitch = { ...transportCalls };
     await network.setOffline(true);
     const cancelled = await jobs.wait(interrupted.id);
+    const switchTransportUnchanged =
+      transportCalls.dns === callsBeforeSwitch.dns &&
+      transportCalls.http === callsBeforeSwitch.http;
+    const callsBeforeBlocked = { ...transportCalls };
     const blocked = await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" });
     offlineCancellationClean =
       cancelled.state === "cancelled" &&
       streamCancelled &&
+      switchTransportUnchanged &&
       blocked.state === "blocked" &&
       blocked.reason === "offline" &&
       blocked.attempts.length === 0 &&
+      transportCalls.dns === callsBeforeBlocked.dns &&
+      transportCalls.http === callsBeforeBlocked.http &&
       JSON.stringify(await library.listYouTubeSources()) === before &&
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
   } finally {
@@ -283,6 +330,7 @@ export async function runPackagedAcquisitionProof() {
   const snapshotReopened = (await reopened.listYouTubeSources()).some((source) =>
     source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
   );
+  const offlineReopen = await proveOfflineAcquisitionReopen(jobOptions);
   await network.setOffline(false);
   const startCancellation = await proveAcquisitionStartCancellation(jobOptions);
   const initializationCleanupRecoverable = await proveInitializationCleanupRecovery(jobOptions);
@@ -300,6 +348,7 @@ export async function runPackagedAcquisitionProof() {
       jobState: job.state,
       botCheckNoSnapshot,
       offlineCancellationClean,
+      ...offlineReopen,
       mismatchedMediaNoSnapshot,
       oversizedDurationNoSnapshot,
       initializationCleanupRecoverable,

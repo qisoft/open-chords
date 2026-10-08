@@ -794,6 +794,11 @@ async function runLifecycleContainmentProbe(
     [`--containment-lifecycle-probe=${plan}`],
     mode === "crash" ? [73] : [0],
   ).launch(request, probeSignal);
+  writeSync(
+    2,
+    `Packaged lifecycle probe stage: mode=${mode} launch_completed duration_ms=${Math.round(performance.now() - probeStartedAt)}\n`,
+  );
+  let phase: "evidence" | "exit" = "evidence";
   let primaryFailure: { cause: unknown } | undefined;
   let evidence: z.infer<typeof LifecycleEvidenceSchema> | undefined;
   const iterator = process.stdout[Symbol.asyncIterator]();
@@ -802,6 +807,11 @@ async function runLifecycleContainmentProbe(
     if (evidence.partialPath !== partialPath || !existsSync(partialPath)) {
       throw new Error(`Contained ${mode} probe did not stage its partial output`);
     }
+    writeSync(
+      2,
+      `Packaged lifecycle probe stage: mode=${mode} evidence_received duration_ms=${Math.round(performance.now() - probeStartedAt)}\n`,
+    );
+    phase = "exit";
     if (mode === "crash") await drainOutput(iterator);
   } catch (cause) {
     const exit =
@@ -818,7 +828,7 @@ async function runLifecycleContainmentProbe(
         : undefined;
     writeSync(
       2,
-      `Packaged lifecycle probe failure: mode=${mode} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"}\n`,
+      `Packaged lifecycle probe failure: mode=${mode} phase=${phase} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"}\n`,
     );
     primaryFailure = { cause };
   }

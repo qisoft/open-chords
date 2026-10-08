@@ -9,9 +9,10 @@ export function rethrowAfterAcquisitionCleanup(
   try {
     workspace?.cleanup();
   } catch {
-    throw new AcquisitionSessionError("cleanup_failure");
+    throw new AcquisitionSessionError("cleanup_failure", { cause: error });
   }
-  if (hasWorkspaceCleanupFailure(error)) throw new AcquisitionSessionError("cleanup_failure");
+  if (hasWorkspaceCleanupFailure(error))
+    throw new AcquisitionSessionError("cleanup_failure", { cause: error });
   throw error;
 }
 function hasWorkspaceCleanupFailure(error: unknown): boolean {

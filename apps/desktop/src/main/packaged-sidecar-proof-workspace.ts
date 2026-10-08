@@ -23,8 +23,8 @@ type WorkspaceFailureCode = (typeof WORKSPACE_FAILURE_CODES)[number];
 class PackagedWorkspaceFailure extends Error {
   readonly code: WorkspaceFailureCode;
 
-  constructor(code: WorkspaceFailureCode) {
-    super(code);
+  constructor(code: WorkspaceFailureCode, options?: ErrorOptions) {
+    super(code, options);
     this.name = "PackagedWorkspaceFailure";
     this.code = code;
   }
@@ -76,10 +76,14 @@ export function preparePackagedWorkspace(
     })
       .trim()
       .split(/\r?\n/);
-  } catch {
+  } catch (cause) {
     throwCombinedFailures(
       "AppContainer profile preparation and cleanup failed",
-      { cause: new PackagedWorkspaceFailure("setup_prepare_failed") },
+      {
+        cause: new PackagedWorkspaceFailure("setup_prepare_failed", {
+          cause: packagedProcessFailureStatus(cause),
+        }),
+      },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
     );
     throw new PackagedWorkspaceFailure("setup_prepare_failed");
@@ -202,7 +206,12 @@ function canonicalWindowsRuntimeRoot(
 }
 
 function privateCleanupFailures(failures: readonly unknown[]): PackagedWorkspaceFailure[] {
-  return failures.map(() => new PackagedWorkspaceFailure("cleanup_failed"));
+  return failures.map(
+    (cause) =>
+      new PackagedWorkspaceFailure("cleanup_failed", {
+        cause: packagedProcessFailureStatus(cause),
+      }),
+  );
 }
 
 function destroyWindowsProfile(helperPath: string, profile: string): unknown[] {
@@ -216,4 +225,18 @@ function destroyWindowsProfile(helperPath: string, profile: string): unknown[] {
     failures.push(cause);
   }
   return failures;
+}
+
+/** Keep only numeric exit status or fixed spawn codes, never process paths or output. */
+export function packagedProcessFailureStatus(cause: unknown) {
+  const status: unknown =
+    cause instanceof Error ? Object.getOwnPropertyDescriptor(cause, "status")?.value : undefined;
+  const code: unknown =
+    cause instanceof Error ? Object.getOwnPropertyDescriptor(cause, "code")?.value : undefined;
+  const exitCode = typeof status === "number" && Number.isSafeInteger(status) ? status : null;
+  const spawnCodes = new Set(["ENOENT", "EACCES", "EPERM", "EINVAL", "E2BIG", "ENOMEM"]);
+  return {
+    exitCode,
+    ...(exitCode === null && typeof code === "string" && spawnCodes.has(code) ? { code } : {}),
+  };
 }

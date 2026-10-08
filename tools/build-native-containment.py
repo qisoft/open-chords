@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -114,8 +115,7 @@ def build_windows(output_root: Path) -> None:
             "-Wall",
             "-Wextra",
             "-Werror",
-            "-static-libgcc",
-            "-static-libstdc++",
+            "-static",
             str(ROOT / "native/windows/containment-launcher.cpp"),
             "-o",
             str(executable),
@@ -127,7 +127,29 @@ def build_windows(output_root: Path) -> None:
         ],
         check=True,
     )
+    verify_windows_imports(executable)
     write_single_file_manifest(output_root, "windows-appcontainer-job", executable)
+
+
+def verify_windows_imports(executable: Path) -> None:
+    """Refuse toolchain DLL discovery outside the installed helper and Windows itself."""
+    imports = subprocess.run(
+        ["objdump", "-p", str(executable)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    names = re.findall(r"DLL Name:\s+(\S+)", imports)
+    system = {
+        "advapi32.dll", "kernel32.dll", "ole32.dll", "shell32.dll",
+        "userenv.dll", "user32.dll", "ntdll.dll", "msvcrt.dll",
+    }
+    if not names or any(
+        name.lower() not in system
+        and not re.fullmatch(r"api-ms-win-crt-[a-z0-9-]+\.dll", name.lower())
+        for name in names
+    ):
+        raise RuntimeError("containment helper imports a non-system runtime DLL")
 
 
 def build_linux(output_root: Path) -> None:

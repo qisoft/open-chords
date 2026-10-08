@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 import unittest
 from pathlib import Path
 
@@ -93,6 +94,16 @@ class WindowsNativeContainmentBuildTests(unittest.TestCase):
             self.assertEqual(executable.read_bytes()[:2], b"MZ")
             manifest = json.loads((output / "containment-manifest.json").read_text("utf-8"))
             self.assertEqual(manifest["backend"], "windows-appcontainer-job")
+            # Launch the real compiled helper with no toolchain PATH or inherited variables.
+            profile = f"OpenChords.Analysis.{uuid.uuid4()}"
+            try:
+                prepared = subprocess.run([str(executable), f"--prepare={profile}"],
+                    env={}, check=True, capture_output=True, text=True, timeout=30)
+                self.assertEqual(len(prepared.stdout.strip().splitlines()), 3)
+            finally:
+                subprocess.run([str(executable), f"--destroy={profile}"],
+                    env={}, check=True, capture_output=True, timeout=30)
+
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "Linux native broker build")
