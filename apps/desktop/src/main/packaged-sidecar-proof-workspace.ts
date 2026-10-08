@@ -81,7 +81,7 @@ export function preparePackagedWorkspace(
       "AppContainer profile preparation and cleanup failed",
       {
         cause: new PackagedWorkspaceFailure("setup_prepare_failed", {
-          cause: processFailureStatus(cause),
+          cause: packagedProcessFailureStatus(cause),
         }),
       },
       privateCleanupFailures(destroyWindowsProfile(helperPath, profile)),
@@ -208,7 +208,9 @@ function canonicalWindowsRuntimeRoot(
 function privateCleanupFailures(failures: readonly unknown[]): PackagedWorkspaceFailure[] {
   return failures.map(
     (cause) =>
-      new PackagedWorkspaceFailure("cleanup_failed", { cause: processFailureStatus(cause) }),
+      new PackagedWorkspaceFailure("cleanup_failed", {
+        cause: packagedProcessFailureStatus(cause),
+      }),
   );
 }
 
@@ -225,8 +227,16 @@ function destroyWindowsProfile(helperPath: string, profile: string): unknown[] {
   return failures;
 }
 
-function processFailureStatus(cause: unknown) {
+/** Keep only numeric exit status or fixed spawn codes, never process paths or output. */
+export function packagedProcessFailureStatus(cause: unknown) {
   const status: unknown =
     cause instanceof Error ? Object.getOwnPropertyDescriptor(cause, "status")?.value : undefined;
-  return { exitCode: typeof status === "number" && Number.isSafeInteger(status) ? status : null };
+  const code: unknown =
+    cause instanceof Error ? Object.getOwnPropertyDescriptor(cause, "code")?.value : undefined;
+  const exitCode = typeof status === "number" && Number.isSafeInteger(status) ? status : null;
+  const spawnCodes = new Set(["ENOENT", "EACCES", "EPERM", "EINVAL", "E2BIG", "ENOMEM"]);
+  return {
+    exitCode,
+    ...(exitCode === null && typeof code === "string" && spawnCodes.has(code) ? { code } : {}),
+  };
 }

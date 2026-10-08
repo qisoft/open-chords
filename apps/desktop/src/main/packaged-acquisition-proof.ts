@@ -283,13 +283,18 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
         throw new Error("acquisition_proof_failed");
       }),
     ]);
+    const callsBeforeSwitch = { ...transportCalls };
     await network.setOffline(true);
     const cancelled = await jobs.wait(interrupted.id);
+    const switchTransportUnchanged =
+      transportCalls.dns === callsBeforeSwitch.dns &&
+      transportCalls.http === callsBeforeSwitch.http;
     const callsBeforeBlocked = { ...transportCalls };
     const blocked = await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" });
     offlineCancellationClean =
       cancelled.state === "cancelled" &&
       streamCancelled &&
+      switchTransportUnchanged &&
       blocked.state === "blocked" &&
       blocked.reason === "offline" &&
       blocked.attempts.length === 0 &&

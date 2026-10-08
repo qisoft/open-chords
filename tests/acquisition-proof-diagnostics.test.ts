@@ -5,6 +5,7 @@ import {
   acquisitionProofFailureCode,
 } from "../apps/desktop/src/main/acquisition-proof-diagnostics.ts";
 import { AcquisitionSessionError } from "../apps/desktop/src/main/acquisition-session.ts";
+import { packagedProcessFailureStatus } from "../apps/desktop/src/main/packaged-sidecar-proof-workspace.ts";
 import { SidecarSessionError } from "../apps/desktop/src/main/sidecar-protocol.ts";
 
 it("reports fixed failure categories without leaking messages, arbitrary codes or cause data", () => {
@@ -47,4 +48,24 @@ it("retains primary failure categories behind cleanup without exposing private c
   expect(acquisitionProofFailureChain(cyclic)).toBe(
     "unknown[unknown[unknown[unknown[truncated]]]]",
   );
+});
+
+it("normalizes missing-status spawn refusals and excludes arbitrary codes and process details", () => {
+  const refusal = Object.assign(new Error("private-helper-path"), {
+    code: "ENOENT",
+    path: "private-path",
+    stderr: "private-response",
+    status: null,
+  });
+  const normalized = packagedProcessFailureStatus(refusal);
+  expect(normalized).toEqual({ exitCode: null, code: "ENOENT" });
+  expect(acquisitionProofFailureChain(normalized)).toBe("ENOENT");
+  expect(
+    packagedProcessFailureStatus(
+      Object.assign(new Error("private-path"), { code: "private-token" }),
+    ),
+  ).toEqual({ exitCode: null });
+  expect(packagedProcessFailureStatus(Object.assign(refusal, { status: 70 }))).toEqual({
+    exitCode: 70,
+  });
 });

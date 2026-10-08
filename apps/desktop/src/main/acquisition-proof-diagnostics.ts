@@ -28,6 +28,9 @@ const ALLOWED_CODES = new Set([
   "EPERM",
   "EPIPE",
   "ABORT_ERR",
+  "EINVAL",
+  "E2BIG",
+  "ENOMEM",
 ]);
 
 /** Emit only fixed failure categories; error messages, paths and provider data remain private. */
@@ -55,6 +58,8 @@ export function acquisitionProofFailureChain(cause: unknown, depth = 0): string 
   if (cause !== null && typeof cause === "object" && !(cause instanceof Error)) {
     const exitCode: unknown = Object.getOwnPropertyDescriptor(cause, "exitCode")?.value;
     if (typeof exitCode === "number" && Number.isSafeInteger(exitCode)) return `exit_${exitCode}`;
+    const spawnCode: unknown = Object.getOwnPropertyDescriptor(cause, "code")?.value;
+    if (typeof spawnCode === "string" && ALLOWED_CODES.has(spawnCode)) return spawnCode;
   }
   const code = acquisitionProofFailureCode(cause);
   if (cause instanceof AggregateError) {
