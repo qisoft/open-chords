@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+import { runPackagedExportDiskProof } from "./packaged-export-disk-proof.ts";
 import { runPackagedExportFailureProof } from "./packaged-export-failure-proof.ts";
 import { exportTarget, openProjectExports } from "./project-exports.ts";
 import { openProjectLibrary } from "./project-library.ts";
@@ -64,6 +65,7 @@ export async function runPackagedExportProof(stateRoot: string) {
     outputRoot,
     initialRevisionId: initial.projectRevisionId,
   });
+  const diskFailures = await runPackagedExportDiskProof(library, stateRoot);
   const reopened = await openProjectLibrary({ stateRoot });
   if (reopened.listExportReceipts(projectId).length !== 5)
     throw new Error("export_proof_reopen_failed");
@@ -72,5 +74,6 @@ export async function runPackagedExportProof(stateRoot: string) {
     cancelledWithoutRevision: true,
     durableReceipts: 5,
     ...failures,
+    ...diskFailures,
   };
 }

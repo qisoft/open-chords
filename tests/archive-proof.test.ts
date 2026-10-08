@@ -25,4 +25,4 @@ it("imports the generated archive and leaves durable Library bytes unchanged on 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 30000);
