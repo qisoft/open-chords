@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 
-import { installedExportExitDiagnostic } from "./support/installed-export-process.ts";
+import {
+  installedExportExitDiagnostic,
+  runInstalledExportProcess,
+} from "./support/installed-export-process.ts";
 
 it("reports only bounded process status without captured private details", () => {
   const error = {
@@ -22,4 +25,41 @@ it("reports only bounded process status without captured private details", () =>
   expect(installedExportExitDiagnostic({ signal: "SIGTERM", killed: true }, 120100)).toContain(
     "killed=true exit_code=none exit_signal=SIGTERM",
   );
+});
+
+it("redacts the actual child-process rejection while retaining fixed proof stages", async () => {
+  let failure: unknown;
+  try {
+    await runInstalledExportProcess(
+      process.execPath,
+      [
+        "-e",
+        `
+      process.stderr.write("/private/provider-token\\n");
+      process.stderr.write("Export disk proof stage: retry_saving duration_ms=123\\n");
+      process.stderr.write("Export disk proof stage: private-content duration_ms=123\\n");
+      process.stdout.write("private stdout");
+      process.exit(7);
+    `,
+      ],
+      {},
+    );
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  if (!(failure instanceof Error)) throw new Error("fixture_child_did_not_fail");
+  expect(failure.message).toContain("exit_code=7");
+  expect(failure.message).toContain("retry_saving duration_ms=123");
+  for (const forbidden of [
+    process.execPath,
+    "/private",
+    "provider-token",
+    "private-content",
+    "private stdout",
+  ]) {
+    expect(failure.message).not.toContain(forbidden);
+  }
+  expect(Object.hasOwn(failure, "cause")).toBe(false);
+  expect(Object.hasOwn(failure, "stderr")).toBe(false);
 });

@@ -31,7 +31,41 @@ export async function runInstalledExportProcess(
       windowsHide: true,
     });
   } catch (error) {
-    console.error(installedExportExitDiagnostic(error, performance.now() - started));
-    throw error;
+    const diagnostic = installedExportExitDiagnostic(error, performance.now() - started);
+    const stages = installedExportProofStages(error);
+    // Raw child errors contain command paths and output; retaining cause defeats redaction.
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error([diagnostic, ...stages].join("\n"));
   }
+}
+
+function installedExportProofStages(error: unknown): string[] {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("stderr" in error) ||
+    typeof error.stderr !== "string"
+  )
+    return [];
+  const names = new Set([
+    "started",
+    "preserved_journal_write",
+    "preserved_staging_write",
+    "preserved_staging_sync",
+    "retry_service_opening",
+    "retry_saving",
+    "retry_target_selected",
+    "retry_saved",
+    "retry_library_reopened",
+    "retry_output_verified",
+    "retry_recovery_verified",
+  ]);
+  return error.stderr
+    .slice(0, 16384)
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const match = /^Export disk proof stage: ([a-z_]+) duration_ms=([0-9]{1,9})$/.exec(line);
+      return match && names.has(match[1]!) ? [line] : [];
+    })
+    .slice(-16);
 }
