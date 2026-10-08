@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { canonicalSerialize, captureJsonExport, serializeJsonExport } from "@open-chords/domain";
@@ -80,17 +80,40 @@ export async function runPackagedExportRecoveryProof(source: ProjectLibrary, sta
     throw new Error("export_recovery_proof_publication_invalid");
 
   stage("published_pending");
+  await writeFile(target, "user replacement bytes\n");
   const reopened = await openProjectLibrary({ stateRoot: root });
   if (
     reopened.listExportReceipts(projectId).length !== 0 ||
     (await reopened.getSnapshot(projectId))?.projectRevisionId !== snapshot.projectRevisionId
   )
     throw new Error("export_recovery_proof_pending_not_durable");
+  const pendingBaseline = canonicalSerialize(await proofTreeHashes(root));
+  let targetBaseline = canonicalSerialize(await proofTreeHashes(output));
   const recovered = await openProjectExports({
     library: reopened,
     stateRoot: root,
     pickTarget: async () => null,
   });
+  const assertRefused = async () => {
+    if (
+      recovered.busy ||
+      recovered.pendingRecovery !== 1 ||
+      reopened.listExportReceipts(projectId).length !== 0 ||
+      (await reopened.getSnapshot(projectId))?.projectRevisionId !== snapshot.projectRevisionId ||
+      canonicalSerialize(await proofTreeHashes(root)) !== pendingBaseline ||
+      canonicalSerialize(await proofTreeHashes(output)) !== targetBaseline
+    )
+      throw new Error("export_recovery_proof_refusal_changed_state");
+  };
+  await assertRefused();
+  stage("refused_changed_output");
+  await rm(target);
+  targetBaseline = canonicalSerialize(await proofTreeHashes(output));
+  await recovered.recover();
+  await assertRefused();
+  stage("refused_missing_output");
+  await writeFile(target, bytes, { flag: "wx" });
+  await recovered.recover();
   const head = (await reopened.getSnapshot(projectId))?.projectRevisionId;
   if (
     !head ||
@@ -126,5 +149,10 @@ export async function runPackagedExportRecoveryProof(source: ProjectLibrary, sta
   )
     throw new Error("export_recovery_proof_not_idempotent");
   stage("idempotent");
-  return { publishedReceiptPending: true, recoveredReceiptDurable: true, recoveryIdempotent: true };
+  return {
+    publishedReceiptPending: true,
+    recoveryRefusalsUnchanged: 2,
+    recoveredReceiptDurable: true,
+    recoveryIdempotent: true,
+  };
 }

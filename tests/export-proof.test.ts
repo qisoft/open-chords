@@ -32,6 +32,7 @@ it("exports the synthetic fixture through the production service with cancelled 
       diskFailureRefusals: 3,
       diskFailureRetryDurable: true,
       publishedReceiptPending: true,
+      recoveryRefusalsUnchanged: 2,
       recoveredReceiptDurable: true,
       recoveryIdempotent: true,
     });
