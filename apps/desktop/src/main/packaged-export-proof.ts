@@ -10,7 +10,7 @@ export const PACKAGED_EXPORT_PROOF_ARGUMENT = "--open-chords-export-proof";
 
 // CI seeds only synthetic Project data in an isolated user-data directory.
 // Fixed targets exercise bundled projections, not native Save dialog selection.
-export async function runPackagedExportProof(stateRoot: string) {
+export async function runPackagedExportProof(stateRoot: string, includeDiskFailures = true) {
   const library = await openProjectLibrary({ stateRoot });
   const projectId = "project_golden";
   const initial = await library.getSnapshot(projectId);
@@ -65,7 +65,9 @@ export async function runPackagedExportProof(stateRoot: string) {
     outputRoot,
     initialRevisionId: initial.projectRevisionId,
   });
-  const diskFailures = await runPackagedExportDiskProof(library, stateRoot);
+  const diskFailures = includeDiskFailures
+    ? await runPackagedExportDiskProof(library, stateRoot)
+    : {};
   const reopened = await openProjectLibrary({ stateRoot });
   if (reopened.listExportReceipts(projectId).length !== 5)
     throw new Error("export_proof_reopen_failed");

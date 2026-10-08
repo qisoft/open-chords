@@ -24,7 +24,7 @@ test.skip(
 );
 
 test("installed application generates golden projections and reopens durable Export Receipts through the bounded capability", async () => {
-  test.setTimeout(360000);
+  test.setTimeout(process.platform === "win32" ? 540000 : 360000);
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-installed-export-")));
   try {
     const stateRoot = join(root, "state");

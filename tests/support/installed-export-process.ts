@@ -26,7 +26,11 @@ export async function runInstalledExportProcess(
   try {
     return await promisify(execFile)(executable, args, {
       env,
-      timeout: 120000,
+      // The expanded Windows export proof includes three independent durable reopens and retry.
+      timeout:
+        process.platform === "win32" && args.includes("--open-chords-export-proof")
+          ? 300000
+          : 120000,
       maxBuffer: 16384,
       windowsHide: true,
     });
