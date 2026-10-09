@@ -66,14 +66,17 @@ describe("native Save driver failure redaction", () => {
     expect(diagnostic).not.toContain("private");
   });
 
-  it("retains only numeric native window observations", () => {
-    const probe = "Native Save window probe: owned=2 expected_titles=1 save_as_titles=0 dialogs=1";
-    const diagnostic = installedSaveDriverDiagnostic(
-      {},
-      `${Array.from({ length: 6 }, () => probe).join("\r\n")}\r\n${probe} C:\\private\\file\r\nNative Save window probe: owned=private expected_titles=0 save_as_titles=0 dialogs=0`,
-      100,
-    );
-    expect(diagnostic.split(probe)).toHaveLength(4);
-    expect(diagnostic).not.toContain("private");
-  });
+  it.each(["true", "false"])(
+    "retains bounded native window observations with truncated=%s",
+    (truncated) => {
+      const probe = `Native Save window probe: owned=2 expected_titles=1 save_as_titles=0 dialogs=1 truncated=${truncated}`;
+      const diagnostic = installedSaveDriverDiagnostic(
+        {},
+        `${Array.from({ length: 6 }, () => probe).join("\r\n")}\r\n${probe} C:\\private\\file\r\nNative Save window probe: owned=private expected_titles=0 save_as_titles=0 dialogs=0`,
+        100,
+      );
+      expect(diagnostic.split(probe)).toHaveLength(4);
+      expect(diagnostic).not.toContain("private");
+    },
+  );
 });

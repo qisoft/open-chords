@@ -34,7 +34,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const windowProbes = output
     .split(/\r?\n/)
     .filter((line) =>
-      /^Native Save window probe: owned=[0-9]{1,3} expected_titles=[0-9]{1,3} save_as_titles=[0-9]{1,3} dialogs=[0-9]{1,3}$/.test(
+      /^Native Save window probe: owned=[0-9]{1,3} expected_titles=[0-9]{1,3} save_as_titles=[0-9]{1,3} dialogs=[0-9]{1,3} truncated=(?:true|false)$/.test(
         line,
       ),
     )

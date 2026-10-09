@@ -60,8 +60,9 @@ public static class SaveNativeInput {
   [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
   public static string Probe(uint expectedProcessId) {
     int visited = 0, owned = 0, expectedTitles = 0, saveAsTitles = 0, dialogs = 0;
+    bool truncated = false;
     EnumWindowProc callback = (window, parameter) => {
-      if (++visited > 256) return false;
+      if (++visited > 256) { truncated = true; return false; }
       uint processId, ownerProcessId;
       GetWindowThreadProcessId(window, out processId);
       GetWindowThreadProcessId(GetWindow(window, 4), out ownerProcessId);
@@ -78,7 +79,8 @@ public static class SaveNativeInput {
     };
     EnumWindows(callback, IntPtr.Zero);
     return "Native Save window probe: owned=" + owned + " expected_titles=" + expectedTitles +
-      " save_as_titles=" + saveAsTitles + " dialogs=" + dialogs;
+      " save_as_titles=" + saveAsTitles + " dialogs=" + dialogs +
+      " truncated=" + (truncated ? "true" : "false");
   }
   public static void Click(IntPtr window, uint expectedProcessId, int x, int y) {
     uint processId;
