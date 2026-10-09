@@ -28,6 +28,7 @@ test.skip(
 );
 
 const PRODUCT_NAME = "Open Chords";
+const INSTALLED_STARTUP_TIMEOUT_MS = process.platform === "win32" ? 120_000 : 30_000;
 const EXPECTED_RENDERER_CSP = [
   "default-src 'none'",
   "script-src 'self'",
@@ -228,6 +229,7 @@ test("installed editor and practice save through named IPC with a durable reopen
 });
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {
+  if (process.platform === "win32") test.setTimeout(180_000);
   const playbackState = join(packageRoot, "offline-playback-user-data");
   cpSync(userDataDirectory, playbackState, { recursive: true });
   await (await openNetworkMode(playbackState)).setOffline(true);
@@ -256,34 +258,18 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     for (const asset of [...(chunk.assets ?? []), ...(chunk.css ?? [])]) allowedAssets.add(asset);
   }
 
-  const env: Record<string, string> = {};
-  for (const key of [
-    "SystemRoot",
-    "WINDIR",
-    "TEMP",
-    "TMP",
-    "HOME",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
-  ]) {
-    if (process.env[key] !== undefined) env[key] = process.env[key];
-  }
-  if (process.platform === "win32") {
-    const windowsRoot = env.SystemRoot ?? env.WINDIR;
-    if (!windowsRoot) throw new Error("Windows system directory is unavailable");
-    env.PATH = [
-      join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
-      join(windowsRoot, "System32"),
-      windowsRoot,
-    ].join(";");
-  }
+  const env = installedSystemEnvironment();
   const debuggingPort = await reservePort();
   const application = spawn(
     executablePath,
-    [`--remote-debugging-port=${String(debuggingPort)}`, `--user-data-dir=${playbackState}`],
+    [
+      `--remote-debugging-port=${String(debuggingPort)}`,
+      `--user-data-dir=${playbackState}`,
+      "--open-chords-startup-diagnostics",
+    ],
     { env, stdio: ["ignore", "pipe", "pipe"] },
   );
+  const startupProbe = recordInstalledStartup(application, "shell");
   let applicationOutput = "";
   const captureOutput = (chunk: Buffer) => {
     applicationOutput = `${applicationOutput}${chunk.toString("utf8")}`.slice(-64 * 1024);
@@ -406,6 +392,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     });
     expect(secondInstanceExitCode).toBe(0);
   } finally {
+    startupProbe();
     await stopApplication(application);
   }
   const reopened = await openProjectLibrary({ stateRoot: playbackState });
@@ -414,6 +401,147 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect(reopened.listExportReceipts(packagedProjectId)).toEqual([]);
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
+
+test("installed local Source refusals preserve Project revisions after durable reopen", async () => {
+  test.setTimeout(process.platform === "win32" ? 540_000 : 240_000);
+  for (const failure of ["missing", "changed"] as const) {
+    const state = join(packageRoot, `source-refusal-${failure}`);
+    const path = join(packageRoot, `source-refusal-${failure}.wav`);
+    const original = monoPcmWav([0, 1, 2, 3]);
+    writeFileSync(path, original);
+    const library = await openProjectLibrary({ stateRoot: state });
+    const media = new LocalMediaService({ library, pickFile: async () => path });
+    const generationId = `generation_refusal_${failure}`;
+    media.activateGeneration(generationId);
+    const selected = await media.pickLocalFile(generationId);
+    if (selected.kind !== "selected") throw new Error("Source refusal fixture was not selected");
+    const created = await media.createProject({
+      capabilityId: selected.capabilityId,
+      endSourceSample: 4,
+      generationId,
+      startSourceSample: 0,
+    });
+    await media.revokeGeneration(generationId);
+    await (await openNetworkMode(state)).setOffline(true);
+    const baseline = await library.readProject(created.projectId);
+    const immutableTree = async (root: string) =>
+      canonicalSerialize(
+        Object.fromEntries(
+          Object.entries(await proofTreeHashes(root)).filter(
+            ([name]) => name !== "source-catalog.json" && name !== "source-catalog.backup.json",
+          ),
+        ),
+      );
+    const treeBaseline = await immutableTree(library.activeRoot);
+    if (failure === "missing") rmSync(path);
+    else writeFileSync(path, monoPcmWav([4, 5, 6, 7]));
+    const result = await inspectInstalled(
+      state,
+      `(async () => {
+        const deadline = Date.now() + 10000;
+        let alert;
+        while (Date.now() < deadline) {
+          const candidate = document.querySelector('.source-status[role="alert"]');
+          if (candidate?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+            alert = candidate;
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        if (!alert) throw new Error("Source relink alert was not visible");
+        const response = await window.openChords.media.openPlayback(${JSON.stringify(created.projectId)});
+        return { response, message: alert.textContent };
+      })()`,
+      installedSystemEnvironment(),
+    );
+    const probe = z
+      .object({
+        response: z.object({
+          type: z.string(),
+          code: z.string().optional(),
+        }),
+      })
+      .parse(result);
+    const code = [
+      "busy",
+      "capability_unavailable",
+      "internal_error",
+      "invalid_media",
+      "invalid_command",
+      "invalid_generation",
+      "project_not_found",
+      "project_read_only",
+      "source_unavailable",
+      "stale_revision",
+      "unauthorized_sender",
+    ].includes(probe.response.code ?? "")
+      ? probe.response.code
+      : "none";
+    const type = ["desktop.error", "media.source_unavailable", "media.playback_ready"].includes(
+      probe.response.type,
+    )
+      ? probe.response.type
+      : "unknown";
+    process.stdout.write(
+      `Installed Source refusal probe: scenario=${failure} type=${type} code=${code}\n`,
+    );
+    expect(result).toMatchObject({
+      response: {
+        type: "media.source_unavailable",
+        projectId: created.projectId,
+        sourceId: created.sourceId,
+      },
+      message: "The verified Source is unavailable. Relink it to enable playback.",
+    });
+    expect(JSON.stringify(result)).not.toContain(path);
+    const escapedPath = JSON.stringify(path).slice(1, -1);
+    expect(JSON.stringify(result)).not.toContain(escapedPath);
+    expect(JSON.stringify(result)).not.toContain(JSON.stringify(escapedPath).slice(1, -1));
+    expect(JSON.stringify(result)).not.toContain("playbackUrl");
+    const reopened = await openProjectLibrary({ stateRoot: state });
+    const after = await reopened.readProject(created.projectId);
+    expect(after.projectRevisionId).toBe(baseline.projectRevisionId);
+    expect(after.envelope).toEqual(baseline.envelope);
+    const withoutLocators = (records: typeof after.records) => ({
+      ...records,
+      sources: records.sources.map((source) => ({ ...source, locators: [] })),
+    });
+    expect(withoutLocators(after.records)).toEqual(withoutLocators(baseline.records));
+    expect(after.records.sources[0]?.locators).toEqual([
+      expect.objectContaining({ path, status: "unavailable" }),
+    ]);
+    expect(await immutableTree(reopened.activeRoot)).toBe(treeBaseline);
+    expect(reopened.listExportReceipts(created.projectId)).toEqual([]);
+    if (failure === "missing") expect(() => readFileSync(path)).toThrow();
+    else expect(readFileSync(path)).toEqual(monoPcmWav([4, 5, 6, 7]));
+  }
+});
+
+function installedSystemEnvironment() {
+  const env: Record<string, string> = {};
+  for (const key of [
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+  ]) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  if (process.platform === "win32") {
+    const windowsRoot = env.SystemRoot ?? env.WINDIR;
+    if (!windowsRoot) throw new Error("Windows system directory is unavailable");
+    env.PATH = [
+      join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
+      join(windowsRoot, "System32"),
+      windowsRoot,
+    ].join(";");
+  }
+  return env;
+}
 
 async function stopApplication(application: ReturnType<typeof spawn>): Promise<void> {
   if (application.exitCode !== null || application.signalCode !== null) return;
@@ -579,7 +707,7 @@ async function inspectPackagedRenderer(
   projectId: string,
 ): Promise<z.infer<typeof RendererSnapshotSchema>> {
   const endpoint = `http://127.0.0.1:${String(port)}`;
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + INSTALLED_STARTUP_TIMEOUT_MS;
   let lastError: unknown;
   while (Date.now() < deadline) {
     let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
@@ -1570,13 +1698,49 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
   ).toBe(true);
 });
 
-async function inspectInstalled(stateRoot: string, expression: string) {
+function recordInstalledStartup(
+  application: ReturnType<typeof spawn>,
+  scenario: "shell" | "capability",
+) {
+  const started = Date.now();
+  const stages =
+    /^(?:Desktop startup stage: (?:library|network_mode|alignment_runtime|model_store|exports|archive_cache|renderer|window_created)|Desktop Library startup stage: (?:state_directory|relocation_journal|location|canonical_path|local_volume|initialize|relocation_cleanup|ready)|Desktop startup failed: (?:library|network_mode|alignment_runtime|model_store|exports|archive_cache|renderer|window_created)\.(?:ENOENT|EACCES|EPERM|ENOSPC|EINVAL|EIO|unknown))$/;
+  for (const stream of [application.stdout, application.stderr]) {
+    let pending = "";
+    stream?.on("data", (chunk: Buffer) => {
+      const lines = (pending + chunk.toString("utf8")).split("\n");
+      pending = lines.pop()!.slice(-1024);
+      for (const line of lines) {
+        const safe = line.trim();
+        if (stages.test(safe))
+          process.stdout.write(
+            `Installed startup probe: scenario=${scenario} elapsed_ms=${Date.now() - started} ${safe}\n`,
+          );
+      }
+    });
+  }
+  return () => {
+    const signal = application.signalCode;
+    const safeSignal =
+      signal && ["SIGTERM", "SIGKILL", "SIGABRT", "SIGSEGV"].includes(signal) ? signal : "none";
+    process.stdout.write(
+      `Installed startup probe: scenario=${scenario} elapsed_ms=${Date.now() - started} exit=${application.exitCode ?? "none"} signal=${safeSignal}\n`,
+    );
+  };
+}
+
+async function inspectInstalled(stateRoot: string, expression: string, env?: NodeJS.ProcessEnv) {
   const port = await reservePort();
   const application = spawn(
     executablePath,
-    [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
-    { stdio: "ignore" },
+    [
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${stateRoot}`,
+      "--open-chords-startup-diagnostics",
+    ],
+    { env, stdio: ["ignore", "pipe", "pipe"] },
   );
+  const startupProbe = recordInstalledStartup(application, "capability");
   let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
   try {
     await expect
@@ -1594,7 +1758,7 @@ async function inspectInstalled(stateRoot: string, expression: string) {
             return false;
           }
         },
-        { timeout: 30000 },
+        { timeout: INSTALLED_STARTUP_TIMEOUT_MS },
       )
       .toBe(true);
     if (!target) throw new Error("Installed Alignment capability is unavailable");
@@ -1608,6 +1772,7 @@ async function inspectInstalled(stateRoot: string, expression: string) {
       60000,
     );
   } finally {
+    startupProbe();
     try {
       if (target) await quitInstalledApplication(application, target.webSocketDebuggerUrl);
     } finally {
