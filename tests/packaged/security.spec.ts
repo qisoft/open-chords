@@ -402,8 +402,8 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
 
-test("installed local Source refusals preserve Project revisions after durable reopen", async () => {
-  test.setTimeout(process.platform === "win32" ? 540_000 : 240_000);
+test("installed local Source refusals and matching relink preserve Project revisions", async () => {
+  test.setTimeout(process.platform === "win32" ? 900_000 : 480_000);
   for (const failure of ["missing", "changed"] as const) {
     const state = join(packageRoot, `source-refusal-${failure}`);
     const path = join(packageRoot, `source-refusal-${failure}.wav`);
@@ -512,6 +512,75 @@ test("installed local Source refusals preserve Project revisions after durable r
     ]);
     expect(await immutableTree(reopened.activeRoot)).toBe(treeBaseline);
     expect(reopened.listExportReceipts(created.projectId)).toEqual([]);
+    if (failure === "missing") expect(() => readFileSync(path)).toThrow();
+    else expect(readFileSync(path)).toEqual(monoPcmWav([4, 5, 6, 7]));
+
+    const relocatedPath = join(packageRoot, `source-relinked-${failure}.wav`);
+    writeFileSync(relocatedPath, original);
+    const relinkMedia = new LocalMediaService({
+      library: reopened,
+      pickFile: async () => relocatedPath,
+    });
+    const relinkGeneration = `generation_relinked_${failure}`;
+    relinkMedia.activateGeneration(relinkGeneration);
+    try {
+      expect(
+        await relinkMedia.relinkSource({
+          generationId: relinkGeneration,
+          sourceId: created.sourceId,
+        }),
+      ).toEqual({ kind: "relinked", sourceId: created.sourceId });
+    } finally {
+      await relinkMedia.revokeGeneration(relinkGeneration);
+    }
+    const relinked = await reopened.readProject(created.projectId);
+    expect(relinked.projectRevisionId).toBe(baseline.projectRevisionId);
+    expect(relinked.envelope).toEqual(baseline.envelope);
+    expect(withoutLocators(relinked.records)).toEqual(withoutLocators(baseline.records));
+    expect(relinked.records.sources[0]?.locators).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path, status: "unavailable" }),
+        expect.objectContaining({ path: relocatedPath, status: "available" }),
+      ]),
+    );
+    expect(await immutableTree(reopened.activeRoot)).toBe(treeBaseline);
+    const relinkedTree = canonicalSerialize(await proofTreeHashes(reopened.activeRoot));
+    const playback = await inspectInstalled(
+      state,
+      `(async () => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const audio = document.querySelector("audio");
+        if (audio?.src.startsWith("open-chords:")) break;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      const audio = document.querySelector("audio");
+      if (!audio?.src.startsWith("open-chords:")) throw new Error("Relinked Source was not ready");
+      const response = await window.openChords.media.openPlayback(${JSON.stringify(created.projectId)});
+      if (response.type !== "media.playback_ready") return { type: response.type };
+      const media = await fetch(response.playbackUrl, { headers: { Range: "bytes=0-${original.length - 1}" } });
+      return { type: response.type, bytes: [...new Uint8Array(await media.arrayBuffer())], status: media.status, offline: (await window.openChords.youtube.perform({type: "status"})).offline };
+    })()`,
+      installedSystemEnvironment(),
+    );
+    expect(playback).toEqual({
+      type: "media.playback_ready",
+      bytes: [...original],
+      status: 206,
+      offline: true,
+    });
+    for (const privatePath of [path, relocatedPath]) {
+      const escaped = JSON.stringify(privatePath).slice(1, -1);
+      for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)])
+        expect(JSON.stringify(playback)).not.toContain(representation);
+    }
+    expect(JSON.stringify(playback)).not.toContain("playbackUrl");
+    const relinkReopened = await openProjectLibrary({ stateRoot: state });
+    expect(await relinkReopened.readProject(created.projectId)).toEqual(relinked);
+    expect(canonicalSerialize(await proofTreeHashes(relinkReopened.activeRoot))).toBe(relinkedTree);
+    expect(relinkReopened.listExportReceipts(created.projectId)).toEqual([]);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    expect(readFileSync(relocatedPath)).toEqual(original);
     if (failure === "missing") expect(() => readFileSync(path)).toThrow();
     else expect(readFileSync(path)).toEqual(monoPcmWav([4, 5, 6, 7]));
   }
