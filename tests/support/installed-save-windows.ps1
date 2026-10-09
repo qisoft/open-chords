@@ -6,9 +6,26 @@ $fileNames = 0
 $actions = 0
 $stage = 'setup'
 [Console]::Error.WriteLine('Native Save driver stage: started')
+$probeStarted = [DateTime]::UtcNow
+$probeSeen = @{}
+$probeCount = 0
+$probeCycle = $false
+function Write-NativeSaveProbe([string]$Name) {
+  if (!$script:probeSeen.ContainsKey($Name) -or $script:probeCycle) {
+    if ($script:probeCount -lt 96) {
+      $elapsed = [int][Math]::Floor(([DateTime]::UtcNow - $script:probeStarted).TotalMilliseconds)
+      [Console]::Error.WriteLine("Native Save driver probe: $Name duration_ms=$elapsed windows=$script:maxWindows elements=$script:maxElements filenames=$script:fileNames actions=$script:actions")
+      $script:probeCount++
+    }
+    $script:probeSeen[$Name] = $true
+  }
+}
+
 try {
+Write-NativeSaveProbe 'assemblies'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Write-NativeSaveProbe 'compile'
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -54,9 +71,12 @@ public static class SaveNativeInput {
 }
 '@
 
+Write-NativeSaveProbe 'root'
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ApplicationPid)
+Write-NativeSaveProbe 'ready'
 $stage = 'discovery'
+$nextProbe = [DateTime]::UtcNow
 $deadline = [DateTime]::UtcNow.AddSeconds(90)
 $maxWindows = 0
 $maxElements = 0
@@ -64,14 +84,21 @@ $fileNames = 0
 $actions = 0
 while ([DateTime]::UtcNow -lt $deadline) {
   if ($null -eq (Get-Process -Id $ApplicationPid -ErrorAction SilentlyContinue)) { throw 'application_exit' }
+  $probeCycle = [DateTime]::UtcNow -ge $nextProbe
+  if ($probeCycle) { $nextProbe = [DateTime]::UtcNow.AddSeconds(5) }
+  Write-NativeSaveProbe 'windows_query'
   $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)
   $maxWindows = [Math]::Max($maxWindows, $windows.Count)
   if ($windows.Count -gt 16) { throw 'window_bound' }
+  Write-NativeSaveProbe 'windows_read'
   foreach ($window in $windows) {
+    Write-NativeSaveProbe 'window_properties'
     if ($window.Current.Name -ne 'Export Open Chords JSON') { continue }
+    Write-NativeSaveProbe 'elements_query'
     $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
     $maxElements = [Math]::Max($maxElements, $elements.Count)
     if ($elements.Count -gt 256) { throw 'element_bound' }
+    Write-NativeSaveProbe 'controls_query'
     $fileName = $null
     $button = $null
     $buttonName = if ($Scenario -eq 'cancel') { 'Cancel' } else { 'Save' }
@@ -88,22 +115,28 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $button = $element
       }
     }
+    Write-NativeSaveProbe 'controls_read'
     if ($null -eq $fileName -or $null -eq $button) { continue }
     $stage = 'default_filename'
+    Write-NativeSaveProbe 'pattern'
     $value = $fileName.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    Write-NativeSaveProbe 'value_read'
     if ($value.Current.Value -ne 'Open Chords.json') { throw 'default_filename_invalid' }
     if ($Scenario -eq 'save') {
       $stage = 'filename_set'
       if ([string]::IsNullOrWhiteSpace($TargetPath)) { throw 'target_missing' }
       if ($value.Current.IsReadOnly) { throw 'filename_readonly' }
+      Write-NativeSaveProbe 'value_set'
       $value.SetValue($TargetPath)
       if ($value.Current.Value -ne $TargetPath) { throw 'filename_not_set' }
     }
     $stage = 'native_input'
+    Write-NativeSaveProbe 'native_input'
     $bounds = $button.Current.BoundingRectangle
     if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) { throw 'action_bounds' }
     [SaveNativeInput]::Click([IntPtr]$window.Current.NativeWindowHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
+    Write-NativeSaveProbe 'action_clicked'
     ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = ($Scenario -eq 'save'); nativeClick = $true; defaultNameValid = $true } -Compress
     exit 0
   }

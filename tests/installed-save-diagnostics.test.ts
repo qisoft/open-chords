@@ -53,4 +53,16 @@ describe("native Save driver failure redaction", () => {
     expect(diagnostic).not.toContain("native_save_failed");
     expect(diagnostic).not.toContain("private");
   });
+
+  it("retains bounded operation probes and rejects raw or injected UI data", () => {
+    const probe =
+      "Native Save driver probe: elements_query duration_ms=501 windows=2 elements=0 filenames=0 actions=0";
+    const diagnostic = installedSaveDriverDiagnostic(
+      { killed: true, signal: "SIGTERM" },
+      `${Array.from({ length: 20 }, () => probe).join("\r\n")}\r\nNative Save driver probe: private/path duration_ms=1 windows=1 elements=1 filenames=1 actions=1\r\n${probe} /private/name`,
+      100000,
+    );
+    expect(diagnostic.split(probe)).toHaveLength(17);
+    expect(diagnostic).not.toContain("private");
+  });
 });
