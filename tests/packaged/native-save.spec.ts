@@ -15,6 +15,7 @@ import { proofTreeHashes } from "../../apps/desktop/src/main/packaged-proof-tree
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
+import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
 
 test.skip(process.platform !== "win32", "Windows native Save dialog");
 
@@ -86,6 +87,7 @@ test("installed Windows native Save cancellation preserves Library and Save publ
     };
     const drive = (scenario: "cancel" | "save") =>
       new Promise<unknown>((resolve, reject) => {
+        const started = performance.now();
         execFile(
           join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
           [
@@ -103,10 +105,11 @@ test("installed Windows native Save cancellation preserves Library and Save publ
           { env, timeout: 100000, maxBuffer: 16384 },
           (error, stdout, stderr) => {
             if (error) {
-              const counters = stderr.match(
-                /native_save_failed stage=(?:setup|discovery|default_filename|filename_set|native_input) windows=\d+ elements=\d+ filenames=\d+ actions=\d+/,
-              )?.[0];
-              reject(new Error(counters ?? "Installed native Save driver failed"));
+              reject(
+                new Error(
+                  installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
+                ),
+              );
               return;
             }
             try {

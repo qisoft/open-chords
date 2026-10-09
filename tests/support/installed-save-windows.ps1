@@ -5,6 +5,7 @@ $maxElements = 0
 $fileNames = 0
 $actions = 0
 $stage = 'setup'
+[Console]::Error.WriteLine('Native Save driver stage: started')
 try {
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
