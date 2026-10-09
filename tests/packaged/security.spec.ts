@@ -260,9 +260,14 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   const debuggingPort = await reservePort();
   const application = spawn(
     executablePath,
-    [`--remote-debugging-port=${String(debuggingPort)}`, `--user-data-dir=${playbackState}`],
+    [
+      `--remote-debugging-port=${String(debuggingPort)}`,
+      `--user-data-dir=${playbackState}`,
+      "--open-chords-startup-diagnostics",
+    ],
     { env, stdio: ["ignore", "pipe", "pipe"] },
   );
+  const startupProbe = recordInstalledStartup(application, "shell");
   let applicationOutput = "";
   const captureOutput = (chunk: Buffer) => {
     applicationOutput = `${applicationOutput}${chunk.toString("utf8")}`.slice(-64 * 1024);
@@ -385,6 +390,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     });
     expect(secondInstanceExitCode).toBe(0);
   } finally {
+    startupProbe();
     await stopApplication(application);
   }
   const reopened = await openProjectLibrary({ stateRoot: playbackState });
@@ -1690,13 +1696,49 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
   ).toBe(true);
 });
 
+function recordInstalledStartup(
+  application: ReturnType<typeof spawn>,
+  scenario: "shell" | "capability",
+) {
+  const started = Date.now();
+  const stages =
+    /^(?:Desktop startup stage: (?:library|network_mode|alignment_runtime|model_store|exports|archive_cache|renderer|window_created)|Desktop Library startup stage: (?:state_directory|relocation_journal|location|canonical_path|local_volume|initialize|relocation_cleanup|ready)|Desktop startup failed: (?:library|network_mode|alignment_runtime|model_store|exports|archive_cache|renderer|window_created)\.(?:ENOENT|EACCES|EPERM|ENOSPC|EINVAL|EIO|unknown))$/;
+  for (const stream of [application.stdout, application.stderr]) {
+    let pending = "";
+    stream?.on("data", (chunk: Buffer) => {
+      const lines = (pending + chunk.toString("utf8")).split("\n");
+      pending = lines.pop()!.slice(-1024);
+      for (const line of lines) {
+        const safe = line.trim();
+        if (stages.test(safe))
+          process.stdout.write(
+            `Installed startup probe: scenario=${scenario} elapsed_ms=${Date.now() - started} ${safe}\n`,
+          );
+      }
+    });
+  }
+  return () => {
+    const signal = application.signalCode;
+    const safeSignal =
+      signal && ["SIGTERM", "SIGKILL", "SIGABRT", "SIGSEGV"].includes(signal) ? signal : "none";
+    process.stdout.write(
+      `Installed startup probe: scenario=${scenario} elapsed_ms=${Date.now() - started} exit=${application.exitCode ?? "none"} signal=${safeSignal}\n`,
+    );
+  };
+}
+
 async function inspectInstalled(stateRoot: string, expression: string, env?: NodeJS.ProcessEnv) {
   const port = await reservePort();
   const application = spawn(
     executablePath,
-    [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
-    { env, stdio: "ignore" },
+    [
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${stateRoot}`,
+      "--open-chords-startup-diagnostics",
+    ],
+    { env, stdio: ["ignore", "pipe", "pipe"] },
   );
+  const startupProbe = recordInstalledStartup(application, "capability");
   let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
   try {
     await expect
@@ -1728,6 +1770,7 @@ async function inspectInstalled(stateRoot: string, expression: string, env?: Nod
       60000,
     );
   } finally {
+    startupProbe();
     try {
       if (target) await quitInstalledApplication(application, target.webSocketDebuggerUrl);
     } finally {
