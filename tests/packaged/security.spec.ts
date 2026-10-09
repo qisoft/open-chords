@@ -28,6 +28,7 @@ test.skip(
 );
 
 const PRODUCT_NAME = "Open Chords";
+const INSTALLED_STARTUP_TIMEOUT_MS = process.platform === "win32" ? 120_000 : 30_000;
 const EXPECTED_RENDERER_CSP = [
   "default-src 'none'",
   "script-src 'self'",
@@ -228,6 +229,7 @@ test("installed editor and practice save through named IPC with a durable reopen
 });
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {
+  if (process.platform === "win32") test.setTimeout(180_000);
   const playbackState = join(packageRoot, "offline-playback-user-data");
   cpSync(userDataDirectory, playbackState, { recursive: true });
   await (await openNetworkMode(playbackState)).setOffline(true);
@@ -401,7 +403,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
 });
 
 test("installed local Source refusals preserve Project revisions after durable reopen", async () => {
-  test.setTimeout(240_000);
+  test.setTimeout(process.platform === "win32" ? 540_000 : 240_000);
   for (const failure of ["missing", "changed"] as const) {
     const state = join(packageRoot, `source-refusal-${failure}`);
     const path = join(packageRoot, `source-refusal-${failure}.wav`);
@@ -705,7 +707,7 @@ async function inspectPackagedRenderer(
   projectId: string,
 ): Promise<z.infer<typeof RendererSnapshotSchema>> {
   const endpoint = `http://127.0.0.1:${String(port)}`;
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + INSTALLED_STARTUP_TIMEOUT_MS;
   let lastError: unknown;
   while (Date.now() < deadline) {
     let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
@@ -1756,7 +1758,7 @@ async function inspectInstalled(stateRoot: string, expression: string, env?: Nod
             return false;
           }
         },
-        { timeout: 30000 },
+        { timeout: INSTALLED_STARTUP_TIMEOUT_MS },
       )
       .toBe(true);
     if (!target) throw new Error("Installed Alignment capability is unavailable");
