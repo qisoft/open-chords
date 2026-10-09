@@ -355,8 +355,8 @@ if (
             const { label, extension } = exportTarget(format);
             const result = await dialog.showSaveDialog(getOrCreateWindow(), {
               title: `Export ${label}`,
-              defaultPath: `Open Chords${extension}`,
-              filters: [{ name: label, extensions: [extension.slice(1)] }],
+              defaultPath: `Open Chords.${extension}`,
+              filters: [{ name: label, extensions: [extension] }],
             });
             return result.canceled ? null : result.filePath;
           },

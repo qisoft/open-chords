@@ -31,6 +31,14 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
         line,
       ),
     );
+  const windowProbes = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save window probe: owned=[0-9]{1,3} expected_titles=[0-9]{1,3} save_as_titles=[0-9]{1,3} dialogs=[0-9]{1,3}$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   return [
     installedExportExitDiagnostic(error, durationMs).replace(
       "Installed export process",
@@ -38,6 +46,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ),
     `Native Save driver failure: started=${started} category=${category} spawn_code=${spawnCode}`,
     ...probes,
+    ...windowProbes,
     ...(counters ? [counters] : []),
   ].join("\n");
 }

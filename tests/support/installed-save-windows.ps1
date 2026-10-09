@@ -29,6 +29,7 @@ Write-NativeSaveProbe 'compile'
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class SaveNativeInput {
   [StructLayout(LayoutKind.Sequential)]
   private struct Point { public int x, y; }
@@ -52,6 +53,33 @@ public static class SaveNativeInput {
   [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
   [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] private static extern uint SendInput(uint count, Input[] inputs, int size);
+  private delegate bool EnumWindowProc(IntPtr window, IntPtr parameter);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc callback, IntPtr parameter);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int count);
+  [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+  public static string Probe(uint expectedProcessId) {
+    int visited = 0, owned = 0, expectedTitles = 0, saveAsTitles = 0, dialogs = 0;
+    EnumWindowProc callback = (window, parameter) => {
+      if (++visited > 256) return false;
+      uint processId, ownerProcessId;
+      GetWindowThreadProcessId(window, out processId);
+      GetWindowThreadProcessId(GetWindow(window, 4), out ownerProcessId);
+      if (!IsWindowVisible(window) || (processId != expectedProcessId && ownerProcessId != expectedProcessId)) return true;
+      owned++;
+      var title = new StringBuilder(256);
+      GetWindowText(window, title, title.Capacity);
+      if (title.ToString() == "Export Open Chords JSON") expectedTitles++;
+      if (title.ToString() == "Save As") saveAsTitles++;
+      var kind = new StringBuilder(64);
+      GetClassName(window, kind, kind.Capacity);
+      if (kind.ToString() == "#32770") dialogs++;
+      return true;
+    };
+    EnumWindows(callback, IntPtr.Zero);
+    return "Native Save window probe: owned=" + owned + " expected_titles=" + expectedTitles +
+      " save_as_titles=" + saveAsTitles + " dialogs=" + dialogs;
+  }
   public static void Click(IntPtr window, uint expectedProcessId, int x, int y) {
     uint processId;
     if (GetWindowThreadProcessId(window, out processId) == 0 || processId != expectedProcessId ||
@@ -86,6 +114,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
   if ($null -eq (Get-Process -Id $ApplicationPid -ErrorAction SilentlyContinue)) { throw 'application_exit' }
   $probeCycle = [DateTime]::UtcNow -ge $nextProbe
   if ($probeCycle) { $nextProbe = [DateTime]::UtcNow.AddSeconds(5) }
+  if ($probeCycle) { [Console]::Error.WriteLine([SaveNativeInput]::Probe([uint32]$ApplicationPid)) }
   Write-NativeSaveProbe 'windows_query'
   $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)
   $maxWindows = [Math]::Max($maxWindows, $windows.Count)
