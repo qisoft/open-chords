@@ -82,9 +82,35 @@ public static class SaveNativeInput {
       " save_as_titles=" + saveAsTitles + " dialogs=" + dialogs +
       " truncated=" + (truncated ? "true" : "false");
   }
+  private static bool OwnedByApplication(IntPtr window, uint expectedProcessId) {
+    uint processId, ownerProcessId;
+    GetWindowThreadProcessId(window, out processId);
+    GetWindowThreadProcessId(GetWindow(window, 4), out ownerProcessId);
+    return processId == expectedProcessId || ownerProcessId == expectedProcessId;
+  }
+  public static IntPtr FindDialog(uint expectedProcessId) {
+    int visited = 0, matches = 0;
+    bool truncated = false;
+    IntPtr result = IntPtr.Zero;
+    EnumWindowProc callback = (window, parameter) => {
+      if (++visited > 256) { truncated = true; return false; }
+      if (!IsWindowVisible(window) || !IsWindowEnabled(window) || !OwnedByApplication(window, expectedProcessId)) return true;
+      var title = new StringBuilder(256);
+      var kind = new StringBuilder(64);
+      GetWindowText(window, title, title.Capacity);
+      GetClassName(window, kind, kind.Capacity);
+      if (title.ToString() == "Export Open Chords JSON" && kind.ToString() == "#32770") {
+        matches++;
+        result = window;
+      }
+      return true;
+    };
+    EnumWindows(callback, IntPtr.Zero);
+    if (truncated || matches > 1) throw new InvalidOperationException("Native Save dialog discovery incomplete or ambiguous");
+    return result;
+  }
   public static void Click(IntPtr window, uint expectedProcessId, int x, int y) {
-    uint processId;
-    if (GetWindowThreadProcessId(window, out processId) == 0 || processId != expectedProcessId ||
+    if (!OwnedByApplication(window, expectedProcessId) ||
         !IsWindowVisible(window) || !IsWindowEnabled(window))
       throw new InvalidOperationException("Native Save input target unavailable");
     SetForegroundWindow(window);
@@ -102,8 +128,6 @@ public static class SaveNativeInput {
 '@
 
 Write-NativeSaveProbe 'root'
-$root = [System.Windows.Automation.AutomationElement]::RootElement
-$condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ApplicationPid)
 Write-NativeSaveProbe 'ready'
 $stage = 'discovery'
 $nextProbe = [DateTime]::UtcNow
@@ -118,7 +142,11 @@ while ([DateTime]::UtcNow -lt $deadline) {
   if ($probeCycle) { $nextProbe = [DateTime]::UtcNow.AddSeconds(5) }
   if ($probeCycle) { [Console]::Error.WriteLine([SaveNativeInput]::Probe([uint32]$ApplicationPid)) }
   Write-NativeSaveProbe 'windows_query'
-  $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)
+  $dialogHandle = [SaveNativeInput]::FindDialog([uint32]$ApplicationPid)
+  $windows = @()
+  if ($dialogHandle -ne [IntPtr]::Zero) {
+    $windows = @([System.Windows.Automation.AutomationElement]::FromHandle($dialogHandle))
+  }
   $maxWindows = [Math]::Max($maxWindows, $windows.Count)
   if ($windows.Count -gt 16) { throw 'window_bound' }
   Write-NativeSaveProbe 'windows_read'
