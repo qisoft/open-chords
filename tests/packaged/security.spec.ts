@@ -7,12 +7,15 @@ import { join } from "node:path";
 import { extractFile, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
+import { canonicalSerialize } from "@open-chords/domain";
 import { monoPcmWav } from "@open-chords/testkit/media";
 import { expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 import { z } from "zod";
 
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
+import { openNetworkMode } from "../../apps/desktop/src/main/network-mode.ts";
+import { proofTreeHashes } from "../../apps/desktop/src/main/packaged-proof-tree.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof-constants.ts";
 import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/packaged-sidecar-proof-evidence.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
@@ -225,6 +228,10 @@ test("installed editor and practice save through named IPC with a durable reopen
 });
 
 test("installed shell exposes only named capabilities and manifest assets", async () => {
+  await (await openNetworkMode(userDataDirectory)).setOffline(true);
+  const library = await openProjectLibrary({ stateRoot: userDataDirectory });
+  const libraryBaseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+  const projectBaseline = canonicalSerialize(await library.readProject(packagedProjectId));
   const rawManifest: unknown = JSON.parse(
     extractFile(
       join(resourcesPath, "app.asar"),
@@ -247,11 +254,33 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     for (const asset of [...(chunk.assets ?? []), ...(chunk.css ?? [])]) allowedAssets.add(asset);
   }
 
+  const env: Record<string, string> = {};
+  for (const key of [
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+  ]) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  if (process.platform === "win32") {
+    const windowsRoot = env.SystemRoot ?? env.WINDIR;
+    if (!windowsRoot) throw new Error("Windows system directory is unavailable");
+    env.PATH = [
+      join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
+      join(windowsRoot, "System32"),
+      windowsRoot,
+    ].join(";");
+  }
   const debuggingPort = await reservePort();
   const application = spawn(
     executablePath,
     [`--remote-debugging-port=${String(debuggingPort)}`, `--user-data-dir=${userDataDirectory}`],
-    { stdio: ["ignore", "pipe", "pipe"] },
+    { env, stdio: ["ignore", "pipe", "pipe"] },
   );
   let applicationOutput = "";
   const captureOutput = (chunk: Buffer) => {
@@ -310,6 +339,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
       },
       navigationDenied: true,
       offlinePlayback: {
+        offline: true,
         body: expect.stringMatching(/^RIFF....WAVE$/s),
         error: null,
         pathKeyExposed: false,
@@ -359,6 +389,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
 
     const secondInstanceExitCode = await new Promise<number | null>((resolve, reject) => {
       const child = spawn(executablePath, [`--user-data-dir=${userDataDirectory}`], {
+        env,
         stdio: "ignore",
       });
       const timeout = setTimeout(() => {
@@ -375,6 +406,11 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   } finally {
     await stopApplication(application);
   }
+  const reopened = await openProjectLibrary({ stateRoot: userDataDirectory });
+  expect(canonicalSerialize(await reopened.readProject(packagedProjectId))).toBe(projectBaseline);
+  expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(libraryBaseline);
+  expect(reopened.listExportReceipts(packagedProjectId)).toEqual([]);
+  expect((await openNetworkMode(userDataDirectory)).offline).toBe(true);
 });
 
 async function stopApplication(application: ReturnType<typeof spawn>): Promise<void> {
@@ -475,6 +511,7 @@ const EffectiveCspProbeSchema = z.object({
 });
 
 const OfflinePlaybackSchema = z.object({
+  offline: z.boolean(),
   body: z.string(),
   error: z.string().nullable(),
   pathKeyExposed: z.boolean(),
@@ -985,7 +1022,11 @@ async function evaluatePackagedMedia(
     let seeked = false;
     let workspacePlayed = false;
     let timelineMoved = false;
+    let offline = false;
     try {
+      const network = await window.openChords.youtube.perform({ type: "set_offline", offline: true });
+      offline = network.offline === true;
+      if (!offline) throw new Error("Offline Mode was not enabled for local playback");
       const waitFor = async (read, message) => {
         const deadline = Date.now() + 3000;
         while (Date.now() < deadline) {
@@ -1085,6 +1126,7 @@ async function evaluatePackagedMedia(
     return {
       body,
       error,
+      offline,
       pathKeyExposed: Object.keys(playback).some((key) => /path|directory/i.test(key)),
       played,
       playAligned,
