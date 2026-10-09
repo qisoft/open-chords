@@ -446,6 +446,37 @@ test("installed local Source refusals preserve Project revisions after durable r
       })()`,
       installedSystemEnvironment(),
     );
+    const probe = z
+      .object({
+        response: z.object({
+          type: z.string(),
+          code: z.string().optional(),
+        }),
+      })
+      .parse(result);
+    const code = [
+      "busy",
+      "capability_unavailable",
+      "internal_error",
+      "invalid_media",
+      "invalid_command",
+      "invalid_generation",
+      "project_not_found",
+      "project_read_only",
+      "source_unavailable",
+      "stale_revision",
+      "unauthorized_sender",
+    ].includes(probe.response.code ?? "")
+      ? probe.response.code
+      : "none";
+    const type = ["desktop.error", "media.source_unavailable", "media.playback_ready"].includes(
+      probe.response.type,
+    )
+      ? probe.response.type
+      : "unknown";
+    process.stdout.write(
+      `Installed Source refusal probe: scenario=${failure} type=${type} code=${code}\n`,
+    );
     expect(result).toMatchObject({
       response: {
         type: "media.source_unavailable",
