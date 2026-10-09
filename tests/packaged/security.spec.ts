@@ -438,7 +438,6 @@ test("installed local Source refusals preserve Project revisions after durable r
     const result = await inspectInstalled(
       state,
       `(async () => {
-        const response = await window.openChords.media.openPlayback(${JSON.stringify(created.projectId)});
         const deadline = Date.now() + 10000;
         let alert;
         while (Date.now() < deadline) {
@@ -450,6 +449,7 @@ test("installed local Source refusals preserve Project revisions after durable r
           await new Promise(resolve => setTimeout(resolve, 25));
         }
         if (!alert) throw new Error("Source relink alert was not visible");
+        const response = await window.openChords.media.openPlayback(${JSON.stringify(created.projectId)});
         return { response, message: alert.textContent };
       })()`,
       installedSystemEnvironment(),
