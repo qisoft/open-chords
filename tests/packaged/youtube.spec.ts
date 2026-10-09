@@ -1,12 +1,18 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { ProjectEnvelopeSchema } from "@open-chords/contracts";
+import { canonicalSerialize } from "@open-chords/domain";
 import { chromium, expect, test, type Browser } from "@playwright/test";
 import extractZip from "extract-zip";
 
+import { proofTreeHashes } from "../../apps/desktop/src/main/packaged-proof-tree.ts";
+import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
+import { goldenRecords } from "../support/editor-fixture.ts";
+import { leadSheetProject } from "../support/export-fixture.ts";
 import {
   installYouTubeMediaFixture,
   installYouTubeProviderFixture,
@@ -42,13 +48,27 @@ test.afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });
 });
 
-async function launchInstalled() {
+async function launchInstalled(seedProject = false) {
   const server = createServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Debug port missing");
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  const state = await mkdtemp(join(root, "profile-"));
+  const state = await realpath(await mkdtemp(join(root, "profile-")));
+  let libraryBaseline: string | undefined;
+  let projectBaseline: string | undefined;
+  if (seedProject) {
+    const library = await openProjectLibrary({ stateRoot: state });
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(
+        await readFile("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8"),
+      ),
+    );
+    envelope.payload = leadSheetProject();
+    await library.createProject({ envelope, records: goldenRecords() });
+    libraryBaseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+    projectBaseline = canonicalSerialize(await library.readProject("project_golden"));
+  }
   const child = spawn(
     executable,
     [`--remote-debugging-port=${address.port}`, `--user-data-dir=${state}`],
@@ -83,7 +103,7 @@ async function launchInstalled() {
       primary.getByRole("button", { name: "YouTube source", exact: true }),
     ).toBeVisible();
     process.stdout.write("YouTube installed probe: primary ready\n");
-    return { child, browser, context, primary };
+    return { child, browser, context, primary, state, libraryBaseline, projectBaseline };
   } catch (error) {
     if (connected) await stopInstalled(child, connected);
     else child.kill();
@@ -107,7 +127,8 @@ async function stopInstalled(child: ChildProcess, browser: Browser) {
 
 test("installed isolated player preserves commands, errors and Offline Mode at the named API", async () => {
   test.setTimeout(120000);
-  const { child, browser, context, primary } = await launchInstalled();
+  const { child, browser, context, primary, state, libraryBaseline, projectBaseline } =
+    await launchInstalled(true);
   try {
     await installYouTubeProviderFixture(context);
     process.stdout.write("YouTube installed probe: provider fixture installed\n");
@@ -242,6 +263,10 @@ test("installed isolated player preserves commands, errors and Offline Mode at t
   } finally {
     await stopInstalled(child, browser);
   }
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(canonicalSerialize(await reopened.readProject("project_golden"))).toBe(projectBaseline);
+  expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(libraryBaseline);
+  expect(reopened.listExportReceipts("project_golden")).toEqual([]);
 });
 
 test("installed live YouTube starts from application controls without player activation", async () => {
