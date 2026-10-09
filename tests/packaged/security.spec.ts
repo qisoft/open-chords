@@ -432,9 +432,17 @@ test("installed local Source refusals preserve Project revisions after durable r
       `(async () => {
         const response = await window.openChords.media.openPlayback(${JSON.stringify(created.projectId)});
         const deadline = Date.now() + 10000;
-        while (Date.now() < deadline && !document.querySelector('.source-status[role="alert"]'))
+        let alert;
+        while (Date.now() < deadline) {
+          const candidate = document.querySelector('.source-status[role="alert"]');
+          if (candidate?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+            alert = candidate;
+            break;
+          }
           await new Promise(resolve => setTimeout(resolve, 25));
-        return { response, message: document.querySelector('.source-status')?.textContent };
+        }
+        if (!alert) throw new Error("Source relink alert was not visible");
+        return { response, message: alert.textContent };
       })()`,
       installedSystemEnvironment(),
     );
@@ -447,7 +455,9 @@ test("installed local Source refusals preserve Project revisions after durable r
       message: "The verified Source is unavailable. Relink it to enable playback.",
     });
     expect(JSON.stringify(result)).not.toContain(path);
-    expect(JSON.stringify(result)).not.toContain(JSON.stringify(path).slice(1, -1));
+    const escapedPath = JSON.stringify(path).slice(1, -1);
+    expect(JSON.stringify(result)).not.toContain(escapedPath);
+    expect(JSON.stringify(result)).not.toContain(JSON.stringify(escapedPath).slice(1, -1));
     expect(JSON.stringify(result)).not.toContain("playbackUrl");
     const reopened = await openProjectLibrary({ stateRoot: state });
     const after = await reopened.readProject(created.projectId);
