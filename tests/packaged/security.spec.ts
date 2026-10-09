@@ -256,28 +256,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
     for (const asset of [...(chunk.assets ?? []), ...(chunk.css ?? [])]) allowedAssets.add(asset);
   }
 
-  const env: Record<string, string> = {};
-  for (const key of [
-    "SystemRoot",
-    "WINDIR",
-    "TEMP",
-    "TMP",
-    "HOME",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
-  ]) {
-    if (process.env[key] !== undefined) env[key] = process.env[key];
-  }
-  if (process.platform === "win32") {
-    const windowsRoot = env.SystemRoot ?? env.WINDIR;
-    if (!windowsRoot) throw new Error("Windows system directory is unavailable");
-    env.PATH = [
-      join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
-      join(windowsRoot, "System32"),
-      windowsRoot,
-    ].join(";");
-  }
+  const env = installedSystemEnvironment();
   const debuggingPort = await reservePort();
   const application = spawn(
     executablePath,
@@ -414,6 +393,106 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect(reopened.listExportReceipts(packagedProjectId)).toEqual([]);
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
+
+test("installed local Source refusals preserve Project revisions after durable reopen", async () => {
+  test.setTimeout(240_000);
+  for (const failure of ["missing", "changed"] as const) {
+    const state = join(packageRoot, `source-refusal-${failure}`);
+    const path = join(packageRoot, `source-refusal-${failure}.wav`);
+    const original = monoPcmWav([0, 1, 2, 3]);
+    writeFileSync(path, original);
+    const library = await openProjectLibrary({ stateRoot: state });
+    const media = new LocalMediaService({ library, pickFile: async () => path });
+    const generationId = `generation_refusal_${failure}`;
+    media.activateGeneration(generationId);
+    const selected = await media.pickLocalFile(generationId);
+    if (selected.kind !== "selected") throw new Error("Source refusal fixture was not selected");
+    const created = await media.createProject({
+      capabilityId: selected.capabilityId,
+      endSourceSample: 4,
+      generationId,
+      startSourceSample: 0,
+    });
+    await media.revokeGeneration(generationId);
+    await (await openNetworkMode(state)).setOffline(true);
+    const baseline = await library.readProject(created.projectId);
+    const immutableTree = async (root: string) =>
+      canonicalSerialize(
+        Object.fromEntries(
+          Object.entries(await proofTreeHashes(root)).filter(
+            ([name]) => name !== "source-catalog.json" && name !== "source-catalog.backup.json",
+          ),
+        ),
+      );
+    const treeBaseline = await immutableTree(library.activeRoot);
+    if (failure === "missing") rmSync(path);
+    else writeFileSync(path, monoPcmWav([4, 5, 6, 7]));
+    const result = await inspectInstalled(
+      state,
+      `(async () => {
+        const response = await window.openChords.media.openPlayback(${JSON.stringify(created.projectId)});
+        const deadline = Date.now() + 10000;
+        while (Date.now() < deadline && !document.querySelector('.source-status[role="alert"]'))
+          await new Promise(resolve => setTimeout(resolve, 25));
+        return { response, message: document.querySelector('.source-status')?.textContent };
+      })()`,
+      installedSystemEnvironment(),
+    );
+    expect(result).toMatchObject({
+      response: {
+        type: "media.source_unavailable",
+        projectId: created.projectId,
+        sourceId: created.sourceId,
+      },
+      message: "The verified Source is unavailable. Relink it to enable playback.",
+    });
+    expect(JSON.stringify(result)).not.toContain(path);
+    expect(JSON.stringify(result)).not.toContain(JSON.stringify(path).slice(1, -1));
+    expect(JSON.stringify(result)).not.toContain("playbackUrl");
+    const reopened = await openProjectLibrary({ stateRoot: state });
+    const after = await reopened.readProject(created.projectId);
+    expect(after.projectRevisionId).toBe(baseline.projectRevisionId);
+    expect(after.envelope).toEqual(baseline.envelope);
+    const withoutLocators = (records: typeof after.records) => ({
+      ...records,
+      sources: records.sources.map((source) => ({ ...source, locators: [] })),
+    });
+    expect(withoutLocators(after.records)).toEqual(withoutLocators(baseline.records));
+    expect(after.records.sources[0]?.locators).toEqual([
+      expect.objectContaining({ path, status: "unavailable" }),
+    ]);
+    expect(await immutableTree(reopened.activeRoot)).toBe(treeBaseline);
+    expect(reopened.listExportReceipts(created.projectId)).toEqual([]);
+    if (failure === "missing") expect(() => readFileSync(path)).toThrow();
+    else expect(readFileSync(path)).toEqual(monoPcmWav([4, 5, 6, 7]));
+  }
+});
+
+function installedSystemEnvironment() {
+  const env: Record<string, string> = {};
+  for (const key of [
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+  ]) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  if (process.platform === "win32") {
+    const windowsRoot = env.SystemRoot ?? env.WINDIR;
+    if (!windowsRoot) throw new Error("Windows system directory is unavailable");
+    env.PATH = [
+      join(windowsRoot, "System32", "WindowsPowerShell", "v1.0"),
+      join(windowsRoot, "System32"),
+      windowsRoot,
+    ].join(";");
+  }
+  return env;
+}
 
 async function stopApplication(application: ReturnType<typeof spawn>): Promise<void> {
   if (application.exitCode !== null || application.signalCode !== null) return;
@@ -1570,12 +1649,12 @@ test("installed native Alignment worker runs exact EN/RU packs offline and publi
   ).toBe(true);
 });
 
-async function inspectInstalled(stateRoot: string, expression: string) {
+async function inspectInstalled(stateRoot: string, expression: string, env?: NodeJS.ProcessEnv) {
   const port = await reservePort();
   const application = spawn(
     executablePath,
     [`--remote-debugging-port=${port}`, `--user-data-dir=${stateRoot}`],
-    { stdio: "ignore" },
+    { env, stdio: "ignore" },
   );
   let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
   try {
