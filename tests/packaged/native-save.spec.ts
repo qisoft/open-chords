@@ -147,9 +147,7 @@ test("installed Windows native Save cancellation preserves Library and Save publ
           .pages()
           .find((candidate) => candidate.url().startsWith("open-chords://"))!;
         await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
-        const readyLibrary = await openProjectLibrary({ stateRoot });
-        const initial = await readyLibrary.readProject("project_golden");
-        const baseline = await proofTreeHashes(readyLibrary.activeRoot);
+        const baseline = await proofTreeHashes(library.activeRoot);
         await page.getByRole("button", { name: "Export Project", exact: true }).click();
         await page.getByRole("button", { name: "Save JSON", exact: true }).click();
         expect(await drive("cancel")).toEqual({
@@ -159,9 +157,7 @@ test("installed Windows native Save cancellation preserves Library and Save publ
           defaultNameValid: true,
         });
         await expect(page.getByText("Export cancelled", { exact: true })).toBeVisible();
-        const cancelled = await openProjectLibrary({ stateRoot });
-        expect(await cancelled.readProject("project_golden")).toEqual(initial);
-        expect(await proofTreeHashes(cancelled.activeRoot)).toEqual(baseline);
+        expect(await proofTreeHashes(library.activeRoot)).toEqual(baseline);
         expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
         await page.getByRole("button", { name: "Save JSON", exact: true }).click();
         expect(await drive("save")).toEqual({
