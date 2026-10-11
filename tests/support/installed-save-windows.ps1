@@ -161,7 +161,27 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $fileName = $null
     $button = $null
     $buttonName = if ($Scenario -eq 'cancel') { 'Cancel' } else { 'Save' }
+    $editTypes = 0
+    $buttonTypes = 0
+    $fileLabels = 0
+    $actionLabels = 0
+    $visibleEnabled = 0
+    $eligibleFileLabels = 0
+    $eligibleActionLabels = 0
     foreach ($element in $elements) {
+      if ($probeCycle) {
+        if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit) { $editTypes++ }
+        if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button) { $buttonTypes++ }
+        $fileLabelMatches = $element.Current.Name -eq 'File name:'
+        $actionLabelMatches = $element.Current.Name -eq $buttonName
+        if ($fileLabelMatches) { $fileLabels++ }
+        if ($actionLabelMatches) { $actionLabels++ }
+        if (!$element.Current.IsOffscreen -and $element.Current.IsEnabled) {
+          $visibleEnabled++
+          if ($fileLabelMatches) { $eligibleFileLabels++ }
+          if ($actionLabelMatches) { $eligibleActionLabels++ }
+        }
+      }
       if ($element.Current.IsOffscreen -or !$element.Current.IsEnabled) { continue }
       if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $element.Current.Name -eq 'File name:') {
         $fileNames++
@@ -173,6 +193,9 @@ while ([DateTime]::UtcNow -lt $deadline) {
         if ($null -ne $button) { throw 'action_ambiguous' }
         $button = $element
       }
+    }
+    if ($probeCycle) {
+      [Console]::Error.WriteLine("Native Save control probe: edits=$editTypes buttons=$buttonTypes file_labels=$fileLabels action_labels=$actionLabels visible_enabled=$visibleEnabled eligible_file_labels=$eligibleFileLabels eligible_action_labels=$eligibleActionLabels")
     }
     Write-NativeSaveProbe 'controls_read'
     if ($null -eq $fileName -or $null -eq $button) { continue }
