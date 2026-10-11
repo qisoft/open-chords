@@ -159,6 +159,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     if ($elements.Count -gt 256) { throw 'element_bound' }
     Write-NativeSaveProbe 'controls_query'
     $fileName = $null
+    $fileNameValue = $null
     $button = $null
     $buttonName = if ($Scenario -eq 'cancel') { 'Cancel' } else { 'Save' }
     $editTypes = 0
@@ -183,12 +184,16 @@ while ([DateTime]::UtcNow -lt $deadline) {
         }
       }
       if ($element.Current.IsOffscreen -or !$element.Current.IsEnabled) { continue }
-      if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $element.Current.Name -eq 'File name:') {
-        $fileNames++
-        if ($null -ne $fileName) { throw 'filename_ambiguous' }
-        $fileName = $element
+      if ($element.Current.Name -eq 'File name:') {
+        $candidateValue = $null
+        if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$candidateValue) -and !$candidateValue.Current.IsReadOnly) {
+          $fileNames++
+          if ($null -ne $fileName) { throw 'filename_ambiguous' }
+          $fileName = $element
+          $fileNameValue = $candidateValue
+        }
       }
-      if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $element.Current.Name -eq $buttonName) {
+      if ($element.Current.Name -eq $buttonName) {
         $actions++
         if ($null -ne $button) { throw 'action_ambiguous' }
         $button = $element
@@ -201,7 +206,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     if ($null -eq $fileName -or $null -eq $button) { continue }
     $stage = 'default_filename'
     Write-NativeSaveProbe 'pattern'
-    $value = $fileName.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    $value = $fileNameValue
     Write-NativeSaveProbe 'value_read'
     if ($value.Current.Value -ne 'Open Chords.json') { throw 'default_filename_invalid' }
     if ($Scenario -eq 'save') {
