@@ -1,4 +1,4 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'save')][string]$Scenario, [string]$TargetPath)
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save')][string]$Scenario, [string]$TargetPath)
 $ErrorActionPreference = 'Stop'
 $maxWindows = 0
 $maxElements = 0
@@ -274,7 +274,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $fileNameValue = $null
     $nativeFilenameHandle = [IntPtr]::Zero
     $button = $null
-    $buttonName = if ($Scenario -eq 'cancel') { 'Cancel' } else { 'Save' }
+    $buttonName = if ($Scenario -eq 'save') { 'Save' } else { 'Cancel' }
     $editTypes = 0
     $buttonTypes = 0
     $fileLabels = 0
@@ -387,7 +387,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $defaultKind = if ($currentFilename -ceq 'Open Chords.json') { 'expected' } elseif ($currentFilename -ceq 'Open Chords') { 'basename' } elseif ($currentFilename -ceq 'Open Chords..json') { 'double_dot' } elseif ($currentFilename -ceq 'Open Chords.json.json') { 'double_extension' } elseif ([string]::IsNullOrEmpty($currentFilename)) { 'empty' } else { 'other' }
     [Console]::Error.WriteLine("Native Save default probe: value=$defaultKind")
     if ($currentFilename -cne 'Open Chords.json') { throw 'default_filename_invalid' }
-    if ($Scenario -eq 'save') {
+    if ($Scenario -ne 'cancel') {
       $stage = 'filename_set'
       if ([string]::IsNullOrWhiteSpace($TargetPath)) { throw 'target_missing' }
       if ($null -ne $value -and $value.Current.IsReadOnly) { throw 'filename_readonly' }
@@ -413,7 +413,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     [SaveNativeInput]::Click([IntPtr]$window.Current.NativeWindowHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
-    ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = ($Scenario -eq 'save'); nativeClick = $true; defaultNameValid = $true } -Compress
+    ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = ($Scenario -ne 'cancel'); nativeClick = $true; defaultNameValid = $true } -Compress
     exit 0
   }
   Start-Sleep -Milliseconds 100
