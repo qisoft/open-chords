@@ -195,7 +195,7 @@ test("installed Windows native Save cancellation preserves Library and Save publ
     );
     const reopened = await openProjectLibrary({ stateRoot });
     const receipts = reopened.listExportReceipts("project_golden");
-    expect(receipts).toHaveLength(1);
+    expect(receipts.length).toBe(1);
     expect(
       receipts[0]?.outputLocation === target,
       "Receipt must retain the exact destination",
