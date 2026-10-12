@@ -81,7 +81,7 @@ describe("native Save driver failure redaction", () => {
   );
   it("retains bounded control observations without raw UI text", () => {
     const probe =
-      "Native Save control probe: edits=2 buttons=4 file_labels=1 action_labels=1 visible_enabled=20 eligible_file_labels=0 eligible_action_labels=0";
+      "Native Save control probe: edits=2 buttons=4 file_labels=1 action_labels=1 visible_enabled=20 eligible_file_labels=0 value_pattern_file_labels=1 readonly_file_labels=1 eligible_action_labels=0";
     const diagnostic = installedSaveDriverDiagnostic(
       {},
       `${Array.from({ length: 6 }, () => probe).join("\r\n")}\r\n${probe} /private/name\r\n${probe.replace("edits=2", "edits=1000")}`,

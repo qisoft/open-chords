@@ -168,6 +168,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $actionLabels = 0
     $visibleEnabled = 0
     $eligibleFileLabels = 0
+    $valuePatternFileLabels = 0
+    $readOnlyFileLabels = 0
     $eligibleActionLabels = 0
     foreach ($element in $elements) {
       if ($probeCycle) {
@@ -186,11 +188,14 @@ while ([DateTime]::UtcNow -lt $deadline) {
       if ($element.Current.IsOffscreen -or !$element.Current.IsEnabled) { continue }
       if ($element.Current.Name -eq 'File name:') {
         $candidateValue = $null
-        if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$candidateValue) -and !$candidateValue.Current.IsReadOnly) {
-          $fileNames++
-          if ($null -ne $fileName) { throw 'filename_ambiguous' }
-          $fileName = $element
-          $fileNameValue = $candidateValue
+        if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$candidateValue)) {
+          $valuePatternFileLabels++
+          if ($candidateValue.Current.IsReadOnly) { $readOnlyFileLabels++ } else {
+            $fileNames++
+            if ($null -ne $fileName) { throw 'filename_ambiguous' }
+            $fileName = $element
+            $fileNameValue = $candidateValue
+          }
         }
       }
       if ($element.Current.Name -eq $buttonName) {
@@ -200,7 +205,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
       }
     }
     if ($probeCycle) {
-      [Console]::Error.WriteLine("Native Save control probe: edits=$editTypes buttons=$buttonTypes file_labels=$fileLabels action_labels=$actionLabels visible_enabled=$visibleEnabled eligible_file_labels=$eligibleFileLabels eligible_action_labels=$eligibleActionLabels")
+      [Console]::Error.WriteLine("Native Save control probe: edits=$editTypes buttons=$buttonTypes file_labels=$fileLabels action_labels=$actionLabels visible_enabled=$visibleEnabled eligible_file_labels=$eligibleFileLabels value_pattern_file_labels=$valuePatternFileLabels readonly_file_labels=$readOnlyFileLabels eligible_action_labels=$eligibleActionLabels")
     }
     Write-NativeSaveProbe 'controls_read'
     if ($null -eq $fileName -or $null -eq $button) { continue }
