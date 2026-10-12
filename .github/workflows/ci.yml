@@ -188,7 +188,34 @@ jobs:
             -o "spdx-json=${stem}.spdx.json" \
             -o "cyclonedx-json=${stem}.cdx.json"
       - name: Verify installed trust boundary
+        if: runner.os != 'Windows'
         run: pnpm test:packaged --retries=0
+      - name: Verify installed Windows trust boundary with visible file extensions
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+          $settings = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+          $previous = $settings.PSObject.Properties['HideFileExt']
+          $hadValue = $null -ne $previous
+          $previousValue = if ($hadValue) { $previous.Value } else { $null }
+          $previousKind = if (!$hadValue) { 'unset' } elseif ($previousValue -eq 0) { 'visible' } elseif ($previousValue -eq 1) { 'hidden' } else { 'other' }
+          Write-Host "Native Save extension preference: previous=$previousKind"
+          try {
+            New-ItemProperty -LiteralPath $key -Name HideFileExt -PropertyType DWord -Value 0 -Force -ErrorAction Stop | Out-Null
+            if ((Get-ItemPropertyValue -LiteralPath $key -Name HideFileExt -ErrorAction Stop) -ne 0) {
+              throw 'Native Save extension preference verification failed'
+            }
+            pnpm test:packaged --retries=0
+            $packagedExit = $LASTEXITCODE
+          } finally {
+            if ($hadValue) {
+              Set-ItemProperty -LiteralPath $key -Name HideFileExt -Value $previousValue -ErrorAction Stop
+            } else {
+              Remove-ItemProperty -LiteralPath $key -Name HideFileExt -ErrorAction Stop
+            }
+          }
+          exit $packagedExit
       - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
