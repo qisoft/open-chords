@@ -3,6 +3,21 @@ import { describe, expect, it } from "vitest";
 import { installedSaveDriverDiagnostic } from "./support/installed-save-diagnostics.ts";
 
 describe("native Save driver failure redaction", () => {
+  it.each(["expected", "basename", "double_dot", "double_extension", "empty", "other"])(
+    "retains only the fixed default filename classification %s",
+    (kind) => {
+      const probe = `Native Save default probe: value=${kind}`;
+      const privatePath = "C:\\Users\\private\\score.json";
+      const diagnostic = installedSaveDriverDiagnostic(
+        {},
+        `${probe}\n${probe} ${privatePath}\nNative Save default probe: value=${privatePath}`,
+        100,
+      );
+      expect(diagnostic).toContain(probe);
+      expect(diagnostic.split("Native Save default probe:")).toHaveLength(2);
+      expect(diagnostic).not.toContain(privatePath);
+    },
+  );
   it.each(["PSSecurityException", "ParserError"])(
     "classifies %s without exposing command or stderr",
     (code) => {

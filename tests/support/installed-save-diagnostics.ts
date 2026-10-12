@@ -39,6 +39,13 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const defaultProbe = output
+    .split(/\r?\n/)
+    .find((line) =>
+      /^Native Save default probe: value=(?:expected|basename|double_dot|double_extension|empty|other)$/.test(
+        line,
+      ),
+    );
   const controlProbes = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -75,6 +82,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...controlProbes,
     ...candidates,
     ...children,
+    ...(defaultProbe ? [defaultProbe] : []),
     ...(counters ? [counters] : []),
   ].join("\n");
 }

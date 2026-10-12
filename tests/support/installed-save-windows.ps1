@@ -384,6 +384,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $value = $fileNameValue
     Write-NativeSaveProbe 'value_read'
     $currentFilename = if ($nativeFilenameHandle -ne [IntPtr]::Zero) { [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid) } else { $value.Current.Value }
+    $defaultKind = if ($currentFilename -ceq 'Open Chords.json') { 'expected' } elseif ($currentFilename -ceq 'Open Chords') { 'basename' } elseif ($currentFilename -ceq 'Open Chords..json') { 'double_dot' } elseif ($currentFilename -ceq 'Open Chords.json.json') { 'double_extension' } elseif ([string]::IsNullOrEmpty($currentFilename)) { 'empty' } else { 'other' }
+    [Console]::Error.WriteLine("Native Save default probe: value=$defaultKind")
     if ($currentFilename -ne 'Open Chords.json') { throw 'default_filename_invalid' }
     if ($Scenario -eq 'save') {
       $stage = 'filename_set'
