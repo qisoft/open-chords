@@ -43,10 +43,23 @@ public static class SaveNativeInput {
     public UIntPtr extraInfo;
   }
   [StructLayout(LayoutKind.Sequential)]
+  private struct KeyboardInput { public ushort key, scan; public uint flags, time; public UIntPtr extraInfo; }
+  [StructLayout(LayoutKind.Explicit, Size = 40)]
   private struct Input {
-    public uint type;
-    public MouseInput mouse;
+    [FieldOffset(0)] public uint type;
+    [FieldOffset(8)] public MouseInput mouse;
+    [FieldOffset(8)] public KeyboardInput keyboard;
   }
+  [StructLayout(LayoutKind.Sequential)]
+  private struct Rect { public int left, top, right, bottom; }
+  [StructLayout(LayoutKind.Sequential)]
+  private struct GuiInfo {
+    public uint size, flags;
+    public IntPtr active, focus, capture, menuOwner, moveSize, caret;
+    public Rect caretRect;
+  }
+  [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect bounds);
+  [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
   [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
   [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
@@ -160,6 +173,44 @@ public static class SaveNativeInput {
     if (truncated || matches > 1) throw new InvalidOperationException("Native Save filename discovery incomplete or ambiguous");
     return result;
   }
+  private static void RequireFilename(IntPtr dialog, IntPtr field, uint processId) {
+    if (field == IntPtr.Zero || FindFilename(dialog, processId) != field)
+      throw new InvalidOperationException("Native Save filename target changed");
+  }
+  public static string ReadFilename(IntPtr dialog, IntPtr field, uint processId) {
+    RequireFilename(dialog, field, processId);
+    var text = new StringBuilder(4096);
+    UIntPtr result;
+    if (SendMessageTimeout(field, 0x000D, (UIntPtr)(uint)text.Capacity, text, 2, 250, out result) == IntPtr.Zero || result.ToUInt64() >= 4095)
+      throw new InvalidOperationException("Native Save filename read unavailable");
+    return text.ToString();
+  }
+  public static void TypeFilename(IntPtr dialog, IntPtr field, uint processId, string target) {
+    RequireFilename(dialog, field, processId);
+    if (IntPtr.Size != 8) throw new InvalidOperationException("Native Save input architecture unsupported");
+    if (String.IsNullOrEmpty(target) || target.Length > 1024)
+      throw new InvalidOperationException("Native Save filename input bound");
+    Rect bounds;
+    if (!GetWindowRect(field, out bounds) || bounds.right <= bounds.left || bounds.bottom <= bounds.top)
+      throw new InvalidOperationException("Native Save filename bounds unavailable");
+    Click(dialog, processId, bounds.left + (bounds.right - bounds.left) / 2, bounds.top + (bounds.bottom - bounds.top) / 2);
+    uint owner;
+    uint thread = GetWindowThreadProcessId(field, out owner);
+    var info = new GuiInfo { size = (uint)Marshal.SizeOf(typeof(GuiInfo)) };
+    if (GetForegroundWindow() != dialog || !GetGUIThreadInfo(thread, ref info) || info.focus != field)
+      throw new InvalidOperationException("Native Save filename focus refused");
+    var inputs = new Input[4 + target.Length * 2];
+    inputs[0] = new Input { type = 1, keyboard = new KeyboardInput { key = 0x11 } };
+    inputs[1] = new Input { type = 1, keyboard = new KeyboardInput { key = 0x41 } };
+    inputs[2] = new Input { type = 1, keyboard = new KeyboardInput { key = 0x41, flags = 2 } };
+    inputs[3] = new Input { type = 1, keyboard = new KeyboardInput { key = 0x11, flags = 2 } };
+    for (int i = 0; i < target.Length; i++) {
+      inputs[4 + i * 2] = new Input { type = 1, keyboard = new KeyboardInput { scan = target[i], flags = 4 } };
+      inputs[5 + i * 2] = new Input { type = 1, keyboard = new KeyboardInput { scan = target[i], flags = 6 } };
+    }
+    if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
+      throw new InvalidOperationException("Native Save filename input not delivered");
+  }
   public static void Click(IntPtr window, uint expectedProcessId, int x, int y) {
     if (!OwnedByApplication(window, expectedProcessId) ||
         !IsWindowVisible(window) || !IsWindowEnabled(window))
@@ -215,6 +266,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     Write-NativeSaveProbe 'controls_query'
     $fileName = $null
     $fileNameValue = $null
+    $nativeFilenameHandle = [IntPtr]::Zero
     $button = $null
     $buttonName = if ($Scenario -eq 'cancel') { 'Cancel' } else { 'Save' }
     $editTypes = 0
@@ -304,7 +356,10 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($filenameHandle)
         $candidateValue = $null
         if ($candidate.Current.IsOffscreen -or !$candidate.Current.IsEnabled) { throw 'filename_unavailable' }
-        if (!$candidate.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$candidateValue) -or $candidateValue.Current.IsReadOnly) { throw 'filename_pattern_unavailable' }
+        if (!$candidate.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$candidateValue) -or $candidateValue.Current.IsReadOnly) {
+          $candidateValue = $null
+          $nativeFilenameHandle = $filenameHandle
+        }
         $fileNames++
         $fileName = $candidate
         $fileNameValue = $candidateValue
@@ -322,14 +377,26 @@ while ([DateTime]::UtcNow -lt $deadline) {
     Write-NativeSaveProbe 'pattern'
     $value = $fileNameValue
     Write-NativeSaveProbe 'value_read'
-    if ($value.Current.Value -ne 'Open Chords.json') { throw 'default_filename_invalid' }
+    $currentFilename = if ($nativeFilenameHandle -ne [IntPtr]::Zero) { [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid) } else { $value.Current.Value }
+    if ($currentFilename -ne 'Open Chords.json') { throw 'default_filename_invalid' }
     if ($Scenario -eq 'save') {
       $stage = 'filename_set'
       if ([string]::IsNullOrWhiteSpace($TargetPath)) { throw 'target_missing' }
-      if ($value.Current.IsReadOnly) { throw 'filename_readonly' }
+      if ($null -ne $value -and $value.Current.IsReadOnly) { throw 'filename_readonly' }
       Write-NativeSaveProbe 'value_set'
-      $value.SetValue($TargetPath)
-      if ($value.Current.Value -ne $TargetPath) { throw 'filename_not_set' }
+      if ($nativeFilenameHandle -ne [IntPtr]::Zero) {
+        [SaveNativeInput]::TypeFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid, $TargetPath)
+        $inputDeadline = [DateTime]::UtcNow.AddSeconds(2)
+        do {
+          $actualFilename = [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid)
+          if ($actualFilename -eq $TargetPath) { break }
+          Start-Sleep -Milliseconds 20
+        } while ([DateTime]::UtcNow -lt $inputDeadline)
+      } else {
+        $value.SetValue($TargetPath)
+        $actualFilename = $value.Current.Value
+      }
+      if ($actualFilename -ne $TargetPath) { throw 'filename_not_set' }
     }
     $stage = 'native_input'
     Write-NativeSaveProbe 'native_input'
