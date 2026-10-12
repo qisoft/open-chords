@@ -124,4 +124,18 @@ describe("native Save driver failure redaction", () => {
     expect(diagnostic).toContain("visited=40 truncated=false");
     expect(diagnostic).not.toContain("private");
   });
+  it.each([
+    "filename_target_changed",
+    "filename_read_unavailable",
+    "input_architecture_unsupported",
+    "filename_input_bound",
+    "filename_bounds_unavailable",
+    "filename_focus_refused",
+    "filename_input_not_delivered",
+  ])("preserves fixed native refusal %s without raw exception text", (code) => {
+    const probe = `native_save_failed code=${code} stage=filename_set windows=1 elements=81 filenames=1 actions=1 fallback_misses=0`;
+    const diagnostic = installedSaveDriverDiagnostic({}, `${probe}\n${probe} /private/file`, 100);
+    expect(diagnostic).toContain(probe);
+    expect(diagnostic).not.toContain("private");
+  });
 });

@@ -422,6 +422,13 @@ throw 'deadline'
       'Native Save filename discovery incomplete or ambiguous' { $failureCode = 'filename_scan_ambiguous' }
       'Native Save dialog could not receive input' { $failureCode = 'input_refused' }
       'Native Save click was not delivered' { $failureCode = 'input_not_delivered' }
+      'Native Save filename target changed' { $failureCode = 'filename_target_changed' }
+      'Native Save filename read unavailable' { $failureCode = 'filename_read_unavailable' }
+      'Native Save input architecture unsupported' { $failureCode = 'input_architecture_unsupported' }
+      'Native Save filename input bound' { $failureCode = 'filename_input_bound' }
+      'Native Save filename bounds unavailable' { $failureCode = 'filename_bounds_unavailable' }
+      'Native Save filename focus refused' { $failureCode = 'filename_focus_refused' }
+      'Native Save filename input not delivered' { $failureCode = 'filename_input_not_delivered' }
     }
   }
   [Console]::Error.WriteLine("native_save_failed code=$failureCode stage=$stage windows=$maxWindows elements=$maxElements filenames=$fileNames actions=$actions fallback_misses=$fallbackMisses")
