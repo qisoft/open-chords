@@ -55,6 +55,15 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(0, 64);
+  const children = output
+    .split(/\r?\n/)
+    .filter(
+      (line) =>
+        /^Native Save child probe: id=(?:-1|[0-9]{1,6}) class=(?:edit|combo|static|other) text=(?:default|empty|other|unavailable) eligible=(?:true|false)$/.test(
+          line,
+        ) || /^Native Save child scan: visited=[0-9]{1,3} truncated=(?:true|false)$/.test(line),
+    )
+    .slice(0, 129);
   return [
     installedExportExitDiagnostic(error, durationMs).replace(
       "Installed export process",
@@ -65,6 +74,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...windowProbes,
     ...controlProbes,
     ...candidates,
+    ...children,
     ...(counters ? [counters] : []),
   ].join("\n");
 }

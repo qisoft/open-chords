@@ -113,4 +113,15 @@ describe("native Save driver failure redaction", () => {
     expect(diagnostic.split(probe)).toHaveLength(65);
     expect(diagnostic).not.toContain("private");
   });
+  it("validates bounded native child categories without exporting text", () => {
+    const probe = "Native Save child probe: id=1001 class=edit text=default eligible=true";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${probe}\nNative Save child scan: visited=40 truncated=false\n${probe} /private/file`,
+      100,
+    );
+    expect(diagnostic).toContain(probe);
+    expect(diagnostic).toContain("visited=40 truncated=false");
+    expect(diagnostic).not.toContain("private");
+  });
 });

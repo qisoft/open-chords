@@ -11,6 +11,7 @@ $probeSeen = @{}
 $probeCount = 0
 $probeCycle = $false
 $candidateSnapshotTaken = $false
+$childSnapshotTaken = $false
 function Write-NativeSaveProbe([string]$Name) {
   if (!$script:probeSeen.ContainsKey($Name) -or $script:probeCycle) {
     if ($script:probeCount -lt 96) {
@@ -59,6 +60,34 @@ public static class SaveNativeInput {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int count);
   [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+  [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumWindowProc callback, IntPtr parameter);
+  [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr window);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
+  public static string ProbeChildren(IntPtr dialog, uint expectedProcessId) {
+    if (!OwnedByApplication(dialog, expectedProcessId) || !IsWindowVisible(dialog))
+      throw new InvalidOperationException("Native Save child probe target unavailable");
+    int visited = 0;
+    var output = new StringBuilder();
+    EnumWindowProc callback = (window, parameter) => {
+      if (++visited > 128) return false;
+      if (GetAncestor(window, 2) != dialog) return true;
+      var kind = new StringBuilder(64);
+      var text = new StringBuilder(256);
+      GetClassName(window, kind, kind.Capacity);
+      UIntPtr textResult;
+      bool textRead = SendMessageTimeout(window, 0x000D, (UIntPtr)(uint)text.Capacity, text, 2, 50, out textResult) != IntPtr.Zero;
+      string category = kind.ToString() == "Edit" ? "edit" : kind.ToString() == "ComboBox" ? "combo" : kind.ToString() == "Static" ? "static" : "other";
+      string value = !textRead ? "unavailable" : text.ToString() == "Open Chords.json" ? "default" : text.Length == 0 ? "empty" : "other";
+      int id = GetDlgCtrlID(window);
+      if (id < -1 || id > 999999) id = -1;
+      output.AppendLine("Native Save child probe: id=" + id + " class=" + category + " text=" + value + " eligible=" +
+        (IsWindowVisible(window) && IsWindowEnabled(window) ? "true" : "false"));
+      return true;
+    };
+    EnumChildWindows(dialog, callback, IntPtr.Zero);
+    output.Append("Native Save child scan: visited=" + Math.Min(visited, 129) + " truncated=" + (visited > 128 ? "true" : "false"));
+    return output.ToString();
+  }
   public static string Probe(uint expectedProcessId) {
     int visited = 0, owned = 0, expectedTitles = 0, saveAsTitles = 0, dialogs = 0;
     bool truncated = false;
@@ -154,7 +183,11 @@ while ([DateTime]::UtcNow -lt $deadline) {
   foreach ($window in $windows) {
     Write-NativeSaveProbe 'window_properties'
     if ($window.Current.Name -ne 'Export Open Chords JSON') { continue }
-    Write-NativeSaveProbe 'elements_query'
+    if (!$childSnapshotTaken) {
+      [Console]::Error.WriteLine([SaveNativeInput]::ProbeChildren([IntPtr]$window.Current.NativeWindowHandle, [uint32]$ApplicationPid))
+      $childSnapshotTaken = $true
+    }
+    Write-NativeSaveProbe 'elements_query' 
     $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
     $maxElements = [Math]::Max($maxElements, $elements.Count)
     if ($elements.Count -gt 256) { throw 'element_bound' }
