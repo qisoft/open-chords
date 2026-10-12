@@ -4,6 +4,7 @@ $maxWindows = 0
 $maxElements = 0
 $fileNames = 0
 $actions = 0
+$fallbackMisses = 0
 $stage = 'setup'
 [Console]::Error.WriteLine('Native Save driver stage: started')
 $probeStarted = [DateTime]::UtcNow
@@ -307,6 +308,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $fileNames++
         $fileName = $candidate
         $fileNameValue = $candidateValue
+      } else {
+        $fallbackMisses = [Math]::Min(999999, $fallbackMisses + 1)
       }
     }
     $candidateSnapshotTaken = $true
@@ -354,6 +357,6 @@ throw 'deadline'
       'Native Save click was not delivered' { $failureCode = 'input_not_delivered' }
     }
   }
-  [Console]::Error.WriteLine("native_save_failed code=$failureCode stage=$stage windows=$maxWindows elements=$maxElements filenames=$fileNames actions=$actions")
+  [Console]::Error.WriteLine("native_save_failed code=$failureCode stage=$stage windows=$maxWindows elements=$maxElements filenames=$fileNames actions=$actions fallback_misses=$fallbackMisses")
   exit 1
 }

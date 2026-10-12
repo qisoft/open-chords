@@ -20,7 +20,7 @@ describe("native Save driver failure redaction", () => {
 
   it("distinguishes a host kill and retains only fixed driver counters", () => {
     const counters =
-      "native_save_failed code=filename_pattern_unavailable stage=discovery windows=2 elements=14 filenames=0 actions=0";
+      "native_save_failed code=filename_pattern_unavailable stage=discovery windows=2 elements=14 filenames=0 actions=0 fallback_misses=4";
     const diagnostic = installedSaveDriverDiagnostic(
       { killed: true, signal: "SIGTERM", code: null, path: "/private/application" },
       `Native Save driver stage: started\r\n${counters}\r\n/private/filename`,
