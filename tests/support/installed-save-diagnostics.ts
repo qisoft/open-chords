@@ -42,7 +42,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const controlProbes = output
     .split(/\r?\n/)
     .filter((line) =>
-      /^Native Save control probe: edits=[0-9]{1,3} buttons=[0-9]{1,3} file_labels=[0-9]{1,3} action_labels=[0-9]{1,3} visible_enabled=[0-9]{1,3} eligible_file_labels=[0-9]{1,3} value_pattern_file_labels=[0-9]{1,3} readonly_file_labels=[0-9]{1,3} eligible_action_labels=[0-9]{1,3}$/.test(
+      /^Native Save control probe: edits=[0-9]{1,3} buttons=[0-9]{1,3} file_labels=[0-9]{1,3} action_labels=[0-9]{1,3} visible_enabled=[0-9]{1,3} eligible_file_labels=[0-9]{1,3} value_pattern_file_labels=[0-9]{1,3} readonly_file_labels=[0-9]{1,3} writable_file_descendants=[0-9]{1,3} writable_labeled_files=[0-9]{1,3} eligible_action_labels=[0-9]{1,3}$/.test(
         line,
       ),
     )

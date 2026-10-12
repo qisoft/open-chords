@@ -170,6 +170,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $eligibleFileLabels = 0
     $valuePatternFileLabels = 0
     $readOnlyFileLabels = 0
+    $writableFileDescendants = 0
+    $writableLabeledFiles = 0
     $eligibleActionLabels = 0
     foreach ($element in $elements) {
       if ($probeCycle) {
@@ -198,6 +200,22 @@ while ([DateTime]::UtcNow -lt $deadline) {
           }
         }
       }
+      if ($probeCycle) {
+        $observedValue = $null
+        if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$observedValue) -and !$observedValue.Current.IsReadOnly) {
+          $label = $element.Current.LabeledBy
+          if ($null -ne $label -and $label.Current.Name -eq 'File name:') { $writableLabeledFiles++ }
+        }
+        if ($element.Current.Name -eq 'File name:') {
+          $children = $element.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+          if ($children.Count -gt 256) { throw 'element_bound' }
+          foreach ($child in $children) {
+            if ($child.Current.IsOffscreen -or !$child.Current.IsEnabled) { continue }
+            $childValue = $null
+            if ($child.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$childValue) -and !$childValue.Current.IsReadOnly) { $writableFileDescendants++ }
+          }
+        }
+      }
       if ($element.Current.Name -eq $buttonName) {
         $actions++
         if ($null -ne $button) { throw 'action_ambiguous' }
@@ -205,7 +223,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
       }
     }
     if ($probeCycle) {
-      [Console]::Error.WriteLine("Native Save control probe: edits=$editTypes buttons=$buttonTypes file_labels=$fileLabels action_labels=$actionLabels visible_enabled=$visibleEnabled eligible_file_labels=$eligibleFileLabels value_pattern_file_labels=$valuePatternFileLabels readonly_file_labels=$readOnlyFileLabels eligible_action_labels=$eligibleActionLabels")
+      [Console]::Error.WriteLine("Native Save control probe: edits=$editTypes buttons=$buttonTypes file_labels=$fileLabels action_labels=$actionLabels visible_enabled=$visibleEnabled eligible_file_labels=$eligibleFileLabels value_pattern_file_labels=$valuePatternFileLabels readonly_file_labels=$readOnlyFileLabels writable_file_descendants=$writableFileDescendants writable_labeled_files=$writableLabeledFiles eligible_action_labels=$eligibleActionLabels")
     }
     Write-NativeSaveProbe 'controls_read'
     if ($null -eq $fileName -or $null -eq $button) { continue }
