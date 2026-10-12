@@ -50,7 +50,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const candidates = output
     .split(/\r?\n/)
     .filter((line) =>
-      /^Native Save candidate probe: type=[0-9]{1,6} id=(?:[0-9]{1,6}|none) name=(?:filename|empty|other) value=(?:unsupported|default|empty|other) readonly=(?:true|false|none) eligible=(?:true|false)$/.test(
+      /^Native Save candidate probe: type=[0-9]{1,6} id=(?:[0-9]{1,6}|FileNameControlHost|FileNameControl|none) name=(?:filename|filename_plain|default|empty|other) value=(?:unsupported|default|empty|other) readonly=(?:true|false|none) eligible=(?:true|false)$/.test(
         line,
       ),
     )

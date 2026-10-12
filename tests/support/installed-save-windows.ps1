@@ -196,8 +196,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
           $candidateCount++
           if ($candidateCount -le 64) {
             $identifier = $element.Current.AutomationId
-            if ($identifier -notmatch '^[0-9]{1,6}$') { $identifier = 'none' }
-            $nameKind = if ($element.Current.Name -eq 'File name:') { 'filename' } elseif ([string]::IsNullOrEmpty($element.Current.Name)) { 'empty' } else { 'other' }
+            if ($identifier -notmatch '^[0-9]{1,6}$' -and $identifier -notin @('FileNameControlHost', 'FileNameControl')) { $identifier = 'none' }
+            $nameKind = if ($element.Current.Name -eq 'File name:') { 'filename' } elseif ($element.Current.Name -eq 'Open Chords.json') { 'default' } elseif ($element.Current.Name -eq 'File name') { 'filename_plain' } elseif ([string]::IsNullOrEmpty($element.Current.Name)) { 'empty' } else { 'other' }
             $valueKind = 'unsupported'
             $readOnly = 'none'
             if ($hasValue) {
