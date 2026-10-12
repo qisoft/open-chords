@@ -20,7 +20,7 @@ describe("native Save driver failure redaction", () => {
 
   it("distinguishes a host kill and retains only fixed driver counters", () => {
     const counters =
-      "native_save_failed stage=discovery windows=2 elements=14 filenames=0 actions=0";
+      "native_save_failed code=filename_pattern_unavailable stage=discovery windows=2 elements=14 filenames=0 actions=0";
     const diagnostic = installedSaveDriverDiagnostic(
       { killed: true, signal: "SIGTERM", code: null, path: "/private/application" },
       `Native Save driver stage: started\r\n${counters}\r\n/private/filename`,
@@ -47,7 +47,7 @@ describe("native Save driver failure redaction", () => {
   it("rejects unbounded counters and injected private diagnostic text", () => {
     const diagnostic = installedSaveDriverDiagnostic(
       { signal: "private-signal", code: "private-code" },
-      "native_save_failed stage=discovery windows=2000000000 elements=1 filenames=1 actions=1\nnative_save_failed stage=private/path windows=1 elements=1 filenames=1 actions=1",
+      "native_save_failed code=filename_pattern_unavailable stage=discovery windows=2000000000 elements=1 filenames=1 actions=1\nnative_save_failed code=filename_pattern_unavailable stage=private/path windows=1 elements=1 filenames=1 actions=1",
       100,
     );
     expect(diagnostic).not.toContain("native_save_failed");

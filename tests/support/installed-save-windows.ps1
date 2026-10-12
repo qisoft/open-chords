@@ -343,6 +343,17 @@ while ([DateTime]::UtcNow -lt $deadline) {
 throw 'deadline'
 } catch {
   # Only numeric discovery counters leave this process; UI names, paths and exceptions stay private.
-  [Console]::Error.WriteLine("native_save_failed stage=$stage windows=$maxWindows elements=$maxElements filenames=$fileNames actions=$actions")
+  $failureCode = 'unknown'
+  $failure = $_.Exception.Message
+  if ($failure -in @('filename_unavailable', 'filename_pattern_unavailable', 'filename_ambiguous', 'default_filename_invalid', 'filename_readonly', 'filename_not_set', 'action_ambiguous', 'target_missing', 'action_bounds', 'deadline', 'window_bound', 'element_bound')) { $failureCode = $failure }
+  if ($null -ne $_.Exception.InnerException) {
+    switch ($_.Exception.InnerException.Message) {
+      'Native Save filename dialog unavailable' { $failureCode = 'filename_dialog_unavailable' }
+      'Native Save filename discovery incomplete or ambiguous' { $failureCode = 'filename_scan_ambiguous' }
+      'Native Save dialog could not receive input' { $failureCode = 'input_refused' }
+      'Native Save click was not delivered' { $failureCode = 'input_not_delivered' }
+    }
+  }
+  [Console]::Error.WriteLine("native_save_failed code=$failureCode stage=$stage windows=$maxWindows elements=$maxElements filenames=$fileNames actions=$actions")
   exit 1
 }
