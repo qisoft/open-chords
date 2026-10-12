@@ -196,9 +196,15 @@ public static class SaveNativeInput {
     Click(dialog, processId, bounds.left + (bounds.right - bounds.left) / 2, bounds.top + (bounds.bottom - bounds.top) / 2);
     uint owner;
     uint thread = GetWindowThreadProcessId(field, out owner);
-    var info = new GuiInfo { size = (uint)Marshal.SizeOf(typeof(GuiInfo)) };
-    if (GetForegroundWindow() != dialog || !GetGUIThreadInfo(thread, ref info) || info.focus != field)
-      throw new InvalidOperationException("Native Save filename focus refused");
+    bool focused = false;
+    var focusWait = System.Diagnostics.Stopwatch.StartNew();
+    do {
+      var info = new GuiInfo { size = (uint)Marshal.SizeOf(typeof(GuiInfo)) };
+      if (GetForegroundWindow() == dialog && GetGUIThreadInfo(thread, ref info) && info.focus == field) { focused = true; break; }
+      System.Threading.Thread.Sleep(20);
+    } while (focusWait.ElapsedMilliseconds < 1000);
+    if (!focused) throw new InvalidOperationException("Native Save filename focus refused");
+    RequireFilename(dialog, field, processId);
     var inputs = new Input[4 + target.Length * 2];
     inputs[0] = new Input { type = 1, keyboard = new KeyboardInput { key = 0x11 } };
     inputs[1] = new Input { type = 1, keyboard = new KeyboardInput { key = 0x41 } };
