@@ -9,7 +9,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ["ENOENT", "EACCES", "EPERM", "ENOEXEC", "EINVAL"].includes(error.code)
       ? error.code
       : "none";
-  const output = stderr.slice(0, 16384);
+  const output = stderr.slice(-65536);
   const category = /\bPSSecurityException\b/.test(output)
     ? "powershell_policy"
     : /\bParserError\b/.test(output)

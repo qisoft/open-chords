@@ -102,7 +102,7 @@ test("installed Windows native Save cancellation preserves Library and Save publ
             "-TargetPath",
             target,
           ],
-          { env, timeout: 100000, maxBuffer: 16384 },
+          { env, timeout: 100000, maxBuffer: 65536 },
           (error, stdout, stderr) => {
             if (error) {
               reject(

@@ -91,4 +91,15 @@ describe("native Save driver failure redaction", () => {
     expect(diagnostic).not.toContain("private");
     expect(diagnostic).not.toContain("edits=1000");
   });
+  it("retains final validated observations after a long discovery transcript", () => {
+    const probe =
+      "Native Save driver probe: controls_read duration_ms=90000 windows=1 elements=81 filenames=0 actions=300";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${"private UI text\n".repeat(2000)}${probe}`,
+      90000,
+    );
+    expect(diagnostic).toContain(probe);
+    expect(diagnostic).not.toContain("private UI text");
+  });
 });
