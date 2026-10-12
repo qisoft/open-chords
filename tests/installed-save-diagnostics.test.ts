@@ -1,0 +1,156 @@
+import { describe, expect, it } from "vitest";
+
+import { installedSaveDriverDiagnostic } from "./support/installed-save-diagnostics.ts";
+
+describe("native Save driver failure redaction", () => {
+  it.each(["expected", "basename", "double_dot", "double_extension", "empty", "other"])(
+    "retains only the fixed default filename classification %s",
+    (kind) => {
+      const probe = `Native Save default probe: value=${kind}`;
+      const privatePath = "C:\\Users\\private\\score.json";
+      const diagnostic = installedSaveDriverDiagnostic(
+        {},
+        `${probe}\n${probe} ${privatePath}\nNative Save default probe: value=${privatePath}`,
+        100,
+      );
+      expect(diagnostic).toContain(probe);
+      expect(diagnostic.split("Native Save default probe:")).toHaveLength(2);
+      expect(diagnostic).not.toContain(privatePath);
+    },
+  );
+  it.each(["PSSecurityException", "ParserError"])(
+    "classifies %s without exposing command or stderr",
+    (code) => {
+      const privatePath = "C:\\Users\\private\\score.json";
+      const error = { code: 1, killed: false, message: privatePath, stderr: privatePath };
+      const diagnostic = installedSaveDriverDiagnostic(error, `${privatePath}\n${code}`, 43);
+      expect(diagnostic).toContain(
+        `category=powershell_${code === "ParserError" ? "parser" : "policy"}`,
+      );
+      expect(diagnostic).toContain("started=false");
+      expect(diagnostic).toContain("exit_code=1");
+      expect(diagnostic).not.toContain(privatePath);
+    },
+  );
+
+  it("distinguishes a host kill and retains only fixed driver counters", () => {
+    const counters =
+      "native_save_failed code=filename_pattern_unavailable stage=discovery windows=2 elements=14 filenames=0 actions=0 fallback_misses=4";
+    const diagnostic = installedSaveDriverDiagnostic(
+      { killed: true, signal: "SIGTERM", code: null, path: "/private/application" },
+      `Native Save driver stage: started\r\n${counters}\r\n/private/filename`,
+      100083,
+    );
+    expect(diagnostic).toContain(
+      "duration_ms=100083 killed=true exit_code=none exit_signal=SIGTERM",
+    );
+    expect(diagnostic).toContain("started=true category=unknown");
+    expect(diagnostic).toContain(counters);
+    expect(diagnostic).not.toContain("/private");
+  });
+
+  it("reports an allowlisted spawn refusal without exposing its path", () => {
+    const diagnostic = installedSaveDriverDiagnostic(
+      { code: "EACCES", path: "/private/driver" },
+      "",
+      2,
+    );
+    expect(diagnostic).toContain("started=false category=unknown spawn_code=EACCES");
+    expect(diagnostic).not.toContain("/private");
+  });
+
+  it("rejects unbounded counters and injected private diagnostic text", () => {
+    const diagnostic = installedSaveDriverDiagnostic(
+      { signal: "private-signal", code: "private-code" },
+      "native_save_failed code=filename_pattern_unavailable stage=discovery windows=2000000000 elements=1 filenames=1 actions=1\nnative_save_failed code=filename_pattern_unavailable stage=private/path windows=1 elements=1 filenames=1 actions=1",
+      100,
+    );
+    expect(diagnostic).not.toContain("native_save_failed");
+    expect(diagnostic).not.toContain("private");
+  });
+
+  it("retains bounded operation probes and rejects raw or injected UI data", () => {
+    const probe =
+      "Native Save driver probe: elements_query duration_ms=501 windows=2 elements=0 filenames=0 actions=0";
+    const diagnostic = installedSaveDriverDiagnostic(
+      { killed: true, signal: "SIGTERM" },
+      `${Array.from({ length: 20 }, () => probe).join("\r\n")}\r\nNative Save driver probe: private/path duration_ms=1 windows=1 elements=1 filenames=1 actions=1\r\n${probe} /private/name`,
+      100000,
+    );
+    expect(diagnostic.split(probe)).toHaveLength(17);
+    expect(diagnostic).not.toContain("private");
+  });
+
+  it.each(["true", "false"])(
+    "retains bounded native window observations with truncated=%s",
+    (truncated) => {
+      const probe = `Native Save window probe: owned=2 expected_titles=1 save_as_titles=0 dialogs=1 truncated=${truncated}`;
+      const diagnostic = installedSaveDriverDiagnostic(
+        {},
+        `${Array.from({ length: 6 }, () => probe).join("\r\n")}\r\n${probe} C:\\private\\file\r\nNative Save window probe: owned=private expected_titles=0 save_as_titles=0 dialogs=0`,
+        100,
+      );
+      expect(diagnostic.split(probe)).toHaveLength(4);
+      expect(diagnostic).not.toContain("private");
+    },
+  );
+  it("retains bounded control observations without raw UI text", () => {
+    const probe =
+      "Native Save control probe: edits=2 buttons=4 file_labels=1 action_labels=1 visible_enabled=20 eligible_file_labels=0 value_pattern_file_labels=1 readonly_file_labels=1 writable_file_descendants=1 writable_labeled_files=0 eligible_action_labels=0";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${Array.from({ length: 6 }, () => probe).join("\r\n")}\r\n${probe} /private/name\r\n${probe.replace("edits=2", "edits=1000")}`,
+      100,
+    );
+    expect(diagnostic.split(probe)).toHaveLength(4);
+    expect(diagnostic).not.toContain("private");
+    expect(diagnostic).not.toContain("edits=1000");
+  });
+  it("retains final validated observations after a long discovery transcript", () => {
+    const probe =
+      "Native Save driver probe: controls_read duration_ms=90000 windows=1 elements=81 filenames=0 actions=300";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${"private UI text\n".repeat(2000)}${probe}`,
+      90000,
+    );
+    expect(diagnostic).toContain(probe);
+    expect(diagnostic).not.toContain("private UI text");
+  });
+  it("retains only bounded numeric candidate properties and fixed value classes", () => {
+    const probe =
+      "Native Save candidate probe: type=50004 id=FileNameControlHost name=default value=empty readonly=false eligible=true";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${(probe + "\n").repeat(70)}${probe} /private/name\n${probe.replace("id=FileNameControlHost", "id=private")}`,
+      100,
+    );
+    expect(diagnostic.split(probe)).toHaveLength(65);
+    expect(diagnostic).not.toContain("private");
+  });
+  it("validates bounded native child categories without exporting text", () => {
+    const probe = "Native Save child probe: id=1001 class=edit text=default eligible=true";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${probe}\nNative Save child scan: visited=40 truncated=false\n${probe} /private/file`,
+      100,
+    );
+    expect(diagnostic).toContain(probe);
+    expect(diagnostic).toContain("visited=40 truncated=false");
+    expect(diagnostic).not.toContain("private");
+  });
+  it.each([
+    "filename_target_changed",
+    "filename_read_unavailable",
+    "input_architecture_unsupported",
+    "filename_input_bound",
+    "filename_bounds_unavailable",
+    "filename_focus_refused",
+    "filename_input_not_delivered",
+  ])("preserves fixed native refusal %s without raw exception text", (code) => {
+    const probe = `native_save_failed code=${code} stage=filename_set windows=1 elements=81 filenames=1 actions=1 fallback_misses=0`;
+    const diagnostic = installedSaveDriverDiagnostic({}, `${probe}\n${probe} /private/file`, 100);
+    expect(diagnostic).toContain(probe);
+    expect(diagnostic).not.toContain("private");
+  });
+});
