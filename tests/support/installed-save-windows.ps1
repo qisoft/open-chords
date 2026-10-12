@@ -139,6 +139,26 @@ public static class SaveNativeInput {
     if (truncated || matches > 1) throw new InvalidOperationException("Native Save dialog discovery incomplete or ambiguous");
     return result;
   }
+  public static IntPtr FindFilename(IntPtr dialog, uint expectedProcessId) {
+    if (!OwnedByApplication(dialog, expectedProcessId) || !IsWindowVisible(dialog) || !IsWindowEnabled(dialog))
+      throw new InvalidOperationException("Native Save filename dialog unavailable");
+    int visited = 0, matches = 0;
+    bool truncated = false;
+    IntPtr result = IntPtr.Zero;
+    EnumWindowProc callback = (window, parameter) => {
+      if (++visited > 128) { truncated = true; return false; }
+      if (GetAncestor(window, 2) != dialog || !IsWindowVisible(window) || !IsWindowEnabled(window) || GetDlgCtrlID(window) != 1001) return true;
+      var kind = new StringBuilder(64);
+      GetClassName(window, kind, kind.Capacity);
+      if (kind.ToString() != "Edit") return true;
+      matches++;
+      result = window;
+      return true;
+    };
+    EnumChildWindows(dialog, callback, IntPtr.Zero);
+    if (truncated || matches > 1) throw new InvalidOperationException("Native Save filename discovery incomplete or ambiguous");
+    return result;
+  }
   public static void Click(IntPtr window, uint expectedProcessId, int x, int y) {
     if (!OwnedByApplication(window, expectedProcessId) ||
         !IsWindowVisible(window) || !IsWindowEnabled(window))
@@ -275,6 +295,18 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $actions++
         if ($null -ne $button) { throw 'action_ambiguous' }
         $button = $element
+      }
+    }
+    if ($null -eq $fileName) {
+      $filenameHandle = [SaveNativeInput]::FindFilename([IntPtr]$window.Current.NativeWindowHandle, [uint32]$ApplicationPid)
+      if ($filenameHandle -ne [IntPtr]::Zero) {
+        $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($filenameHandle)
+        $candidateValue = $null
+        if ($candidate.Current.IsOffscreen -or !$candidate.Current.IsEnabled) { throw 'filename_unavailable' }
+        if (!$candidate.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$candidateValue) -or $candidateValue.Current.IsReadOnly) { throw 'filename_pattern_unavailable' }
+        $fileNames++
+        $fileName = $candidate
+        $fileNameValue = $candidateValue
       }
     }
     $candidateSnapshotTaken = $true
