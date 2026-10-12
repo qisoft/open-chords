@@ -147,6 +147,10 @@ describe("native Save driver failure redaction", () => {
     "filename_bounds_unavailable",
     "filename_focus_refused",
     "filename_input_not_delivered",
+    "input_target_unavailable",
+    "input_foreground_refused",
+    "input_point_refused",
+    "input_cursor_refused",
   ])("preserves fixed native refusal %s without raw exception text", (code) => {
     const probe = `native_save_failed code=${code} stage=filename_set windows=1 elements=81 filenames=1 actions=1 fallback_misses=0`;
     const diagnostic = installedSaveDriverDiagnostic({}, `${probe}\n${probe} /private/file`, 100);

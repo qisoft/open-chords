@@ -222,9 +222,12 @@ public static class SaveNativeInput {
         !IsWindowVisible(window) || !IsWindowEnabled(window))
       throw new InvalidOperationException("Native Save input target unavailable");
     SetForegroundWindow(window);
-    if (GetForegroundWindow() != window ||
-        GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2) != window || !SetCursorPos(x, y))
-      throw new InvalidOperationException("Native Save dialog could not receive input");
+    if (GetForegroundWindow() != window)
+      throw new InvalidOperationException("Native Save foreground refused");
+    if (GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2) != window)
+      throw new InvalidOperationException("Native Save point root refused");
+    if (!SetCursorPos(x, y))
+      throw new InvalidOperationException("Native Save cursor move refused");
     var inputs = new[] {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
       new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
@@ -429,6 +432,10 @@ throw 'deadline'
       'Native Save filename dialog unavailable' { $failureCode = 'filename_dialog_unavailable' }
       'Native Save filename discovery incomplete or ambiguous' { $failureCode = 'filename_scan_ambiguous' }
       'Native Save dialog could not receive input' { $failureCode = 'input_refused' }
+      'Native Save input target unavailable' { $failureCode = 'input_target_unavailable' }
+      'Native Save foreground refused' { $failureCode = 'input_foreground_refused' }
+      'Native Save point root refused' { $failureCode = 'input_point_refused' }
+      'Native Save cursor move refused' { $failureCode = 'input_cursor_refused' }
       'Native Save click was not delivered' { $failureCode = 'input_not_delivered' }
       'Native Save filename target changed' { $failureCode = 'filename_target_changed' }
       'Native Save filename read unavailable' { $failureCode = 'filename_read_unavailable' }
