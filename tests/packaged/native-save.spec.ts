@@ -194,9 +194,14 @@ test("installed Windows native Save cancellation preserves Library and Save publ
       serializeJsonExport(captureJsonExport(envelope.payload, { presentation: "current" })),
     );
     const reopened = await openProjectLibrary({ stateRoot });
-    expect(reopened.listExportReceipts("project_golden")).toMatchObject([
+    const receipts = reopened.listExportReceipts("project_golden");
+    expect(receipts).toHaveLength(1);
+    expect(
+      receipts[0]?.outputLocation === target,
+      "Receipt must retain the exact destination",
+    ).toBe(true);
+    expect(receipts.map(({ format, outputHash }) => ({ format, outputHash }))).toEqual([
       {
-        displayName: "native-score.json",
         format: "open_chords_json",
         outputHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
       },

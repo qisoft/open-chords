@@ -273,7 +273,26 @@ for (const profile of [
         await expect(choose).toBeFocused();
         await audit("changed-draft");
         await activate(editor.getByRole("button", { name: "Save", exact: true }));
-        await expect(page.getByRole("button", { name: "Edit chords", exact: true })).toBeFocused();
+        try {
+          await expect(
+            page.getByRole("button", { name: "Edit chords", exact: true }),
+          ).toBeFocused();
+        } catch (error) {
+          const save = editor.getByRole("button", { name: "Save", exact: true });
+          const editorVisible = await editor.isVisible();
+          const saveEnabled = await save.isEnabled({ timeout: 1000 }).catch(() => false);
+          const saveFocused = await save
+            .evaluate((element) => element === document.activeElement, undefined, { timeout: 1000 })
+            .catch(() => false);
+          const stale = await editor
+            .getByText("The Project or revision changed.", { exact: false })
+            .isVisible();
+          const alerts = Math.min(await editor.getByRole("alert").count(), 16);
+          console.log(
+            `Chord Editor save focus probe: editor_visible=${editorVisible} save_enabled=${saveEnabled} save_focused=${saveFocused} stale=${stale} alerts=${alerts}`,
+          );
+          throw error;
+        }
         await expect(pickup).toHaveAttribute("aria-label", /Chords: N/);
         await audit("saved-edit");
         await activate(page.getByRole("button", { name: "Undo edit", exact: true }));
