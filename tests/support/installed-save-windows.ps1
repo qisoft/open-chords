@@ -187,7 +187,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
       [Console]::Error.WriteLine([SaveNativeInput]::ProbeChildren([IntPtr]$window.Current.NativeWindowHandle, [uint32]$ApplicationPid))
       $childSnapshotTaken = $true
     }
-    Write-NativeSaveProbe 'elements_query' 
+    Write-NativeSaveProbe 'elements_query'
     $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
     $maxElements = [Math]::Max($maxElements, $elements.Count)
     if ($elements.Count -gt 256) { throw 'element_bound' }
