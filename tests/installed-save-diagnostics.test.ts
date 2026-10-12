@@ -102,4 +102,15 @@ describe("native Save driver failure redaction", () => {
     expect(diagnostic).toContain(probe);
     expect(diagnostic).not.toContain("private UI text");
   });
+  it("retains only bounded numeric candidate properties and fixed value classes", () => {
+    const probe =
+      "Native Save candidate probe: type=50004 id=1001 name=empty value=default readonly=false eligible=true";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${(probe + "\n").repeat(70)}${probe} /private/name\n${probe.replace("id=1001", "id=private")}`,
+      100,
+    );
+    expect(diagnostic.split(probe)).toHaveLength(65);
+    expect(diagnostic).not.toContain("private");
+  });
 });

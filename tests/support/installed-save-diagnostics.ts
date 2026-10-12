@@ -47,6 +47,14 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const candidates = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save candidate probe: type=[0-9]{1,6} id=(?:[0-9]{1,6}|none) name=(?:filename|empty|other) value=(?:unsupported|default|empty|other) readonly=(?:true|false|none) eligible=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(0, 64);
   return [
     installedExportExitDiagnostic(error, durationMs).replace(
       "Installed export process",
@@ -56,6 +64,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...probes,
     ...windowProbes,
     ...controlProbes,
+    ...candidates,
     ...(counters ? [counters] : []),
   ].join("\n");
 }

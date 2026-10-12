@@ -10,6 +10,7 @@ $probeStarted = [DateTime]::UtcNow
 $probeSeen = @{}
 $probeCount = 0
 $probeCycle = $false
+$candidateSnapshotTaken = $false
 function Write-NativeSaveProbe([string]$Name) {
   if (!$script:probeSeen.ContainsKey($Name) -or $script:probeCycle) {
     if ($script:probeCount -lt 96) {
@@ -173,6 +174,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $writableFileDescendants = 0
     $writableLabeledFiles = 0
     $eligibleActionLabels = 0
+    $candidateCount = 0
     foreach ($element in $elements) {
       if ($probeCycle) {
         if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit) { $editTypes++ }
@@ -185,6 +187,26 @@ while ([DateTime]::UtcNow -lt $deadline) {
           $visibleEnabled++
           if ($fileLabelMatches) { $eligibleFileLabels++ }
           if ($actionLabelMatches) { $eligibleActionLabels++ }
+        }
+      }
+      if (!$candidateSnapshotTaken) {
+        $snapshotValue = $null
+        $hasValue = $element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$snapshotValue)
+        if ($hasValue -or $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit) {
+          $candidateCount++
+          if ($candidateCount -le 64) {
+            $identifier = $element.Current.AutomationId
+            if ($identifier -notmatch '^[0-9]{1,6}$') { $identifier = 'none' }
+            $nameKind = if ($element.Current.Name -eq 'File name:') { 'filename' } elseif ([string]::IsNullOrEmpty($element.Current.Name)) { 'empty' } else { 'other' }
+            $valueKind = 'unsupported'
+            $readOnly = 'none'
+            if ($hasValue) {
+              $readOnly = if ($snapshotValue.Current.IsReadOnly) { 'true' } else { 'false' }
+              $valueKind = if ($snapshotValue.Current.Value -eq 'Open Chords.json') { 'default' } elseif ([string]::IsNullOrEmpty($snapshotValue.Current.Value)) { 'empty' } else { 'other' }
+            }
+            $eligible = if (!$element.Current.IsOffscreen -and $element.Current.IsEnabled) { 'true' } else { 'false' }
+            [Console]::Error.WriteLine("Native Save candidate probe: type=$($element.Current.ControlType.Id) id=$identifier name=$nameKind value=$valueKind readonly=$readOnly eligible=$eligible")
+          }
         }
       }
       if ($element.Current.IsOffscreen -or !$element.Current.IsEnabled) { continue }
@@ -222,6 +244,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $button = $element
       }
     }
+    $candidateSnapshotTaken = $true
     if ($probeCycle) {
       [Console]::Error.WriteLine("Native Save control probe: edits=$editTypes buttons=$buttonTypes file_labels=$fileLabels action_labels=$actionLabels visible_enabled=$visibleEnabled eligible_file_labels=$eligibleFileLabels value_pattern_file_labels=$valuePatternFileLabels readonly_file_labels=$readOnlyFileLabels writable_file_descendants=$writableFileDescendants writable_labeled_files=$writableLabeledFiles eligible_action_labels=$eligibleActionLabels")
     }
