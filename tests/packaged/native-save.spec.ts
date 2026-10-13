@@ -24,11 +24,11 @@ test.skip(process.platform !== "win32", "Windows native Save dialog");
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed Windows native ${format} Save cancellation preserves Library and Save publishes a durable receipt`, async () => {
     test.setTimeout(480000);
-    const started = performance.now();
+    const roundtripStarted = performance.now();
     const phase = (stage: string) => {
       if (format === "archive")
         console.log(
-          `Native archive roundtrip stage: ${stage} elapsed_ms=${Math.min(900000, Math.round(performance.now() - started))}`,
+          `Native archive roundtrip stage: ${stage} elapsed_ms=${Math.min(900000, Math.round(performance.now() - roundtripStarted))}`,
         );
     };
     phase("setup");
@@ -274,10 +274,12 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
             .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
             .toBe(true);
         } finally {
+          phase("browser_dispose");
           await browser.close();
         }
       } finally {
         if (!failed && child.exitCode === null && child.signalCode === null) {
+          phase("forced_exit");
           child.kill();
           await expect
             .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
