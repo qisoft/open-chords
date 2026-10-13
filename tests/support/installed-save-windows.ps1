@@ -417,14 +417,14 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $inputDeadline = [DateTime]::UtcNow.AddSeconds(2)
         do {
           $actualFilename = [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid)
-          if ($actualFilename -eq $TargetPath) { break }
+          if ($actualFilename -ceq $TargetPath) { break }
           Start-Sleep -Milliseconds 20
         } while ([DateTime]::UtcNow -lt $inputDeadline)
       } else {
         $value.SetValue($TargetPath)
         $actualFilename = $value.Current.Value
       }
-      if ($actualFilename -ne $TargetPath) { throw 'filename_not_set' }
+      if ($actualFilename -cne $TargetPath) { throw 'filename_not_set' }
     }
     $stage = 'native_input'
     Write-NativeSaveProbe 'native_input'
