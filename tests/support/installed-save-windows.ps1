@@ -73,6 +73,7 @@ public static class SaveNativeInput {
     public Rect caretRect;
   }
   [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect bounds);
+  [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
   [DllImport("user32.dll")] private static extern IntPtr GetThreadDpiAwarenessContext();
   [DllImport("user32.dll")] private static extern int GetAwarenessFromDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
@@ -266,6 +267,12 @@ public static class SaveNativeInput {
     if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
       throw new InvalidOperationException("Native Save click was not delivered");
   }
+  public static void WaitForDismissal(IntPtr window) {
+    var elapsed = System.Diagnostics.Stopwatch.StartNew();
+    while (IsWindow(window) && elapsed.ElapsedMilliseconds < 2000)
+      System.Threading.Thread.Sleep(20);
+    if (IsWindow(window)) throw new InvalidOperationException("Native Save dialog not dismissed");
+  }
 }
 '@
 
@@ -445,10 +452,12 @@ while ([DateTime]::UtcNow -lt $deadline) {
     Write-NativeSaveProbe 'native_input'
     $bounds = $button.Current.BoundingRectangle
     if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) { throw 'action_bounds' }
-    [SaveNativeInput]::Click([IntPtr]$window.Current.NativeWindowHandle, [uint32]$ApplicationPid,
+    $dialogHandle = [IntPtr]$window.Current.NativeWindowHandle
+    [SaveNativeInput]::Click($dialogHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
-    ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = ($Scenario -ne 'cancel'); nativeClick = $true; defaultNameValid = $true } -Compress
+    [SaveNativeInput]::WaitForDismissal($dialogHandle)
+    ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = ($Scenario -ne 'cancel'); nativeClick = $true; dialogDismissed = $true; defaultNameValid = $true } -Compress
     exit 0
   }
   Start-Sleep -Milliseconds 100
@@ -467,6 +476,7 @@ throw 'deadline'
       'Native Save input target unavailable' { $failureCode = 'input_target_unavailable' }
       'Native Save foreground refused' { $failureCode = 'input_foreground_refused' }
       'Native Save point root refused' { $failureCode = 'input_point_refused' }
+      'Native Save dialog not dismissed' { $failureCode = 'dialog_not_dismissed' }
       'Native Save cursor move refused' { $failureCode = 'input_cursor_refused' }
       'Native Save click was not delivered' { $failureCode = 'input_not_delivered' }
       'Native Save filename target changed' { $failureCode = 'filename_target_changed' }

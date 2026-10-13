@@ -172,6 +172,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
             action: "cancel",
             filenameSet: false,
             nativeClick: true,
+            dialogDismissed: true,
             defaultNameValid: true,
           });
           await expect(page.getByText("Export cancelled", { exact: true })).toBeVisible();
@@ -187,6 +188,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
             action: "cancel_existing",
             filenameSet: true,
             nativeClick: true,
+            dialogDismissed: true,
             defaultNameValid: true,
           });
           await expect(page.getByText("Export cancelled", { exact: true })).toBeVisible();
@@ -202,6 +204,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
             action: "save",
             filenameSet: true,
             nativeClick: true,
+            dialogDismissed: true,
             defaultNameValid: true,
           });
           await expect(page.getByText("Export saved", { exact: true })).toBeVisible({
