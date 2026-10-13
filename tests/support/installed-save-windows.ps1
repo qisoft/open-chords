@@ -43,7 +43,9 @@ using System.Text;
 public static class SaveNativeInput {
   private static string ExpectedFilename = "Open Chords.json";
   private static string ExpectedTitle = "Export Open Chords JSON";
+  private static int ExpectedFilenameId = 1001;
   public static void ConfigureFormat(string format, bool import) {
+    ExpectedFilenameId = import ? 1148 : 1001;
     switch (format) {
       case "json": ExpectedFilename = "Open Chords.json"; ExpectedTitle = "Export Open Chords JSON"; break;
       case "lrc": ExpectedFilename = "Open Chords.lrc"; ExpectedTitle = "Export LRC lyrics"; break;
@@ -187,7 +189,7 @@ public static class SaveNativeInput {
     IntPtr result = IntPtr.Zero;
     EnumWindowProc callback = (window, parameter) => {
       if (++visited > 128) { truncated = true; return false; }
-      if (GetAncestor(window, 2) != dialog || !IsWindowVisible(window) || !IsWindowEnabled(window) || GetDlgCtrlID(window) != 1001) return true;
+      if (GetAncestor(window, 2) != dialog || !IsWindowVisible(window) || !IsWindowEnabled(window) || GetDlgCtrlID(window) != ExpectedFilenameId) return true;
       var kind = new StringBuilder(64);
       GetClassName(window, kind, kind.Capacity);
       if (kind.ToString() != "Edit") return true;
