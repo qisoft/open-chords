@@ -17,7 +17,22 @@ function run(argv) {
   };
   var seen = {};
   var events = [];
-  var deadline = Date.now() + 90000;
+  var started = Date.now();
+  var deadline = started + 90000;
+  function discoveryFailure(stage, error) {
+    var matches = -1;
+    try {
+      var current = systemEvents.processes.whose({ unixId: applicationPid })();
+      if (current.length <= 16) matches = current.length;
+    } catch (_) {}
+    var number = error && error.errorNumber;
+    if (!Number.isInteger(number) || number < -32768 || number > 32767) number = 'unknown';
+    var elapsed = Math.max(0, Math.min(200000, Date.now() - started));
+    var last = events.length === 0 ? 'none' : events[events.length - 1].category;
+    return new Error('Native cleanup accessibility discovery failed: stage=' + stage +
+      ' elapsed_ms=' + elapsed + ' process_matches=' + matches +
+      ' completed=' + events.length + ' last_category=' + last + ' os_error=' + number);
+  }
   function attribute(element, name) {
     try { return element[name](); } catch (_) { return null; }
   }
@@ -33,8 +48,8 @@ function run(argv) {
     var processes;
     try {
       processes = systemEvents.processes.whose({ unixId: applicationPid })();
-    } catch (_) {
-      throw new Error('Native cleanup accessibility process discovery unavailable');
+    } catch (error) {
+      throw discoveryFailure('processes', error);
     }
     if (processes.length === 0) {
       if (events.length > 0) return JSON.stringify(events);
@@ -44,14 +59,14 @@ function run(argv) {
     if (processes.length !== 1) throw new Error('Native cleanup process was ambiguous');
     var process = processes[0];
     var windows;
-    try { windows = process.windows(); } catch (_) {
-      throw new Error('Native cleanup accessibility window discovery unavailable');
+    try { windows = process.windows(); } catch (error) {
+      throw discoveryFailure('windows', error);
     }
     if (windows.length > 16) throw new Error('Native cleanup window budget exceeded');
     for (var w = 0; w < windows.length; w++) {
       var elements;
-      try { elements = windows[w].entireContents(); } catch (_) {
-        throw new Error('Native cleanup accessibility element discovery unavailable');
+      try { elements = windows[w].entireContents(); } catch (error) {
+        throw discoveryFailure('elements', error);
       }
       if (elements.length > 256) throw new Error('Native cleanup element budget exceeded');
       var category = null;
