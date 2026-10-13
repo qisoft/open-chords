@@ -1,7 +1,8 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc')][string]$Format = 'json')
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf')][string]$Format = 'json')
 $ErrorActionPreference = 'Stop'
-$expectedFilename = if ($Format -eq 'lrc') { 'Open Chords.lrc' } else { 'Open Chords.json' }
-$expectedTitle = if ($Format -eq 'lrc') { 'Export LRC lyrics' } else { 'Export Open Chords JSON' }
+$extension = if ($Format -eq 'chordpro') { 'cho' } else { $Format }
+$expectedFilename = 'Open Chords.' + $extension
+$expectedTitle = switch ($Format) { 'json' { 'Export Open Chords JSON' }; 'lrc' { 'Export LRC lyrics' }; 'chordpro' { 'Export ChordPro' }; 'pdf' { 'Export PDF lead sheet' } }
 $maxWindows = 0
 $maxElements = 0
 $fileNames = 0
@@ -38,9 +39,14 @@ using System.Text;
 public static class SaveNativeInput {
   private static string ExpectedFilename = "Open Chords.json";
   private static string ExpectedTitle = "Export Open Chords JSON";
-  public static void ConfigureLrc(bool lrc) {
-    ExpectedFilename = lrc ? "Open Chords.lrc" : "Open Chords.json";
-    ExpectedTitle = lrc ? "Export LRC lyrics" : "Export Open Chords JSON";
+  public static void ConfigureFormat(string format) {
+    switch (format) {
+      case "json": ExpectedFilename = "Open Chords.json"; ExpectedTitle = "Export Open Chords JSON"; break;
+      case "lrc": ExpectedFilename = "Open Chords.lrc"; ExpectedTitle = "Export LRC lyrics"; break;
+      case "chordpro": ExpectedFilename = "Open Chords.cho"; ExpectedTitle = "Export ChordPro"; break;
+      case "pdf": ExpectedFilename = "Open Chords.pdf"; ExpectedTitle = "Export PDF lead sheet"; break;
+      default: throw new InvalidOperationException("Native Save format unavailable");
+    }
   }
   [StructLayout(LayoutKind.Sequential)]
   private struct Point { public int x, y; }
@@ -263,7 +269,7 @@ public static class SaveNativeInput {
 }
 '@
 
-[SaveNativeInput]::ConfigureLrc($Format -eq 'lrc')
+[SaveNativeInput]::ConfigureFormat($Format)
 Write-NativeSaveProbe 'root'
 Write-NativeSaveProbe 'ready'
 $stage = 'discovery'
@@ -413,7 +419,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $value = $fileNameValue
     Write-NativeSaveProbe 'value_read'
     $currentFilename = if ($nativeFilenameHandle -ne [IntPtr]::Zero) { [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid) } else { $value.Current.Value }
-    $defaultKind = if ($currentFilename -ceq $expectedFilename) { 'expected' } elseif ($currentFilename -ceq 'Open Chords') { 'basename' } elseif ($currentFilename -ceq ('Open Chords..' + $Format)) { 'double_dot' } elseif ($currentFilename -ceq ($expectedFilename + '.' + $Format)) { 'double_extension' } elseif ([string]::IsNullOrEmpty($currentFilename)) { 'empty' } else { 'other' }
+    $defaultKind = if ($currentFilename -ceq $expectedFilename) { 'expected' } elseif ($currentFilename -ceq 'Open Chords') { 'basename' } elseif ($currentFilename -ceq ('Open Chords..' + $extension)) { 'double_dot' } elseif ($currentFilename -ceq ($expectedFilename + '.' + $extension)) { 'double_extension' } elseif ([string]::IsNullOrEmpty($currentFilename)) { 'empty' } else { 'other' }
     [Console]::Error.WriteLine("Native Save default probe: value=$defaultKind")
     if ($currentFilename -cne $expectedFilename) { throw 'default_filename_invalid' }
     if ($Scenario -ne 'cancel') {
