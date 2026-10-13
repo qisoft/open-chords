@@ -6,12 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
-import { captureJsonExport, serializeJsonExport } from "@open-chords/domain";
+import { canonicalSerialize, captureJsonExport, serializeJsonExport } from "@open-chords/domain";
 import { chromium, expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
 
 import { openNetworkMode } from "../../apps/desktop/src/main/network-mode.ts";
 import { proofTreeHashes } from "../../apps/desktop/src/main/packaged-proof-tree.ts";
+import { archivedProjectFor } from "../../apps/desktop/src/main/project-archive-format.ts";
+import { inspectPortableProjectArchive } from "../../apps/desktop/src/main/project-archive-inspection.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
@@ -19,15 +21,16 @@ import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnos
 
 test.skip(process.platform !== "win32", "Windows native Save dialog");
 
-for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
+for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed Windows native ${format} Save cancellation preserves Library and Save publishes a durable receipt`, async () => {
     test.setTimeout(480000);
-    const extension = format === "chordpro" ? "cho" : format;
+    const extension = format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format;
     const saveButton = {
       json: "Save JSON",
       lrc: "Save LRC",
       chordpro: "Save ChordPro",
       pdf: "Save PDF",
+      archive: "Save Project Archive",
     }[format];
     const root = await realpath(await mkdtemp(join(tmpdir(), "oc-native-save-")));
     try {
@@ -41,6 +44,10 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
       );
       envelope.payload = leadSheetProject();
       await library.createProject({ envelope, records: goldenRecords() });
+      const archiveFixture =
+        format === "archive"
+          ? archivedProjectFor(await library.readProject("project_golden"))
+          : undefined;
       const preservedTarget = join(root, `preserved.${extension}`);
       await writeFile(preservedTarget, "preserve existing external file");
       const target = join(root, `native-score.${extension}`);
@@ -229,7 +236,14 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
       }
       const bytes = await readFile(target);
       const snapshot = captureJsonExport(envelope.payload, { presentation: "current" });
-      if (format === "pdf") {
+      if (format === "archive") {
+        const inspected = inspectPortableProjectArchive(bytes);
+        expect(
+          canonicalSerialize(inspected.document) === canonicalSerialize(archiveFixture!.document),
+          "Portable archive must preserve the expected envelope and records",
+        ).toBe(true);
+        expect(inspected.media === undefined, "Media must not be included").toBe(true);
+      } else if (format === "pdf") {
         expect(createHash("sha256").update(bytes).digest("hex")).toBe(
           "3c834d61c9f05666fac4090bb5287fa676eaef34d94c463565c076f77a86cefa",
         );
@@ -263,41 +277,45 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
         );
       }
       const omissions =
-        format === "json"
-          ? [...snapshot.omissions].sort()
-          : format !== "lrc"
-            ? [
-                "abstained_chord_marked_unknown",
-                "analysis_provenance_not_represented",
-                "chord_diagram_unavailable:Gm9add9add11/D",
-                "chord_symbol_not_portable:Gm9add9add11/D",
-                "confidence_not_represented",
-                "edit_history_not_represented",
-                "lyrics_mismatch_not_represented",
-                "sample_timing_not_represented",
-                "stable_identity_not_represented",
-                "support_claim_descriptions_omitted",
-                "unmetered_seconds_not_represented",
-                "unrecognized_lyrics_reference_omitted",
-              ]
-            : [
-                "analysis_provenance_not_represented",
-                "confidence_not_represented",
-                "edit_history_not_represented",
-                "line_end_timing_not_represented",
-                "lrc_line_coverage:1/2",
-                "lrc_line_omitted:unmatched:line_first",
-                "lyrics_mismatch_not_represented",
-                "lyrics_notices_not_represented",
-                "sample_timing_not_represented",
-                "stable_identity_not_represented",
-                "support_claim_descriptions_omitted",
-                "unrecognized_lyrics_reference_omitted",
-                "word_timing_not_represented",
-              ];
+        format === "archive"
+          ? archiveFixture!.omissions
+          : format === "json"
+            ? [...snapshot.omissions].sort()
+            : format !== "lrc"
+              ? [
+                  "abstained_chord_marked_unknown",
+                  "analysis_provenance_not_represented",
+                  "chord_diagram_unavailable:Gm9add9add11/D",
+                  "chord_symbol_not_portable:Gm9add9add11/D",
+                  "confidence_not_represented",
+                  "edit_history_not_represented",
+                  "lyrics_mismatch_not_represented",
+                  "sample_timing_not_represented",
+                  "stable_identity_not_represented",
+                  "support_claim_descriptions_omitted",
+                  "unmetered_seconds_not_represented",
+                  "unrecognized_lyrics_reference_omitted",
+                ]
+              : [
+                  "analysis_provenance_not_represented",
+                  "confidence_not_represented",
+                  "edit_history_not_represented",
+                  "line_end_timing_not_represented",
+                  "lrc_line_coverage:1/2",
+                  "lrc_line_omitted:unmatched:line_first",
+                  "lyrics_mismatch_not_represented",
+                  "lyrics_notices_not_represented",
+                  "sample_timing_not_represented",
+                  "stable_identity_not_represented",
+                  "support_claim_descriptions_omitted",
+                  "unrecognized_lyrics_reference_omitted",
+                  "word_timing_not_represented",
+                ];
       const reopened = await openProjectLibrary({ stateRoot });
       const receipts = reopened.listExportReceipts("project_golden");
       expect(receipts.length).toBe(1);
+      if (format === "archive")
+        expect(receipts[0]?.profileVersion).toBe("project_archive/1.0/no_media");
       expect(
         receipts[0]?.outputLocation === target,
         "Receipt must retain the exact destination",
@@ -310,7 +328,12 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
         })),
       ).toEqual([
         {
-          format: format === "json" ? "open_chords_json" : format,
+          format:
+            format === "json"
+              ? "open_chords_json"
+              : format === "archive"
+                ? "project_archive"
+                : format,
           omissions,
           outputHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
         },
