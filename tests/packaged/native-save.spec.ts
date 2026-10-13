@@ -24,6 +24,14 @@ test.skip(process.platform !== "win32", "Windows native Save dialog");
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed Windows native ${format} Save cancellation preserves Library and Save publishes a durable receipt`, async () => {
     test.setTimeout(480000);
+    const started = performance.now();
+    const phase = (stage: string) => {
+      if (format === "archive")
+        console.log(
+          `Native archive roundtrip stage: ${stage} elapsed_ms=${Math.min(900000, Math.round(performance.now() - started))}`,
+        );
+    };
+    phase("setup");
     const extension = format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format;
     const saveButton = {
       json: "Save JSON",
@@ -63,6 +71,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
         ),
         { dir: join(root, "installed") },
       );
+      phase("installed_extracted");
       const windows = process.env.SystemRoot ?? process.env.WINDIR;
       if (!windows) throw new Error("Windows OS directory unavailable");
       const env: NodeJS.ProcessEnv = {};
@@ -92,6 +101,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
         [`--user-data-dir=${stateRoot}`, `--remote-debugging-port=${address.port}`],
         { env, stdio: "ignore" },
       );
+      phase("application_started");
       let failed = false;
       child.on("error", () => {
         failed = true;
@@ -167,6 +177,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
             .pages()
             .find((candidate) => candidate.url().startsWith("open-chords://"))!;
           await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
+          phase("renderer_ready");
           const baseline = await proofTreeHashes(library.activeRoot);
           await page.getByRole("button", { name: "Export Project", exact: true }).click();
           await page
@@ -175,6 +186,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               exact: true,
             })
             .click();
+          phase("cancel_driver");
           expect(await drive("cancel")).toEqual({
             action: "cancel",
             filenameSet: false,
@@ -191,6 +203,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               exact: true,
             })
             .click();
+          phase("cancel_existing_driver");
           expect(await drive("cancel_existing")).toEqual({
             action: "cancel_existing",
             filenameSet: true,
@@ -207,6 +220,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               exact: true,
             })
             .click();
+          phase("save_driver");
           expect(await drive("save")).toEqual({
             action: "save",
             filenameSet: true,
@@ -218,13 +232,16 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
             timeout: 60000,
           });
           await expect(page.getByText(`native-score.${extension}`, { exact: true })).toBeVisible();
+          phase("saved_ui_visible");
           if (format === "archive") {
             await test.step("Native Open recognizes the installed native Save archive without changes", async () => {
+              phase("duplicate_baseline");
               const savedBaseline = await proofTreeHashes(library.activeRoot);
               const savedHash = createHash("sha256")
                 .update(await readFile(target))
                 .digest("hex");
               await page.getByTestId("archives.import.button").click();
+              phase("open_driver");
               expect(await drive("open")).toEqual({
                 action: "open",
                 filenameSet: true,
@@ -232,11 +249,13 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
                 dialogDismissed: true,
                 defaultNameValid: false,
               });
+              phase("duplicate_ui_wait");
               await expect(page.getByTestId("archives.import.status")).toContainText(
                 "This Library already contains this exact Project history.",
                 { timeout: 60000 },
               );
               await expect(page.getByTestId("archives.import.alert")).toHaveCount(0);
+              phase("duplicate_preservation");
               expect(await proofTreeHashes(library.activeRoot)).toEqual(savedBaseline);
               expect(
                 createHash("sha256")
@@ -248,6 +267,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               );
             });
           }
+          phase("application_close");
           const cdp = await browser.newBrowserCDPSession();
           void cdp.send("Browser.close").catch(() => undefined);
           await expect
@@ -264,6 +284,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
             .toBe(true);
         }
       }
+      phase("output_verification");
       const bytes = await readFile(target);
       const snapshot = captureJsonExport(envelope.payload, { presentation: "current" });
       if (format === "archive") {
@@ -341,6 +362,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
                   "unrecognized_lyrics_reference_omitted",
                   "word_timing_not_represented",
                 ];
+      phase("cold_receipts");
       const reopened = await openProjectLibrary({ stateRoot });
       const receipts = reopened.listExportReceipts("project_golden");
       expect(receipts.length).toBe(1);
@@ -374,7 +396,9 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
       expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
       expect((await openNetworkMode(stateRoot)).offline).toBe(true);
     } finally {
+      phase("root_cleanup");
       await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });
+      phase("root_removed");
     }
   });
 }
