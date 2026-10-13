@@ -19,209 +19,256 @@ import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnos
 
 test.skip(process.platform !== "win32", "Windows native Save dialog");
 
-test("installed Windows native Save cancellation preserves Library and Save publishes a durable receipt", async () => {
-  test.setTimeout(480000);
-  const root = await realpath(await mkdtemp(join(tmpdir(), "oc-native-save-")));
-  try {
-    const stateRoot = join(root, "state");
-    await (await openNetworkMode(stateRoot)).setOffline(true);
-    const library = await openProjectLibrary({ stateRoot });
-    const envelope = ProjectEnvelopeSchema.parse(
-      JSON.parse(
-        await readFile("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8"),
-      ),
-    );
-    envelope.payload = leadSheetProject();
-    await library.createProject({ envelope, records: goldenRecords() });
-    const preservedTarget = join(root, "preserved.json");
-    await writeFile(preservedTarget, "preserve existing external file");
-    const target = join(root, "native-score.json");
-    await extractZip(
-      join(
-        process.cwd(),
-        "out",
-        "make",
-        "zip",
-        process.platform,
-        process.arch,
-        `Open Chords-${process.platform}-${process.arch}-0.0.0.zip`,
-      ),
-      { dir: join(root, "installed") },
-    );
-    const windows = process.env.SystemRoot ?? process.env.WINDIR;
-    if (!windows) throw new Error("Windows OS directory unavailable");
-    const env: NodeJS.ProcessEnv = {};
-    for (const key of [
-      "SystemRoot",
-      "WINDIR",
-      "TEMP",
-      "TMP",
-      "HOME",
-      "USERPROFILE",
-      "APPDATA",
-      "LOCALAPPDATA",
-    ])
-      if (process.env[key]) env[key] = process.env[key];
-    env.PATH = [
-      join(windows, "System32", "WindowsPowerShell", "v1.0"),
-      join(windows, "System32"),
-      windows,
-    ].join(";");
-    const server = createServer();
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Debug port unavailable");
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    const child = spawn(
-      join(root, "installed", "Open Chords.exe"),
-      [`--user-data-dir=${stateRoot}`, `--remote-debugging-port=${address.port}`],
-      { env, stdio: "ignore" },
-    );
-    let failed = false;
-    child.on("error", () => {
-      failed = true;
-    });
-    const assertAlive = () => {
-      if (failed || child.exitCode !== null || child.signalCode !== null)
-        throw new Error("Installed native Save application exited");
-    };
-    const drive = (scenario: "cancel" | "cancel_existing" | "save") =>
-      new Promise<unknown>((resolve, reject) => {
-        const started = performance.now();
-        execFile(
-          join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-File",
-            join(process.cwd(), "tests", "support", "installed-save-windows.ps1"),
-            "-ApplicationPid",
-            String(child.pid),
-            "-Scenario",
-            scenario,
-            "-TargetPath",
-            scenario === "cancel_existing" ? preservedTarget : target,
-          ],
-          { env, timeout: 100000, maxBuffer: 65536 },
-          (error, stdout, stderr) => {
-            if (error) {
-              reject(
-                new Error(
-                  installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
-                ),
-              );
-              return;
-            }
-            try {
-              resolve(JSON.parse(stdout.trim()));
-            } catch {
-              reject(new Error("Installed native Save driver returned invalid evidence"));
-            }
-          },
-        );
-      });
+for (const format of ["json", "lrc"] as const) {
+  test(`installed Windows native ${format} Save cancellation preserves Library and Save publishes a durable receipt`, async () => {
+    test.setTimeout(480000);
+    const root = await realpath(await mkdtemp(join(tmpdir(), "oc-native-save-")));
     try {
-      const endpoint = `http://127.0.0.1:${address.port}`;
-      await expect
-        .poll(
-          () => {
-            assertAlive();
-            return fetch(`${endpoint}/json/version`).then(
-              (response) => response.ok,
-              () => false,
-            );
-          },
-          { timeout: 120000 },
-        )
-        .toBe(true);
-      const browser = await chromium.connectOverCDP(endpoint);
+      const stateRoot = join(root, "state");
+      await (await openNetworkMode(stateRoot)).setOffline(true);
+      const library = await openProjectLibrary({ stateRoot });
+      const envelope = ProjectEnvelopeSchema.parse(
+        JSON.parse(
+          await readFile("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8"),
+        ),
+      );
+      envelope.payload = leadSheetProject();
+      await library.createProject({ envelope, records: goldenRecords() });
+      const preservedTarget = join(root, `preserved.${format}`);
+      await writeFile(preservedTarget, "preserve existing external file");
+      const target = join(root, `native-score.${format}`);
+      await extractZip(
+        join(
+          process.cwd(),
+          "out",
+          "make",
+          "zip",
+          process.platform,
+          process.arch,
+          `Open Chords-${process.platform}-${process.arch}-0.0.0.zip`,
+        ),
+        { dir: join(root, "installed") },
+      );
+      const windows = process.env.SystemRoot ?? process.env.WINDIR;
+      if (!windows) throw new Error("Windows OS directory unavailable");
+      const env: NodeJS.ProcessEnv = {};
+      for (const key of [
+        "SystemRoot",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+      ])
+        if (process.env[key]) env[key] = process.env[key];
+      env.PATH = [
+        join(windows, "System32", "WindowsPowerShell", "v1.0"),
+        join(windows, "System32"),
+        windows,
+      ].join(";");
+      const server = createServer();
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Debug port unavailable");
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      const child = spawn(
+        join(root, "installed", "Open Chords.exe"),
+        [`--user-data-dir=${stateRoot}`, `--remote-debugging-port=${address.port}`],
+        { env, stdio: "ignore" },
+      );
+      let failed = false;
+      child.on("error", () => {
+        failed = true;
+      });
+      const assertAlive = () => {
+        if (failed || child.exitCode !== null || child.signalCode !== null)
+          throw new Error("Installed native Save application exited");
+      };
+      const drive = (scenario: "cancel" | "cancel_existing" | "save") =>
+        new Promise<unknown>((resolve, reject) => {
+          const started = performance.now();
+          execFile(
+            join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-File",
+              join(process.cwd(), "tests", "support", "installed-save-windows.ps1"),
+              "-ApplicationPid",
+              String(child.pid),
+              "-Scenario",
+              scenario,
+              "-Format",
+              format,
+              "-TargetPath",
+              scenario === "cancel_existing" ? preservedTarget : target,
+            ],
+            { env, timeout: 100000, maxBuffer: 65536 },
+            (error, stdout, stderr) => {
+              if (error) {
+                reject(
+                  new Error(
+                    installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
+                  ),
+                );
+                return;
+              }
+              try {
+                resolve(JSON.parse(stdout.trim()));
+              } catch {
+                reject(new Error("Installed native Save driver returned invalid evidence"));
+              }
+            },
+          );
+        });
       try {
-        const context = browser.contexts()[0]!;
+        const endpoint = `http://127.0.0.1:${address.port}`;
         await expect
           .poll(
             () => {
               assertAlive();
-              return context.pages().some((page) => page.url().startsWith("open-chords://"));
+              return fetch(`${endpoint}/json/version`).then(
+                (response) => response.ok,
+                () => false,
+              );
             },
             { timeout: 120000 },
           )
           .toBe(true);
-        const page = context
-          .pages()
-          .find((candidate) => candidate.url().startsWith("open-chords://"))!;
-        await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
-        const baseline = await proofTreeHashes(library.activeRoot);
-        await page.getByRole("button", { name: "Export Project", exact: true }).click();
-        await page.getByRole("button", { name: "Save JSON", exact: true }).click();
-        expect(await drive("cancel")).toEqual({
-          action: "cancel",
-          filenameSet: false,
-          nativeClick: true,
-          defaultNameValid: true,
-        });
-        await expect(page.getByText("Export cancelled", { exact: true })).toBeVisible();
-        expect(await proofTreeHashes(library.activeRoot)).toEqual(baseline);
-        expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
-        await page.getByRole("button", { name: "Save JSON", exact: true }).click();
-        expect(await drive("cancel_existing")).toEqual({
-          action: "cancel_existing",
-          filenameSet: true,
-          nativeClick: true,
-          defaultNameValid: true,
-        });
-        await expect(page.getByText("Export cancelled", { exact: true })).toBeVisible();
-        expect(await proofTreeHashes(library.activeRoot)).toEqual(baseline);
-        expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
-        await page.getByRole("button", { name: "Save JSON", exact: true }).click();
-        expect(await drive("save")).toEqual({
-          action: "save",
-          filenameSet: true,
-          nativeClick: true,
-          defaultNameValid: true,
-        });
-        await expect(page.getByText("Export saved", { exact: true })).toBeVisible({
-          timeout: 60000,
-        });
-        await expect(page.getByText("native-score.json", { exact: true })).toBeVisible();
-        const cdp = await browser.newBrowserCDPSession();
-        void cdp.send("Browser.close").catch(() => undefined);
-        await expect
-          .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
-          .toBe(true);
+        const browser = await chromium.connectOverCDP(endpoint);
+        try {
+          const context = browser.contexts()[0]!;
+          await expect
+            .poll(
+              () => {
+                assertAlive();
+                return context.pages().some((page) => page.url().startsWith("open-chords://"));
+              },
+              { timeout: 120000 },
+            )
+            .toBe(true);
+          const page = context
+            .pages()
+            .find((candidate) => candidate.url().startsWith("open-chords://"))!;
+          await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
+          const baseline = await proofTreeHashes(library.activeRoot);
+          await page.getByRole("button", { name: "Export Project", exact: true }).click();
+          await page
+            .getByRole("button", {
+              name: format === "json" ? "Save JSON" : "Save LRC",
+              exact: true,
+            })
+            .click();
+          expect(await drive("cancel")).toEqual({
+            action: "cancel",
+            filenameSet: false,
+            nativeClick: true,
+            defaultNameValid: true,
+          });
+          await expect(page.getByText("Export cancelled", { exact: true })).toBeVisible();
+          expect(await proofTreeHashes(library.activeRoot)).toEqual(baseline);
+          expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
+          await page
+            .getByRole("button", {
+              name: format === "json" ? "Save JSON" : "Save LRC",
+              exact: true,
+            })
+            .click();
+          expect(await drive("cancel_existing")).toEqual({
+            action: "cancel_existing",
+            filenameSet: true,
+            nativeClick: true,
+            defaultNameValid: true,
+          });
+          await expect(page.getByText("Export cancelled", { exact: true })).toBeVisible();
+          expect(await proofTreeHashes(library.activeRoot)).toEqual(baseline);
+          expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
+          await page
+            .getByRole("button", {
+              name: format === "json" ? "Save JSON" : "Save LRC",
+              exact: true,
+            })
+            .click();
+          expect(await drive("save")).toEqual({
+            action: "save",
+            filenameSet: true,
+            nativeClick: true,
+            defaultNameValid: true,
+          });
+          await expect(page.getByText("Export saved", { exact: true })).toBeVisible({
+            timeout: 60000,
+          });
+          await expect(page.getByText(`native-score.${format}`, { exact: true })).toBeVisible();
+          const cdp = await browser.newBrowserCDPSession();
+          void cdp.send("Browser.close").catch(() => undefined);
+          await expect
+            .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
+            .toBe(true);
+        } finally {
+          await browser.close();
+        }
       } finally {
-        await browser.close();
+        if (!failed && child.exitCode === null && child.signalCode === null) {
+          child.kill();
+          await expect
+            .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
+            .toBe(true);
+        }
       }
+      const bytes = await readFile(target);
+      const snapshot = captureJsonExport(envelope.payload, { presentation: "current" });
+      expect(bytes.toString()).toBe(
+        format === "json"
+          ? serializeJsonExport(snapshot)
+          : "[ti:project_golden]\n[00:00.41]home go\n",
+      );
+      const omissions =
+        format === "json"
+          ? [...snapshot.omissions].sort()
+          : [
+              "analysis_provenance_not_represented",
+              "confidence_not_represented",
+              "edit_history_not_represented",
+              "line_end_timing_not_represented",
+              "lrc_line_coverage:1/2",
+              "lrc_line_omitted:unmatched:line_first",
+              "lyrics_mismatch_not_represented",
+              "lyrics_notices_not_represented",
+              "sample_timing_not_represented",
+              "stable_identity_not_represented",
+              "support_claim_descriptions_omitted",
+              "unrecognized_lyrics_reference_omitted",
+              "word_timing_not_represented",
+            ];
+      const reopened = await openProjectLibrary({ stateRoot });
+      const receipts = reopened.listExportReceipts("project_golden");
+      expect(receipts.length).toBe(1);
+      expect(
+        receipts[0]?.outputLocation === target,
+        "Receipt must retain the exact destination",
+      ).toBe(true);
+      expect(
+        receipts.map(({ format: receiptFormat, outputHash, omissions: receiptOmissions }) => ({
+          format: receiptFormat,
+          outputHash,
+          omissions: receiptOmissions,
+        })),
+      ).toEqual([
+        {
+          format: format === "json" ? "open_chords_json" : "lrc",
+          omissions,
+          outputHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+        },
+      ]);
+      expect((await reopened.readProject("project_golden")).revisions.at(-1)?.reason).toBe(
+        "edit_transaction",
+      );
+      expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
+      expect((await openNetworkMode(stateRoot)).offline).toBe(true);
     } finally {
-      if (!failed && child.exitCode === null && child.signalCode === null) {
-        child.kill();
-        await expect
-          .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
-          .toBe(true);
-      }
+      await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });
     }
-    const bytes = await readFile(target);
-    expect(bytes.toString()).toBe(
-      serializeJsonExport(captureJsonExport(envelope.payload, { presentation: "current" })),
-    );
-    const reopened = await openProjectLibrary({ stateRoot });
-    const receipts = reopened.listExportReceipts("project_golden");
-    expect(receipts.length).toBe(1);
-    expect(
-      receipts[0]?.outputLocation === target,
-      "Receipt must retain the exact destination",
-    ).toBe(true);
-    expect(receipts.map(({ format, outputHash }) => ({ format, outputHash }))).toEqual([
-      {
-        format: "open_chords_json",
-        outputHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
-      },
-    ]);
-    expect((await reopened.readProject("project_golden")).revisions.at(-1)?.reason).toBe(
-      "edit_transaction",
-    );
-    expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
-    expect((await openNetworkMode(stateRoot)).offline).toBe(true);
-  } finally {
-    await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });
-  }
-});
+  });
+}
