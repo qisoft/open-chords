@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,13 +17,14 @@ import {
   writePortableProjectArchive,
 } from "../../apps/desktop/src/main/project-archive-format.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
+import { prepareArchiveProofFixture } from "../support/archive-proof-fixture.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
 
 test.skip(process.platform !== "win32", "Windows native Open dialog");
 
-test("installed Windows native archive Open preserves cancellation, imports once and cold-reopens the portable Project", async () => {
+test("installed Windows native archive Open preserves cancellation, rejects hostile input and cold-reopens the portable Project", async () => {
   test.setTimeout(480000);
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-native-open-")));
   try {
@@ -41,6 +42,11 @@ test("installed Windows native archive Open preserves cancellation, imports once
     const target = join(root, "fixture.ocarchive");
     await writeFile(target, archive);
     const archiveHash = createHash("sha256").update(archive).digest("hex");
+    const hostileState = join(root, "hostile-fixture");
+    await prepareArchiveProofFixture(hostileState);
+    const hostileBaseline = await proofTreeHashes(hostileState);
+    const marker = join(root, "external-marker.txt");
+    await writeFile(marker, "preserved external native archive bytes");
     const stateRoot = join(root, "state");
     await (await openNetworkMode(stateRoot)).setOffline(true);
     const library = await openProjectLibrary({ stateRoot });
@@ -93,7 +99,7 @@ test("installed Windows native archive Open preserves cancellation, imports once
       if (failed || child.exitCode !== null || child.signalCode !== null)
         throw new Error("Installed native Open application exited");
     };
-    const drive = (scenario: "cancel_open" | "open") =>
+    const drive = (scenario: "cancel_open" | "open", selectedPath = target) =>
       new Promise<unknown>((resolve, reject) => {
         const started = performance.now();
         execFile(
@@ -110,7 +116,7 @@ test("installed Windows native archive Open preserves cancellation, imports once
             "-Format",
             "archive",
             "-TargetPath",
-            target,
+            selectedPath,
           ],
           { env, timeout: 100000, maxBuffer: 65536 },
           (error, stdout, stderr) => {
@@ -198,6 +204,42 @@ test("installed Windows native archive Open preserves cancellation, imports once
           { timeout: 60000 },
         );
         expect(await proofTreeHashes(library.activeRoot)).toEqual(importedBaseline);
+        for (const [name, reason] of [
+          ["traversal", "it contains unsafe file paths"],
+          ["link", "it contains links or special files"],
+          ["collision", "two entries have colliding names"],
+          ["executable", "it contains executable or script content"],
+          ["hash", "a file does not match its recorded hash"],
+          ["future", "it was written by a newer or unsupported version"],
+          ["size", "it exceeds the archive size limits"],
+          ["encrypted", "it contains encrypted entries"],
+        ] as const) {
+          await test.step(`Native Open rejects ${name} without durable changes`, async () => {
+            await importButton.click();
+            expect(
+              await drive("open", join(hostileState, "archive-proof-input", `${name}.ocarchive`)),
+            ).toEqual({
+              action: "open",
+              filenameSet: true,
+              nativeClick: true,
+              dialogDismissed: true,
+              defaultNameValid: false,
+            });
+            const alert = page.getByTestId("archives.import.alert");
+            await expect(alert).toHaveText(
+              `Archive rejected because ${reason}. Nothing was imported.`,
+              { timeout: 60000 },
+            );
+            const message = await alert.textContent();
+            expect(message?.includes(root)).toBe(false);
+            expect(message?.includes(JSON.stringify(root).slice(1, -1))).toBe(false);
+            expect(await proofTreeHashes(library.activeRoot)).toEqual(importedBaseline);
+            expect(await proofTreeHashes(hostileState)).toEqual(hostileBaseline);
+            expect(await readFile(marker, "utf8")).toBe("preserved external native archive bytes");
+            for (const escaped of [join(root, "escape.json"), join(stateRoot, "escape.json")])
+              await expect(lstat(escaped)).rejects.toMatchObject({ code: "ENOENT" });
+          });
+        }
         const cdp = await browser.newBrowserCDPSession();
         void cdp.send("Browser.close").catch(() => undefined);
         await expect
@@ -224,6 +266,8 @@ test("installed Windows native archive Open preserves cancellation, imports once
     ).toBe(true);
     expect(reopened.listExportReceipts("project_golden").length).toBe(0);
     expect((await openNetworkMode(stateRoot)).offline).toBe(true);
+    expect(await proofTreeHashes(hostileState)).toEqual(hostileBaseline);
+    expect(await readFile(marker, "utf8")).toBe("preserved external native archive bytes");
     expect(
       createHash("sha256")
         .update(await readFile(target))
