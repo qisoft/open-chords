@@ -100,7 +100,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
         if (failed || child.exitCode !== null || child.signalCode !== null)
           throw new Error("Installed native Save application exited");
       };
-      const drive = (scenario: "cancel" | "cancel_existing" | "save") =>
+      const drive = (scenario: "cancel" | "cancel_existing" | "save" | "open") =>
         new Promise<unknown>((resolve, reject) => {
           const started = performance.now();
           execFile(
@@ -218,6 +218,36 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
             timeout: 60000,
           });
           await expect(page.getByText(`native-score.${extension}`, { exact: true })).toBeVisible();
+          if (format === "archive") {
+            await test.step("Native Open recognizes the installed native Save archive without changes", async () => {
+              const savedBaseline = await proofTreeHashes(library.activeRoot);
+              const savedHash = createHash("sha256")
+                .update(await readFile(target))
+                .digest("hex");
+              await page.getByTestId("archives.import.button").click();
+              expect(await drive("open")).toEqual({
+                action: "open",
+                filenameSet: true,
+                nativeClick: true,
+                dialogDismissed: true,
+                defaultNameValid: false,
+              });
+              await expect(page.getByTestId("archives.import.status")).toContainText(
+                "This Library already contains this exact Project history.",
+                { timeout: 60000 },
+              );
+              await expect(page.getByTestId("archives.import.alert")).toHaveCount(0);
+              expect(await proofTreeHashes(library.activeRoot)).toEqual(savedBaseline);
+              expect(
+                createHash("sha256")
+                  .update(await readFile(target))
+                  .digest("hex"),
+              ).toBe(savedHash);
+              expect(await readFile(preservedTarget, "utf8")).toBe(
+                "preserve existing external file",
+              );
+            });
+          }
           const cdp = await browser.newBrowserCDPSession();
           void cdp.send("Browser.close").catch(() => undefined);
           await expect
