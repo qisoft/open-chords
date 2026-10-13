@@ -24,7 +24,7 @@ import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnos
 
 test.skip(process.platform !== "win32", "Windows native Open dialog");
 
-test("installed Windows native archive Open preserves cancellation, rejects hostile input and cold-reopens the portable Project", async () => {
+test("installed Windows native archive Open preserves cancellation, rejects hostile input, recovers and cold-reopens both portable Projects", async () => {
   test.setTimeout(480000);
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-native-open-")));
   try {
@@ -42,6 +42,17 @@ test("installed Windows native archive Open preserves cancellation, rejects host
     const target = join(root, "fixture.ocarchive");
     await writeFile(target, archive);
     const archiveHash = createHash("sha256").update(archive).digest("hex");
+    const recoveryEnvelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(JSON.stringify(envelope).replaceAll("project_golden", "project_recovery")),
+    );
+    await source.createProject({ envelope: recoveryEnvelope, records: goldenRecords() });
+    const recoveryExpected = archivedProjectFor(
+      await source.readProject("project_recovery"),
+    ).document;
+    const recoveryArchive = writePortableProjectArchive({ document: recoveryExpected }).archive;
+    const recoveryTarget = join(root, "recovery.ocarchive");
+    await writeFile(recoveryTarget, recoveryArchive);
+    const recoveryHash = createHash("sha256").update(recoveryArchive).digest("hex");
     const hostileState = join(root, "hostile-fixture");
     await prepareArchiveProofFixture(hostileState);
     const hostileBaseline = await proofTreeHashes(hostileState);
@@ -240,6 +251,21 @@ test("installed Windows native archive Open preserves cancellation, rejects host
               await expect(lstat(escaped)).rejects.toMatchObject({ code: "ENOENT" });
           });
         }
+        await test.step("Native Open recovers with a different valid Project after all refusals", async () => {
+          await importButton.click();
+          expect(await drive("open", recoveryTarget)).toEqual({
+            action: "open",
+            filenameSet: true,
+            nativeClick: true,
+            dialogDismissed: true,
+            defaultNameValid: false,
+          });
+          await expect(status).toContainText("Project imported.", { timeout: 60000 });
+          await expect(page.getByTestId("archives.import.alert")).toHaveCount(0);
+          await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
+          expect(await proofTreeHashes(hostileState)).toEqual(hostileBaseline);
+          expect(await readFile(marker, "utf8")).toBe("preserved external native archive bytes");
+        });
         const cdp = await browser.newBrowserCDPSession();
         void cdp.send("Browser.close").catch(() => undefined);
         await expect
@@ -257,7 +283,7 @@ test("installed Windows native archive Open preserves cancellation, rejects host
       }
     }
     const reopened = await openProjectLibrary({ stateRoot });
-    expect(reopened.listProjects().length).toBe(1);
+    expect(reopened.listProjects().length).toBe(2);
     expect(
       canonicalSerialize(
         archivedProjectFor(await reopened.readProject("project_golden")).document,
@@ -265,6 +291,18 @@ test("installed Windows native archive Open preserves cancellation, rejects host
       "Cold Project must match the portable envelope and records",
     ).toBe(true);
     expect(reopened.listExportReceipts("project_golden").length).toBe(0);
+    expect(
+      canonicalSerialize(
+        archivedProjectFor(await reopened.readProject("project_recovery")).document,
+      ) === canonicalSerialize(recoveryExpected),
+      "Cold recovery Project must match its portable envelope and records",
+    ).toBe(true);
+    expect(reopened.listExportReceipts("project_recovery").length).toBe(0);
+    expect(
+      createHash("sha256")
+        .update(await readFile(recoveryTarget))
+        .digest("hex"),
+    ).toBe(recoveryHash);
     expect((await openNetworkMode(stateRoot)).offline).toBe(true);
     expect(await proofTreeHashes(hostileState)).toEqual(hostileBaseline);
     expect(await readFile(marker, "utf8")).toBe("preserved external native archive bytes");
