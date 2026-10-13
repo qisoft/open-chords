@@ -1,8 +1,12 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive')][string]$Format = 'json')
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'open')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive')][string]$Format = 'json')
 $ErrorActionPreference = 'Stop'
+$isImport = $Scenario -in @('cancel_open', 'open')
+$setFilename = $Scenario -in @('cancel_existing', 'save', 'open')
+if ($isImport -and $Format -ne 'archive') { throw 'Native import format unavailable' }
 $extension = if ($Format -eq 'chordpro') { 'cho' } elseif ($Format -eq 'archive') { 'ocarchive' } else { $Format }
 $expectedFilename = 'Open Chords.' + $extension
 $expectedTitle = switch ($Format) { 'json' { 'Export Open Chords JSON' }; 'lrc' { 'Export LRC lyrics' }; 'chordpro' { 'Export ChordPro' }; 'pdf' { 'Export PDF lead sheet' }; 'archive' { 'Export Portable Project Archive' } }
+if ($isImport) { $expectedTitle = 'Import Portable Project Archive' }
 $maxWindows = 0
 $maxElements = 0
 $fileNames = 0
@@ -39,7 +43,7 @@ using System.Text;
 public static class SaveNativeInput {
   private static string ExpectedFilename = "Open Chords.json";
   private static string ExpectedTitle = "Export Open Chords JSON";
-  public static void ConfigureFormat(string format) {
+  public static void ConfigureFormat(string format, bool import) {
     switch (format) {
       case "json": ExpectedFilename = "Open Chords.json"; ExpectedTitle = "Export Open Chords JSON"; break;
       case "lrc": ExpectedFilename = "Open Chords.lrc"; ExpectedTitle = "Export LRC lyrics"; break;
@@ -47,6 +51,10 @@ public static class SaveNativeInput {
       case "pdf": ExpectedFilename = "Open Chords.pdf"; ExpectedTitle = "Export PDF lead sheet"; break;
       case "archive": ExpectedFilename = "Open Chords.ocarchive"; ExpectedTitle = "Export Portable Project Archive"; break;
       default: throw new InvalidOperationException("Native Save format unavailable");
+    }
+    if (import) {
+      if (format != "archive") throw new InvalidOperationException("Native import format unavailable");
+      ExpectedTitle = "Import Portable Project Archive";
     }
   }
   [StructLayout(LayoutKind.Sequential)]
@@ -277,7 +285,7 @@ public static class SaveNativeInput {
 }
 '@
 
-[SaveNativeInput]::ConfigureFormat($Format)
+[SaveNativeInput]::ConfigureFormat($Format, $isImport)
 Write-NativeSaveProbe 'root'
 Write-NativeSaveProbe 'ready'
 $stage = 'discovery'
@@ -317,7 +325,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $fileNameValue = $null
     $nativeFilenameHandle = [IntPtr]::Zero
     $button = $null
-    $buttonName = if ($Scenario -eq 'save') { 'Save' } else { 'Cancel' }
+    $buttonName = if ($Scenario -eq 'open') { 'Open' } elseif ($Scenario -eq 'save') { 'Save' } else { 'Cancel' }
     $editTypes = 0
     $buttonTypes = 0
     $fileLabels = 0
@@ -429,8 +437,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $currentFilename = if ($nativeFilenameHandle -ne [IntPtr]::Zero) { [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid) } else { $value.Current.Value }
     $defaultKind = if ($currentFilename -ceq $expectedFilename) { 'expected' } elseif ($currentFilename -ceq 'Open Chords') { 'basename' } elseif ($currentFilename -ceq ('Open Chords..' + $extension)) { 'double_dot' } elseif ($currentFilename -ceq ($expectedFilename + '.' + $extension)) { 'double_extension' } elseif ([string]::IsNullOrEmpty($currentFilename)) { 'empty' } else { 'other' }
     [Console]::Error.WriteLine("Native Save default probe: value=$defaultKind")
-    if ($currentFilename -cne $expectedFilename) { throw 'default_filename_invalid' }
-    if ($Scenario -ne 'cancel') {
+    if (!$isImport -and $currentFilename -cne $expectedFilename) { throw 'default_filename_invalid' }
+    if ($setFilename) {
       $stage = 'filename_set'
       if ([string]::IsNullOrWhiteSpace($TargetPath)) { throw 'target_missing' }
       if ($null -ne $value -and $value.Current.IsReadOnly) { throw 'filename_readonly' }
@@ -458,7 +466,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
     [SaveNativeInput]::WaitForDismissal($dialogHandle)
-    ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = ($Scenario -ne 'cancel'); nativeClick = $true; dialogDismissed = $true; defaultNameValid = $true } -Compress
+    ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $setFilename; nativeClick = $true; dialogDismissed = $true; defaultNameValid = (!$isImport) } -Compress
     exit 0
   }
   Start-Sleep -Milliseconds 100
