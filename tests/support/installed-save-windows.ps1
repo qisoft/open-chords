@@ -1,5 +1,7 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save')][string]$Scenario, [string]$TargetPath)
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc')][string]$Format = 'json')
 $ErrorActionPreference = 'Stop'
+$expectedFilename = if ($Format -eq 'lrc') { 'Open Chords.lrc' } else { 'Open Chords.json' }
+$expectedTitle = if ($Format -eq 'lrc') { 'Export LRC lyrics' } else { 'Export Open Chords JSON' }
 $maxWindows = 0
 $maxElements = 0
 $fileNames = 0
@@ -34,6 +36,12 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class SaveNativeInput {
+  private static string ExpectedFilename = "Open Chords.json";
+  private static string ExpectedTitle = "Export Open Chords JSON";
+  public static void ConfigureLrc(bool lrc) {
+    ExpectedFilename = lrc ? "Open Chords.lrc" : "Open Chords.json";
+    ExpectedTitle = lrc ? "Export LRC lyrics" : "Export Open Chords JSON";
+  }
   [StructLayout(LayoutKind.Sequential)]
   private struct Point { public int x, y; }
   [StructLayout(LayoutKind.Sequential)]
@@ -93,7 +101,7 @@ public static class SaveNativeInput {
       UIntPtr textResult;
       bool textRead = SendMessageTimeout(window, 0x000D, (UIntPtr)(uint)text.Capacity, text, 2, 50, out textResult) != IntPtr.Zero;
       string category = kind.ToString() == "Edit" ? "edit" : kind.ToString() == "ComboBox" ? "combo" : kind.ToString() == "Static" ? "static" : "other";
-      string value = !textRead ? "unavailable" : text.ToString() == "Open Chords.json" ? "default" : text.Length == 0 ? "empty" : "other";
+      string value = !textRead ? "unavailable" : text.ToString() == ExpectedFilename ? "default" : text.Length == 0 ? "empty" : "other";
       int id = GetDlgCtrlID(window);
       if (id < -1 || id > 999999) id = -1;
       output.AppendLine("Native Save child probe: id=" + id + " class=" + category + " text=" + value + " eligible=" +
@@ -116,7 +124,7 @@ public static class SaveNativeInput {
       owned++;
       var title = new StringBuilder(256);
       GetWindowText(window, title, title.Capacity);
-      if (title.ToString() == "Export Open Chords JSON") expectedTitles++;
+      if (title.ToString() == ExpectedTitle) expectedTitles++;
       if (title.ToString() == "Save As") saveAsTitles++;
       var kind = new StringBuilder(64);
       GetClassName(window, kind, kind.Capacity);
@@ -145,7 +153,7 @@ public static class SaveNativeInput {
       var kind = new StringBuilder(64);
       GetWindowText(window, title, title.Capacity);
       GetClassName(window, kind, kind.Capacity);
-      if (title.ToString() == "Export Open Chords JSON" && kind.ToString() == "#32770") {
+      if (title.ToString() == ExpectedTitle && kind.ToString() == "#32770") {
         matches++;
         result = window;
       }
@@ -255,6 +263,7 @@ public static class SaveNativeInput {
 }
 '@
 
+[SaveNativeInput]::ConfigureLrc($Format -eq 'lrc')
 Write-NativeSaveProbe 'root'
 Write-NativeSaveProbe 'ready'
 $stage = 'discovery'
@@ -280,7 +289,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
   Write-NativeSaveProbe 'windows_read'
   foreach ($window in $windows) {
     Write-NativeSaveProbe 'window_properties'
-    if ($window.Current.Name -ne 'Export Open Chords JSON') { continue }
+    if ($window.Current.Name -cne $expectedTitle) { continue }
     if (!$childSnapshotTaken) {
       [Console]::Error.WriteLine([SaveNativeInput]::ProbeChildren([IntPtr]$window.Current.NativeWindowHandle, [uint32]$ApplicationPid))
       $childSnapshotTaken = $true
@@ -329,12 +338,12 @@ while ([DateTime]::UtcNow -lt $deadline) {
           if ($candidateCount -le 64) {
             $identifier = $element.Current.AutomationId
             if ($identifier -notmatch '^[0-9]{1,6}$' -and $identifier -notin @('FileNameControlHost', 'FileNameControl')) { $identifier = 'none' }
-            $nameKind = if ($element.Current.Name -eq 'File name:') { 'filename' } elseif ($element.Current.Name -eq 'Open Chords.json') { 'default' } elseif ($element.Current.Name -eq 'File name') { 'filename_plain' } elseif ([string]::IsNullOrEmpty($element.Current.Name)) { 'empty' } else { 'other' }
+            $nameKind = if ($element.Current.Name -eq 'File name:') { 'filename' } elseif ($element.Current.Name -ceq $expectedFilename) { 'default' } elseif ($element.Current.Name -eq 'File name') { 'filename_plain' } elseif ([string]::IsNullOrEmpty($element.Current.Name)) { 'empty' } else { 'other' }
             $valueKind = 'unsupported'
             $readOnly = 'none'
             if ($hasValue) {
               $readOnly = if ($snapshotValue.Current.IsReadOnly) { 'true' } else { 'false' }
-              $valueKind = if ($snapshotValue.Current.Value -eq 'Open Chords.json') { 'default' } elseif ([string]::IsNullOrEmpty($snapshotValue.Current.Value)) { 'empty' } else { 'other' }
+              $valueKind = if ($snapshotValue.Current.Value -ceq $expectedFilename) { 'default' } elseif ([string]::IsNullOrEmpty($snapshotValue.Current.Value)) { 'empty' } else { 'other' }
             }
             $eligible = if (!$element.Current.IsOffscreen -and $element.Current.IsEnabled) { 'true' } else { 'false' }
             [Console]::Error.WriteLine("Native Save candidate probe: type=$($element.Current.ControlType.Id) id=$identifier name=$nameKind value=$valueKind readonly=$readOnly eligible=$eligible")
@@ -404,9 +413,9 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $value = $fileNameValue
     Write-NativeSaveProbe 'value_read'
     $currentFilename = if ($nativeFilenameHandle -ne [IntPtr]::Zero) { [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid) } else { $value.Current.Value }
-    $defaultKind = if ($currentFilename -ceq 'Open Chords.json') { 'expected' } elseif ($currentFilename -ceq 'Open Chords') { 'basename' } elseif ($currentFilename -ceq 'Open Chords..json') { 'double_dot' } elseif ($currentFilename -ceq 'Open Chords.json.json') { 'double_extension' } elseif ([string]::IsNullOrEmpty($currentFilename)) { 'empty' } else { 'other' }
+    $defaultKind = if ($currentFilename -ceq $expectedFilename) { 'expected' } elseif ($currentFilename -ceq 'Open Chords') { 'basename' } elseif ($currentFilename -ceq ('Open Chords..' + $Format)) { 'double_dot' } elseif ($currentFilename -ceq ($expectedFilename + '.' + $Format)) { 'double_extension' } elseif ([string]::IsNullOrEmpty($currentFilename)) { 'empty' } else { 'other' }
     [Console]::Error.WriteLine("Native Save default probe: value=$defaultKind")
-    if ($currentFilename -cne 'Open Chords.json') { throw 'default_filename_invalid' }
+    if ($currentFilename -cne $expectedFilename) { throw 'default_filename_invalid' }
     if ($Scenario -ne 'cancel') {
       $stage = 'filename_set'
       if ([string]::IsNullOrWhiteSpace($TargetPath)) { throw 'target_missing' }
