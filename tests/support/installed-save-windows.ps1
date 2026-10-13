@@ -224,6 +224,14 @@ public static class SaveNativeInput {
         !IsWindowVisible(window) || !IsWindowEnabled(window))
       throw new InvalidOperationException("Native Save input target unavailable");
     SetForegroundWindow(window);
+    var activation = System.Diagnostics.Stopwatch.StartNew();
+    while (activation.ElapsedMilliseconds < 1000) {
+      if (!OwnedByApplication(window, expectedProcessId) || !IsWindowVisible(window) || !IsWindowEnabled(window))
+        throw new InvalidOperationException("Native Save input target unavailable");
+      if (GetForegroundWindow() == window && GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2) == window)
+        break;
+      System.Threading.Thread.Sleep(20);
+    }
     if (GetForegroundWindow() != window)
       throw new InvalidOperationException("Native Save foreground refused");
     var pointRoot = GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2);
