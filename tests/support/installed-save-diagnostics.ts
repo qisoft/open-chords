@@ -27,7 +27,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const counters = output
     .split(/\r?\n/)
     .find((line) =>
-      /^native_save_failed code=(?:unknown|filename_unavailable|filename_pattern_unavailable|filename_ambiguous|default_filename_invalid|filename_readonly|filename_not_set|action_ambiguous|target_missing|action_bounds|deadline|window_bound|element_bound|filename_dialog_unavailable|filename_scan_ambiguous|input_refused|input_not_delivered|filename_target_changed|filename_read_unavailable|input_architecture_unsupported|filename_input_bound|filename_bounds_unavailable|filename_focus_refused|filename_input_not_delivered) stage=(?:setup|discovery|default_filename|filename_set|native_input) windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9} fallback_misses=[0-9]{1,6}$/.test(
+      /^native_save_failed code=(?:unknown|filename_unavailable|filename_pattern_unavailable|filename_ambiguous|default_filename_invalid|filename_readonly|filename_not_set|action_ambiguous|target_missing|action_bounds|deadline|window_bound|element_bound|filename_dialog_unavailable|filename_scan_ambiguous|input_refused|input_not_delivered|filename_target_changed|filename_read_unavailable|input_architecture_unsupported|filename_input_bound|filename_bounds_unavailable|filename_focus_refused|filename_input_not_delivered|input_target_unavailable|input_foreground_refused|input_point_refused|input_cursor_refused) stage=(?:setup|discovery|default_filename|filename_set|native_input) windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9} fallback_misses=[0-9]{1,6}$/.test(
         line,
       ),
     );
@@ -43,6 +43,13 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     .split(/\r?\n/)
     .find((line) =>
       /^Native Save default probe: value=(?:expected|basename|double_dot|double_extension|empty|other)$/.test(
+        line,
+      ),
+    );
+  const pointProbe = output
+    .split(/\r?\n/)
+    .find((line) =>
+      /^Native Save point probe: inside_dialog=(?:true|false) hit=(?:none|owned_other|foreign) awareness=(?:-1|0|1|2)$/.test(
         line,
       ),
     );
@@ -83,6 +90,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...candidates,
     ...children,
     ...(defaultProbe ? [defaultProbe] : []),
+    ...(pointProbe ? [pointProbe] : []),
     ...(counters ? [counters] : []),
   ].join("\n");
 }

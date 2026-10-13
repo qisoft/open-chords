@@ -85,7 +85,7 @@ test("installed Windows native Save cancellation preserves Library and Save publ
       if (failed || child.exitCode !== null || child.signalCode !== null)
         throw new Error("Installed native Save application exited");
     };
-    const drive = (scenario: "cancel" | "save") =>
+    const drive = (scenario: "cancel" | "cancel_existing" | "save") =>
       new Promise<unknown>((resolve, reject) => {
         const started = performance.now();
         execFile(
@@ -100,7 +100,7 @@ test("installed Windows native Save cancellation preserves Library and Save publ
             "-Scenario",
             scenario,
             "-TargetPath",
-            target,
+            scenario === "cancel_existing" ? preservedTarget : target,
           ],
           { env, timeout: 100000, maxBuffer: 65536 },
           (error, stdout, stderr) => {
@@ -156,6 +156,16 @@ test("installed Windows native Save cancellation preserves Library and Save publ
         expect(await drive("cancel")).toEqual({
           action: "cancel",
           filenameSet: false,
+          nativeClick: true,
+          defaultNameValid: true,
+        });
+        await expect(page.getByText("Export cancelled", { exact: true })).toBeVisible();
+        expect(await proofTreeHashes(library.activeRoot)).toEqual(baseline);
+        expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
+        await page.getByRole("button", { name: "Save JSON", exact: true }).click();
+        expect(await drive("cancel_existing")).toEqual({
+          action: "cancel_existing",
+          filenameSet: true,
           nativeClick: true,
           defaultNameValid: true,
         });

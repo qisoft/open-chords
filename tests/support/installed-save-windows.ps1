@@ -1,4 +1,4 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'save')][string]$Scenario, [string]$TargetPath)
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save')][string]$Scenario, [string]$TargetPath)
 $ErrorActionPreference = 'Stop'
 $maxWindows = 0
 $maxElements = 0
@@ -59,6 +59,8 @@ public static class SaveNativeInput {
     public Rect caretRect;
   }
   [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect bounds);
+  [DllImport("user32.dll")] private static extern IntPtr GetThreadDpiAwarenessContext();
+  [DllImport("user32.dll")] private static extern int GetAwarenessFromDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
   [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
   [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
@@ -222,9 +224,27 @@ public static class SaveNativeInput {
         !IsWindowVisible(window) || !IsWindowEnabled(window))
       throw new InvalidOperationException("Native Save input target unavailable");
     SetForegroundWindow(window);
-    if (GetForegroundWindow() != window ||
-        GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2) != window || !SetCursorPos(x, y))
-      throw new InvalidOperationException("Native Save dialog could not receive input");
+    var activation = System.Diagnostics.Stopwatch.StartNew();
+    while (activation.ElapsedMilliseconds < 1000) {
+      if (!OwnedByApplication(window, expectedProcessId) || !IsWindowVisible(window) || !IsWindowEnabled(window))
+        throw new InvalidOperationException("Native Save input target unavailable");
+      if (GetForegroundWindow() == window && GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2) == window)
+        break;
+      System.Threading.Thread.Sleep(20);
+    }
+    if (GetForegroundWindow() != window)
+      throw new InvalidOperationException("Native Save foreground refused");
+    var pointRoot = GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2);
+    if (pointRoot != window) {
+      Rect dialogBounds;
+      bool inside = GetWindowRect(window, out dialogBounds) && x >= dialogBounds.left && x < dialogBounds.right && y >= dialogBounds.top && y < dialogBounds.bottom;
+      string hit = pointRoot == IntPtr.Zero ? "none" : OwnedByApplication(pointRoot, expectedProcessId) ? "owned_other" : "foreign";
+      int awareness = GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+      Console.Error.WriteLine("Native Save point probe: inside_dialog=" + inside.ToString().ToLowerInvariant() + " hit=" + hit + " awareness=" + awareness);
+      throw new InvalidOperationException("Native Save point root refused");
+    }
+    if (!SetCursorPos(x, y))
+      throw new InvalidOperationException("Native Save cursor move refused");
     var inputs = new[] {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
       new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
@@ -274,7 +294,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $fileNameValue = $null
     $nativeFilenameHandle = [IntPtr]::Zero
     $button = $null
-    $buttonName = if ($Scenario -eq 'cancel') { 'Cancel' } else { 'Save' }
+    $buttonName = if ($Scenario -eq 'save') { 'Save' } else { 'Cancel' }
     $editTypes = 0
     $buttonTypes = 0
     $fileLabels = 0
@@ -387,7 +407,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $defaultKind = if ($currentFilename -ceq 'Open Chords.json') { 'expected' } elseif ($currentFilename -ceq 'Open Chords') { 'basename' } elseif ($currentFilename -ceq 'Open Chords..json') { 'double_dot' } elseif ($currentFilename -ceq 'Open Chords.json.json') { 'double_extension' } elseif ([string]::IsNullOrEmpty($currentFilename)) { 'empty' } else { 'other' }
     [Console]::Error.WriteLine("Native Save default probe: value=$defaultKind")
     if ($currentFilename -cne 'Open Chords.json') { throw 'default_filename_invalid' }
-    if ($Scenario -eq 'save') {
+    if ($Scenario -ne 'cancel') {
       $stage = 'filename_set'
       if ([string]::IsNullOrWhiteSpace($TargetPath)) { throw 'target_missing' }
       if ($null -ne $value -and $value.Current.IsReadOnly) { throw 'filename_readonly' }
@@ -397,14 +417,14 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $inputDeadline = [DateTime]::UtcNow.AddSeconds(2)
         do {
           $actualFilename = [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid)
-          if ($actualFilename -eq $TargetPath) { break }
+          if ($actualFilename -ceq $TargetPath) { break }
           Start-Sleep -Milliseconds 20
         } while ([DateTime]::UtcNow -lt $inputDeadline)
       } else {
         $value.SetValue($TargetPath)
         $actualFilename = $value.Current.Value
       }
-      if ($actualFilename -ne $TargetPath) { throw 'filename_not_set' }
+      if ($actualFilename -cne $TargetPath) { throw 'filename_not_set' }
     }
     $stage = 'native_input'
     Write-NativeSaveProbe 'native_input'
@@ -413,7 +433,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     [SaveNativeInput]::Click([IntPtr]$window.Current.NativeWindowHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
-    ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = ($Scenario -eq 'save'); nativeClick = $true; defaultNameValid = $true } -Compress
+    ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = ($Scenario -ne 'cancel'); nativeClick = $true; defaultNameValid = $true } -Compress
     exit 0
   }
   Start-Sleep -Milliseconds 100
@@ -429,6 +449,10 @@ throw 'deadline'
       'Native Save filename dialog unavailable' { $failureCode = 'filename_dialog_unavailable' }
       'Native Save filename discovery incomplete or ambiguous' { $failureCode = 'filename_scan_ambiguous' }
       'Native Save dialog could not receive input' { $failureCode = 'input_refused' }
+      'Native Save input target unavailable' { $failureCode = 'input_target_unavailable' }
+      'Native Save foreground refused' { $failureCode = 'input_foreground_refused' }
+      'Native Save point root refused' { $failureCode = 'input_point_refused' }
+      'Native Save cursor move refused' { $failureCode = 'input_cursor_refused' }
       'Native Save click was not delivered' { $failureCode = 'input_not_delivered' }
       'Native Save filename target changed' { $failureCode = 'filename_target_changed' }
       'Native Save filename read unavailable' { $failureCode = 'filename_read_unavailable' }

@@ -16,24 +16,36 @@ for (const [code, error] of [
   [-1, "autoplay_denied"],
 ] as const) {
   test(`YouTube provider error ${code} is normalized as ${error}`, async () => {
+    const started = performance.now();
+    const probe = (
+      stage: "launch" | "fixture" | "window" | "open_player" | "status" | "close" | "closed",
+    ) =>
+      console.log(
+        `YouTube error fixture probe: code=${code} stage=${stage} duration_ms=${Math.floor(performance.now() - started)}`,
+      );
     const root = mkdtempSync(join(tmpdir(), "open-chords-youtube-error-"));
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env))
       if (key !== "ELECTRON_RUN_AS_NODE" && value !== undefined) env[key] = value;
+    probe("launch");
     const application = await electron.launch({
       args: [join(import.meta.dirname, "../.."), `--user-data-dir=${root}`],
       env,
     });
     try {
+      probe("fixture");
       await installYouTubeProviderFixture(application.context(), code);
+      probe("window");
       const primary = await application.firstWindow();
       await expect(primary.getByRole("heading", { name: "Open a local recording" })).toBeVisible();
+      probe("open_player");
       await primary.evaluate(() =>
         window.openChords!.youtube.perform({
           type: "open_player",
           url: "https://youtu.be/aqz-KE-bpKQ",
         }),
       );
+      probe("status");
       await expect
         .poll(() => primary.evaluate(() => window.openChords!.youtube.perform({ type: "status" })))
         .toMatchObject({ type: "youtube.result", player: { state: "error", error } });
@@ -52,7 +64,9 @@ for (const [code, error] of [
         await expect(player.getByRole("status")).toHaveText("Playback: playing");
       }
     } finally {
+      probe("close");
       await test.step("Close Electron and its isolated player", () => application.close());
+      probe("closed");
       rmSync(root, { recursive: true, force: true });
     }
   });
