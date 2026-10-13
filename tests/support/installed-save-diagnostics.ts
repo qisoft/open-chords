@@ -46,6 +46,13 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
         line,
       ),
     );
+  const pointProbe = output
+    .split(/\r?\n/)
+    .find((line) =>
+      /^Native Save point probe: inside_dialog=(?:true|false) hit=(?:none|owned_other|foreign) awareness=(?:-1|0|1|2)$/.test(
+        line,
+      ),
+    );
   const controlProbes = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -83,6 +90,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...candidates,
     ...children,
     ...(defaultProbe ? [defaultProbe] : []),
+    ...(pointProbe ? [pointProbe] : []),
     ...(counters ? [counters] : []),
   ].join("\n");
 }

@@ -59,6 +59,8 @@ public static class SaveNativeInput {
     public Rect caretRect;
   }
   [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect bounds);
+  [DllImport("user32.dll")] private static extern IntPtr GetThreadDpiAwarenessContext();
+  [DllImport("user32.dll")] private static extern int GetAwarenessFromDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
   [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
   [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
@@ -224,8 +226,15 @@ public static class SaveNativeInput {
     SetForegroundWindow(window);
     if (GetForegroundWindow() != window)
       throw new InvalidOperationException("Native Save foreground refused");
-    if (GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2) != window)
+    var pointRoot = GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2);
+    if (pointRoot != window) {
+      Rect dialogBounds;
+      bool inside = GetWindowRect(window, out dialogBounds) && x >= dialogBounds.left && x < dialogBounds.right && y >= dialogBounds.top && y < dialogBounds.bottom;
+      string hit = pointRoot == IntPtr.Zero ? "none" : OwnedByApplication(pointRoot, expectedProcessId) ? "owned_other" : "foreign";
+      int awareness = GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+      Console.Error.WriteLine("Native Save point probe: inside_dialog=" + inside.ToString().ToLowerInvariant() + " hit=" + hit + " awareness=" + awareness);
       throw new InvalidOperationException("Native Save point root refused");
+    }
     if (!SetCursorPos(x, y))
       throw new InvalidOperationException("Native Save cursor move refused");
     var inputs = new[] {

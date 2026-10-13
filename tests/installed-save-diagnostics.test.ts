@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import { installedSaveDriverDiagnostic } from "./support/installed-save-diagnostics.ts";
 
 describe("native Save driver failure redaction", () => {
+  it("retains only bounded point-root and DPI categories", () => {
+    const probe = "Native Save point probe: inside_dialog=false hit=foreign awareness=0";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${probe}\n${probe} /private/path\n${probe.replace("awareness=0", "awareness=999")}`,
+      100,
+    );
+    expect(diagnostic).toContain(probe);
+    expect(diagnostic.split("Native Save point probe:")).toHaveLength(2);
+    expect(diagnostic).not.toContain("private");
+  });
   it.each(["expected", "basename", "double_dot", "double_extension", "empty", "other"])(
     "retains only the fixed default filename classification %s",
     (kind) => {
