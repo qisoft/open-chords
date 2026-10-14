@@ -134,7 +134,8 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               if (error) {
                 reject(
                   new Error(
-                    installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
+                    `Native driver scenario: format=${format} action=${scenario} ` +
+                      installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
                   ),
                 );
                 return;
@@ -234,7 +235,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
           await expect(page.getByText(`native-score.${extension}`, { exact: true })).toBeVisible();
           phase("saved_ui_visible");
           if (format === "archive") {
-            await test.step("Native Open recognizes the installed native Save archive without changes", async () => {
+            await test.step("Native Open preserves the exporting Project, imports a copy and recognizes its duplicate", async () => {
               phase("duplicate_baseline");
               const savedBaseline = await proofTreeHashes(library.activeRoot);
               phase("duplicate_baseline_read");
@@ -262,14 +263,39 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
                 dialogDismissed: true,
                 defaultNameValid: false,
               });
+              phase("copy_ui_wait");
+              await expect(page.getByTestId("archives.import.status")).toContainText(
+                "Imported as a separate Project copy because this Library already has a different history with the same identity.",
+                { timeout: 60000 },
+              );
+              await expect(page.getByTestId("archives.import.alert")).toHaveCount(0);
+              phase("original_preservation");
+              const importedBaseline = await proofTreeHashes(library.activeRoot);
+              const originalTree = (tree: Record<string, string>) =>
+                Object.fromEntries(
+                  Object.entries(tree).filter(([path]) =>
+                    path.startsWith("projects/project_golden/"),
+                  ),
+                );
+              expect(Object.keys(originalTree(savedBaseline)).length).toBeGreaterThan(0);
+              expect(originalTree(importedBaseline)).toEqual(originalTree(savedBaseline));
+              await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
+              await page.getByTestId("archives.import.button").click({ timeout: 5000 });
+              phase("duplicate_open_driver");
+              expect(await drive("open")).toEqual({
+                action: "open",
+                filenameSet: true,
+                nativeClick: true,
+                dialogDismissed: true,
+                defaultNameValid: false,
+              });
               phase("duplicate_ui_wait");
               await expect(page.getByTestId("archives.import.status")).toContainText(
                 "This Library already contains this exact Project history.",
                 { timeout: 60000 },
               );
-              await expect(page.getByTestId("archives.import.alert")).toHaveCount(0);
               phase("duplicate_preservation");
-              expect(await proofTreeHashes(library.activeRoot)).toEqual(savedBaseline);
+              expect(await proofTreeHashes(library.activeRoot)).toEqual(importedBaseline);
               expect(
                 createHash("sha256")
                   .update(await readFile(target))
@@ -379,6 +405,26 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
                 ];
       phase("cold_receipts");
       const reopened = await openProjectLibrary({ stateRoot });
+      if (format === "archive") {
+        expect(reopened.listProjects().length).toBe(2);
+        const copyId = reopened
+          .listProjects()
+          .find(({ projectId }) => projectId !== "project_golden")!.projectId;
+        expect(copyId).toMatch(/^project_[a-f0-9]{32}$/);
+        const inspected = inspectPortableProjectArchive(bytes);
+        const expectedCopy = structuredClone(archiveFixture!.document);
+        expectedCopy.envelope.payload.id = copyId;
+        expectedCopy.envelope.payload.importOrigins = [
+          ...(expectedCopy.envelope.payload.importOrigins ?? []),
+          { archiveManifestHash: inspected.manifestHash, projectId: "project_golden" },
+        ];
+        expect(
+          canonicalSerialize(archivedProjectFor(await reopened.readProject(copyId)).document) ===
+            canonicalSerialize(expectedCopy),
+          "Cold imported copy must preserve the portable envelope and records with its import origin",
+        ).toBe(true);
+        expect(reopened.listExportReceipts(copyId).length).toBe(0);
+      }
       const receipts = reopened.listExportReceipts("project_golden");
       expect(receipts.length).toBe(1);
       if (format === "archive")
