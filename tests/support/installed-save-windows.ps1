@@ -1,7 +1,7 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'open')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive')][string]$Format = 'json')
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive')][string]$Format = 'json')
 $ErrorActionPreference = 'Stop'
-$isImport = $Scenario -in @('cancel_open', 'open')
-$setFilename = $Scenario -in @('cancel_existing', 'save', 'open')
+$isImport = $Scenario -in @('cancel_open', 'cancel_open_existing', 'open')
+$setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open')
 if ($isImport -and $Format -ne 'archive') { throw 'Native import format unavailable' }
 $extension = if ($Format -eq 'chordpro') { 'cho' } elseif ($Format -eq 'archive') { 'ocarchive' } else { $Format }
 $expectedFilename = 'Open Chords.' + $extension
