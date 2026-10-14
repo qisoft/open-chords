@@ -110,7 +110,10 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
         if (failed || child.exitCode !== null || child.signalCode !== null)
           throw new Error("Installed native Save application exited");
       };
-      const drive = (scenario: "cancel" | "cancel_existing" | "save" | "open") =>
+      const drive = (
+        scenario: "cancel" | "cancel_existing" | "save" | "open",
+        applicationPid = child.pid,
+      ) =>
         new Promise<unknown>((resolve, reject) => {
           const started = performance.now();
           execFile(
@@ -121,7 +124,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               "-File",
               join(process.cwd(), "tests", "support", "installed-save-windows.ps1"),
               "-ApplicationPid",
-              String(child.pid),
+              String(applicationPid),
               "-Scenario",
               scenario,
               "-Format",
@@ -456,6 +459,115 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
       );
       expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
       expect((await openNetworkMode(stateRoot)).offline).toBe(true);
+      if (format === "archive") {
+        await test.step("Installed native Save archive imports into a fresh installed Library", async () => {
+          const exportingBaseline = await proofTreeHashes(reopened.activeRoot);
+          const outputHash = createHash("sha256").update(bytes).digest("hex");
+          const freshState = join(root, "fresh-state");
+          await (await openNetworkMode(freshState)).setOffline(true);
+          const freshLibrary = await openProjectLibrary({ stateRoot: freshState });
+          expect(freshLibrary.listProjects().length).toBe(0);
+          const freshChild = spawn(
+            join(root, "installed", "Open Chords.exe"),
+            [`--user-data-dir=${freshState}`, `--remote-debugging-port=${address.port}`],
+            { env, stdio: "ignore" },
+          );
+          let freshFailed = false;
+          freshChild.on("error", () => {
+            freshFailed = true;
+          });
+          const assertFreshAlive = () => {
+            if (freshFailed || freshChild.exitCode !== null || freshChild.signalCode !== null)
+              throw new Error("Fresh installed native archive application exited");
+          };
+          phase("fresh_application_started");
+          try {
+            const freshEndpoint = `http://127.0.0.1:${address.port}`;
+            await expect
+              .poll(
+                () => {
+                  assertFreshAlive();
+                  return fetch(`${freshEndpoint}/json/version`).then(
+                    (response) => response.ok,
+                    () => false,
+                  );
+                },
+                { timeout: 120000 },
+              )
+              .toBe(true);
+            const freshBrowser = await chromium.connectOverCDP(freshEndpoint);
+            try {
+              const freshContext = freshBrowser.contexts()[0]!;
+              await expect
+                .poll(
+                  () => {
+                    assertFreshAlive();
+                    return freshContext
+                      .pages()
+                      .some((page) => page.url().startsWith("open-chords://"));
+                  },
+                  { timeout: 120000 },
+                )
+                .toBe(true);
+              const freshPage = freshContext
+                .pages()
+                .find((page) => page.url().startsWith("open-chords://"))!;
+              await freshPage.getByTestId("archives.import.button").click({ timeout: 5000 });
+              phase("fresh_open_driver");
+              expect(await drive("open", freshChild.pid)).toEqual({
+                action: "open",
+                filenameSet: true,
+                nativeClick: true,
+                dialogDismissed: true,
+                defaultNameValid: false,
+              });
+              await expect(freshPage.getByTestId("archives.import.status")).toContainText(
+                "Project imported.",
+                { timeout: 60000 },
+              );
+              await expect(freshPage.getByTestId("archives.import.alert")).toHaveCount(0);
+              await expect(freshPage.locator('.source-status[role="alert"]')).toBeVisible();
+              phase("fresh_application_close");
+              const freshCdp = await freshBrowser.newBrowserCDPSession();
+              void freshCdp.send("Browser.close").catch(() => undefined);
+              await expect
+                .poll(() => freshChild.exitCode !== null || freshChild.signalCode !== null, {
+                  timeout: 15000,
+                })
+                .toBe(true);
+            } finally {
+              await freshBrowser.close();
+            }
+          } finally {
+            if (!freshFailed && freshChild.exitCode === null && freshChild.signalCode === null) {
+              freshChild.kill();
+              await expect
+                .poll(() => freshChild.exitCode !== null || freshChild.signalCode !== null, {
+                  timeout: 15000,
+                })
+                .toBe(true);
+            }
+          }
+          phase("fresh_cold_verification");
+          const freshReopened = await openProjectLibrary({ stateRoot: freshState });
+          expect(freshReopened.listProjects().length).toBe(1);
+          expect(
+            canonicalSerialize(
+              archivedProjectFor(await freshReopened.readProject("project_golden")).document,
+            ) === canonicalSerialize(archiveFixture!.document),
+            "Fresh cold Project must match the archive produced by installed native Save",
+          ).toBe(true);
+          expect(freshReopened.listExportReceipts("project_golden").length).toBe(0);
+          expect((await openNetworkMode(freshState)).offline).toBe(true);
+          expect(await proofTreeHashes(reopened.activeRoot)).toEqual(exportingBaseline);
+          expect(
+            createHash("sha256")
+              .update(await readFile(target))
+              .digest("hex"),
+          ).toBe(outputHash);
+          expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
+        });
+      }
     } finally {
       phase("root_cleanup");
       await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });
