@@ -237,10 +237,23 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
             await test.step("Native Open recognizes the installed native Save archive without changes", async () => {
               phase("duplicate_baseline");
               const savedBaseline = await proofTreeHashes(library.activeRoot);
+              phase("duplicate_baseline_read");
               const savedHash = createHash("sha256")
                 .update(await readFile(target))
                 .digest("hex");
-              await page.getByTestId("archives.import.button").click();
+              phase("saved_archive_read");
+              const exportDialog = page.getByRole("dialog", {
+                name: "Export Project",
+                exact: true,
+              });
+              await expect(exportDialog).toBeVisible();
+              phase("export_close");
+              await exportDialog.getByRole("button", { name: "Close", exact: true }).click({
+                timeout: 5000,
+              });
+              await expect(exportDialog).not.toBeVisible();
+              phase("import_click");
+              await page.getByTestId("archives.import.button").click({ timeout: 5000 });
               phase("open_driver");
               expect(await drive("open")).toEqual({
                 action: "open",
