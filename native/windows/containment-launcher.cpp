@@ -722,15 +722,21 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (destroy) {
       if (!valid_profile_name(profile)) throw std::runtime_error("profile name");
+      std::cerr << "Native destroy phase: lock" << std::endl;
       ScopedProfileLaunchLock profile_lock(profile);
+      std::cerr << "Native destroy phase: derive" << std::endl;
       PSID sid = derive_profile(profile);
+      std::cerr << "Native destroy phase: revoke" << std::endl;
       const bool traverse_removed = revoke_profile_ancestor_traverse(profile, sid);
       FreeSid(sid);
+      std::cerr << "Native destroy phase: delete_profile" << std::endl;
       HRESULT result = DeleteAppContainerProfile(profile.c_str());
       const bool profile_removed = SUCCEEDED(result) ||
           result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) ||
           result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+      std::cerr << "Native destroy phase: remove_runtime" << std::endl;
       const bool runtime_removed = remove_runtime_staging_root(profile);
+      std::cerr << "Native destroy phase: complete" << std::endl;
       return traverse_removed && profile_removed && runtime_removed ? 0 : 1;
     }
     if (profile.empty()) throw std::runtime_error("profile missing");
