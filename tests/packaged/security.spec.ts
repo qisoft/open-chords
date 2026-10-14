@@ -1,5 +1,13 @@
 import { execFile as runNativeFile, spawn } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -625,8 +633,25 @@ test("installed local Source refusals and matching relink preserve Project revis
       relinkedLocators.some((locator) => {
         if (locator.kind !== "local_file" || locator.status !== "available") return false;
         try {
-          return realpathSync(locator.path) === canonicalRelocated;
+          const resolved = realpathSync(locator.path);
+          const exact = resolved === canonicalRelocated;
+          if (process.platform === "win32") {
+            const native = realpathSync.native(locator.path) === realpathSync.native(relocatedPath);
+            const casefold = resolved.toLowerCase() === canonicalRelocated.toLowerCase();
+            const actual = statSync(locator.path, { bigint: true });
+            const expected = statSync(relocatedPath, { bigint: true });
+            const identity =
+              actual.ino !== 0n && actual.ino === expected.ino && actual.dev === expected.dev;
+            process.stdout.write(
+              `Native Relink locator probe: scenario=${failure} resolved=true exact=${exact} native=${native} casefold=${casefold} identity=${identity}\n`,
+            );
+          }
+          return exact;
         } catch {
+          if (process.platform === "win32")
+            process.stdout.write(
+              `Native Relink locator probe: scenario=${failure} resolved=false\n`,
+            );
           return false;
         }
       }),
