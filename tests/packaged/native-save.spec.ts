@@ -111,7 +111,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
           throw new Error("Installed native Save application exited");
       };
       const drive = (
-        scenario: "cancel" | "cancel_existing" | "save" | "open",
+        scenario: "cancel" | "cancel_existing" | "save" | "open" | "cancel_open_existing",
         applicationPid = child.pid,
       ) =>
         new Promise<unknown>((resolve, reject) => {
@@ -512,6 +512,26 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               const freshPage = freshContext
                 .pages()
                 .find((page) => page.url().startsWith("open-chords://"))!;
+              const freshBaseline = await proofTreeHashes(freshLibrary.activeRoot);
+              await freshPage.getByTestId("archives.import.button").click({ timeout: 5000 });
+              phase("fresh_selected_cancel_driver");
+              expect(await drive("cancel_open_existing", freshChild.pid)).toEqual({
+                action: "cancel_open_existing",
+                filenameSet: true,
+                nativeClick: true,
+                dialogDismissed: true,
+                defaultNameValid: false,
+              });
+              await expect(freshPage.getByTestId("archives.import.status")).toHaveText(
+                "Import cancelled",
+              );
+              expect(await proofTreeHashes(freshLibrary.activeRoot)).toEqual(freshBaseline);
+              expect(await proofTreeHashes(reopened.activeRoot)).toEqual(exportingBaseline);
+              expect(
+                createHash("sha256")
+                  .update(await readFile(target))
+                  .digest("hex"),
+              ).toBe(outputHash);
               await freshPage.getByTestId("archives.import.button").click({ timeout: 5000 });
               phase("fresh_open_driver");
               expect(await drive("open", freshChild.pid)).toEqual({
