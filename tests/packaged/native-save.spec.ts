@@ -24,6 +24,14 @@ test.skip(process.platform !== "win32", "Windows native Save dialog");
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed Windows native ${format} Save cancellation preserves Library and Save publishes a durable receipt`, async () => {
     test.setTimeout(480000);
+    const roundtripStarted = performance.now();
+    const phase = (stage: string) => {
+      if (format === "archive")
+        console.log(
+          `Native archive roundtrip stage: ${stage} elapsed_ms=${Math.min(900000, Math.round(performance.now() - roundtripStarted))}`,
+        );
+    };
+    phase("setup");
     const extension = format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format;
     const saveButton = {
       json: "Save JSON",
@@ -63,6 +71,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
         ),
         { dir: join(root, "installed") },
       );
+      phase("installed_extracted");
       const windows = process.env.SystemRoot ?? process.env.WINDIR;
       if (!windows) throw new Error("Windows OS directory unavailable");
       const env: NodeJS.ProcessEnv = {};
@@ -92,6 +101,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
         [`--user-data-dir=${stateRoot}`, `--remote-debugging-port=${address.port}`],
         { env, stdio: "ignore" },
       );
+      phase("application_started");
       let failed = false;
       child.on("error", () => {
         failed = true;
@@ -100,7 +110,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
         if (failed || child.exitCode !== null || child.signalCode !== null)
           throw new Error("Installed native Save application exited");
       };
-      const drive = (scenario: "cancel" | "cancel_existing" | "save") =>
+      const drive = (scenario: "cancel" | "cancel_existing" | "save" | "open") =>
         new Promise<unknown>((resolve, reject) => {
           const started = performance.now();
           execFile(
@@ -124,7 +134,8 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               if (error) {
                 reject(
                   new Error(
-                    installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
+                    `Native driver scenario: format=${format} action=${scenario} ` +
+                      installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
                   ),
                 );
                 return;
@@ -167,6 +178,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
             .pages()
             .find((candidate) => candidate.url().startsWith("open-chords://"))!;
           await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
+          phase("renderer_ready");
           const baseline = await proofTreeHashes(library.activeRoot);
           await page.getByRole("button", { name: "Export Project", exact: true }).click();
           await page
@@ -175,6 +187,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               exact: true,
             })
             .click();
+          phase("cancel_driver");
           expect(await drive("cancel")).toEqual({
             action: "cancel",
             filenameSet: false,
@@ -191,6 +204,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               exact: true,
             })
             .click();
+          phase("cancel_existing_driver");
           expect(await drive("cancel_existing")).toEqual({
             action: "cancel_existing",
             filenameSet: true,
@@ -207,6 +221,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
               exact: true,
             })
             .click();
+          phase("save_driver");
           expect(await drive("save")).toEqual({
             action: "save",
             filenameSet: true,
@@ -218,22 +233,99 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
             timeout: 60000,
           });
           await expect(page.getByText(`native-score.${extension}`, { exact: true })).toBeVisible();
+          phase("saved_ui_visible");
+          if (format === "archive") {
+            await test.step("Native Open preserves the exporting Project, imports a copy and recognizes its duplicate", async () => {
+              phase("duplicate_baseline");
+              const savedBaseline = await proofTreeHashes(library.activeRoot);
+              phase("duplicate_baseline_read");
+              const savedHash = createHash("sha256")
+                .update(await readFile(target))
+                .digest("hex");
+              phase("saved_archive_read");
+              const exportDialog = page.getByRole("dialog", {
+                name: "Export Project",
+                exact: true,
+              });
+              await expect(exportDialog).toBeVisible();
+              phase("export_close");
+              await exportDialog.getByRole("button", { name: "Close", exact: true }).click({
+                timeout: 5000,
+              });
+              await expect(exportDialog).not.toBeVisible();
+              phase("import_click");
+              await page.getByTestId("archives.import.button").click({ timeout: 5000 });
+              phase("open_driver");
+              expect(await drive("open")).toEqual({
+                action: "open",
+                filenameSet: true,
+                nativeClick: true,
+                dialogDismissed: true,
+                defaultNameValid: false,
+              });
+              phase("copy_ui_wait");
+              await expect(page.getByTestId("archives.import.status")).toContainText(
+                "Imported as a separate Project copy because this Library already has a different history with the same identity.",
+                { timeout: 60000 },
+              );
+              await expect(page.getByTestId("archives.import.alert")).toHaveCount(0);
+              phase("original_preservation");
+              const importedBaseline = await proofTreeHashes(library.activeRoot);
+              const originalTree = (tree: Record<string, string>) =>
+                Object.fromEntries(
+                  Object.entries(tree).filter(([path]) =>
+                    path.startsWith("projects/project_golden/"),
+                  ),
+                );
+              expect(Object.keys(originalTree(savedBaseline)).length).toBeGreaterThan(0);
+              expect(originalTree(importedBaseline)).toEqual(originalTree(savedBaseline));
+              await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
+              await page.getByTestId("archives.import.button").click({ timeout: 5000 });
+              phase("duplicate_open_driver");
+              expect(await drive("open")).toEqual({
+                action: "open",
+                filenameSet: true,
+                nativeClick: true,
+                dialogDismissed: true,
+                defaultNameValid: false,
+              });
+              phase("duplicate_ui_wait");
+              await expect(page.getByTestId("archives.import.status")).toContainText(
+                "This Library already contains this exact Project history.",
+                { timeout: 60000 },
+              );
+              phase("duplicate_preservation");
+              expect(await proofTreeHashes(library.activeRoot)).toEqual(importedBaseline);
+              expect(
+                createHash("sha256")
+                  .update(await readFile(target))
+                  .digest("hex"),
+              ).toBe(savedHash);
+              expect(await readFile(preservedTarget, "utf8")).toBe(
+                "preserve existing external file",
+              );
+            });
+          }
+          phase("application_close");
           const cdp = await browser.newBrowserCDPSession();
           void cdp.send("Browser.close").catch(() => undefined);
           await expect
             .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
             .toBe(true);
         } finally {
+          phase("browser_dispose");
           await browser.close();
         }
       } finally {
         if (!failed && child.exitCode === null && child.signalCode === null) {
+          phase("forced_exit");
           child.kill();
           await expect
             .poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15000 })
             .toBe(true);
         }
       }
+      phase("output_verification");
       const bytes = await readFile(target);
       const snapshot = captureJsonExport(envelope.payload, { presentation: "current" });
       if (format === "archive") {
@@ -311,7 +403,28 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
                   "unrecognized_lyrics_reference_omitted",
                   "word_timing_not_represented",
                 ];
+      phase("cold_receipts");
       const reopened = await openProjectLibrary({ stateRoot });
+      if (format === "archive") {
+        expect(reopened.listProjects().length).toBe(2);
+        const copyId = reopened
+          .listProjects()
+          .find(({ projectId }) => projectId !== "project_golden")!.projectId;
+        expect(copyId).toMatch(/^project_[a-f0-9]{32}$/);
+        const inspected = inspectPortableProjectArchive(bytes);
+        const expectedCopy = structuredClone(archiveFixture!.document);
+        expectedCopy.envelope.payload.id = copyId;
+        expectedCopy.envelope.payload.importOrigins = [
+          ...(expectedCopy.envelope.payload.importOrigins ?? []),
+          { archiveManifestHash: inspected.manifestHash, projectId: "project_golden" },
+        ];
+        expect(
+          canonicalSerialize(archivedProjectFor(await reopened.readProject(copyId)).document) ===
+            canonicalSerialize(expectedCopy),
+          "Cold imported copy must preserve the portable envelope and records with its import origin",
+        ).toBe(true);
+        expect(reopened.listExportReceipts(copyId).length).toBe(0);
+      }
       const receipts = reopened.listExportReceipts("project_golden");
       expect(receipts.length).toBe(1);
       if (format === "archive")
@@ -344,7 +457,9 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
       expect(await readFile(preservedTarget, "utf8")).toBe("preserve existing external file");
       expect((await openNetworkMode(stateRoot)).offline).toBe(true);
     } finally {
+      phase("root_cleanup");
       await rm(root, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });
+      phase("root_removed");
     }
   });
 }
