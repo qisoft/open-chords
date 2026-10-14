@@ -581,7 +581,7 @@ test("installed local Source refusals and matching relink preserve Project revis
         },
       );
       expect(relinkResult).toMatchObject({ type: "media.relinked", sourceId: created.sourceId });
-      for (const privatePath of [state, path, relocatedPath]) {
+      for (const privatePath of [state, path, relocatedPath, realpathSync(relocatedPath)]) {
         expect(JSON.stringify(relinkResult).includes(privatePath)).toBe(false);
         expect(
           JSON.stringify(relinkResult).includes(JSON.stringify(privatePath).slice(1, -1)),
@@ -610,12 +610,28 @@ test("installed local Source refusals and matching relink preserve Project revis
     expect(relinked.projectRevisionId).toBe(baseline.projectRevisionId);
     expect(relinked.envelope).toEqual(baseline.envelope);
     expect(withoutLocators(relinked.records)).toEqual(withoutLocators(baseline.records));
-    expect(relinked.records.sources[0]?.locators).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ path, status: "unavailable" }),
-        expect.objectContaining({ path: relocatedPath, status: "available" }),
-      ]),
-    );
+    const relinkedLocators = relinked.records.sources[0]?.locators ?? [];
+    expect(
+      relinkedLocators.some(
+        (locator) =>
+          locator.kind === "local_file" &&
+          locator.path === path &&
+          locator.status === "unavailable",
+      ),
+      "Original Locator must remain unavailable",
+    ).toBe(true);
+    const canonicalRelocated = realpathSync(relocatedPath);
+    expect(
+      relinkedLocators.some((locator) => {
+        if (locator.kind !== "local_file" || locator.status !== "available") return false;
+        try {
+          return realpathSync(locator.path) === canonicalRelocated;
+        } catch {
+          return false;
+        }
+      }),
+      "Available Locator must resolve to the exact selected WAV",
+    ).toBe(true);
     expect(await immutableTree(reopened.activeRoot)).toBe(treeBaseline);
     const relinkedTree = canonicalSerialize(await proofTreeHashes(relinkedLibrary.activeRoot));
     const playback = await inspectInstalled(

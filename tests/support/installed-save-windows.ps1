@@ -280,11 +280,15 @@ public static class SaveNativeInput {
     if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
       throw new InvalidOperationException("Native Save click was not delivered");
   }
-  public static void WaitForDismissal(IntPtr window) {
+  public static void WaitForDismissal(IntPtr window, uint expectedProcessId) {
     var elapsed = System.Diagnostics.Stopwatch.StartNew();
     while (IsWindow(window) && elapsed.ElapsedMilliseconds < 2000)
       System.Threading.Thread.Sleep(20);
-    if (IsWindow(window)) throw new InvalidOperationException("Native Save dialog not dismissed");
+    if (IsWindow(window)) {
+      Console.Error.WriteLine("Native Save dismissal probe: exists=true visible=" + IsWindowVisible(window).ToString().ToLowerInvariant() +
+        " enabled=" + IsWindowEnabled(window).ToString().ToLowerInvariant() + " owned=" + OwnedByApplication(window, expectedProcessId).ToString().ToLowerInvariant());
+      throw new InvalidOperationException("Native Save dialog not dismissed");
+    }
   }
 }
 '@
@@ -469,7 +473,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     [SaveNativeInput]::Click($dialogHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
-    [SaveNativeInput]::WaitForDismissal($dialogHandle)
+    [SaveNativeInput]::WaitForDismissal($dialogHandle, $ApplicationPid)
     ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $setFilename; nativeClick = $true; dialogDismissed = $true; defaultNameValid = (!$isImport) } -Compress
     exit 0
   }

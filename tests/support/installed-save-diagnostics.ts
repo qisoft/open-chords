@@ -53,6 +53,14 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
         line,
       ),
     );
+  const dismissalProbes = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save dismissal probe: exists=true visible=(?:true|false) enabled=(?:true|false) owned=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   const controlProbes = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -86,6 +94,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     `Native Save driver failure: started=${started} category=${category} spawn_code=${spawnCode}`,
     ...probes,
     ...windowProbes,
+    ...dismissalProbes,
     ...controlProbes,
     ...candidates,
     ...children,
