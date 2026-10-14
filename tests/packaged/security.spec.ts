@@ -635,6 +635,7 @@ test("installed local Source refusals and matching relink preserve Project revis
         try {
           const resolved = realpathSync(locator.path);
           const exact = resolved === canonicalRelocated;
+          let matches = exact;
           if (process.platform === "win32") {
             const native = realpathSync.native(locator.path) === realpathSync.native(relocatedPath);
             const casefold = resolved.toLowerCase() === canonicalRelocated.toLowerCase();
@@ -642,11 +643,12 @@ test("installed local Source refusals and matching relink preserve Project revis
             const expected = statSync(relocatedPath, { bigint: true });
             const identity =
               actual.ino !== 0n && actual.ino === expected.ino && actual.dev === expected.dev;
+            matches = identity;
             process.stdout.write(
               `Native Relink locator probe: scenario=${failure} resolved=true exact=${exact} native=${native} casefold=${casefold} identity=${identity}\n`,
             );
           }
-          return exact;
+          return matches;
         } catch {
           if (process.platform === "win32")
             process.stdout.write(
