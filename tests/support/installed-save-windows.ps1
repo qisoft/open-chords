@@ -1,12 +1,13 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive')][string]$Format = 'json')
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive', 'media')][string]$Format = 'json')
 $ErrorActionPreference = 'Stop'
 $isImport = $Scenario -in @('cancel_open', 'cancel_open_existing', 'open')
 $setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open')
-if ($isImport -and $Format -ne 'archive') { throw 'Native import format unavailable' }
+if ($isImport -and $Format -notin @('archive', 'media')) { throw 'Native import format unavailable' }
+if ($Format -eq 'media' -and !$isImport) { throw 'Native media Save unavailable' }
 $extension = if ($Format -eq 'chordpro') { 'cho' } elseif ($Format -eq 'archive') { 'ocarchive' } else { $Format }
 $expectedFilename = 'Open Chords.' + $extension
 $expectedTitle = switch ($Format) { 'json' { 'Export Open Chords JSON' }; 'lrc' { 'Export LRC lyrics' }; 'chordpro' { 'Export ChordPro' }; 'pdf' { 'Export PDF lead sheet' }; 'archive' { 'Export Portable Project Archive' } }
-if ($isImport) { $expectedTitle = 'Import Portable Project Archive' }
+if ($isImport) { $expectedTitle = if ($Format -eq 'media') { 'Open' } else { 'Import Portable Project Archive' } }
 $maxWindows = 0
 $maxElements = 0
 $fileNames = 0
@@ -51,12 +52,13 @@ public static class SaveNativeInput {
       case "lrc": ExpectedFilename = "Open Chords.lrc"; ExpectedTitle = "Export LRC lyrics"; break;
       case "chordpro": ExpectedFilename = "Open Chords.cho"; ExpectedTitle = "Export ChordPro"; break;
       case "pdf": ExpectedFilename = "Open Chords.pdf"; ExpectedTitle = "Export PDF lead sheet"; break;
+      case "media": ExpectedFilename = "Open Chords.wav"; ExpectedTitle = "Open"; break;
       case "archive": ExpectedFilename = "Open Chords.ocarchive"; ExpectedTitle = "Export Portable Project Archive"; break;
       default: throw new InvalidOperationException("Native Save format unavailable");
     }
     if (import) {
-      if (format != "archive") throw new InvalidOperationException("Native import format unavailable");
-      ExpectedTitle = "Import Portable Project Archive";
+      if (format != "archive" && format != "media") throw new InvalidOperationException("Native import format unavailable");
+      ExpectedTitle = format == "media" ? "Open" : "Import Portable Project Archive";
     }
   }
   [StructLayout(LayoutKind.Sequential)]
