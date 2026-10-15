@@ -235,7 +235,8 @@ class ScopedAncestorTraverse {
       if (!granted_[index - 1]) continue;
       try {
         if (diagnostic_cleanup_) {
-          update_shared_ancestor_traverse(paths_[index - 1], sid_, REVOKE_ACCESS, index);
+          update_shared_ancestor_traverse(
+              paths_[index - 1], sid_, REVOKE_ACCESS, paths_.size() - index + 1);
         } else {
           update_shared_ancestor_traverse(paths_[index - 1], sid_, REVOKE_ACCESS);
         }
