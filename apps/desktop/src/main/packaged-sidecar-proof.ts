@@ -818,6 +818,12 @@ async function runLifecycleContainmentProbe(
       cause instanceof SidecarSessionError
         ? z
             .object({
+              nativeRevokeProbe: z
+                .string()
+                .regex(
+                  /^(?:unknown|ancestor=[0-5] step=(?:runtime_root|ancestor_attributes|canonical|path_attributes|mutex_create|mutex_wait|security_read|acl_build|security_write|release|complete))$/u,
+                )
+                .optional(),
               nativeLifecyclePhase: z
                 .enum([
                   "unknown",
@@ -839,7 +845,7 @@ async function runLifecycleContainmentProbe(
         : undefined;
     writeSync(
       2,
-      `Packaged lifecycle probe failure: mode=${mode} phase=${phase} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"} native_phase=${exit?.success === true ? (exit.data.nativeLifecyclePhase ?? "unknown") : "unknown"}\n`,
+      `Packaged lifecycle probe failure: mode=${mode} phase=${phase} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"} native_phase=${exit?.success === true ? (exit.data.nativeLifecyclePhase ?? "unknown") : "unknown"} native_revoke=${exit?.success === true ? (exit.data.nativeRevokeProbe ?? "unknown") : "unknown"}\n`,
     );
     primaryFailure = { cause };
   }

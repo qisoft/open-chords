@@ -106,14 +106,29 @@ static fs::path runtime_staging_path(const std::wstring& profile) {
   return local_app_data_root() / L"OpenChords" / L"ContainmentRuntime" / profile;
 }
 
+static void destroy_revoke_probe(size_t ancestor, const char* step) {
+  fprintf(stderr, "Native destroy revoke probe: ancestor=%zu step=%s\n", ancestor, step);
+  fflush(stderr);
+}
+
 static void update_shared_ancestor_traverse(
-    const fs::path& path, PSID app_container_sid, ACCESS_MODE mode) {
-  if (fs::canonical(path) != path ||
-      (GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+    const fs::path& path, PSID app_container_sid, ACCESS_MODE mode,
+    size_t diagnostic_ancestor = 0) {
+  const auto probe = [diagnostic_ancestor](const char* step) {
+    if (diagnostic_ancestor != 0) destroy_revoke_probe(diagnostic_ancestor, step);
+  };
+  probe("canonical");
+  if (fs::canonical(path) != path) {
     throw std::runtime_error("runtime staging shared ancestor");
   }
+  probe("path_attributes");
+  if ((GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+    throw std::runtime_error("runtime staging shared ancestor");
+  }
+  probe("mutex_create");
   HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\OpenChords.ContainmentRuntimeAcl");
   if (mutex == nullptr) throw std::runtime_error("runtime staging acl mutex");
+  probe("mutex_wait");
   const DWORD wait = WaitForSingleObject(mutex, 5000);
   if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
     CloseHandle(mutex);
@@ -121,6 +136,7 @@ static void update_shared_ancestor_traverse(
   }
   PACL current_dacl = nullptr;
   PSECURITY_DESCRIPTOR descriptor = nullptr;
+  probe("security_read");
   DWORD result = GetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
       DACL_SECURITY_INFORMATION, nullptr, nullptr, &current_dacl, nullptr, &descriptor);
   PACL updated_dacl = nullptr;
@@ -132,16 +148,20 @@ static void update_shared_ancestor_traverse(
     access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
     access.Trustee.TrusteeType = TRUSTEE_IS_USER;
     access.Trustee.ptstrName = static_cast<LPWSTR>(app_container_sid);
+    probe("acl_build");
     result = SetEntriesInAclW(1, &access, current_dacl, &updated_dacl);
     if (result == ERROR_SUCCESS) {
+      probe("security_write");
       result = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT,
           DACL_SECURITY_INFORMATION, nullptr, nullptr, updated_dacl, nullptr);
     }
   }
+  probe("release");
   if (updated_dacl != nullptr) LocalFree(updated_dacl);
   if (descriptor != nullptr) LocalFree(descriptor);
   ReleaseMutex(mutex);
   CloseHandle(mutex);
+  probe("complete");
   if (result != ERROR_SUCCESS) throw_last_error("update shared ancestor traverse", result);
 }
 
@@ -206,13 +226,20 @@ class ScopedAncestorTraverse {
     if (!remove_noexcept()) throw std::runtime_error("revoke shared ancestor traverse");
   }
 
+  void enable_cleanup_diagnostics(bool enabled) { diagnostic_cleanup_ = enabled; }
+
  private:
   bool remove_noexcept() noexcept {
     bool removed = true;
     for (size_t index = paths_.size(); index > 0; index -= 1) {
       if (!granted_[index - 1]) continue;
       try {
-        update_shared_ancestor_traverse(paths_[index - 1], sid_, REVOKE_ACCESS);
+        if (diagnostic_cleanup_) {
+          update_shared_ancestor_traverse(
+              paths_[index - 1], sid_, REVOKE_ACCESS, paths_.size() - index + 1);
+        } else {
+          update_shared_ancestor_traverse(paths_[index - 1], sid_, REVOKE_ACCESS);
+        }
         granted_[index - 1] = false;
       } catch (...) {
         removed = false;
@@ -225,6 +252,7 @@ class ScopedAncestorTraverse {
   PSID sid_ = nullptr;
   std::vector<fs::path> paths_;
   std::vector<bool> granted_;
+  bool diagnostic_cleanup_ = false;
 };
 
 static bool revoke_profile_ancestor_traverse(
@@ -232,16 +260,20 @@ static bool revoke_profile_ancestor_traverse(
   bool removed = true;
   fs::path runtime_root;
   try {
+    destroy_revoke_probe(0, "runtime_root");
     runtime_root = runtime_staging_path(profile);
   } catch (...) {
     return false;
   }
+  size_t ancestor = 0;
   for (const fs::path& path :
       {runtime_root.parent_path(), runtime_root.parent_path().parent_path(),
           runtime_root.parent_path().parent_path().parent_path(),
           runtime_root.parent_path().parent_path().parent_path().parent_path(),
           runtime_root.parent_path().parent_path().parent_path().parent_path().parent_path()}) {
+    ancestor += 1;
     try {
+      destroy_revoke_probe(ancestor, "ancestor_attributes");
       const DWORD attributes = GetFileAttributesW(path.c_str());
       if (attributes == INVALID_FILE_ATTRIBUTES) {
         const DWORD error = GetLastError();
@@ -249,7 +281,7 @@ static bool revoke_profile_ancestor_traverse(
         removed = false;
         continue;
       }
-      update_shared_ancestor_traverse(path, app_container_sid, REVOKE_ACCESS);
+      update_shared_ancestor_traverse(path, app_container_sid, REVOKE_ACCESS, ancestor);
     } catch (...) {
       removed = false;
     }
@@ -707,6 +739,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     fprintf(stderr, "Native lifecycle phase: %s\n", phase);
     fflush(stderr);
   };
+  ancestor_traverse.enable_cleanup_diagnostics(lifecycle_probe);
   CloseHandle(process.hThread);
   lifecycle_phase("wait_parent");
   WaitForSingleObject(process.hProcess, INFINITE);

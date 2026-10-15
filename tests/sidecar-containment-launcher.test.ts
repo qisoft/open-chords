@@ -14,6 +14,7 @@ import {
   createBoundedSidecarStderrCapture,
   parseNativeContainmentFailure,
   parseNativeLifecyclePhase,
+  parseNativeRevokeProbe,
   parseSidecarProcessFailure,
 } from "../apps/desktop/src/main/sidecar-native-broker.ts";
 import {
@@ -460,4 +461,20 @@ it("keeps only exact bounded native lifecycle phases from private stderr", () =>
     parseNativeLifecyclePhase("Native lifecycle phase: wait_parent\n" + "x".repeat(65536)),
   ).toBe("unknown");
   expect(parseNativeLifecyclePhase("")).toBe("unknown");
+});
+
+it("redacts native cleanup probes while preserving the last exact operation", () => {
+  expect(
+    parseNativeRevokeProbe(
+      "private path\nNative destroy revoke probe: ancestor=5 step=security_write\r\n",
+    ),
+  ).toBe("ancestor=5 step=security_write");
+  for (const value of [
+    "Native destroy revoke probe: ancestor=6 step=security_write",
+    "Native destroy revoke probe: ancestor=1 step=private",
+    "Native destroy revoke probe: ancestor=1 step=security_write /private",
+    "Native destroy revoke probe: ancestor=1 step=security_write\n" + "x".repeat(65536),
+  ]) {
+    expect(parseNativeRevokeProbe(value)).toBe("unknown");
+  }
 });

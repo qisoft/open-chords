@@ -552,6 +552,71 @@ test("installed native local file refusals precede a durable offline Project", a
   expect(reopened.listExportReceipts(created.projectId)).toEqual([]);
   expect((await openNetworkMode(state)).offline).toBe(true);
   expect(readFileSync(path)).toEqual(original);
+
+  const playbackBaseline = canonicalSerialize(await proofTreeHashes(reopened.activeRoot));
+  const playback = await inspectInstalled(
+    state,
+    `(async () => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const audio = document.querySelector("audio");
+        if (audio?.src.startsWith("open-chords:")) break;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!document.querySelector("audio")?.src.startsWith("open-chords:")) {
+        throw new Error("Native-selected Source playback was not ready");
+      }
+      const offlineBefore = (await window.openChords.youtube.perform({type: "status"})).offline;
+      const response = await window.openChords.media.openPlayback(${JSON.stringify(created.projectId)});
+      if (response.type !== "media.playback_ready") return { type: response.type };
+      const head = await fetch(response.playbackUrl, { method: "HEAD" });
+      const headBytes = (await head.arrayBuffer()).byteLength;
+      const ranged = await fetch(response.playbackUrl, { headers: { Range: "bytes=44-${original.length - 1}" } });
+      return {
+        type: response.type,
+        offlineBefore,
+        offlineAfter: (await window.openChords.youtube.perform({type: "status"})).offline,
+        head: { status: head.status, allow: head.headers.get("Allow"), bytes: headBytes },
+        range: { status: ranged.status, contentRange: ranged.headers.get("Content-Range"), bytes: [...new Uint8Array(await ranged.arrayBuffer())] },
+      };
+    })()`,
+    installedSystemEnvironment(),
+  );
+  expect(playback).toEqual({
+    type: "media.playback_ready",
+    offlineBefore: true,
+    offlineAfter: true,
+    head: { status: 405, allow: "GET, OPTIONS", bytes: 0 },
+    range: {
+      status: 206,
+      contentRange: `bytes 44-${original.length - 1}/${original.length}`,
+      bytes: [...original.subarray(44)],
+    },
+  });
+  for (const privatePath of [
+    state,
+    path,
+    invalidPath,
+    realpathSync(path),
+    realpathSync(invalidPath),
+  ]) {
+    const escaped = JSON.stringify(privatePath).slice(1, -1);
+    for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+      expect(JSON.stringify(playback).includes(representation)).toBe(false);
+    }
+  }
+  expect(JSON.stringify(playback).includes("playbackUrl")).toBe(false);
+  const playbackReopened = await openProjectLibrary({ stateRoot: state });
+  expect(canonicalSerialize(await playbackReopened.readProject(created.projectId))).toBe(
+    canonicalSerialize(project),
+  );
+  expect(canonicalSerialize(await proofTreeHashes(playbackReopened.activeRoot))).toBe(
+    playbackBaseline,
+  );
+  expect(playbackReopened.listExportReceipts(created.projectId)).toEqual([]);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  expect(readFileSync(path)).toEqual(original);
+  expect(readFileSync(invalidPath)).toEqual(invalidBytes);
 });
 
 test("installed local Source refusals and matching relink preserve Project revisions", async () => {

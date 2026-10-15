@@ -36,13 +36,23 @@ type AcquisitionProofStage =
   | "extractor_run"
   | "artifact_verification"
   | "extractor_cleanup"
-  | "jobs";
+  | "jobs"
+  | "jobs_bot_check"
+  | "jobs_invalid_media"
+  | "jobs_overlong"
+  | "jobs_offline_cancel"
+  | "jobs_closing"
+  | "jobs_closed";
 
 export async function runPackagedAcquisitionProof() {
+  const started = performance.now();
   let stage: AcquisitionProofStage = "application_ready";
   const reportStage = (next: AcquisitionProofStage) => {
     stage = next;
-    writeSync(2, `Acquisition proof stage: ${stage}\n`);
+    writeSync(
+      2,
+      `Acquisition proof stage: ${stage} duration_ms=${Math.round(performance.now() - started)}\n`,
+    );
   };
   reportStage(stage);
   try {
@@ -250,6 +260,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
     if (job.state !== "succeeded") throw new Error("acquisition_proof_failed");
     const before = JSON.stringify(await library.listYouTubeSources());
     libraryBaseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+    reportStage("jobs_bot_check");
     botCheck = true;
     const rejected = await jobs.wait(
       (await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" })).id,
@@ -263,6 +274,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
     failedJobs.push(rejected);
     botCheck = false;
+    reportStage("jobs_invalid_media");
     mismatchedMedia = true;
     const invalidMedia = await jobs.wait(
       (await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" })).id,
@@ -274,6 +286,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
     failedJobs.push(invalidMedia);
     mismatchedMedia = false;
+    reportStage("jobs_overlong");
     oversizedDuration = true;
     const overlong = await jobs.wait(
       (await jobs.start({ url: "https://youtu.be/aqz-KE-bpKQ" })).id,
@@ -285,6 +298,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
     failedJobs.push(overlong);
     oversizedDuration = false;
+    reportStage("jobs_offline_cancel");
     stallMedia = true;
     const requested = new Promise<void>((resolveRequest) => {
       mediaRequested = resolveRequest;
@@ -317,7 +331,9 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
       JSON.stringify(await library.listYouTubeSources()) === before &&
       (await readdir(join(stateRoot, "acquisition-jobs/workspaces"))).length === 0;
   } finally {
+    reportStage("jobs_closing");
     await jobs.close();
+    reportStage("jobs_closed");
   }
   if (job.state !== "succeeded") throw new Error(`acquisition_job_${job.reason ?? "incomplete"}`);
   const snapshotPublished = (await library.listYouTubeSources()).some((source) =>

@@ -1,5 +1,6 @@
 import json
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,22 @@ def destroy_timeout_phase(stderr: bytes | str | None) -> str:
     return next((phase for phase in reversed(phases) if phase in allowed), "unknown")
 
 
+def destroy_timeout_revoke_probe(stderr: bytes | str | None) -> str:
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not isinstance(stderr, str):
+        return "unknown"
+    pattern = re.compile(
+        r"Native destroy revoke probe: ancestor=([0-5]) step="
+        r"(runtime_root|ancestor_attributes|canonical|path_attributes|mutex_create|mutex_wait|"
+        r"security_read|acl_build|security_write|release|complete)")
+    for line in reversed(stderr[-4096:].splitlines()):
+        match = pattern.fullmatch(line)
+        if match:
+            return f"ancestor={match[1]} step={match[2]}"
+    return "unknown"
+
+
 class NativeDestroyDiagnosticsTests(unittest.TestCase):
     def test_retains_last_allowlisted_phase_without_private_text(self) -> None:
         self.assertEqual(destroy_timeout_phase(
@@ -32,6 +49,17 @@ class NativeDestroyDiagnosticsTests(unittest.TestCase):
         self.assertEqual(destroy_timeout_phase("Native destroy phase: lock /private/token"), "unknown")
         self.assertEqual(destroy_timeout_phase("Native destroy phase: /private/profile"), "unknown")
         self.assertEqual(destroy_timeout_phase(None), "unknown")
+
+    def test_retains_only_exact_bounded_revoke_probe_fields(self) -> None:
+        self.assertEqual(destroy_timeout_revoke_probe(
+            b"Native destroy revoke probe: ancestor=1 step=canonical\n"
+            b"Native destroy revoke probe: ancestor=2 step=security_write\n/private/path"),
+            "ancestor=2 step=security_write")
+        for value in (None, "Native destroy revoke probe: ancestor=6 step=canonical",
+                      "Native destroy revoke probe: ancestor=1 step=private/path",
+                      "Native destroy revoke probe: ancestor=1 step=canonical /private/path",
+                      "Native destroy revoke probe: ancestor=1 step=canonical\n" + "x" * 4096):
+            self.assertEqual(destroy_timeout_revoke_probe(value), "unknown")
 
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS native broker build")
@@ -128,7 +156,8 @@ class WindowsNativeContainmentBuildTests(unittest.TestCase):
                         env={}, check=True, capture_output=True, timeout=30)
                 except subprocess.TimeoutExpired as error:
                     raise AssertionError(
-                        f"Native destroy timed out: phase={destroy_timeout_phase(error.stderr)}"
+                        f"Native destroy timed out: phase={destroy_timeout_phase(error.stderr)} "
+                        f"revoke_probe={destroy_timeout_revoke_probe(error.stderr)}"
                     ) from None
 
 
