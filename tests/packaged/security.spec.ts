@@ -1,5 +1,13 @@
-import { spawn } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { execFile as runNativeFile, spawn } from "node:child_process";
+import {
+  cpSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +28,7 @@ import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/pac
 import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/packaged-sidecar-proof-evidence.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
 test.skip(
@@ -517,34 +526,141 @@ test("installed local Source refusals and matching relink preserve Project revis
 
     const relocatedPath = join(packageRoot, `source-relinked-${failure}.wav`);
     writeFileSync(relocatedPath, original);
-    const relinkMedia = new LocalMediaService({
-      library: reopened,
-      pickFile: async () => relocatedPath,
-    });
-    const relinkGeneration = `generation_relinked_${failure}`;
-    relinkMedia.activateGeneration(relinkGeneration);
-    try {
-      expect(
-        await relinkMedia.relinkSource({
-          generationId: relinkGeneration,
-          sourceId: created.sourceId,
-        }),
-      ).toEqual({ kind: "relinked", sourceId: created.sourceId });
-    } finally {
-      await relinkMedia.revokeGeneration(relinkGeneration);
+    if (process.platform === "win32") {
+      const env = installedSystemEnvironment();
+      const windows = process.env.SystemRoot ?? process.env.WINDIR;
+      if (!windows) throw new Error("Windows OS directory unavailable");
+      const relinkResult = await inspectInstalled(
+        state,
+        `(async () => {
+          const deadline = Date.now() + 10000;
+          while (Date.now() < deadline) {
+            const alert = document.querySelector('.source-status[role="alert"]');
+            if (alert?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) break;
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+          return await window.openChords.media.relinkSource(${JSON.stringify(created.sourceId)});
+        })()`,
+        env,
+        async (applicationPid) => {
+          const evidence = await new Promise<unknown>((resolve, reject) => {
+            const started = performance.now();
+            runNativeFile(
+              join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+              [
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                join(process.cwd(), "tests/support/installed-save-windows.ps1"),
+                "-ApplicationPid",
+                String(applicationPid),
+                "-Scenario",
+                "open",
+                "-Format",
+                "media",
+                "-TargetPath",
+                relocatedPath,
+              ],
+              { env, timeout: 100000, maxBuffer: 65536 },
+              (error, stdout, stderr) => {
+                if (error) {
+                  reject(
+                    new Error(
+                      installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
+                    ),
+                  );
+                  return;
+                }
+                try {
+                  resolve(JSON.parse(stdout.trim()));
+                } catch {
+                  reject(new Error("Installed native Relink driver returned invalid evidence"));
+                }
+              },
+            );
+          });
+          expect(evidence).toEqual({
+            action: "open",
+            filenameSet: true,
+            nativeClick: true,
+            dialogDismissed: true,
+            defaultNameValid: false,
+          });
+        },
+      );
+      expect(relinkResult).toMatchObject({ type: "media.relinked", sourceId: created.sourceId });
+      for (const privatePath of [state, path, relocatedPath, realpathSync(relocatedPath)]) {
+        expect(JSON.stringify(relinkResult).includes(privatePath)).toBe(false);
+        expect(
+          JSON.stringify(relinkResult).includes(JSON.stringify(privatePath).slice(1, -1)),
+        ).toBe(false);
+      }
+    } else {
+      const relinkMedia = new LocalMediaService({
+        library: reopened,
+        pickFile: async () => relocatedPath,
+      });
+      const relinkGeneration = `generation_relinked_${failure}`;
+      relinkMedia.activateGeneration(relinkGeneration);
+      try {
+        expect(
+          await relinkMedia.relinkSource({
+            generationId: relinkGeneration,
+            sourceId: created.sourceId,
+          }),
+        ).toEqual({ kind: "relinked", sourceId: created.sourceId });
+      } finally {
+        await relinkMedia.revokeGeneration(relinkGeneration);
+      }
     }
-    const relinked = await reopened.readProject(created.projectId);
+    const relinkedLibrary = await openProjectLibrary({ stateRoot: state });
+    const relinked = await relinkedLibrary.readProject(created.projectId);
     expect(relinked.projectRevisionId).toBe(baseline.projectRevisionId);
     expect(relinked.envelope).toEqual(baseline.envelope);
     expect(withoutLocators(relinked.records)).toEqual(withoutLocators(baseline.records));
-    expect(relinked.records.sources[0]?.locators).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ path, status: "unavailable" }),
-        expect.objectContaining({ path: relocatedPath, status: "available" }),
-      ]),
-    );
+    const relinkedLocators = relinked.records.sources[0]?.locators ?? [];
+    expect(
+      relinkedLocators.some(
+        (locator) =>
+          locator.kind === "local_file" &&
+          locator.path === path &&
+          locator.status === "unavailable",
+      ),
+      "Original Locator must remain unavailable",
+    ).toBe(true);
+    const canonicalRelocated = realpathSync(relocatedPath);
+    expect(
+      relinkedLocators.some((locator) => {
+        if (locator.kind !== "local_file" || locator.status !== "available") return false;
+        try {
+          const resolved = realpathSync(locator.path);
+          const exact = resolved === canonicalRelocated;
+          let matches = exact;
+          if (process.platform === "win32") {
+            const native = realpathSync.native(locator.path) === realpathSync.native(relocatedPath);
+            const casefold = resolved.toLowerCase() === canonicalRelocated.toLowerCase();
+            const actual = statSync(locator.path, { bigint: true });
+            const expected = statSync(relocatedPath, { bigint: true });
+            const identity =
+              actual.ino !== 0n && actual.ino === expected.ino && actual.dev === expected.dev;
+            matches = identity;
+            process.stdout.write(
+              `Native Relink locator probe: scenario=${failure} resolved=true exact=${exact} native=${native} casefold=${casefold} identity=${identity}\n`,
+            );
+          }
+          return matches;
+        } catch {
+          if (process.platform === "win32")
+            process.stdout.write(
+              `Native Relink locator probe: scenario=${failure} resolved=false\n`,
+            );
+          return false;
+        }
+      }),
+      "Available Locator must resolve to the exact selected WAV",
+    ).toBe(true);
     expect(await immutableTree(reopened.activeRoot)).toBe(treeBaseline);
-    const relinkedTree = canonicalSerialize(await proofTreeHashes(reopened.activeRoot));
+    const relinkedTree = canonicalSerialize(await proofTreeHashes(relinkedLibrary.activeRoot));
     const playback = await inspectInstalled(
       state,
       `(async () => {
@@ -1798,7 +1914,12 @@ function recordInstalledStartup(
   };
 }
 
-async function inspectInstalled(stateRoot: string, expression: string, env?: NodeJS.ProcessEnv) {
+async function inspectInstalled(
+  stateRoot: string,
+  expression: string,
+  env?: NodeJS.ProcessEnv,
+  nativeDriver?: (applicationPid: number) => Promise<void>,
+) {
   const port = await reservePort();
   const application = spawn(
     executablePath,
@@ -1831,7 +1952,7 @@ async function inspectInstalled(stateRoot: string, expression: string, env?: Nod
       )
       .toBe(true);
     if (!target) throw new Error("Installed Alignment capability is unavailable");
-    return await evaluatePackagedExpression(
+    const evaluation = evaluatePackagedExpression(
       target.webSocketDebuggerUrl,
       `(async () => {
       const deadline = Date.now() + 10000;
@@ -1840,6 +1961,17 @@ async function inspectInstalled(stateRoot: string, expression: string, env?: Nod
     })()`,
       60000,
     );
+    if (nativeDriver) {
+      if (!application.pid) throw new Error("Installed native picker process unavailable");
+      const [evaluated, driven] = await Promise.allSettled([
+        evaluation,
+        nativeDriver(application.pid),
+      ]);
+      if (driven.status === "rejected") throw driven.reason;
+      if (evaluated.status === "rejected") throw evaluated.reason;
+      return evaluated.value;
+    }
+    return await evaluation;
   } finally {
     startupProbe();
     try {

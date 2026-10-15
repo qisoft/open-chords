@@ -1,12 +1,13 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive')][string]$Format = 'json')
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive', 'media')][string]$Format = 'json')
 $ErrorActionPreference = 'Stop'
 $isImport = $Scenario -in @('cancel_open', 'cancel_open_existing', 'open')
 $setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open')
-if ($isImport -and $Format -ne 'archive') { throw 'Native import format unavailable' }
+if ($isImport -and $Format -notin @('archive', 'media')) { throw 'Native import format unavailable' }
+if ($Format -eq 'media' -and !$isImport) { throw 'Native media Save unavailable' }
 $extension = if ($Format -eq 'chordpro') { 'cho' } elseif ($Format -eq 'archive') { 'ocarchive' } else { $Format }
 $expectedFilename = 'Open Chords.' + $extension
 $expectedTitle = switch ($Format) { 'json' { 'Export Open Chords JSON' }; 'lrc' { 'Export LRC lyrics' }; 'chordpro' { 'Export ChordPro' }; 'pdf' { 'Export PDF lead sheet' }; 'archive' { 'Export Portable Project Archive' } }
-if ($isImport) { $expectedTitle = 'Import Portable Project Archive' }
+if ($isImport) { $expectedTitle = if ($Format -eq 'media') { 'Open' } else { 'Import Portable Project Archive' } }
 $maxWindows = 0
 $maxElements = 0
 $fileNames = 0
@@ -51,12 +52,13 @@ public static class SaveNativeInput {
       case "lrc": ExpectedFilename = "Open Chords.lrc"; ExpectedTitle = "Export LRC lyrics"; break;
       case "chordpro": ExpectedFilename = "Open Chords.cho"; ExpectedTitle = "Export ChordPro"; break;
       case "pdf": ExpectedFilename = "Open Chords.pdf"; ExpectedTitle = "Export PDF lead sheet"; break;
+      case "media": ExpectedFilename = "Open Chords.wav"; ExpectedTitle = "Open"; break;
       case "archive": ExpectedFilename = "Open Chords.ocarchive"; ExpectedTitle = "Export Portable Project Archive"; break;
       default: throw new InvalidOperationException("Native Save format unavailable");
     }
     if (import) {
-      if (format != "archive") throw new InvalidOperationException("Native import format unavailable");
-      ExpectedTitle = "Import Portable Project Archive";
+      if (format != "archive" && format != "media") throw new InvalidOperationException("Native import format unavailable");
+      ExpectedTitle = format == "media" ? "Open" : "Import Portable Project Archive";
     }
   }
   [StructLayout(LayoutKind.Sequential)]
@@ -94,6 +96,8 @@ public static class SaveNativeInput {
   [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+  [DllImport("user32.dll")] private static extern bool GetCursorPos(out Point point);
+  [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr window);
   [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
   [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] private static extern uint SendInput(uint count, Input[] inputs, int size);
@@ -221,7 +225,7 @@ public static class SaveNativeInput {
     Rect bounds;
     if (!GetWindowRect(field, out bounds) || bounds.right <= bounds.left || bounds.bottom <= bounds.top)
       throw new InvalidOperationException("Native Save filename bounds unavailable");
-    Click(dialog, processId, bounds.left + (bounds.right - bounds.left) / 2, bounds.top + (bounds.bottom - bounds.top) / 2);
+    Click(dialog, field, processId, bounds.left + (bounds.right - bounds.left) / 2, bounds.top + (bounds.bottom - bounds.top) / 2);
     uint owner;
     uint thread = GetWindowThreadProcessId(field, out owner);
     bool focused = false;
@@ -245,7 +249,7 @@ public static class SaveNativeInput {
     if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
       throw new InvalidOperationException("Native Save filename input not delivered");
   }
-  public static void Click(IntPtr window, uint expectedProcessId, int x, int y) {
+  public static void Click(IntPtr window, IntPtr control, uint expectedProcessId, int x, int y) {
     if (!OwnedByApplication(window, expectedProcessId) ||
         !IsWindowVisible(window) || !IsWindowEnabled(window))
       throw new InvalidOperationException("Native Save input target unavailable");
@@ -271,6 +275,14 @@ public static class SaveNativeInput {
     }
     if (!SetCursorPos(x, y))
       throw new InvalidOperationException("Native Save cursor move refused");
+    var clickedControl = WindowFromPoint(new Point { x = x, y = y });
+    Point cursor;
+    bool cursorMatches = GetCursorPos(out cursor) && cursor.x == x && cursor.y == y;
+    bool known = control != IntPtr.Zero && IsWindow(control);
+    Console.Error.WriteLine("Native Save click probe: control_known=" + known.ToString().ToLowerInvariant() +
+      " hit_control=" + (known && clickedControl == control).ToString().ToLowerInvariant() +
+      " hit_child=" + (known && IsChild(control, clickedControl)).ToString().ToLowerInvariant() +
+      " cursor_match=" + cursorMatches.ToString().ToLowerInvariant());
     var inputs = new[] {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
       new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
@@ -278,11 +290,15 @@ public static class SaveNativeInput {
     if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
       throw new InvalidOperationException("Native Save click was not delivered");
   }
-  public static void WaitForDismissal(IntPtr window) {
+  public static void WaitForDismissal(IntPtr window, uint expectedProcessId) {
     var elapsed = System.Diagnostics.Stopwatch.StartNew();
     while (IsWindow(window) && elapsed.ElapsedMilliseconds < 2000)
       System.Threading.Thread.Sleep(20);
-    if (IsWindow(window)) throw new InvalidOperationException("Native Save dialog not dismissed");
+    if (IsWindow(window)) {
+      Console.Error.WriteLine("Native Save dismissal probe: exists=true visible=" + IsWindowVisible(window).ToString().ToLowerInvariant() +
+        " enabled=" + IsWindowEnabled(window).ToString().ToLowerInvariant() + " owned=" + OwnedByApplication(window, expectedProcessId).ToString().ToLowerInvariant());
+      throw new InvalidOperationException("Native Save dialog not dismissed");
+    }
   }
 }
 '@
@@ -464,10 +480,10 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $bounds = $button.Current.BoundingRectangle
     if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) { throw 'action_bounds' }
     $dialogHandle = [IntPtr]$window.Current.NativeWindowHandle
-    [SaveNativeInput]::Click($dialogHandle, [uint32]$ApplicationPid,
+    [SaveNativeInput]::Click($dialogHandle, [IntPtr]$button.Current.NativeWindowHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
-    [SaveNativeInput]::WaitForDismissal($dialogHandle)
+    [SaveNativeInput]::WaitForDismissal($dialogHandle, $ApplicationPid)
     ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $setFilename; nativeClick = $true; dialogDismissed = $true; defaultNameValid = (!$isImport) } -Compress
     exit 0
   }

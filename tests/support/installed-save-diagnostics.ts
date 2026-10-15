@@ -53,6 +53,22 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
         line,
       ),
     );
+  const clickProbes = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save click probe: control_known=(?:true|false) hit_control=(?:true|false) hit_child=(?:true|false) cursor_match=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
+  const dismissalProbes = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save dismissal probe: exists=true visible=(?:true|false) enabled=(?:true|false) owned=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   const controlProbes = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -86,6 +102,8 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     `Native Save driver failure: started=${started} category=${category} spawn_code=${spawnCode}`,
     ...probes,
     ...windowProbes,
+    ...dismissalProbes,
+    ...clickProbes,
     ...controlProbes,
     ...candidates,
     ...children,

@@ -12,6 +12,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def destroy_timeout_phase(stderr: bytes | str | None) -> str:
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not isinstance(stderr, str):
+        return "unknown"
+    allowed = {"lock", "derive", "revoke", "delete_profile", "remove_runtime", "complete"}
+    phases = [line.removeprefix("Native destroy phase: ")
+              for line in stderr[-4096:].splitlines()
+              if line.startswith("Native destroy phase: ")]
+    return next((phase for phase in reversed(phases) if phase in allowed), "unknown")
+
+
+class NativeDestroyDiagnosticsTests(unittest.TestCase):
+    def test_retains_last_allowlisted_phase_without_private_text(self) -> None:
+        self.assertEqual(destroy_timeout_phase(
+            b"Native destroy phase: lock\nNative destroy phase: delete_profile\n/private/profile"),
+            "delete_profile")
+        self.assertEqual(destroy_timeout_phase("Native destroy phase: lock /private/token"), "unknown")
+        self.assertEqual(destroy_timeout_phase("Native destroy phase: /private/profile"), "unknown")
+        self.assertEqual(destroy_timeout_phase(None), "unknown")
+
+
 @unittest.skipUnless(sys.platform == "darwin", "macOS native broker build")
 class NativeContainmentBuildTests(unittest.TestCase):
     def test_builds_signed_xpc_service_without_network_entitlements(self) -> None:
@@ -101,8 +123,13 @@ class WindowsNativeContainmentBuildTests(unittest.TestCase):
                     env={}, check=True, capture_output=True, text=True, timeout=30)
                 self.assertEqual(len(prepared.stdout.strip().splitlines()), 3)
             finally:
-                subprocess.run([str(executable), f"--destroy={profile}"],
-                    env={}, check=True, capture_output=True, timeout=30)
+                try:
+                    subprocess.run([str(executable), f"--destroy={profile}"],
+                        env={}, check=True, capture_output=True, timeout=30)
+                except subprocess.TimeoutExpired as error:
+                    raise AssertionError(
+                        f"Native destroy timed out: phase={destroy_timeout_phase(error.stderr)}"
+                    ) from None
 
 
 
