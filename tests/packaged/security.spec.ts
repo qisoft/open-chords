@@ -412,6 +412,115 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
 
+test("installed Choose local recording opens the native picker and committed workspace", async () => {
+  test.skip(process.platform !== "win32", "Windows native renderer file picker proof");
+  test.setTimeout(300_000);
+  const state = join(packageRoot, "renderer-native-source");
+  const path = join(packageRoot, "renderer-native-source.wav");
+  const original = monoPcmWav([0, 1, 2, 3]);
+  writeFileSync(path, original);
+  await openProjectLibrary({ stateRoot: state });
+  await (await openNetworkMode(state)).setOffline(true);
+  const result = await inspectInstalled(
+    state,
+    `(async () => {
+      const deadline = Date.now() + 45000;
+      const visible = element => element?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) === true;
+      let choose;
+      while (Date.now() < deadline) {
+        choose = [...document.querySelectorAll('.empty-workspace button')].find(button => button.textContent.trim() === "Choose local recording" && !button.disabled && visible(button));
+        if (choose) break;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!choose) throw new Error("Installed Choose recording button was unavailable");
+      choose.click();
+      while (Date.now() < deadline) {
+        const workspace = document.querySelector('main.workspace');
+        const identity = document.querySelector('.project-identity');
+        const audio = document.querySelector('audio');
+        if (visible(workspace) && visible(identity) && audio?.src.startsWith('open-chords:')) {
+          const projectId = identity.textContent.trim();
+          const response = await window.openChords.project.getSnapshot(projectId);
+          if (response.type !== "project.snapshot") return { type: response.type };
+          return {
+            type: response.type,
+            projectId,
+            projectRevisionId: response.projectRevisionId,
+            durationSamples: response.project.durationSamples,
+            sampleRate: response.project.sampleRate,
+            workspaceVisible: visible(workspace),
+            playbackReady: audio.src.startsWith('open-chords:'),
+            offline: (await window.openChords.youtube.perform({type: "status"})).offline,
+          };
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      throw new Error("Native-selected recording did not open its committed workspace");
+    })()`,
+    installedSystemEnvironment(),
+    installedMediaPickerDriver("open", path),
+  );
+  const opened = z
+    .object({
+      type: z.literal("project.snapshot"),
+      projectId: z.string(),
+      projectRevisionId: z.string(),
+      durationSamples: z.literal(4),
+      sampleRate: z.literal(48000),
+      workspaceVisible: z.literal(true),
+      playbackReady: z.literal(true),
+      offline: z.literal(true),
+    })
+    .parse(result);
+  for (const privatePath of [state, path, realpathSync(path)]) {
+    const escaped = JSON.stringify(privatePath).slice(1, -1);
+    for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+      expect(JSON.stringify(result).includes(representation)).toBe(false);
+    }
+  }
+  expect(JSON.stringify(result).includes("playbackUrl")).toBe(false);
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual([opened.projectId]);
+  const project = await reopened.readProject(opened.projectId);
+  expect(project.projectRevisionId).toBe(opened.projectRevisionId);
+  expect(project.envelope.payload).toMatchObject({
+    id: opened.projectId,
+    durationSamples: 4,
+    sampleRate: 48000,
+    analysisRevisions: [],
+    editLayers: [],
+    activeView: null,
+  });
+  expect(project.records.projectRange).toMatchObject({ startSourceSample: 0, endSourceSample: 4 });
+  expect(project.records.sources).toHaveLength(1);
+  const source = project.records.sources[0]!;
+  expect(source.id).toBe(project.records.projectRange?.sourceId);
+  expect(source.identity.kind).toBe("local_file");
+  expect(source.snapshots).toMatchObject([
+    {
+      byteFingerprint: `sha256:${createNativeSelectionHash("sha256").update(original).digest("hex")}`,
+      byteSize: original.length,
+      durationSamples: 4,
+    },
+  ]);
+  expect(source.locators).toHaveLength(1);
+  let sameFile = false;
+  const locator = source.locators[0];
+  if (locator?.kind === "local_file" && locator.status === "available") {
+    try {
+      const actual = statSync(locator.path, { bigint: true });
+      const expected = statSync(path, { bigint: true });
+      sameFile = actual.ino !== 0n && actual.ino === expected.ino && actual.dev === expected.dev;
+    } catch {
+      // Keep private paths from stat failures out of the test report.
+    }
+  }
+  expect(sameFile).toBe(true);
+  expect(reopened.listExportReceipts(opened.projectId)).toEqual([]);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  expect(readFileSync(path)).toEqual(original);
+});
+
 test("installed native local file refusals precede a durable offline Project", async () => {
   test.skip(process.platform !== "win32", "Windows native file picker proof");
   test.setTimeout(540_000);
