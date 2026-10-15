@@ -3,6 +3,25 @@ import { describe, expect, it } from "vitest";
 import { installedSaveDriverDiagnostic } from "./support/installed-save-diagnostics.ts";
 
 describe("native Save driver failure redaction", () => {
+  it("retains only bounded click-hit booleans without private UI content", () => {
+    const probe =
+      "Native Save click probe: control_known=true hit_control=false hit_child=false cursor_match=true";
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      [
+        probe,
+        probe,
+        probe,
+        probe,
+        `${probe} /private/title`,
+        probe.replace("hit_control=false", "hit_control=secret"),
+      ].join("\n"),
+      2000,
+    );
+    expect(diagnostic.split(probe)).toHaveLength(4);
+    expect(diagnostic).not.toContain("private");
+    expect(diagnostic).not.toContain("secret");
+  });
   it("retains bounded dismissal booleans and rejects private or malformed fields", () => {
     const probe = "Native Save dismissal probe: exists=true visible=false enabled=true owned=true";
     const diagnostic = installedSaveDriverDiagnostic(

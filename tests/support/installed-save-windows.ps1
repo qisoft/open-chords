@@ -96,6 +96,8 @@ public static class SaveNativeInput {
   [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+  [DllImport("user32.dll")] private static extern bool GetCursorPos(out Point point);
+  [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr window);
   [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
   [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] private static extern uint SendInput(uint count, Input[] inputs, int size);
@@ -223,7 +225,7 @@ public static class SaveNativeInput {
     Rect bounds;
     if (!GetWindowRect(field, out bounds) || bounds.right <= bounds.left || bounds.bottom <= bounds.top)
       throw new InvalidOperationException("Native Save filename bounds unavailable");
-    Click(dialog, processId, bounds.left + (bounds.right - bounds.left) / 2, bounds.top + (bounds.bottom - bounds.top) / 2);
+    Click(dialog, field, processId, bounds.left + (bounds.right - bounds.left) / 2, bounds.top + (bounds.bottom - bounds.top) / 2);
     uint owner;
     uint thread = GetWindowThreadProcessId(field, out owner);
     bool focused = false;
@@ -247,7 +249,7 @@ public static class SaveNativeInput {
     if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
       throw new InvalidOperationException("Native Save filename input not delivered");
   }
-  public static void Click(IntPtr window, uint expectedProcessId, int x, int y) {
+  public static void Click(IntPtr window, IntPtr control, uint expectedProcessId, int x, int y) {
     if (!OwnedByApplication(window, expectedProcessId) ||
         !IsWindowVisible(window) || !IsWindowEnabled(window))
       throw new InvalidOperationException("Native Save input target unavailable");
@@ -273,6 +275,14 @@ public static class SaveNativeInput {
     }
     if (!SetCursorPos(x, y))
       throw new InvalidOperationException("Native Save cursor move refused");
+    var clickedControl = WindowFromPoint(new Point { x = x, y = y });
+    Point cursor;
+    bool cursorMatches = GetCursorPos(out cursor) && cursor.x == x && cursor.y == y;
+    bool known = control != IntPtr.Zero && IsWindow(control);
+    Console.Error.WriteLine("Native Save click probe: control_known=" + known.ToString().ToLowerInvariant() +
+      " hit_control=" + (known && clickedControl == control).ToString().ToLowerInvariant() +
+      " hit_child=" + (known && IsChild(control, clickedControl)).ToString().ToLowerInvariant() +
+      " cursor_match=" + cursorMatches.ToString().ToLowerInvariant());
     var inputs = new[] {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
       new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
@@ -470,7 +480,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $bounds = $button.Current.BoundingRectangle
     if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) { throw 'action_bounds' }
     $dialogHandle = [IntPtr]$window.Current.NativeWindowHandle
-    [SaveNativeInput]::Click($dialogHandle, [uint32]$ApplicationPid,
+    [SaveNativeInput]::Click($dialogHandle, [IntPtr]$button.Current.NativeWindowHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
     [SaveNativeInput]::WaitForDismissal($dialogHandle, $ApplicationPid)
