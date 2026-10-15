@@ -461,20 +461,38 @@ test("installed native local file refusals precede a durable offline Project", a
   const result = await inspectInstalled(
     state,
     `(async () => {
+      const recoveryRefusal = await window.openChords.media.pickLocalFile();
+      const projectsAfterRefusal = await window.openChords.project.list();
       const selected = await window.openChords.media.pickLocalFile();
-      if (selected.type !== "media.selected") return { selected };
+      if (selected.type !== "media.selected") return { recoveryRefusal, projectsAfterRefusal, selected };
       const created = await window.openChords.media.createProject({
         capabilityId: selected.capabilityId,
         startSourceSample: 0,
         endSourceSample: selected.durationSamples,
       });
-      return { selected, created, offline: (await window.openChords.youtube.perform({type: "status"})).offline };
+      return { recoveryRefusal, projectsAfterRefusal, selected, created, offline: (await window.openChords.youtube.perform({type: "status"})).offline };
     })()`,
     installedSystemEnvironment(),
-    installedMediaPickerDriver("open", path),
+    async (applicationPid) => {
+      await installedMediaPickerDriver("open", invalidPath)(applicationPid);
+      expect(canonicalSerialize(await proofTreeHashes(library.activeRoot))).toBe(baseline);
+      expect(readFileSync(invalidPath)).toEqual(invalidBytes);
+      expect(readFileSync(path)).toEqual(original);
+      await installedMediaPickerDriver("open", path)(applicationPid);
+    },
   );
   const created = z
     .object({
+      recoveryRefusal: z.object({
+        type: z.literal("desktop.error"),
+        code: z.literal("invalid_media"),
+        message: z.literal("Local media operation failed"),
+        retryable: z.literal(false),
+      }),
+      projectsAfterRefusal: z.object({
+        type: z.literal("project.list"),
+        projects: z.array(z.unknown()).length(0),
+      }),
       selected: z.object({
         type: z.literal("media.selected"),
         durationSamples: z.literal(4),
