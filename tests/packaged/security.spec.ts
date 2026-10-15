@@ -576,7 +576,7 @@ test("installed native local file refusals precede a durable offline Project", a
         type: response.type,
         offlineBefore,
         offlineAfter: (await window.openChords.youtube.perform({type: "status"})).offline,
-        head: { status: head.status, length: head.headers.get("Content-Length"), bytes: headBytes },
+        head: { status: head.status, allow: head.headers.get("Allow"), bytes: headBytes },
         range: { status: ranged.status, contentRange: ranged.headers.get("Content-Range"), bytes: [...new Uint8Array(await ranged.arrayBuffer())] },
       };
     })()`,
@@ -586,7 +586,7 @@ test("installed native local file refusals precede a durable offline Project", a
     type: "media.playback_ready",
     offlineBefore: true,
     offlineAfter: true,
-    head: { status: 200, length: String(original.length), bytes: 0 },
+    head: { status: 405, allow: "GET, OPTIONS", bytes: 0 },
     range: {
       status: 206,
       contentRange: `bytes 44-${original.length - 1}/${original.length}`,
