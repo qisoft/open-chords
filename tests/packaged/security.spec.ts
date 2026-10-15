@@ -1,4 +1,5 @@
 import { execFile as runNativeFile, spawn } from "node:child_process";
+import { createHash as createNativeSelectionHash } from "node:crypto";
 import {
   cpSync,
   mkdtempSync,
@@ -411,6 +412,115 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
 
+test("installed native local file selection creates a durable offline Project", async () => {
+  test.skip(process.platform !== "win32", "Windows native file picker proof");
+  test.setTimeout(540_000);
+  const state = join(packageRoot, "native-source-create");
+  const path = join(packageRoot, "native-source-create.wav");
+  const original = monoPcmWav([0, 1, 2, 3]);
+  writeFileSync(path, original);
+  const library = await openProjectLibrary({ stateRoot: state });
+  await (await openNetworkMode(state)).setOffline(true);
+  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+  const cancelled = await inspectInstalled(
+    state,
+    "window.openChords.media.pickLocalFile()",
+    installedSystemEnvironment(),
+    installedMediaPickerDriver("cancel_open_existing", path),
+  );
+  expect(cancelled).toMatchObject({ type: "media.selection_cancelled", operation: "pick" });
+  expect(canonicalSerialize(await proofTreeHashes(library.activeRoot))).toBe(baseline);
+  expect((await openProjectLibrary({ stateRoot: state })).listProjects()).toEqual([]);
+  expect(readFileSync(path)).toEqual(original);
+
+  const result = await inspectInstalled(
+    state,
+    `(async () => {
+      const selected = await window.openChords.media.pickLocalFile();
+      if (selected.type !== "media.selected") return { selected };
+      const created = await window.openChords.media.createProject({
+        capabilityId: selected.capabilityId,
+        startSourceSample: 0,
+        endSourceSample: selected.durationSamples,
+      });
+      return { selected, created, offline: (await window.openChords.youtube.perform({type: "status"})).offline };
+    })()`,
+    installedSystemEnvironment(),
+    installedMediaPickerDriver("open", path),
+  );
+  const created = z
+    .object({
+      selected: z.object({
+        type: z.literal("media.selected"),
+        durationSamples: z.literal(4),
+        sampleRate: z.literal(48000),
+      }),
+      created: z.object({
+        type: z.literal("media.project_created"),
+        projectId: z.string(),
+        projectRevisionId: z.string(),
+        sourceId: z.string(),
+      }),
+      offline: z.literal(true),
+    })
+    .parse(result).created;
+  for (const response of [cancelled, result]) {
+    for (const privatePath of [state, path, realpathSync(path)]) {
+      const escaped = JSON.stringify(privatePath).slice(1, -1);
+      for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+        expect(JSON.stringify(response).includes(representation)).toBe(false);
+      }
+    }
+    expect(JSON.stringify(response).includes("playbackUrl")).toBe(false);
+  }
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual([created.projectId]);
+  const project = await reopened.readProject(created.projectId);
+  expect(project.projectRevisionId).toBe(created.projectRevisionId);
+  expect(project.records.projectRange).toEqual({
+    sourceId: created.sourceId,
+    startSourceSample: 0,
+    endSourceSample: 4,
+  });
+  expect(project.envelope.payload).toMatchObject({
+    id: created.projectId,
+    durationSamples: 4,
+    sampleRate: 48000,
+    activeView: null,
+    analysisRevisions: [],
+    editLayers: [],
+  });
+  expect(project.records.sources).toHaveLength(1);
+  const source = project.records.sources[0]!;
+  expect(source.id).toBe(created.sourceId);
+  expect(source.identity.kind).toBe("local_file");
+  expect(source.snapshots).toMatchObject([
+    {
+      byteSize: original.length,
+      durationSamples: 4,
+      byteFingerprint: `sha256:${createNativeSelectionHash("sha256").update(original).digest("hex")}`,
+    },
+  ]);
+  expect(source.locators).toHaveLength(1);
+  const locator = source.locators[0]!;
+  expect(locator.kind).toBe("local_file");
+  if (locator.kind !== "local_file")
+    throw new Error("Native selection did not create a local Locator");
+  expect(locator.status).toBe("available");
+  let sameFile = false;
+  try {
+    const actual = statSync(locator.path, { bigint: true });
+    const expected = statSync(path, { bigint: true });
+    sameFile = actual.ino !== 0n && actual.ino === expected.ino && actual.dev === expected.dev;
+  } catch {
+    // Report only the failed identity check, without private paths from stat errors.
+  }
+  expect(sameFile).toBe(true);
+  expect(reopened.listExportReceipts(created.projectId)).toEqual([]);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  expect(readFileSync(path)).toEqual(original);
+});
+
 test("installed local Source refusals and matching relink preserve Project revisions", async () => {
   test.setTimeout(process.platform === "win32" ? 900_000 : 480_000);
   for (const failure of ["missing", "changed"] as const) {
@@ -528,55 +638,6 @@ test("installed local Source refusals and matching relink preserve Project revis
     writeFileSync(relocatedPath, original);
     if (process.platform === "win32") {
       const env = installedSystemEnvironment();
-      const windows = process.env.SystemRoot ?? process.env.WINDIR;
-      if (!windows) throw new Error("Windows OS directory unavailable");
-      const nativeDriver =
-        (scenario: "open" | "cancel_open_existing", selectedPath: string) =>
-        async (applicationPid: number) => {
-          const evidence = await new Promise<unknown>((resolve, reject) => {
-            const started = performance.now();
-            runNativeFile(
-              join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-              [
-                "-NoProfile",
-                "-NonInteractive",
-                "-File",
-                join(process.cwd(), "tests/support/installed-save-windows.ps1"),
-                "-ApplicationPid",
-                String(applicationPid),
-                "-Scenario",
-                scenario,
-                "-Format",
-                "media",
-                "-TargetPath",
-                selectedPath,
-              ],
-              { env, timeout: 100000, maxBuffer: 65536 },
-              (error, stdout, stderr) => {
-                if (error) {
-                  reject(
-                    new Error(
-                      installedSaveDriverDiagnostic(error, stderr, performance.now() - started),
-                    ),
-                  );
-                  return;
-                }
-                try {
-                  resolve(JSON.parse(stdout.trim()));
-                } catch {
-                  reject(new Error("Installed native Relink driver returned invalid evidence"));
-                }
-              },
-            );
-          });
-          expect(evidence).toEqual({
-            action: scenario,
-            filenameSet: true,
-            nativeClick: true,
-            dialogDismissed: true,
-            defaultNameValid: false,
-          });
-        };
       const relink = (scenario: "open" | "cancel_open_existing", selectedPath: string) =>
         inspectInstalled(
           state,
@@ -590,7 +651,7 @@ test("installed local Source refusals and matching relink preserve Project revis
           return await window.openChords.media.relinkSource(${JSON.stringify(created.sourceId)});
         })()`,
           env,
-          nativeDriver(scenario, selectedPath),
+          installedMediaPickerDriver(scenario, selectedPath),
         );
       const differentPath = join(packageRoot, `source-different-${failure}.wav`);
       const differentBytes = monoPcmWav([12, 13, 14, 15]);
@@ -737,6 +798,58 @@ test("installed local Source refusals and matching relink preserve Project revis
     else expect(readFileSync(path)).toEqual(monoPcmWav([4, 5, 6, 7]));
   }
 });
+
+function installedMediaPickerDriver(
+  scenario: "open" | "cancel_open_existing",
+  selectedPath: string,
+) {
+  const env = installedSystemEnvironment();
+  const windows = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!windows) throw new Error("Windows OS directory unavailable");
+  return async (applicationPid: number) => {
+    const evidence = await new Promise<unknown>((resolve, reject) => {
+      const started = performance.now();
+      runNativeFile(
+        join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-File",
+          join(process.cwd(), "tests/support/installed-save-windows.ps1"),
+          "-ApplicationPid",
+          String(applicationPid),
+          "-Scenario",
+          scenario,
+          "-Format",
+          "media",
+          "-TargetPath",
+          selectedPath,
+        ],
+        { env, timeout: 100000, maxBuffer: 65536 },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(
+              new Error(installedSaveDriverDiagnostic(error, stderr, performance.now() - started)),
+            );
+            return;
+          }
+          try {
+            resolve(JSON.parse(stdout.trim()));
+          } catch {
+            reject(new Error("Installed native media picker driver returned invalid evidence"));
+          }
+        },
+      );
+    });
+    expect(evidence).toEqual({
+      action: scenario,
+      filenameSet: true,
+      nativeClick: true,
+      dialogDismissed: true,
+      defaultNameValid: false,
+    });
+  };
+}
 
 function installedSystemEnvironment() {
   const env: Record<string, string> = {};
