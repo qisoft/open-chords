@@ -530,19 +530,9 @@ test("installed local Source refusals and matching relink preserve Project revis
       const env = installedSystemEnvironment();
       const windows = process.env.SystemRoot ?? process.env.WINDIR;
       if (!windows) throw new Error("Windows OS directory unavailable");
-      const relinkResult = await inspectInstalled(
-        state,
-        `(async () => {
-          const deadline = Date.now() + 10000;
-          while (Date.now() < deadline) {
-            const alert = document.querySelector('.source-status[role="alert"]');
-            if (alert?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) break;
-            await new Promise(resolve => setTimeout(resolve, 25));
-          }
-          return await window.openChords.media.relinkSource(${JSON.stringify(created.sourceId)});
-        })()`,
-        env,
-        async (applicationPid) => {
+      const nativeDriver =
+        (scenario: "open" | "cancel_open_existing", selectedPath: string) =>
+        async (applicationPid: number) => {
           const evidence = await new Promise<unknown>((resolve, reject) => {
             const started = performance.now();
             runNativeFile(
@@ -555,11 +545,11 @@ test("installed local Source refusals and matching relink preserve Project revis
                 "-ApplicationPid",
                 String(applicationPid),
                 "-Scenario",
-                "open",
+                scenario,
                 "-Format",
                 "media",
                 "-TargetPath",
-                relocatedPath,
+                selectedPath,
               ],
               { env, timeout: 100000, maxBuffer: 65536 },
               (error, stdout, stderr) => {
@@ -580,14 +570,60 @@ test("installed local Source refusals and matching relink preserve Project revis
             );
           });
           expect(evidence).toEqual({
-            action: "open",
+            action: scenario,
             filenameSet: true,
             nativeClick: true,
             dialogDismissed: true,
             defaultNameValid: false,
           });
-        },
-      );
+        };
+      const relink = (scenario: "open" | "cancel_open_existing", selectedPath: string) =>
+        inspectInstalled(
+          state,
+          `(async () => {
+          const deadline = Date.now() + 10000;
+          while (Date.now() < deadline) {
+            const alert = document.querySelector('.source-status[role="alert"]');
+            if (alert?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) break;
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+          return await window.openChords.media.relinkSource(${JSON.stringify(created.sourceId)});
+        })()`,
+          env,
+          nativeDriver(scenario, selectedPath),
+        );
+      const differentPath = join(packageRoot, `source-different-${failure}.wav`);
+      const differentBytes = monoPcmWav([12, 13, 14, 15]);
+      writeFileSync(differentPath, differentBytes);
+      for (const [scenario, selectedPath, expectedType] of [
+        ["cancel_open_existing", relocatedPath, "media.selection_cancelled"],
+        ["open", differentPath, "media.different_source"],
+      ] as const) {
+        const refusalBaseline = canonicalSerialize(await proofTreeHashes(reopened.activeRoot));
+        const response = await relink(scenario, selectedPath);
+        expect(response).toMatchObject({ type: expectedType });
+        for (const privatePath of [
+          state,
+          path,
+          relocatedPath,
+          differentPath,
+          realpathSync(relocatedPath),
+          realpathSync(differentPath),
+        ]) {
+          expect(JSON.stringify(response).includes(privatePath)).toBe(false);
+          expect(JSON.stringify(response).includes(JSON.stringify(privatePath).slice(1, -1))).toBe(
+            false,
+          );
+        }
+        expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(
+          refusalBaseline,
+        );
+        expect(readFileSync(relocatedPath)).toEqual(original);
+        expect(readFileSync(differentPath)).toEqual(differentBytes);
+        if (failure === "missing") expect(() => readFileSync(path)).toThrow();
+        else expect(readFileSync(path)).toEqual(monoPcmWav([4, 5, 6, 7]));
+      }
+      const relinkResult = await relink("open", relocatedPath);
       expect(relinkResult).toMatchObject({ type: "media.relinked", sourceId: created.sourceId });
       for (const privatePath of [state, path, relocatedPath, realpathSync(relocatedPath)]) {
         expect(JSON.stringify(relinkResult).includes(privatePath)).toBe(false);

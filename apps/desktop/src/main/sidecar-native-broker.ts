@@ -209,10 +209,26 @@ async function* containedProcessStdout(
     "process_failure",
     `Contained sidecar exited before completing its protocol (exit=${status.code ?? "none"}, reason=${failureCode ?? "unclassified"})`,
     {
-      cause: { exitCode: status.code, exitSignal: status.signal },
+      cause: {
+        exitCode: status.code,
+        exitSignal: status.signal,
+        nativeLifecyclePhase: parseNativeLifecyclePhase(capturedStderr.bytes.toString("utf8")),
+      },
       ...(failureCode === null ? {} : { remoteCode: failureCode }),
     },
   );
+}
+
+export function parseNativeLifecyclePhase(stderr: string): string {
+  let phase = "unknown";
+  for (const line of stderr.slice(-MAX_STDERR_BYTES).split(/\r?\n/u)) {
+    const match =
+      /^Native lifecycle phase: (wait_parent|parent_exited|drain_started|drain_completed|cleanup_started|cleanup_completed)$/u.exec(
+        line,
+      );
+    if (match !== null) phase = match[1]!;
+  }
+  return phase;
 }
 
 export function containedExitWasAccepted(
