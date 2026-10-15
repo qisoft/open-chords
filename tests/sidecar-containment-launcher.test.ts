@@ -13,6 +13,7 @@ import {
   containedExitWasAccepted,
   createBoundedSidecarStderrCapture,
   parseNativeContainmentFailure,
+  parseNativeLifecyclePhase,
   parseSidecarProcessFailure,
 } from "../apps/desktop/src/main/sidecar-native-broker.ts";
 import {
@@ -443,3 +444,20 @@ function brokerThatReturns(evidence: NativeContainmentEvidence): NativeContainme
     },
   };
 }
+
+it("keeps only exact bounded native lifecycle phases from private stderr", () => {
+  expect(
+    parseNativeLifecyclePhase(
+      "private C:\\Users\\person\nNative lifecycle phase: wait_parent\nNative lifecycle phase: drain_started\r\n",
+    ),
+  ).toBe("drain_started");
+  expect(
+    parseNativeLifecyclePhase(
+      "Native lifecycle phase: private-path\nNative lifecycle phase: cleanup_completed trailing",
+    ),
+  ).toBe("unknown");
+  expect(
+    parseNativeLifecyclePhase("Native lifecycle phase: wait_parent\n" + "x".repeat(65536)),
+  ).toBe("unknown");
+  expect(parseNativeLifecyclePhase("")).toBe("unknown");
+});

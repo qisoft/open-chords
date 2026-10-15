@@ -696,15 +696,32 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     FreeSid(sid);
     throw std::runtime_error("containment evidence output");
   }
+  const bool lifecycle_probe = [&]() {
+    for (int index = separator + 2; index < argc; index += 1) {
+      if (std::wstring(argv[index]).rfind(L"--containment-lifecycle-probe=", 0) == 0) return true;
+    }
+    return false;
+  }();
+  const auto lifecycle_phase = [lifecycle_probe](const char* phase) {
+    if (!lifecycle_probe) return;
+    fprintf(stderr, "Native lifecycle phase: %s\n", phase);
+    fflush(stderr);
+  };
   CloseHandle(process.hThread);
+  lifecycle_phase("wait_parent");
   WaitForSingleObject(process.hProcess, INFINITE);
+  lifecycle_phase("parent_exited");
   DWORD exit_code = 1;
   GetExitCodeProcess(process.hProcess, &exit_code);
+  lifecycle_phase("drain_started");
   bool job_drained = terminate_and_wait_for_empty_job(job);
+  lifecycle_phase("drain_completed");
   CloseHandle(process.hProcess);
   close_job(job);
+  lifecycle_phase("cleanup_started");
   ancestor_traverse.remove();
   FreeSid(sid);
+  lifecycle_phase("cleanup_completed");
   if (!job_drained) throw std::runtime_error("job did not drain");
   return static_cast<int>(exit_code);
 }

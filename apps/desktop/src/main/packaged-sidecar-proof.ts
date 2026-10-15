@@ -818,6 +818,17 @@ async function runLifecycleContainmentProbe(
       cause instanceof SidecarSessionError
         ? z
             .object({
+              nativeLifecyclePhase: z
+                .enum([
+                  "unknown",
+                  "wait_parent",
+                  "parent_exited",
+                  "drain_started",
+                  "drain_completed",
+                  "cleanup_started",
+                  "cleanup_completed",
+                ])
+                .optional(),
               exitCode: z.number().int().nullable(),
               exitSignal: z
                 .string()
@@ -828,7 +839,7 @@ async function runLifecycleContainmentProbe(
         : undefined;
     writeSync(
       2,
-      `Packaged lifecycle probe failure: mode=${mode} phase=${phase} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"}\n`,
+      `Packaged lifecycle probe failure: mode=${mode} phase=${phase} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"} native_phase=${exit?.success === true ? (exit.data.nativeLifecyclePhase ?? "unknown") : "unknown"}\n`,
     );
     primaryFailure = { cause };
   }
