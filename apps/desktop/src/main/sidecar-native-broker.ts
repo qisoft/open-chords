@@ -213,6 +213,7 @@ async function* containedProcessStdout(
         exitCode: status.code,
         exitSignal: status.signal,
         nativeLifecyclePhase: parseNativeLifecyclePhase(capturedStderr.bytes.toString("utf8")),
+        nativeRevokeProbe: parseNativeRevokeProbe(capturedStderr.bytes.toString("utf8")),
       },
       ...(failureCode === null ? {} : { remoteCode: failureCode }),
     },
@@ -229,6 +230,18 @@ export function parseNativeLifecyclePhase(stderr: string): string {
     if (match !== null) phase = match[1]!;
   }
   return phase;
+}
+
+export function parseNativeRevokeProbe(stderr: string): string {
+  let probe = "unknown";
+  for (const line of stderr.slice(-MAX_STDERR_BYTES).split(/\r?\n/u)) {
+    const match =
+      /^Native destroy revoke probe: (ancestor=[0-5] step=(?:runtime_root|ancestor_attributes|canonical|path_attributes|mutex_create|mutex_wait|security_read|acl_build|security_write|release|complete))$/u.exec(
+        line,
+      );
+    if (match !== null) probe = match[1]!;
+  }
+  return probe;
 }
 
 export function containedExitWasAccepted(

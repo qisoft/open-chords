@@ -2,6 +2,14 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 export function installedExportExitDiagnostic(error: unknown, durationMs: number) {
+  return installedProcessExitDiagnostic("export", error, durationMs);
+}
+
+export function installedProcessExitDiagnostic(
+  proof: "export" | "acquisition",
+  error: unknown,
+  durationMs: number,
+) {
   const value = typeof error === "object" && error !== null ? error : {};
   const code =
     "code" in value && typeof value.code === "number" && Number.isSafeInteger(value.code)
@@ -14,7 +22,7 @@ export function installedExportExitDiagnostic(error: unknown, durationMs: number
       ? value.signal
       : "none";
   const killed = "killed" in value && value.killed === true;
-  return `Installed export process failure: duration_ms=${Math.round(durationMs)} killed=${killed} exit_code=${code} exit_signal=${signal}`;
+  return `Installed ${proof} process failure: duration_ms=${Math.round(durationMs)} killed=${killed} exit_code=${code} exit_signal=${signal}`;
 }
 
 export async function runInstalledExportProcess(

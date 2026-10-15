@@ -1,11 +1,11 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
+
+import { runInstalledAcquisitionProcess } from "../support/installed-acquisition-process.ts";
 
 test.skip(
   process.platform !== "darwin" && process.platform !== "win32",
@@ -64,10 +64,11 @@ test("installed Extractor Worker streams only through the broker with native net
         windowsRoot,
       ].join(";");
     }
-    const { stdout, stderr } = await promisify(execFile)(
+    const { stdout, stderr } = await runInstalledAcquisitionProcess(
       executable,
       ["--open-chords-acquisition-proof", `--user-data-dir=${join(root, "profile")}`],
-      { env, timeout: proofTimeout, maxBuffer: 1024 * 1024, windowsHide: true },
+      env,
+      proofTimeout,
     );
     for (const privateValue of [
       root,

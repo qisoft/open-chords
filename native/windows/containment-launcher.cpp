@@ -226,13 +226,19 @@ class ScopedAncestorTraverse {
     if (!remove_noexcept()) throw std::runtime_error("revoke shared ancestor traverse");
   }
 
+  void enable_cleanup_diagnostics(bool enabled) { diagnostic_cleanup_ = enabled; }
+
  private:
   bool remove_noexcept() noexcept {
     bool removed = true;
     for (size_t index = paths_.size(); index > 0; index -= 1) {
       if (!granted_[index - 1]) continue;
       try {
-        update_shared_ancestor_traverse(paths_[index - 1], sid_, REVOKE_ACCESS);
+        if (diagnostic_cleanup_) {
+          update_shared_ancestor_traverse(paths_[index - 1], sid_, REVOKE_ACCESS, index);
+        } else {
+          update_shared_ancestor_traverse(paths_[index - 1], sid_, REVOKE_ACCESS);
+        }
         granted_[index - 1] = false;
       } catch (...) {
         removed = false;
@@ -245,6 +251,7 @@ class ScopedAncestorTraverse {
   PSID sid_ = nullptr;
   std::vector<fs::path> paths_;
   std::vector<bool> granted_;
+  bool diagnostic_cleanup_ = false;
 };
 
 static bool revoke_profile_ancestor_traverse(
@@ -731,6 +738,7 @@ static int launch(int argc, wchar_t** argv, const std::wstring& profile) {
     fprintf(stderr, "Native lifecycle phase: %s\n", phase);
     fflush(stderr);
   };
+  ancestor_traverse.enable_cleanup_diagnostics(lifecycle_probe);
   CloseHandle(process.hThread);
   lifecycle_phase("wait_parent");
   WaitForSingleObject(process.hProcess, INFINITE);
