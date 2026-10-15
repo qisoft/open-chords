@@ -206,4 +206,17 @@ describe("native Save driver failure redaction", () => {
     expect(diagnostic).toContain(probe);
     expect(diagnostic).not.toContain("private");
   });
+  it.each(["true", "false", "unknown"])(
+    "retains bounded dismissal response observations: %s",
+    (value) => {
+      const probe = `Native Save response probe: dialog_responsive=${value} control_responsive=${value} focus_control=${value} capture_control=${value} left_down=false foreground_dialog=true`;
+      const diagnostic = installedSaveDriverDiagnostic(
+        {},
+        `${(probe + "\n").repeat(5)}${probe} /private/file\n${probe.replace("left_down=false", "left_down=private")}`,
+        100,
+      );
+      expect(diagnostic.split(probe)).toHaveLength(4);
+      expect(diagnostic).not.toContain("private");
+    },
+  );
 });

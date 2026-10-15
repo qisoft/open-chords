@@ -69,6 +69,14 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const responseProbes = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save response probe: dialog_responsive=(?:true|false|unknown) control_responsive=(?:true|false|unknown) focus_control=(?:true|false|unknown) capture_control=(?:true|false|unknown) left_down=(?:true|false) foreground_dialog=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   const controlProbes = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -103,6 +111,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...probes,
     ...windowProbes,
     ...dismissalProbes,
+    ...responseProbes,
     ...clickProbes,
     ...controlProbes,
     ...candidates,
