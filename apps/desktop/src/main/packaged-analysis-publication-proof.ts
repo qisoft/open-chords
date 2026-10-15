@@ -88,8 +88,43 @@ export async function runPackagedAnalysisPublicationProof(options: {
       ...options.recipe,
       profile: { ...options.recipe.profile, id: "balanced", name: "balanced" },
     };
+    const secondStartedAt = performance.now();
+    process.stderr.write("Packaged publication proof stage: second_job_started\n");
     const second = await analysis.analyzeProject({ projectId, recipe: laterRecipe });
+    const secondState = [
+      "queued",
+      "running",
+      "succeeded",
+      "failed",
+      "cancelled",
+      "blocked",
+    ].includes(second.job.state)
+      ? second.job.state
+      : "unknown";
+    const classification = second.attempts.at(-1)?.failure?.classification ?? "none";
+    const secondFailure = [
+      "none",
+      "invalid_output",
+      "blocked_input",
+      "unsupported_input",
+      "cancelled",
+      "integrity_violation",
+      "deadline",
+      "protocol_violation",
+      "containment_violation",
+      "component_failure",
+      "internal_error",
+    ].includes(classification)
+      ? classification
+      : "unknown";
+    process.stderr.write(
+      `Packaged publication proof second job: state=${secondState} failure=${secondFailure} duration_ms=${Math.round(performance.now() - secondStartedAt)}\n`,
+    );
+    process.stderr.write("Packaged publication proof stage: second_snapshot_reading\n");
     const later = await library.getSnapshot(projectId);
+    process.stderr.write(
+      `Packaged publication proof second invariants: snapshot=${later !== null} revision_count=${later?.project.analysisRevisions.length ?? 0} first_revision_unchanged=${later !== null && later.project.analysisRevisions.length > 0 && canonicalSerialize(later.project.analysisRevisions[0]) === firstRevision} active_view_unchanged=${later !== null && canonicalSerialize(later.project.activeView) === firstActiveView} edit_layers_unchanged=${later !== null && later.project.editLayers.length === snapshot.project.editLayers.length}\n`,
+    );
     if (
       second.job.state !== "succeeded" ||
       later === null ||
@@ -100,7 +135,11 @@ export async function runPackagedAnalysisPublicationProof(options: {
     ) {
       throw new Error("Publication proof did not preserve a Reviewable later Revision");
     }
+    process.stderr.write("Packaged publication proof stage: second_manifests_reading\n");
     const retained = (await library.readProject(projectId)).records.analysisManifests;
+    process.stderr.write(
+      `Packaged publication proof second manifests: count=${retained.length} first_unchanged=${retained.length > 0 && canonicalSerialize(retained[0]) === firstManifest}\n`,
+    );
     if (retained.length !== 2 || canonicalSerialize(retained[0]) !== firstManifest) {
       throw new Error("Publication proof mutated the first immutable Manifest");
     }
