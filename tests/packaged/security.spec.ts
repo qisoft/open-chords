@@ -412,7 +412,7 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
 
-test("installed native local file selection creates a durable offline Project", async () => {
+test("installed native local file refusals precede a durable offline Project", async () => {
   test.skip(process.platform !== "win32", "Windows native file picker proof");
   test.setTimeout(540_000);
   const state = join(packageRoot, "native-source-create");
@@ -431,6 +431,31 @@ test("installed native local file selection creates a durable offline Project", 
   expect(cancelled).toMatchObject({ type: "media.selection_cancelled", operation: "pick" });
   expect(canonicalSerialize(await proofTreeHashes(library.activeRoot))).toBe(baseline);
   expect((await openProjectLibrary({ stateRoot: state })).listProjects()).toEqual([]);
+  expect(readFileSync(path)).toEqual(original);
+
+  const invalidPath = join(packageRoot, "native-source-invalid.wav");
+  const invalidBytes = Buffer.from("private-invalid-media-fixture-not-a-WAV");
+  writeFileSync(invalidPath, invalidBytes);
+  const refused = await inspectInstalled(
+    state,
+    "window.openChords.media.pickLocalFile()",
+    installedSystemEnvironment(),
+    installedMediaPickerDriver("open", invalidPath),
+  );
+  expect(refused).toMatchObject({
+    type: "desktop.error",
+    code: "invalid_media",
+    message: "Local media operation failed",
+    retryable: false,
+  });
+  const refusedFields = z.record(z.string(), z.unknown()).parse(refused);
+  for (const key of ["capabilityId", "projectId", "sourceId"]) {
+    expect(Object.hasOwn(refusedFields, key)).toBe(false);
+  }
+  expect(canonicalSerialize(await proofTreeHashes(library.activeRoot))).toBe(baseline);
+  expect((await openProjectLibrary({ stateRoot: state })).listProjects()).toEqual([]);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  expect(readFileSync(invalidPath)).toEqual(invalidBytes);
   expect(readFileSync(path)).toEqual(original);
 
   const result = await inspectInstalled(
@@ -464,8 +489,15 @@ test("installed native local file selection creates a durable offline Project", 
       offline: z.literal(true),
     })
     .parse(result).created;
-  for (const response of [cancelled, result]) {
-    for (const privatePath of [state, path, realpathSync(path)]) {
+  for (const response of [cancelled, refused, result]) {
+    expect(JSON.stringify(response).includes(invalidBytes.toString("utf8"))).toBe(false);
+    for (const privatePath of [
+      state,
+      path,
+      invalidPath,
+      realpathSync(path),
+      realpathSync(invalidPath),
+    ]) {
       const escaped = JSON.stringify(privatePath).slice(1, -1);
       for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)]) {
         expect(JSON.stringify(response).includes(representation)).toBe(false);
@@ -516,6 +548,7 @@ test("installed native local file selection creates a durable offline Project", 
     // Report only the failed identity check, without private paths from stat errors.
   }
   expect(sameFile).toBe(true);
+  expect(readFileSync(invalidPath)).toEqual(invalidBytes);
   expect(reopened.listExportReceipts(created.projectId)).toEqual([]);
   expect((await openNetworkMode(state)).offline).toBe(true);
   expect(readFileSync(path)).toEqual(original);
