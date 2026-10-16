@@ -1,0 +1,84 @@
+function run(argv) {
+  var applicationPid = Number(argv[0]);
+  if (!Number.isInteger(applicationPid) || applicationPid <= 0) {
+    throw new Error('Invalid native picker driver arguments');
+  }
+  var systemEvents = Application('System Events');
+  var started = Date.now();
+  var deadline = started + 90000;
+  var stage = 'processes';
+  var counts = { processes: 0, windows: 0, sheets: 0, elements: 0, cancel: 0, open: 0 };
+  function attribute(element, name) {
+    try { return element[name](); } catch (_) { return null; }
+  }
+  try {
+    while (Date.now() < deadline) {
+      stage = 'processes';
+      var processes = systemEvents.processes.whose({ unixId: applicationPid })();
+      counts.processes = Math.min(processes.length, 17);
+      if (processes.length === 0) { delay(0.1); continue; }
+      if (processes.length !== 1) throw new Error('ambiguous');
+      var process = processes[0];
+      stage = 'windows';
+      var windows = process.windows();
+      counts.windows = Math.min(windows.length, 17);
+      if (windows.length > 16) throw new Error('window bound');
+      var candidates = [];
+      counts.sheets = 0;
+      for (var w = 0; w < windows.length; w++) {
+        stage = 'sheets';
+        var sheets = windows[w].sheets();
+        counts.sheets += sheets.length;
+        if (counts.sheets > 16) { counts.sheets = 17; throw new Error('sheet bound'); }
+        for (var s = 0; s < sheets.length; s++) {
+          if (attribute(sheets[s], 'role') !== 'AXSheet') continue;
+          stage = 'elements';
+          var elements = sheets[s].entireContents();
+          counts.elements = Math.min(elements.length, 257);
+          if (elements.length > 256) throw new Error('element bound');
+          var cancel = [];
+          var open = [];
+          for (var e = 0; e < elements.length; e++) {
+            if (attribute(elements[e], 'role') !== 'AXButton') continue;
+            var name = attribute(elements[e], 'name');
+            if (name === 'Cancel' && attribute(elements[e], 'enabled') === true) cancel.push(elements[e]);
+            if (name === 'Open') open.push(elements[e]);
+          }
+          counts.cancel = cancel.length;
+          counts.open = open.length;
+          if (cancel.length === 1 && open.length === 1) candidates.push({ sheet: sheets[s], button: cancel[0] });
+        }
+      }
+      stage = 'selection';
+      if (candidates.length > 1) throw new Error('ambiguous picker');
+      if (candidates.length === 0) { delay(0.1); continue; }
+      var candidate = candidates[0];
+      stage = 'action';
+      process.frontmost = true;
+      if (attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
+          attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'role') !== 'AXButton' ||
+          attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true) {
+        throw new Error('target changed');
+      }
+      candidate.button.click();
+      stage = 'dismissal';
+      var dismissDeadline = Math.min(deadline, Date.now() + 2000);
+      while (Date.now() < dismissDeadline) {
+        if (candidate.sheet.exists() === false) {
+          return JSON.stringify({ action: 'cancel', nativePress: true, dialogDismissed: true });
+        }
+        delay(0.1);
+      }
+      throw new Error('not dismissed');
+    }
+    stage = 'deadline';
+    throw new Error('deadline');
+  } catch (error) {
+    var number = error && error.errorNumber;
+    if (!Number.isInteger(number) || number < -32768 || number > 32767) number = 'unknown';
+    console.log('Native macOS picker failure: stage=' + stage + ' elapsed_ms=' + Math.max(0, Math.min(200000, Date.now() - started)) +
+      ' processes=' + counts.processes + ' windows=' + counts.windows + ' sheets=' + counts.sheets +
+      ' elements=' + counts.elements + ' cancel=' + counts.cancel + ' open=' + counts.open + ' os_error=' + number);
+    throw new Error('Installed native macOS picker failed');
+  }
+}

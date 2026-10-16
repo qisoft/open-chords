@@ -30,6 +30,7 @@ import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/pa
 import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-sidecar-proof-failures.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { installedMacPickerDiagnostic } from "../support/installed-picker-macos-diagnostics.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
@@ -411,6 +412,80 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(libraryBaseline);
   expect(reopened.listExportReceipts(packagedProjectId)).toEqual([]);
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
+});
+
+test("installed macOS native Open Cancel preserves an empty Offline Library", async () => {
+  test.skip(process.platform !== "darwin", "macOS native picker cancellation proof");
+  test.setTimeout(180_000);
+  const state = join(packageRoot, "macos-native-picker-cancel");
+  const path = join(packageRoot, "macos-native-picker-cancel.wav");
+  const original = monoPcmWav([0, 1, 2, 3]);
+  writeFileSync(path, original);
+  const library = await openProjectLibrary({ stateRoot: state });
+  await (await openNetworkMode(state)).setOffline(true);
+  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+  const result = await inspectInstalled(
+    state,
+    `(async () => {
+    const cancelled = await window.openChords.media.pickLocalFile();
+    const projects = await window.openChords.project.list();
+    const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+    return { cancelled, projects, offline };
+  })()`,
+    installedSystemEnvironment(),
+    async (applicationPid) => {
+      const started = performance.now();
+      const evidence = await new Promise<unknown>((resolve, reject) => {
+        runNativeFile(
+          "/usr/bin/osascript",
+          [
+            "-l",
+            "JavaScript",
+            join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
+            String(applicationPid),
+          ],
+          { env: installedSystemEnvironment(), timeout: 100000, maxBuffer: 65536 },
+          (error, stdout, stderr) => {
+            if (error) {
+              reject(
+                new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
+              );
+              return;
+            }
+            try {
+              resolve(JSON.parse(stdout.trim()));
+            } catch {
+              reject(new Error("Native macOS picker returned invalid evidence"));
+            }
+          },
+        );
+      });
+      expect(evidence).toEqual({ action: "cancel", nativePress: true, dialogDismissed: true });
+    },
+  );
+  z.object({
+    cancelled: z.object({
+      type: z.literal("media.selection_cancelled"),
+      operation: z.literal("pick"),
+    }),
+    projects: z.object({
+      type: z.literal("project.list"),
+      projects: z.array(z.unknown()).length(0),
+    }),
+    offline: z.literal(true),
+  }).parse(result);
+  expect(JSON.stringify(result).includes("playbackUrl")).toBe(false);
+  for (const privatePath of [state, path, realpathSync(path)]) {
+    const escaped = JSON.stringify(privatePath).slice(1, -1);
+    for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+      expect(JSON.stringify(result).includes(representation)).toBe(false);
+    }
+  }
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(reopened.listProjects()).toEqual([]);
+  expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(baseline);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  expect(readFileSync(path)).toEqual(original);
 });
 
 for (const firstOutcome of ["cancel", "refusal"] as const) {
