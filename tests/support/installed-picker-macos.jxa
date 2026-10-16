@@ -60,7 +60,7 @@ function run(argv) {
         else if (children !== null) probe.relationship_other++;
         if (Array.isArray(rows)) { probe.relationship_arrays++; probe.selected_rows += Math.min(rows.length, 257); }
         else if (rows !== null) probe.relationship_other++;
-        var selectionContainer = ['AXBrowser', 'AXList', 'AXOutline', 'AXTable'].indexOf(role) !== -1;
+        var selectionContainer = ['AXList', 'AXOutline', 'AXTable'].indexOf(role) !== -1;
         var next;
         if (selectionContainer) {
           probe.containers++;
