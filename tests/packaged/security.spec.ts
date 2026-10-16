@@ -438,7 +438,11 @@ test("installed Choose recording cancels without changes then opens a committed 
       let busyObserved = false;
       while (Date.now() < deadline) {
         const busy = [...document.querySelectorAll('.empty-workspace button')].find(button => button.disabled && button.textContent.trim() === "Creating Project…" && visible(button));
-        if (busy) { busyObserved = true; break; }
+        if (busy) {
+          busyObserved = true;
+          document.documentElement.dataset.installedChoosePending = "observed";
+          break;
+        }
         await new Promise(resolve => setTimeout(resolve, 25));
       }
       if (!busyObserved) throw new Error("Installed Choose recording did not enter its pending state");
@@ -493,6 +497,14 @@ test("installed Choose recording cancels without changes then opens a committed 
       expect(readFileSync(path)).toEqual(original);
       await installedMediaPickerDriver("open", path)(applicationPid);
     },
+    `(async () => {
+      const deadline = Date.now() + 55000;
+      while (Date.now() < deadline) {
+        if (document.documentElement.dataset.installedChoosePending === "observed") return true;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      throw new Error("Installed Choose pending acknowledgment was unavailable");
+    })()`,
   );
   const opened = z
     .object({
@@ -2336,6 +2348,7 @@ async function inspectInstalled(
   expression: string,
   env?: NodeJS.ProcessEnv,
   nativeDriver?: (applicationPid: number) => Promise<void>,
+  nativeReadyExpression?: string,
 ) {
   const port = await reservePort();
   const application = spawn(
@@ -2380,9 +2393,21 @@ async function inspectInstalled(
     );
     if (nativeDriver) {
       if (!application.pid) throw new Error("Installed native picker process unavailable");
+      const applicationPid = application.pid;
+      const webSocketUrl = target.webSocketDebuggerUrl;
       const [evaluated, driven] = await Promise.allSettled([
         evaluation,
-        nativeDriver(application.pid),
+        (async () => {
+          if (nativeReadyExpression) {
+            const ready = await evaluatePackagedExpression(
+              webSocketUrl,
+              nativeReadyExpression,
+              60000,
+            );
+            expect(ready).toBe(true);
+          }
+          await nativeDriver(applicationPid);
+        })(),
       ]);
       if (driven.status === "rejected") throw driven.reason;
       if (evaluated.status === "rejected") throw evaluated.reason;
