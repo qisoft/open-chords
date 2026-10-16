@@ -31,6 +31,7 @@ import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-side
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
+import { installedMacAxProbeDiagnostic } from "../support/installed-picker-macos-ax-diagnostics.ts";
 import { installedMacPickerDiagnostic } from "../support/installed-picker-macos-diagnostics.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
@@ -1202,9 +1203,25 @@ function installedMacMediaPickerDriver(
         { env: installedSystemEnvironment(), timeout: 100000, maxBuffer: 65536 },
         (error, stdout, stderr) => {
           if (error) {
-            reject(
-              new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
+            const failure = installedMacPickerDiagnostic(
+              error,
+              stderr,
+              performance.now() - started,
             );
+            if (selectedPath !== undefined && failure.includes("stage=selected_file ")) {
+              const probeStarted = performance.now();
+              runNativeFile(
+                join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
+                [String(applicationPid), selectedPath],
+                { env: installedSystemEnvironment(), timeout: 5000, maxBuffer: 4096 },
+                (probeError, probeOutput) =>
+                  reject(
+                    new Error(
+                      `${failure}\n${installedMacAxProbeDiagnostic(probeOutput, probeError, performance.now() - probeStarted)}`,
+                    ),
+                  ),
+              );
+            } else reject(new Error(failure));
             return;
           }
           try {
