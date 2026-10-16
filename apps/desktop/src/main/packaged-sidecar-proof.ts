@@ -794,9 +794,9 @@ async function runLifecycleContainmentProbe(
   const probeStartedAt = performance.now();
   // Windows CI measured ~10 s launch plus multi-second ancestor ACL cleanup.
   // Keep the 15 s evidence handshake; allow bounded cleanup after parent/Job exit.
-  const probeSignal = AbortSignal.timeout(
-    globalThis.process.platform === "win32" ? 30_000 : 15_000,
-  );
+  const probeBudgetMs = globalThis.process.platform === "win32" ? 30_000 : 15_000;
+  const probeDeadline = probeStartedAt + probeBudgetMs;
+  const probeSignal = AbortSignal.timeout(probeBudgetMs);
   const process = await createLauncher(
     [`--containment-lifecycle-probe=${plan}`],
     mode === "crash" ? [73] : [0],
@@ -819,7 +819,7 @@ async function runLifecycleContainmentProbe(
       `Packaged lifecycle probe stage: mode=${mode} evidence_received duration_ms=${Math.round(performance.now() - probeStartedAt)}\n`,
     );
     phase = "exit";
-    if (mode === "crash") await drainOutput(iterator);
+    if (mode === "crash") await drainOutput(iterator, probeDeadline);
   } catch (cause) {
     const exit =
       cause instanceof SidecarSessionError
@@ -908,9 +908,18 @@ async function readBoundedLine(iterator: AsyncIterator<Uint8Array>): Promise<str
   }
 }
 
-async function drainOutput(iterator: AsyncIterator<Uint8Array>): Promise<void> {
+export async function drainOutput(
+  iterator: AsyncIterator<Uint8Array>,
+  deadline: number,
+): Promise<void> {
   while (true) {
-    const next = await withTimeout(iterator.next(), 10_000, "Contained crash probe did not exit");
+    const remainingMs = deadline - performance.now();
+    if (remainingMs <= 0) throw new Error("Contained crash probe did not exit");
+    const next = await withTimeout(
+      iterator.next(),
+      remainingMs,
+      "Contained crash probe did not exit",
+    );
     if (next.done) return;
   }
 }

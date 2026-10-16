@@ -90,3 +90,56 @@ it("does not expose an unvalidated native containment launch marker", () => {
     "adversarial_launch_failed",
   );
 });
+
+it("allows crash cleanup to drain beyond ten seconds within the absolute budget", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  try {
+    const iterator: AsyncIterator<Uint8Array> = {
+      next: () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ done: true, value: undefined }), 12_000),
+        ),
+    };
+    const result = packagedProof()
+      .drainOutput(iterator, performance.now() + 20_000)
+      .then(
+        () => "complete",
+        () => "timeout",
+      );
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(await result).toBe("complete");
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+it("does not restart the absolute crash cleanup budget for each output chunk", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  try {
+    const iterator: AsyncIterator<Uint8Array> = {
+      next: () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ done: false, value: new Uint8Array([1]) }), 4000),
+        ),
+    };
+    let result = "pending";
+    void packagedProof()
+      .drainOutput(iterator, performance.now() + 10_000)
+      .then(
+        () => {
+          result = "complete";
+          return result;
+        },
+        () => {
+          result = "timeout";
+          return result;
+        },
+      );
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(result).toBe("timeout");
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
