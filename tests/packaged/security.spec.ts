@@ -464,13 +464,14 @@ for (const firstOutcome of ["cancel", "refusal"] as const) {
         if (ready && visible(document.querySelector('main.empty-workspace'))) {
           document.documentElement.dataset.installedChooseStage = "cancel_restored";
           const projects = await window.openChords.project.list();
+          const visibleAlerts = [...document.querySelectorAll('[role="alert"]')].filter(visible);
           cancellation = {
             type: projects.type,
             projectCount: projects.type === "project.list" ? projects.projects.length : -1,
             emptyVisible: true,
             workspaceAbsent: document.querySelector('main.workspace') === null,
             alertAbsent: document.querySelector('.empty-workspace [role="alert"]') === null,
-            refusalVisible: [...document.querySelectorAll('.empty-workspace [role="alert"]')].some(alert => visible(alert) && alert.textContent === "Local media operation failed"),
+            refusalVisible: visibleAlerts.length === 1 && visibleAlerts[0]?.textContent === "Local media operation failed",
             chooseEnabled: !ready.disabled,
             offline: (await window.openChords.youtube.perform({type: "status"})).offline,
           };
