@@ -15,6 +15,7 @@ import {
   parseNativeContainmentFailure,
   parseNativeLifecyclePhase,
   parseNativeRevokeProbe,
+  parseNativeRevokeTimeline,
   parseSidecarProcessFailure,
 } from "../apps/desktop/src/main/sidecar-native-broker.ts";
 import {
@@ -477,4 +478,21 @@ it("redacts native cleanup probes while preserving the last exact operation", ()
   ]) {
     expect(parseNativeRevokeProbe(value)).toBe("unknown");
   }
+});
+
+it("bounds native revoke timing observations and rejects private or injected fields", () => {
+  const entry = "ancestor=5 step=security_write elapsed_ms=7776";
+  const diagnostic = parseNativeRevokeTimeline(
+    `${("Native revoke timing: " + entry + "\r\n").repeat(20)}Native revoke timing: ${entry} /private/file\nNative revoke timing: ancestor=6 step=security_write elapsed_ms=1\nNative revoke timing: ancestor=5 step=security_write elapsed_ms=1234567890`,
+  );
+  expect(diagnostic.split(";")).toEqual(Array.from({ length: 16 }, () => entry));
+  expect(diagnostic).not.toContain("private");
+  expect(
+    parseNativeRevokeTimeline("Native revoke timing: " + entry + "\n" + "x".repeat(65536)),
+  ).toBe("unknown");
+  expect(
+    parseNativeRevokeTimeline(
+      "Native revoke timing: unknown /private\nNative revoke timing: " + entry + ";" + entry,
+    ),
+  ).toBe("unknown");
 });

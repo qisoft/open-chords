@@ -27,7 +27,10 @@ import {
 import { EXPECTED_SIDECAR_MANIFEST_SHA256 } from "./sidecar-build-metadata.ts";
 import { verifyContainmentRuntime } from "./sidecar-containment-integrity.ts";
 import { createNativeContainmentLauncher } from "./sidecar-containment-launcher.ts";
-import { createExecutableNativeContainmentBroker } from "./sidecar-native-broker.ts";
+import {
+  createExecutableNativeContainmentBroker,
+  NativeRevokeTimelineSchema,
+} from "./sidecar-native-broker.ts";
 import { verifyPackagedSidecarRuntime } from "./sidecar-runtime-integrity.ts";
 import {
   createEffectSidecarClient,
@@ -789,7 +792,11 @@ async function runLifecycleContainmentProbe(
     timeoutMs: 15_000,
   });
   const probeStartedAt = performance.now();
-  const probeSignal = AbortSignal.timeout(15_000);
+  // Windows CI measured ~10 s launch plus multi-second ancestor ACL cleanup.
+  // Keep the 15 s evidence handshake; allow bounded cleanup after parent/Job exit.
+  const probeBudgetMs = globalThis.process.platform === "win32" ? 30_000 : 15_000;
+  const probeDeadline = probeStartedAt + probeBudgetMs;
+  const probeSignal = AbortSignal.timeout(probeBudgetMs);
   const process = await createLauncher(
     [`--containment-lifecycle-probe=${plan}`],
     mode === "crash" ? [73] : [0],
@@ -812,12 +819,13 @@ async function runLifecycleContainmentProbe(
       `Packaged lifecycle probe stage: mode=${mode} evidence_received duration_ms=${Math.round(performance.now() - probeStartedAt)}\n`,
     );
     phase = "exit";
-    if (mode === "crash") await drainOutput(iterator);
+    if (mode === "crash") await drainOutput(iterator, probeDeadline);
   } catch (cause) {
     const exit =
       cause instanceof SidecarSessionError
         ? z
             .object({
+              nativeRevokeTimeline: NativeRevokeTimelineSchema.optional(),
               nativeRevokeProbe: z
                 .string()
                 .regex(
@@ -846,6 +854,10 @@ async function runLifecycleContainmentProbe(
     writeSync(
       2,
       `Packaged lifecycle probe failure: mode=${mode} phase=${phase} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"} native_phase=${exit?.success === true ? (exit.data.nativeLifecyclePhase ?? "unknown") : "unknown"} native_revoke=${exit?.success === true ? (exit.data.nativeRevokeProbe ?? "unknown") : "unknown"}\n`,
+    );
+    writeSync(
+      2,
+      `Packaged lifecycle revoke timeline: ${exit?.success === true ? (exit.data.nativeRevokeTimeline ?? "unknown") : "unknown"}\n`,
     );
     primaryFailure = { cause };
   }
@@ -896,9 +908,18 @@ async function readBoundedLine(iterator: AsyncIterator<Uint8Array>): Promise<str
   }
 }
 
-async function drainOutput(iterator: AsyncIterator<Uint8Array>): Promise<void> {
+export async function drainOutput(
+  iterator: AsyncIterator<Uint8Array>,
+  deadline: number,
+): Promise<void> {
   while (true) {
-    const next = await withTimeout(iterator.next(), 10_000, "Contained crash probe did not exit");
+    const remainingMs = deadline - performance.now();
+    if (remainingMs <= 0) throw new Error("Contained crash probe did not exit");
+    const next = await withTimeout(
+      iterator.next(),
+      remainingMs,
+      "Contained crash probe did not exit",
+    );
     if (next.done) return;
   }
 }

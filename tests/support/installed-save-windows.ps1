@@ -283,6 +283,7 @@ public static class SaveNativeInput {
       " hit_control=" + (known && clickedControl == control).ToString().ToLowerInvariant() +
       " hit_child=" + (known && IsChild(control, clickedControl)).ToString().ToLowerInvariant() +
       " cursor_match=" + cursorMatches.ToString().ToLowerInvariant());
+    ProbeForeground(window, expectedProcessId, "before_input");
     var inputs = new[] {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
       new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
@@ -290,13 +291,49 @@ public static class SaveNativeInput {
     if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
       throw new InvalidOperationException("Native Save click was not delivered");
   }
-  public static void WaitForDismissal(IntPtr window, uint expectedProcessId) {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr parameter, IntPtr data, uint flags, uint timeout, out UIntPtr result);
+  [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+  private static void ProbeForeground(IntPtr dialog, uint expectedProcessId, string phase) {
+    IntPtr foreground = GetForegroundWindow();
+    uint processId;
+    GetWindowThreadProcessId(foreground, out processId);
+    string kind = foreground == IntPtr.Zero ? "none" : foreground == dialog ? "dialog" :
+      processId == expectedProcessId ? "application" : OwnedByApplication(foreground, expectedProcessId) ? "owned_other" :
+      processId == (uint)System.Diagnostics.Process.GetCurrentProcess().Id ? "driver" : "foreign";
+    var windowClass = new StringBuilder(64);
+    GetClassName(foreground, windowClass, windowClass.Capacity);
+    string category = foreground == IntPtr.Zero ? "none" : windowClass.ToString() == "#32770" ? "dialog" : "other";
+    Console.Error.WriteLine("Native Save foreground probe: phase=" + phase + " kind=" + kind + " class=" + category +
+      " visible=" + IsWindowVisible(foreground).ToString().ToLowerInvariant() +
+      " enabled=" + IsWindowEnabled(foreground).ToString().ToLowerInvariant());
+  }
+  private static string Responsive(IntPtr window) {
+    UIntPtr result;
+    return (SendMessageTimeout(window, 0, UIntPtr.Zero, IntPtr.Zero, 2, 50, out result) != IntPtr.Zero).ToString().ToLowerInvariant();
+  }
+  private static void ProbeDismissalResponse(IntPtr window, IntPtr control, uint expectedProcessId) {
+    bool owned = IsWindow(window) && OwnedByApplication(window, expectedProcessId);
+    bool knownControl = owned && control != IntPtr.Zero && IsWindow(control) && IsChild(window, control) && GetAncestor(control, 2) == window;
+    uint processId;
+    uint thread = owned ? GetWindowThreadProcessId(window, out processId) : 0;
+    var info = new GuiInfo { size = (uint)Marshal.SizeOf(typeof(GuiInfo)) };
+    bool threadKnown = thread != 0 && GetGUIThreadInfo(thread, ref info);
+    Console.Error.WriteLine("Native Save response probe: dialog_responsive=" + (owned ? Responsive(window) : "unknown") +
+      " control_responsive=" + (knownControl ? Responsive(control) : "unknown") +
+      " focus_control=" + (knownControl && threadKnown ? (info.focus == control).ToString().ToLowerInvariant() : "unknown") +
+      " capture_control=" + (knownControl && threadKnown ? (info.capture == control).ToString().ToLowerInvariant() : "unknown") +
+      " left_down=" + ((GetAsyncKeyState(1) & 0x8000) != 0).ToString().ToLowerInvariant() +
+      " foreground_dialog=" + (GetForegroundWindow() == window).ToString().ToLowerInvariant());
+  }
+  public static void WaitForDismissal(IntPtr window, IntPtr control, uint expectedProcessId) {
     var elapsed = System.Diagnostics.Stopwatch.StartNew();
     while (IsWindow(window) && elapsed.ElapsedMilliseconds < 2000)
       System.Threading.Thread.Sleep(20);
     if (IsWindow(window)) {
       Console.Error.WriteLine("Native Save dismissal probe: exists=true visible=" + IsWindowVisible(window).ToString().ToLowerInvariant() +
         " enabled=" + IsWindowEnabled(window).ToString().ToLowerInvariant() + " owned=" + OwnedByApplication(window, expectedProcessId).ToString().ToLowerInvariant());
+      ProbeDismissalResponse(window, control, expectedProcessId);
+      ProbeForeground(window, expectedProcessId, "dismissal");
       throw new InvalidOperationException("Native Save dialog not dismissed");
     }
   }
@@ -480,10 +517,11 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $bounds = $button.Current.BoundingRectangle
     if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) { throw 'action_bounds' }
     $dialogHandle = [IntPtr]$window.Current.NativeWindowHandle
-    [SaveNativeInput]::Click($dialogHandle, [IntPtr]$button.Current.NativeWindowHandle, [uint32]$ApplicationPid,
+    $actionHandle = [IntPtr]$button.Current.NativeWindowHandle
+    [SaveNativeInput]::Click($dialogHandle, $actionHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
-    [SaveNativeInput]::WaitForDismissal($dialogHandle, $ApplicationPid)
+    [SaveNativeInput]::WaitForDismissal($dialogHandle, $actionHandle, $ApplicationPid)
     ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $setFilename; nativeClick = $true; dialogDismissed = $true; defaultNameValid = (!$isImport) } -Compress
     exit 0
   }

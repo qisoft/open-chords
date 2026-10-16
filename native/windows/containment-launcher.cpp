@@ -15,6 +15,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+static const ULONGLONG diagnostic_process_started_at = GetTickCount64();
 static HANDLE active_job = nullptr;
 static SRWLOCK active_job_lock = SRWLOCK_INIT;
 
@@ -108,6 +109,8 @@ static fs::path runtime_staging_path(const std::wstring& profile) {
 
 static void destroy_revoke_probe(size_t ancestor, const char* step) {
   fprintf(stderr, "Native destroy revoke probe: ancestor=%zu step=%s\n", ancestor, step);
+  fprintf(stderr, "Native revoke timing: ancestor=%zu step=%s elapsed_ms=%llu\n", ancestor, step,
+      static_cast<unsigned long long>(GetTickCount64() - diagnostic_process_started_at));
   fflush(stderr);
 }
 
