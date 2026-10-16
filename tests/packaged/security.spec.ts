@@ -30,6 +30,9 @@ import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/pa
 import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-sidecar-proof-failures.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
+import { installedMacPickerDiagnostic } from "../support/installed-picker-macos-diagnostics.ts";
+import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
@@ -411,6 +414,80 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(libraryBaseline);
   expect(reopened.listExportReceipts(packagedProjectId)).toEqual([]);
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
+});
+
+test("installed macOS native Open Cancel preserves an empty Offline Library", async () => {
+  test.skip(process.platform !== "darwin", "macOS native picker cancellation proof");
+  test.setTimeout(180_000);
+  const state = join(packageRoot, "macos-native-picker-cancel");
+  const path = join(packageRoot, "macos-native-picker-cancel.wav");
+  const original = monoPcmWav([0, 1, 2, 3]);
+  writeFileSync(path, original);
+  const library = await openProjectLibrary({ stateRoot: state });
+  await (await openNetworkMode(state)).setOffline(true);
+  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+  const result = await inspectInstalled(
+    state,
+    `(async () => {
+    const cancelled = await window.openChords.media.pickLocalFile();
+    const projects = await window.openChords.project.list();
+    const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+    return { cancelled, projects, offline };
+  })()`,
+    installedSystemEnvironment(),
+    async (applicationPid) => {
+      const started = performance.now();
+      const evidence = await new Promise<unknown>((resolve, reject) => {
+        runNativeFile(
+          "/usr/bin/osascript",
+          [
+            "-l",
+            "JavaScript",
+            join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
+            String(applicationPid),
+          ],
+          { env: installedSystemEnvironment(), timeout: 100000, maxBuffer: 65536 },
+          (error, stdout, stderr) => {
+            if (error) {
+              reject(
+                new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
+              );
+              return;
+            }
+            try {
+              resolve(JSON.parse(stdout.trim()));
+            } catch {
+              reject(new Error("Native macOS picker returned invalid evidence"));
+            }
+          },
+        );
+      });
+      expect(evidence).toEqual({ action: "cancel", nativePress: true, dialogDismissed: true });
+    },
+  );
+  z.object({
+    cancelled: z.object({
+      type: z.literal("media.selection_cancelled"),
+      operation: z.literal("pick"),
+    }),
+    projects: z.object({
+      type: z.literal("project.list"),
+      projects: z.array(z.unknown()).length(0),
+    }),
+    offline: z.literal(true),
+  }).parse(result);
+  expect(JSON.stringify(result).includes("playbackUrl")).toBe(false);
+  for (const privatePath of [state, path, realpathSync(path)]) {
+    const escaped = JSON.stringify(privatePath).slice(1, -1);
+    for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+      expect(JSON.stringify(result).includes(representation)).toBe(false);
+    }
+  }
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(reopened.listProjects()).toEqual([]);
+  expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(baseline);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  expect(readFileSync(path)).toEqual(original);
 });
 
 for (const firstOutcome of ["cancel", "refusal"] as const) {
@@ -1518,7 +1595,11 @@ async function evaluatePackagedExpression(
         }
         const response = CdpEvaluationResponseSchema.parse(raw);
         if (response.result.exceptionDetails !== undefined) {
-          finish(new Error("Packaged editor journey failed"));
+          finish(
+            new Error(
+              `Packaged editor journey failed: ${installedCdpExceptionDiagnostic(response.result.exceptionDetails)}`,
+            ),
+          );
           return;
         }
         finish(null, response.result.result.value);
@@ -2439,11 +2520,7 @@ async function inspectInstalled(
     if (!target) throw new Error("Installed Alignment capability is unavailable");
     const evaluation = evaluatePackagedExpression(
       target.webSocketDebuggerUrl,
-      `(async () => {
-      const deadline = Date.now() + 10000;
-      while (!window.openChords && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
-      return await (${expression});
-    })()`,
+      installedRendererExpression(expression),
       60000,
     );
     if (nativeDriver) {
@@ -2456,7 +2533,7 @@ async function inspectInstalled(
           if (nativeReadyExpression) {
             const ready = await evaluatePackagedExpression(
               webSocketUrl,
-              nativeReadyExpression,
+              installedRendererExpression(nativeReadyExpression),
               60000,
             );
             expect(ready).toBe(true);
@@ -2477,16 +2554,25 @@ async function inspectInstalled(
   } catch (cause) {
     primaryFailure = { cause };
     if (nativeReadyExpression && target) {
-      let stage: unknown;
+      let observation: unknown;
       try {
-        stage = await evaluatePackagedExpression(
+        observation = await evaluatePackagedExpression(
           target.webSocketDebuggerUrl,
-          "document.documentElement.dataset.installedChooseStage",
+          "({ stage: document.documentElement?.dataset.installedChooseStage, rootPresent: document.documentElement !== null, preloadPresent: Boolean(window.openChords), readyState: document.readyState })",
           2000,
         );
       } catch {
-        stage = "unknown";
+        observation = undefined;
       }
+      const parsed = z
+        .object({
+          stage: z.unknown().optional(),
+          rootPresent: z.boolean(),
+          preloadPresent: z.boolean(),
+          readyState: z.enum(["loading", "interactive", "complete"]),
+        })
+        .safeParse(observation);
+      const stage = parsed.success ? parsed.data.stage : undefined;
       const safeStage =
         typeof stage === "string" &&
         [
@@ -2500,7 +2586,9 @@ async function inspectInstalled(
         ].includes(stage)
           ? stage
           : "unknown";
-      process.stdout.write(`Installed Choose evaluator: stage=${safeStage}\n`);
+      process.stdout.write(
+        `Installed Choose evaluator: stage=${safeStage} root_present=${parsed.success ? parsed.data.rootPresent : "unknown"} preload_present=${parsed.success ? parsed.data.preloadPresent : "unknown"} ready=${parsed.success ? parsed.data.readyState : "unknown"}\n`,
+      );
     }
     throw cause;
   } finally {
