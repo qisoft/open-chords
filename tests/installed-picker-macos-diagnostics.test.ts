@@ -30,3 +30,27 @@ it.each([
     "stage=",
   );
 });
+
+it("retains only the last complete fixed selection classification without private AX data", () => {
+  const probe =
+    "Native macOS selection probe: elements=99 complete=1 selected_boolean=1 selected_number=0 selected_string=0 selected_row=0 selected_cell=1 selected_image=0 selected_other=0 url_strings=2 url_matches=1 selected_children=1 selected_rows=0";
+  const diagnostic = installedMacPickerDiagnostic(
+    {},
+    [
+      probe,
+      probe,
+      `${probe} /private/file`,
+      probe.replace("selected_cell=1", "selected_cell=1000"),
+      probe.replace("selected_cell=1", "AXPrivate=1"),
+      "Native macOS selection probe: file:///private/file",
+    ].join("\n"),
+    9000,
+  );
+  expect(diagnostic.split(probe)).toHaveLength(2);
+  expect(diagnostic).not.toContain("private");
+  expect(diagnostic).not.toContain("1000");
+  expect(diagnostic).not.toContain("AXPrivate");
+  expect(installedMacPickerDiagnostic({}, `${probe}\n${"x".repeat(65536)}`, 1)).not.toContain(
+    "selection probe",
+  );
+});

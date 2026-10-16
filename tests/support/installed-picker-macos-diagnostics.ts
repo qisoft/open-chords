@@ -10,11 +10,21 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       ),
     )
     .slice(-1);
+  const selection = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS selection probe: elements=[0-9]{1,3} complete=[01] selected_boolean=[0-9]{1,3} selected_number=[0-9]{1,3} selected_string=[0-9]{1,3} selected_row=[0-9]{1,3} selected_cell=[0-9]{1,3} selected_image=[0-9]{1,3} selected_other=[0-9]{1,3} url_strings=[0-9]{1,3} url_matches=[0-9]{1,3} selected_children=[0-9]{1,3} selected_rows=[0-9]{1,3}$/u.test(
+        line,
+      ),
+    )
+    .slice(-1);
   return [
     installedExportExitDiagnostic(error, durationMs).replace(
       "Installed export process",
       "Native macOS picker",
     ),
     ...probes,
+    ...selection,
   ].join("\n");
 }
