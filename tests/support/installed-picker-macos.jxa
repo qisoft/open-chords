@@ -27,13 +27,13 @@ function run(argv) {
     var probe = { elements: 0, complete: 0,
       selected_boolean: 0, selected_number: 0, selected_string: 0,
       selected_row: 0, selected_cell: 0, selected_image: 0, selected_other: 0,
-      url_strings: 0, url_matches: 0, selected_children: 0, selected_rows: 0, containers: 0, relationship_arrays: 0, relationship_other: 0, selected_filter: 0, filter_errors: 0, url_other: 0 };
+      url_strings: 0, url_matches: 0, selected_children: 0, selected_rows: 0, containers: 0, relationship_arrays: 0, relationship_other: 0, selected_filter: 0, filter_errors: 0, url_other: 0, column_children: 0, target_names: 0, target_values: 0, filename_strings: 0, filename_matches: 0 };
     try {
       var queue = [sheet];
       var visited = 0;
       var exhausted = false;
       while (queue.length > 0) {
-        if (visited >= 256) { exhausted = true; break; }
+        if (Date.now() >= deadline || visited >= 256) { exhausted = true; break; }
         var element = queue.shift();
         visited++;
         probe.elements = visited;
@@ -41,6 +41,10 @@ function run(argv) {
         var selected = axAttribute(element, 'AXSelected');
         probeStage = 'role';
         var role = attribute(element, 'role');
+        if (attribute(element, 'name') === selectedPath.split('/').pop()) probe.target_names++;
+        if (attribute(element, 'value') === selectedPath.split('/').pop()) probe.target_values++;
+        var filename = axAttribute(element, 'AXFilename');
+        if (typeof filename === 'string') { probe.filename_strings++; if (filename === selectedPath) probe.filename_matches++; }
         if (selected === true) {
           probe.selected_boolean++;
           if (role === 'AXRow') probe.selected_row++;
@@ -61,7 +65,7 @@ function run(argv) {
         else if (children !== null) probe.relationship_other++;
         if (Array.isArray(rows)) { probe.relationship_arrays++; probe.selected_rows += Math.min(rows.length, 257); }
         else if (rows !== null) probe.relationship_other++;
-        var selectionContainer = ['AXList', 'AXOutline', 'AXTable'].indexOf(role) !== -1;
+        var selectionContainer = ['AXList', 'AXOutline', 'AXTable', 'AXColumn'].indexOf(role) !== -1;
         var next;
         if (selectionContainer) {
           probe.containers++;
@@ -72,7 +76,11 @@ function run(argv) {
             if (!Array.isArray(filtered) || filtered.length > 256) { exhausted = true; break; }
             probe.selected_filter += filtered.length;
           } catch (_) { probe.filter_errors++; }
-          next = (Array.isArray(children) ? children : []).concat(Array.isArray(rows) ? rows : [], filtered);
+          probeStage = 'columns';
+          var columns = element.uiElements.whose({ role: 'AXColumn' })();
+          if (!Array.isArray(columns) || columns.length > 256) { exhausted = true; break; }
+          probe.column_children += columns.length;
+          next = (Array.isArray(children) ? children : []).concat(Array.isArray(rows) ? rows : [], filtered, columns);
         } else {
           next = element.uiElements();
         }
@@ -86,7 +94,7 @@ function run(argv) {
       probeError = Number.isInteger(number) && number >= -32768 && number <= 32767 ? number : 'unknown';
     }
     var fields = ['elements', 'complete', 'selected_boolean', 'selected_number', 'selected_string',
-      'selected_row', 'selected_cell', 'selected_image', 'selected_other', 'url_strings', 'url_matches', 'selected_children', 'selected_rows', 'containers', 'relationship_arrays', 'relationship_other', 'selected_filter', 'filter_errors', 'url_other'];
+      'selected_row', 'selected_cell', 'selected_image', 'selected_other', 'url_strings', 'url_matches', 'selected_children', 'selected_rows', 'containers', 'relationship_arrays', 'relationship_other', 'selected_filter', 'filter_errors', 'url_other', 'column_children', 'target_names', 'target_values', 'filename_strings', 'filename_matches'];
     var output = ['step=' + probeStage, 'os_error=' + probeError];
     for (var f = 0; f < fields.length; f++) output.push(fields[f] + '=' + Math.min(probe[fields[f]], 999));
     console.log('Native macOS selection probe: ' + output.join(' '));
