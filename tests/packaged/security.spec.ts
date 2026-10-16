@@ -435,35 +435,7 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
     return { cancelled, projects, offline };
   })()`,
     installedSystemEnvironment(),
-    async (applicationPid) => {
-      const started = performance.now();
-      const evidence = await new Promise<unknown>((resolve, reject) => {
-        runNativeFile(
-          "/usr/bin/osascript",
-          [
-            "-l",
-            "JavaScript",
-            join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
-            String(applicationPid),
-          ],
-          { env: installedSystemEnvironment(), timeout: 100000, maxBuffer: 65536 },
-          (error, stdout, stderr) => {
-            if (error) {
-              reject(
-                new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
-              );
-              return;
-            }
-            try {
-              resolve(JSON.parse(stdout.trim()));
-            } catch {
-              reject(new Error("Native macOS picker returned invalid evidence"));
-            }
-          },
-        );
-      });
-      expect(evidence).toEqual({ action: "cancel", nativePress: true, dialogDismissed: true });
-    },
+    installedMacMediaPickerDriver("cancel"),
   );
   z.object({
     cancelled: z.object({
@@ -708,7 +680,7 @@ for (const firstOutcome of ["cancel", "refusal"] as const) {
 }
 
 test("installed native local file refusals precede a durable offline Project", async () => {
-  test.skip(process.platform !== "win32", "Windows native file picker proof");
+  test.skip(!["win32", "darwin"].includes(process.platform), "Native file picker proof");
   test.setTimeout(540_000);
   const state = join(packageRoot, "native-source-create");
   const path = join(packageRoot, "native-source-create.wav");
@@ -1210,10 +1182,52 @@ test("installed local Source refusals and matching relink preserve Project revis
   }
 });
 
+function installedMacMediaPickerDriver(
+  scenario: "cancel" | "open" | "cancel_open_existing",
+  selectedPath?: string,
+) {
+  return async (applicationPid: number) => {
+    const started = performance.now();
+    const evidence = await new Promise<unknown>((resolve, reject) => {
+      runNativeFile(
+        "/usr/bin/osascript",
+        [
+          "-l",
+          "JavaScript",
+          join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
+          String(applicationPid),
+          scenario,
+          ...(selectedPath === undefined ? [] : [selectedPath]),
+        ],
+        { env: installedSystemEnvironment(), timeout: 100000, maxBuffer: 65536 },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(
+              new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
+            );
+            return;
+          }
+          try {
+            resolve(JSON.parse(stdout.trim()));
+          } catch {
+            reject(new Error("Native macOS picker returned invalid evidence"));
+          }
+        },
+      );
+    });
+    expect(evidence).toEqual(
+      scenario === "cancel"
+        ? { action: "cancel", nativePress: true, dialogDismissed: true }
+        : { action: scenario, filenameSet: true, nativePress: true, dialogDismissed: true },
+    );
+  };
+}
+
 function installedMediaPickerDriver(
   scenario: "open" | "cancel_open_existing",
   selectedPath: string,
 ) {
+  if (process.platform === "darwin") return installedMacMediaPickerDriver(scenario, selectedPath);
   const env = installedSystemEnvironment();
   const windows = process.env.SystemRoot ?? process.env.WINDIR;
   if (!windows) throw new Error("Windows OS directory unavailable");
