@@ -55,7 +55,9 @@ function run(argv) {
       var candidate = candidates[0];
       stage = 'action';
       process.frontmost = true;
-      if (attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
+      var frontDeadline = Math.min(deadline, Date.now() + 2000);
+      while (Date.now() < frontDeadline && attribute(process, 'frontmost') !== true) delay(0.05);
+      if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
           attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'role') !== 'AXButton' ||
           attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true) {
         throw new Error('target changed');
