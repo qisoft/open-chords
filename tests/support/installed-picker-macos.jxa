@@ -13,6 +13,7 @@ function run(argv) {
   var started = Date.now();
   var deadline = started + 90000;
   var stage = 'processes';
+  var selectionStep = 'none';
   var counts = { processes: 0, windows: 0, sheets: 0, elements: 0, cancel: 0, open: 0, navigation_sheets: 0, path_fields: 0, selected_rows: 0, selected_urls: 0, selected_matches: 0 };
   function attribute(element, name) {
     try { return element[name](); } catch (_) { return null; }
@@ -157,29 +158,35 @@ function run(argv) {
         var selectedDeadline = Math.min(deadline, Date.now() + 5000);
         var expectedUrl = 'file://' + selectedPath.split('/').map(encodeURIComponent).join('/');
         while (Date.now() < selectedDeadline) {
+          selectionStep = 'elements';
           var panelElements = candidate.sheet.entireContents();
-          if (panelElements.length > 256) throw new Error('selection bound');
+          counts.elements = Math.min(panelElements.length, 257);
+          if (panelElements.length > 256) { selectionStep = 'elements_bound'; throw new Error('selection bound'); }
           counts.selected_rows = 0;
           counts.selected_urls = 0;
           counts.selected_matches = 0;
           for (var r = 0; r < panelElements.length; r++) {
+            selectionStep = 'selected_attribute';
             if (attribute(panelElements[r], 'role') !== 'AXRow' || axAttribute(panelElements[r], 'AXSelected') !== true) continue;
             counts.selected_rows++;
-            if (counts.selected_rows > 1) throw new Error('ambiguous selected rows');
+            if (counts.selected_rows > 1) { selectionStep = 'ambiguous'; throw new Error('ambiguous selected rows'); }
+            selectionStep = 'row_elements';
             var rowElements = [panelElements[r]].concat(panelElements[r].entireContents());
-            if (rowElements.length > 256) throw new Error('selected row bound');
+            if (rowElements.length > 256) { selectionStep = 'row_bound'; throw new Error('selected row bound'); }
             for (var u = 0; u < rowElements.length; u++) {
+              selectionStep = 'url';
               var url = axAttribute(rowElements[u], 'AXURL');
               if (typeof url !== 'string') continue;
               counts.selected_urls++;
               if (url === expectedUrl) counts.selected_matches++;
             }
           }
+          selectionStep = 'verify';
           if (counts.selected_rows === 1 && counts.selected_urls === 1 && counts.selected_matches === 1) { filenameSet = true; break; }
           delay(0.05);
         }
         if (!filenameSet) {
-          selectionProbe(candidate.sheet, expectedUrl);
+          selectionStep = 'unverified';
           throw new Error('selected file unverified');
         }
         candidate.button = scenario === 'open' ? candidate.open : candidate.button;
@@ -204,6 +211,10 @@ function run(argv) {
     stage = 'deadline';
     throw new Error('deadline');
   } catch (error) {
+    if (stage === 'selected_file') {
+      try { selectionProbe(candidate.sheet, expectedUrl); }
+      catch (_) { console.log('Native macOS selection unavailable: fixed_probe_failure'); }
+    }
     var number = error && error.errorNumber;
     if (!Number.isInteger(number) || number < -32768 || number > 32767) number = 'unknown';
     console.log('Native macOS picker failure: stage=' + stage + ' elapsed_ms=' + Math.max(0, Math.min(200000, Date.now() - started)) +
@@ -211,7 +222,7 @@ function run(argv) {
       ' elements=' + counts.elements + ' cancel=' + counts.cancel + ' open=' + counts.open +
       ' navigation_sheets=' + counts.navigation_sheets + ' path_fields=' + counts.path_fields +
       ' selected_rows=' + Math.min(counts.selected_rows, 257) + ' selected_urls=' + Math.min(counts.selected_urls, 999) +
-      ' selected_matches=' + Math.min(counts.selected_matches, 999) + ' os_error=' + number);
+      ' selected_matches=' + Math.min(counts.selected_matches, 999) + ' selection_step=' + selectionStep + ' os_error=' + number);
     throw new Error('Installed native macOS picker failed');
   }
 }
