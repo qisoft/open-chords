@@ -11,6 +11,7 @@ it.each([
   "navigation",
   "path_entry",
   "navigation_dismissal",
+  "file_selection",
   "selected_file",
   "action",
   "dismissal",
