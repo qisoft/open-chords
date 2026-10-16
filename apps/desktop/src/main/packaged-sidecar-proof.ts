@@ -27,7 +27,10 @@ import {
 import { EXPECTED_SIDECAR_MANIFEST_SHA256 } from "./sidecar-build-metadata.ts";
 import { verifyContainmentRuntime } from "./sidecar-containment-integrity.ts";
 import { createNativeContainmentLauncher } from "./sidecar-containment-launcher.ts";
-import { createExecutableNativeContainmentBroker } from "./sidecar-native-broker.ts";
+import {
+  createExecutableNativeContainmentBroker,
+  NativeRevokeTimelineSchema,
+} from "./sidecar-native-broker.ts";
 import { verifyPackagedSidecarRuntime } from "./sidecar-runtime-integrity.ts";
 import {
   createEffectSidecarClient,
@@ -818,6 +821,7 @@ async function runLifecycleContainmentProbe(
       cause instanceof SidecarSessionError
         ? z
             .object({
+              nativeRevokeTimeline: NativeRevokeTimelineSchema.optional(),
               nativeRevokeProbe: z
                 .string()
                 .regex(
@@ -846,6 +850,10 @@ async function runLifecycleContainmentProbe(
     writeSync(
       2,
       `Packaged lifecycle probe failure: mode=${mode} phase=${phase} duration_ms=${Math.round(performance.now() - probeStartedAt)} deadline_aborted=${probeSignal.aborted} exit_code=${exit?.success === true ? (exit.data.exitCode ?? "none") : "unknown"} exit_signal=${exit?.success === true ? (exit.data.exitSignal ?? "none") : "unknown"} native_phase=${exit?.success === true ? (exit.data.nativeLifecyclePhase ?? "unknown") : "unknown"} native_revoke=${exit?.success === true ? (exit.data.nativeRevokeProbe ?? "unknown") : "unknown"}\n`,
+    );
+    writeSync(
+      2,
+      `Packaged lifecycle revoke timeline: ${exit?.success === true ? (exit.data.nativeRevokeTimeline ?? "unknown") : "unknown"}\n`,
     );
     primaryFailure = { cause };
   }

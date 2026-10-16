@@ -214,6 +214,7 @@ async function* containedProcessStdout(
         exitSignal: status.signal,
         nativeLifecyclePhase: parseNativeLifecyclePhase(capturedStderr.bytes.toString("utf8")),
         nativeRevokeProbe: parseNativeRevokeProbe(capturedStderr.bytes.toString("utf8")),
+        nativeRevokeTimeline: parseNativeRevokeTimeline(capturedStderr.bytes.toString("utf8")),
       },
       ...(failureCode === null ? {} : { remoteCode: failureCode }),
     },
@@ -242,6 +243,29 @@ export function parseNativeRevokeProbe(stderr: string): string {
     if (match !== null) probe = match[1]!;
   }
   return probe;
+}
+
+export const NativeRevokeTimelineSchema = z
+  .string()
+  .regex(
+    /^(?:unknown|ancestor=[0-5] step=(?:runtime_root|ancestor_attributes|canonical|path_attributes|mutex_create|mutex_wait|security_read|acl_build|security_write|release|complete) elapsed_ms=[0-9]{1,9}(?:;ancestor=[0-5] step=(?:runtime_root|ancestor_attributes|canonical|path_attributes|mutex_create|mutex_wait|security_read|acl_build|security_write|release|complete) elapsed_ms=[0-9]{1,9}){0,15})$/u,
+  );
+
+export function parseNativeRevokeTimeline(stderr: string): string {
+  const entries = stderr
+    .slice(-MAX_STDERR_BYTES)
+    .split(/\r?\n/u)
+    .flatMap((line) => {
+      const prefix = "Native revoke timing: ";
+      if (!line.startsWith(prefix)) return [];
+      const entry = line.slice(prefix.length);
+      return entry !== "unknown" &&
+        !entry.includes(";") &&
+        NativeRevokeTimelineSchema.safeParse(entry).success
+        ? [entry]
+        : [];
+    });
+  return entries.slice(-16).join(";") || "unknown";
 }
 
 export function containedExitWasAccepted(
