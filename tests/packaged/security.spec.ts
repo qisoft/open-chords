@@ -413,19 +413,27 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
 
-test("installed Choose recording cancels without changes then opens a committed workspace", async () => {
-  test.skip(process.platform !== "win32", "Windows native renderer file picker proof");
-  test.setTimeout(360_000);
-  const state = join(packageRoot, "renderer-native-source");
-  const path = join(packageRoot, "renderer-native-source.wav");
-  const original = monoPcmWav([0, 1, 2, 3]);
-  writeFileSync(path, original);
-  const library = await openProjectLibrary({ stateRoot: state });
-  await (await openNetworkMode(state)).setOffline(true);
-  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
-  const result = await inspectInstalled(
-    state,
-    `(async () => {
+for (const firstOutcome of ["cancel", "refusal"] as const) {
+  test(`installed Choose recording ${firstOutcome} preserves state before same-process recovery`, async () => {
+    test.skip(process.platform !== "win32", "Windows native renderer file picker proof");
+    test.setTimeout(360_000);
+    const state = join(packageRoot, `renderer-native-source-${firstOutcome}`);
+    const path = join(packageRoot, `renderer-native-source-${firstOutcome}.wav`);
+    const original = monoPcmWav([0, 1, 2, 3]);
+    writeFileSync(path, original);
+    const firstPath =
+      firstOutcome === "cancel" ? path : join(packageRoot, "renderer-native-invalid.wav");
+    const firstBytes =
+      firstOutcome === "cancel"
+        ? original
+        : Buffer.from("private renderer refusal fixture, not WAV");
+    if (firstOutcome === "refusal") writeFileSync(firstPath, firstBytes);
+    const library = await openProjectLibrary({ stateRoot: state });
+    await (await openNetworkMode(state)).setOffline(true);
+    const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+    const result = await inspectInstalled(
+      state,
+      `(async () => {
       const deadline = Date.now() + 55000;
       document.documentElement.dataset.installedChooseStage = "waiting_choose";
       const visible = element => element?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) === true;
@@ -456,12 +464,14 @@ test("installed Choose recording cancels without changes then opens a committed 
         if (ready && visible(document.querySelector('main.empty-workspace'))) {
           document.documentElement.dataset.installedChooseStage = "cancel_restored";
           const projects = await window.openChords.project.list();
+          const visibleAlerts = [...document.querySelectorAll('[role="alert"]')].filter(visible);
           cancellation = {
             type: projects.type,
             projectCount: projects.type === "project.list" ? projects.projects.length : -1,
             emptyVisible: true,
             workspaceAbsent: document.querySelector('main.workspace') === null,
             alertAbsent: document.querySelector('.empty-workspace [role="alert"]') === null,
+            refusalVisible: visibleAlerts.length === 1 && visibleAlerts[0]?.textContent === "Local media operation failed",
             chooseEnabled: !ready.disabled,
             offline: (await window.openChords.youtube.perform({type: "status"})).offline,
           };
@@ -491,6 +501,7 @@ test("installed Choose recording cancels without changes then opens a committed 
             sampleRate: response.project.sampleRate,
             workspaceVisible: visible(workspace),
             playbackReady: audio.src.startsWith('open-chords:'),
+            errorAbsent: ![...document.querySelectorAll('[role="alert"]')].some(visible),
             offline: (await window.openChords.youtube.perform({type: "status"})).offline,
           };
         }
@@ -498,31 +509,35 @@ test("installed Choose recording cancels without changes then opens a committed 
       }
       throw new Error("Native-selected recording did not open its committed workspace");
     })()`,
-    installedSystemEnvironment(),
-    async (applicationPid) => {
-      const started = performance.now();
-      const report = (
-        stage:
-          | "cancel_started"
-          | "cancel_completed"
-          | "baseline_verified"
-          | "open_started"
-          | "open_completed",
-      ) =>
-        process.stdout.write(
-          `Installed Choose driver: stage=${stage} elapsed_ms=${Math.round(performance.now() - started)}\n`,
-        );
-      report("cancel_started");
-      await installedMediaPickerDriver("cancel_open_existing", path)(applicationPid);
-      report("cancel_completed");
-      expect(canonicalSerialize(await proofTreeHashes(library.activeRoot))).toBe(baseline);
-      expect(readFileSync(path)).toEqual(original);
-      report("baseline_verified");
-      report("open_started");
-      await installedMediaPickerDriver("open", path)(applicationPid);
-      report("open_completed");
-    },
-    `(async () => {
+      installedSystemEnvironment(),
+      async (applicationPid) => {
+        const started = performance.now();
+        const report = (
+          stage:
+            | "first_started"
+            | "first_completed"
+            | "baseline_verified"
+            | "open_started"
+            | "open_completed",
+        ) =>
+          process.stdout.write(
+            `Installed Choose driver: scenario=${firstOutcome} stage=${stage} elapsed_ms=${Math.round(performance.now() - started)}\n`,
+          );
+        report("first_started");
+        await installedMediaPickerDriver(
+          firstOutcome === "cancel" ? "cancel_open_existing" : "open",
+          firstPath,
+        )(applicationPid);
+        report("first_completed");
+        expect(canonicalSerialize(await proofTreeHashes(library.activeRoot))).toBe(baseline);
+        expect(readFileSync(path)).toEqual(original);
+        expect(readFileSync(firstPath)).toEqual(firstBytes);
+        report("baseline_verified");
+        report("open_started");
+        await installedMediaPickerDriver("open", path)(applicationPid);
+        report("open_completed");
+      },
+      `(async () => {
       const deadline = Date.now() + 55000;
       while (Date.now() < deadline) {
         if (document.documentElement.dataset.installedChoosePending === "observed") return true;
@@ -530,76 +545,90 @@ test("installed Choose recording cancels without changes then opens a committed 
       }
       throw new Error("Installed Choose pending acknowledgment was unavailable");
     })()`,
-  );
-  const opened = z
-    .object({
-      type: z.literal("project.snapshot"),
-      cancellation: z.object({
-        type: z.literal("project.list"),
-        projectCount: z.literal(0),
-        emptyVisible: z.literal(true),
-        workspaceAbsent: z.literal(true),
-        alertAbsent: z.literal(true),
-        chooseEnabled: z.literal(true),
+    );
+    const opened = z
+      .object({
+        type: z.literal("project.snapshot"),
+        cancellation: z.object({
+          type: z.literal("project.list"),
+          projectCount: z.literal(0),
+          emptyVisible: z.literal(true),
+          workspaceAbsent: z.literal(true),
+          alertAbsent: z.literal(firstOutcome === "cancel"),
+          refusalVisible: z.literal(firstOutcome === "refusal"),
+          chooseEnabled: z.literal(true),
+          offline: z.literal(true),
+        }),
+        projectId: z.string(),
+        projectRevisionId: z.string(),
+        durationSamples: z.literal(4),
+        sampleRate: z.literal(48000),
+        workspaceVisible: z.literal(true),
+        playbackReady: z.literal(true),
+        errorAbsent: z.literal(true),
         offline: z.literal(true),
-      }),
-      projectId: z.string(),
-      projectRevisionId: z.string(),
-      durationSamples: z.literal(4),
-      sampleRate: z.literal(48000),
-      workspaceVisible: z.literal(true),
-      playbackReady: z.literal(true),
-      offline: z.literal(true),
-    })
-    .parse(result);
-  for (const privatePath of [state, path, realpathSync(path)]) {
-    const escaped = JSON.stringify(privatePath).slice(1, -1);
-    for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)]) {
-      expect(JSON.stringify(result).includes(representation)).toBe(false);
+      })
+      .parse(result);
+    for (const privatePath of [
+      state,
+      path,
+      firstPath,
+      realpathSync(path),
+      realpathSync(firstPath),
+    ]) {
+      const escaped = JSON.stringify(privatePath).slice(1, -1);
+      for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+        expect(JSON.stringify(result).includes(representation)).toBe(false);
+      }
     }
-  }
-  expect(JSON.stringify(result).includes("playbackUrl")).toBe(false);
-  const reopened = await openProjectLibrary({ stateRoot: state });
-  expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual([opened.projectId]);
-  const project = await reopened.readProject(opened.projectId);
-  expect(project.projectRevisionId).toBe(opened.projectRevisionId);
-  expect(project.envelope.payload).toMatchObject({
-    id: opened.projectId,
-    durationSamples: 4,
-    sampleRate: 48000,
-    analysisRevisions: [],
-    editLayers: [],
-    activeView: null,
-  });
-  expect(project.records.projectRange).toMatchObject({ startSourceSample: 0, endSourceSample: 4 });
-  expect(project.records.sources).toHaveLength(1);
-  const source = project.records.sources[0]!;
-  expect(source.id).toBe(project.records.projectRange?.sourceId);
-  expect(source.identity.kind).toBe("local_file");
-  expect(source.snapshots).toMatchObject([
-    {
-      byteFingerprint: `sha256:${createNativeSelectionHash("sha256").update(original).digest("hex")}`,
-      byteSize: original.length,
+    expect(JSON.stringify(result).includes("playbackUrl")).toBe(false);
+    expect(JSON.stringify(result).includes("private renderer refusal fixture")).toBe(false);
+    const reopened = await openProjectLibrary({ stateRoot: state });
+    expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual([opened.projectId]);
+    const project = await reopened.readProject(opened.projectId);
+    expect(project.projectRevisionId).toBe(opened.projectRevisionId);
+    expect(project.envelope.payload).toMatchObject({
+      id: opened.projectId,
       durationSamples: 4,
-    },
-  ]);
-  expect(source.locators).toHaveLength(1);
-  let sameFile = false;
-  const locator = source.locators[0];
-  if (locator?.kind === "local_file" && locator.status === "available") {
-    try {
-      const actual = statSync(locator.path, { bigint: true });
-      const expected = statSync(path, { bigint: true });
-      sameFile = actual.ino !== 0n && actual.ino === expected.ino && actual.dev === expected.dev;
-    } catch {
-      // Keep private paths from stat failures out of the test report.
+      sampleRate: 48000,
+      analysisRevisions: [],
+      editLayers: [],
+      activeView: null,
+    });
+    expect(project.records.projectRange).toMatchObject({
+      startSourceSample: 0,
+      endSourceSample: 4,
+    });
+    expect(project.records.sources).toHaveLength(1);
+    const source = project.records.sources[0]!;
+    expect(source.id).toBe(project.records.projectRange?.sourceId);
+    expect(source.identity.kind).toBe("local_file");
+    expect(source.snapshots).toMatchObject([
+      {
+        byteFingerprint: `sha256:${createNativeSelectionHash("sha256").update(original).digest("hex")}`,
+        byteSize: original.length,
+        durationSamples: 4,
+      },
+    ]);
+    expect(source.locators).toHaveLength(1);
+    let sameFile = false;
+    const locator = source.locators[0];
+    if (locator?.kind === "local_file" && locator.status === "available") {
+      try {
+        const actual = statSync(locator.path, { bigint: true });
+        const expected = statSync(path, { bigint: true });
+        sameFile = actual.ino !== 0n && actual.ino === expected.ino && actual.dev === expected.dev;
+      } catch {
+        // Keep private paths from stat failures out of the test report.
+      }
     }
-  }
-  expect(sameFile).toBe(true);
-  expect(reopened.listExportReceipts(opened.projectId)).toEqual([]);
-  expect((await openNetworkMode(state)).offline).toBe(true);
-  expect(readFileSync(path)).toEqual(original);
-});
+    expect(sameFile).toBe(true);
+    expect(reopened.listExportReceipts(opened.projectId)).toEqual([]);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    expect(readFileSync(path)).toEqual(original);
+    expect(readFileSync(firstPath)).toEqual(firstBytes);
+  });
+}
 
 test("installed native local file refusals precede a durable offline Project", async () => {
   test.skip(process.platform !== "win32", "Windows native file picker proof");
