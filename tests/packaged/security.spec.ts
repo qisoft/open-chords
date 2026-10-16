@@ -30,6 +30,7 @@ import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/pa
 import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-sidecar-proof-failures.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
 import { installedMacPickerDiagnostic } from "../support/installed-picker-macos-diagnostics.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
@@ -1593,7 +1594,11 @@ async function evaluatePackagedExpression(
         }
         const response = CdpEvaluationResponseSchema.parse(raw);
         if (response.result.exceptionDetails !== undefined) {
-          finish(new Error("Packaged editor journey failed"));
+          finish(
+            new Error(
+              `Packaged editor journey failed: ${installedCdpExceptionDiagnostic(response.result.exceptionDetails)}`,
+            ),
+          );
           return;
         }
         finish(null, response.result.result.value);
@@ -2552,16 +2557,25 @@ async function inspectInstalled(
   } catch (cause) {
     primaryFailure = { cause };
     if (nativeReadyExpression && target) {
-      let stage: unknown;
+      let observation: unknown;
       try {
-        stage = await evaluatePackagedExpression(
+        observation = await evaluatePackagedExpression(
           target.webSocketDebuggerUrl,
-          "document.documentElement.dataset.installedChooseStage",
+          "({ stage: document.documentElement?.dataset.installedChooseStage, rootPresent: document.documentElement !== null, preloadPresent: Boolean(window.openChords), readyState: document.readyState })",
           2000,
         );
       } catch {
-        stage = "unknown";
+        observation = undefined;
       }
+      const parsed = z
+        .object({
+          stage: z.unknown().optional(),
+          rootPresent: z.boolean(),
+          preloadPresent: z.boolean(),
+          readyState: z.enum(["loading", "interactive", "complete"]),
+        })
+        .safeParse(observation);
+      const stage = parsed.success ? parsed.data.stage : undefined;
       const safeStage =
         typeof stage === "string" &&
         [
@@ -2575,7 +2589,9 @@ async function inspectInstalled(
         ].includes(stage)
           ? stage
           : "unknown";
-      process.stdout.write(`Installed Choose evaluator: stage=${safeStage}\n`);
+      process.stdout.write(
+        `Installed Choose evaluator: stage=${safeStage} root_present=${parsed.success ? parsed.data.rootPresent : "unknown"} preload_present=${parsed.success ? parsed.data.preloadPresent : "unknown"} ready=${parsed.success ? parsed.data.readyState : "unknown"}\n`,
+      );
     }
     throw cause;
   } finally {
