@@ -219,4 +219,17 @@ describe("native Save driver failure redaction", () => {
       expect(diagnostic).not.toContain("private");
     },
   );
+  it.each(["none", "dialog", "application", "owned_other", "driver", "foreign"])(
+    "retains bounded foreground categories: %s",
+    (kind) => {
+      const probe = `Native Save foreground probe: phase=dismissal kind=${kind} class=dialog visible=true enabled=true`;
+      const diagnostic = installedSaveDriverDiagnostic(
+        {},
+        `${(probe + "\n").repeat(5)}${probe} /private/file\n${probe.replace("class=dialog", "class=private")}`,
+        100,
+      );
+      expect(diagnostic.split(probe)).toHaveLength(4);
+      expect(diagnostic).not.toContain("private");
+    },
+  );
 });

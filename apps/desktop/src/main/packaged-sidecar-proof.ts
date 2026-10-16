@@ -792,7 +792,11 @@ async function runLifecycleContainmentProbe(
     timeoutMs: 15_000,
   });
   const probeStartedAt = performance.now();
-  const probeSignal = AbortSignal.timeout(15_000);
+  // Windows CI measured ~10 s launch plus multi-second ancestor ACL cleanup.
+  // Keep the 15 s evidence handshake; allow bounded cleanup after parent/Job exit.
+  const probeSignal = AbortSignal.timeout(
+    globalThis.process.platform === "win32" ? 30_000 : 15_000,
+  );
   const process = await createLauncher(
     [`--containment-lifecycle-probe=${plan}`],
     mode === "crash" ? [73] : [0],

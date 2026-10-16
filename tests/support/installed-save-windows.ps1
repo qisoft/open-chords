@@ -283,6 +283,7 @@ public static class SaveNativeInput {
       " hit_control=" + (known && clickedControl == control).ToString().ToLowerInvariant() +
       " hit_child=" + (known && IsChild(control, clickedControl)).ToString().ToLowerInvariant() +
       " cursor_match=" + cursorMatches.ToString().ToLowerInvariant());
+    ProbeForeground(window, expectedProcessId, "before_input");
     var inputs = new[] {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
       new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
@@ -292,6 +293,20 @@ public static class SaveNativeInput {
   }
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr parameter, IntPtr data, uint flags, uint timeout, out UIntPtr result);
   [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+  private static void ProbeForeground(IntPtr dialog, uint expectedProcessId, string phase) {
+    IntPtr foreground = GetForegroundWindow();
+    uint processId;
+    GetWindowThreadProcessId(foreground, out processId);
+    string kind = foreground == IntPtr.Zero ? "none" : foreground == dialog ? "dialog" :
+      processId == expectedProcessId ? "application" : OwnedByApplication(foreground, expectedProcessId) ? "owned_other" :
+      processId == (uint)System.Diagnostics.Process.GetCurrentProcess().Id ? "driver" : "foreign";
+    var windowClass = new StringBuilder(64);
+    GetClassName(foreground, windowClass, windowClass.Capacity);
+    string category = foreground == IntPtr.Zero ? "none" : windowClass.ToString() == "#32770" ? "dialog" : "other";
+    Console.Error.WriteLine("Native Save foreground probe: phase=" + phase + " kind=" + kind + " class=" + category +
+      " visible=" + IsWindowVisible(foreground).ToString().ToLowerInvariant() +
+      " enabled=" + IsWindowEnabled(foreground).ToString().ToLowerInvariant());
+  }
   private static string Responsive(IntPtr window) {
     UIntPtr result;
     return (SendMessageTimeout(window, 0, UIntPtr.Zero, IntPtr.Zero, 2, 50, out result) != IntPtr.Zero).ToString().ToLowerInvariant();
@@ -318,6 +333,7 @@ public static class SaveNativeInput {
       Console.Error.WriteLine("Native Save dismissal probe: exists=true visible=" + IsWindowVisible(window).ToString().ToLowerInvariant() +
         " enabled=" + IsWindowEnabled(window).ToString().ToLowerInvariant() + " owned=" + OwnedByApplication(window, expectedProcessId).ToString().ToLowerInvariant());
       ProbeDismissalResponse(window, control, expectedProcessId);
+      ProbeForeground(window, expectedProcessId, "dismissal");
       throw new InvalidOperationException("Native Save dialog not dismissed");
     }
   }
