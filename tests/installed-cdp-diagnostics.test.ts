@@ -55,3 +55,16 @@ it("classifies only exact fixed error messages without returning their stacks", 
     );
   }
 });
+
+it("keeps the bounded renderer readiness failure category without a stack", () => {
+  expect(
+    installedCdpExceptionDiagnostic({
+      exception: {
+        className: "Error",
+        description: "Error: Installed renderer prerequisites unavailable\n at /private/file",
+      },
+    }),
+  ).toBe(
+    "Installed CDP exception: class=Error line=unknown column=unknown category=renderer_unavailable",
+  );
+});

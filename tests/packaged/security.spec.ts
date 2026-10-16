@@ -32,6 +32,7 @@ import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
 import { installedMacPickerDiagnostic } from "../support/installed-picker-macos-diagnostics.ts";
+import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
@@ -2519,11 +2520,7 @@ async function inspectInstalled(
     if (!target) throw new Error("Installed Alignment capability is unavailable");
     const evaluation = evaluatePackagedExpression(
       target.webSocketDebuggerUrl,
-      `(async () => {
-      const deadline = Date.now() + 10000;
-      while (!window.openChords && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
-      return await (${expression});
-    })()`,
+      installedRendererExpression(expression),
       60000,
     );
     if (nativeDriver) {
@@ -2536,7 +2533,7 @@ async function inspectInstalled(
           if (nativeReadyExpression) {
             const ready = await evaluatePackagedExpression(
               webSocketUrl,
-              nativeReadyExpression,
+              installedRendererExpression(nativeReadyExpression),
               60000,
             );
             expect(ready).toBe(true);

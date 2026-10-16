@@ -24,6 +24,7 @@ export function installedCdpExceptionDiagnostic(details: unknown): string {
   const firstLine =
     typeof description === "string" ? description.slice(0, 4096).split(/\r?\n/u)[0] : "";
   const categories: Record<string, string> = {
+    "Error: Installed renderer prerequisites unavailable": "renderer_unavailable",
     "TypeError: Cannot read properties of null (reading 'dataset')": "null_dataset",
     "Error: Installed Choose recording button was unavailable": "choose_unavailable",
     "Error: Installed Choose recording did not enter its pending state": "pending_unobserved",
