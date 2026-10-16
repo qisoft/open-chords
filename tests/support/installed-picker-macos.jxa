@@ -21,38 +21,54 @@ function run(argv) {
     try { return element.attributes.byName(name).value(); } catch (_) { return null; }
   }
   function selectionProbe(sheet, expectedUrl) {
-    var elements = sheet.entireContents();
-    var probe = { elements: Math.min(elements.length, 257), complete: elements.length <= 256 ? 1 : 0,
+    var probeStage = 'elements';
+    var probeError = 'none';
+    var probe = { elements: 0, complete: 0,
       selected_boolean: 0, selected_number: 0, selected_string: 0,
       selected_row: 0, selected_cell: 0, selected_image: 0, selected_other: 0,
       url_strings: 0, url_matches: 0, selected_children: 0, selected_rows: 0 };
-    if (elements.length <= 256) {
-      for (var i = 0; i < elements.length; i++) {
-        var selected = axAttribute(elements[i], 'AXSelected');
-        if (selected === true) {
-          probe.selected_boolean++;
-          var role = attribute(elements[i], 'role');
-          if (role === 'AXRow') probe.selected_row++;
-          else if (role === 'AXCell') probe.selected_cell++;
-          else if (role === 'AXImage') probe.selected_image++;
-          else probe.selected_other++;
+    try {
+      var elements = sheet.entireContents();
+      if (!Number.isInteger(elements.length) || elements.length < 0) throw new Error('invalid collection');
+      probe.elements = Math.min(elements.length, 257);
+      if (elements.length <= 256) {
+        for (var i = 0; i < elements.length; i++) {
+          probeStage = 'selected';
+          var selected = axAttribute(elements[i], 'AXSelected');
+          if (selected === true) {
+            probe.selected_boolean++;
+            probeStage = 'role';
+            var role = attribute(elements[i], 'role');
+            if (role === 'AXRow') probe.selected_row++;
+            else if (role === 'AXCell') probe.selected_cell++;
+            else if (role === 'AXImage') probe.selected_image++;
+            else probe.selected_other++;
+          }
+          if (typeof selected === 'number' && selected === 1) probe.selected_number++;
+          if (typeof selected === 'string') probe.selected_string++;
+          probeStage = 'url';
+          var url = axAttribute(elements[i], 'AXURL');
+          if (typeof url === 'string') { probe.url_strings++; if (url === expectedUrl) probe.url_matches++; }
+          probeStage = 'relationships';
+          var children = axAttribute(elements[i], 'AXSelectedChildren');
+          var rows = axAttribute(elements[i], 'AXSelectedRows');
+          if (Array.isArray(children)) probe.selected_children += Math.min(children.length, 257);
+          if (Array.isArray(rows)) probe.selected_rows += Math.min(rows.length, 257);
         }
-        if (typeof selected === 'number' && selected === 1) probe.selected_number++;
-        if (typeof selected === 'string') probe.selected_string++;
-        var url = axAttribute(elements[i], 'AXURL');
-        if (typeof url === 'string') { probe.url_strings++; if (url === expectedUrl) probe.url_matches++; }
-        var children = axAttribute(elements[i], 'AXSelectedChildren');
-        var rows = axAttribute(elements[i], 'AXSelectedRows');
-        if (Array.isArray(children)) probe.selected_children += Math.min(children.length, 257);
-        if (Array.isArray(rows)) probe.selected_rows += Math.min(rows.length, 257);
-      }
+        probe.complete = 1;
+        probeStage = 'complete';
+      } else probeStage = 'bound';
+    } catch (error) {
+      var number = error && error.errorNumber;
+      probeError = Number.isInteger(number) && number >= -32768 && number <= 32767 ? number : 'unknown';
     }
     var fields = ['elements', 'complete', 'selected_boolean', 'selected_number', 'selected_string',
       'selected_row', 'selected_cell', 'selected_image', 'selected_other', 'url_strings', 'url_matches', 'selected_children', 'selected_rows'];
-    var output = [];
+    var output = ['step=' + probeStage, 'os_error=' + probeError];
     for (var f = 0; f < fields.length; f++) output.push(fields[f] + '=' + Math.min(probe[fields[f]], 999));
     console.log('Native macOS selection probe: ' + output.join(' '));
   }
+
   try {
     while (Date.now() < deadline) {
       stage = 'processes';
@@ -163,7 +179,7 @@ function run(argv) {
           delay(0.05);
         }
         if (!filenameSet) {
-          try { selectionProbe(candidate.sheet, expectedUrl); } catch (_) { /* Keep AX failures private. */ }
+          selectionProbe(candidate.sheet, expectedUrl);
           throw new Error('selected file unverified');
         }
         candidate.button = scenario === 'open' ? candidate.open : candidate.button;
