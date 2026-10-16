@@ -27,6 +27,7 @@ import { openNetworkMode } from "../../apps/desktop/src/main/network-mode.ts";
 import { proofTreeHashes } from "../../apps/desktop/src/main/packaged-proof-tree.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof-constants.ts";
 import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/packaged-sidecar-proof-evidence.ts";
+import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-sidecar-proof-failures.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
@@ -412,19 +413,21 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
 
-test("installed Choose local recording opens the native picker and committed workspace", async () => {
+test("installed Choose recording cancels without changes then opens a committed workspace", async () => {
   test.skip(process.platform !== "win32", "Windows native renderer file picker proof");
-  test.setTimeout(300_000);
+  test.setTimeout(360_000);
   const state = join(packageRoot, "renderer-native-source");
   const path = join(packageRoot, "renderer-native-source.wav");
   const original = monoPcmWav([0, 1, 2, 3]);
   writeFileSync(path, original);
-  await openProjectLibrary({ stateRoot: state });
+  const library = await openProjectLibrary({ stateRoot: state });
   await (await openNetworkMode(state)).setOffline(true);
+  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
   const result = await inspectInstalled(
     state,
     `(async () => {
-      const deadline = Date.now() + 45000;
+      const deadline = Date.now() + 55000;
+      document.documentElement.dataset.installedChooseStage = "waiting_choose";
       const visible = element => element?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) === true;
       let choose;
       while (Date.now() < deadline) {
@@ -433,17 +436,55 @@ test("installed Choose local recording opens the native picker and committed wor
         await new Promise(resolve => setTimeout(resolve, 25));
       }
       if (!choose) throw new Error("Installed Choose recording button was unavailable");
+      document.documentElement.dataset.installedChooseStage = "choose_clicked";
       choose.click();
+      let busyObserved = false;
+      while (Date.now() < deadline) {
+        const busy = [...document.querySelectorAll('.empty-workspace button')].find(button => button.disabled && button.textContent.trim() === "Creating Project…" && visible(button));
+        if (busy) {
+          busyObserved = true;
+          document.documentElement.dataset.installedChooseStage = "pending_observed";
+          document.documentElement.dataset.installedChoosePending = "observed";
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!busyObserved) throw new Error("Installed Choose recording did not enter its pending state");
+      let cancellation;
+      while (Date.now() < deadline) {
+        const ready = [...document.querySelectorAll('.empty-workspace button')].find(button => button.textContent.trim() === "Choose local recording" && !button.disabled && visible(button));
+        if (ready && visible(document.querySelector('main.empty-workspace'))) {
+          document.documentElement.dataset.installedChooseStage = "cancel_restored";
+          const projects = await window.openChords.project.list();
+          cancellation = {
+            type: projects.type,
+            projectCount: projects.type === "project.list" ? projects.projects.length : -1,
+            emptyVisible: true,
+            workspaceAbsent: document.querySelector('main.workspace') === null,
+            alertAbsent: document.querySelector('.empty-workspace [role="alert"]') === null,
+            chooseEnabled: !ready.disabled,
+            offline: (await window.openChords.youtube.perform({type: "status"})).offline,
+          };
+          document.documentElement.dataset.installedChooseStage = "retry_clicked";
+          ready.click();
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!cancellation) throw new Error("Native Cancel did not restore the empty workspace");
       while (Date.now() < deadline) {
         const workspace = document.querySelector('main.workspace');
         const identity = document.querySelector('.project-identity');
         const audio = document.querySelector('audio');
         if (visible(workspace) && visible(identity) && audio?.src.startsWith('open-chords:')) {
+          document.documentElement.dataset.installedChooseStage = "workspace_visible";
           const projectId = identity.textContent.trim();
           const response = await window.openChords.project.getSnapshot(projectId);
           if (response.type !== "project.snapshot") return { type: response.type };
+          document.documentElement.dataset.installedChooseStage = "snapshot_read";
           return {
             type: response.type,
+            cancellation,
             projectId,
             projectRevisionId: response.projectRevisionId,
             durationSamples: response.project.durationSamples,
@@ -458,11 +499,50 @@ test("installed Choose local recording opens the native picker and committed wor
       throw new Error("Native-selected recording did not open its committed workspace");
     })()`,
     installedSystemEnvironment(),
-    installedMediaPickerDriver("open", path),
+    async (applicationPid) => {
+      const started = performance.now();
+      const report = (
+        stage:
+          | "cancel_started"
+          | "cancel_completed"
+          | "baseline_verified"
+          | "open_started"
+          | "open_completed",
+      ) =>
+        process.stdout.write(
+          `Installed Choose driver: stage=${stage} elapsed_ms=${Math.round(performance.now() - started)}\n`,
+        );
+      report("cancel_started");
+      await installedMediaPickerDriver("cancel_open_existing", path)(applicationPid);
+      report("cancel_completed");
+      expect(canonicalSerialize(await proofTreeHashes(library.activeRoot))).toBe(baseline);
+      expect(readFileSync(path)).toEqual(original);
+      report("baseline_verified");
+      report("open_started");
+      await installedMediaPickerDriver("open", path)(applicationPid);
+      report("open_completed");
+    },
+    `(async () => {
+      const deadline = Date.now() + 55000;
+      while (Date.now() < deadline) {
+        if (document.documentElement.dataset.installedChoosePending === "observed") return true;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      throw new Error("Installed Choose pending acknowledgment was unavailable");
+    })()`,
   );
   const opened = z
     .object({
       type: z.literal("project.snapshot"),
+      cancellation: z.object({
+        type: z.literal("project.list"),
+        projectCount: z.literal(0),
+        emptyVisible: z.literal(true),
+        workspaceAbsent: z.literal(true),
+        alertAbsent: z.literal(true),
+        chooseEnabled: z.literal(true),
+        offline: z.literal(true),
+      }),
       projectId: z.string(),
       projectRevisionId: z.string(),
       durationSamples: z.literal(4),
@@ -2293,6 +2373,7 @@ async function inspectInstalled(
   expression: string,
   env?: NodeJS.ProcessEnv,
   nativeDriver?: (applicationPid: number) => Promise<void>,
+  nativeReadyExpression?: string,
 ) {
   const port = await reservePort();
   const application = spawn(
@@ -2306,6 +2387,7 @@ async function inspectInstalled(
   );
   const startupProbe = recordInstalledStartup(application, "capability");
   let target: z.infer<typeof CdpTargetsSchema>[number] | undefined;
+  let primaryFailure: { cause: unknown } | undefined;
   try {
     await expect
       .poll(
@@ -2337,20 +2419,70 @@ async function inspectInstalled(
     );
     if (nativeDriver) {
       if (!application.pid) throw new Error("Installed native picker process unavailable");
+      const applicationPid = application.pid;
+      const webSocketUrl = target.webSocketDebuggerUrl;
       const [evaluated, driven] = await Promise.allSettled([
         evaluation,
-        nativeDriver(application.pid),
+        (async () => {
+          if (nativeReadyExpression) {
+            const ready = await evaluatePackagedExpression(
+              webSocketUrl,
+              nativeReadyExpression,
+              60000,
+            );
+            expect(ready).toBe(true);
+          }
+          await nativeDriver(applicationPid);
+        })(),
       ]);
+      if (driven.status === "rejected" && evaluated.status === "rejected")
+        throw new AggregateError(
+          [driven.reason, evaluated.reason],
+          "Installed native driver and evaluator failed",
+        );
       if (driven.status === "rejected") throw driven.reason;
       if (evaluated.status === "rejected") throw evaluated.reason;
       return evaluated.value;
     }
     return await evaluation;
+  } catch (cause) {
+    primaryFailure = { cause };
+    if (nativeReadyExpression && target) {
+      let stage: unknown;
+      try {
+        stage = await evaluatePackagedExpression(
+          target.webSocketDebuggerUrl,
+          "document.documentElement.dataset.installedChooseStage",
+          2000,
+        );
+      } catch {
+        stage = "unknown";
+      }
+      const safeStage =
+        typeof stage === "string" &&
+        [
+          "waiting_choose",
+          "choose_clicked",
+          "pending_observed",
+          "cancel_restored",
+          "retry_clicked",
+          "workspace_visible",
+          "snapshot_read",
+        ].includes(stage)
+          ? stage
+          : "unknown";
+      process.stdout.write(`Installed Choose evaluator: stage=${safeStage}\n`);
+    }
+    throw cause;
   } finally {
     startupProbe();
+    const cleanupFailures: unknown[] = [];
     try {
       if (target) await quitInstalledApplication(application, target.webSocketDebuggerUrl);
-    } finally {
+    } catch (cause) {
+      cleanupFailures.push(cause);
+    }
+    try {
       if (
         process.platform !== "win32" &&
         application.exitCode === null &&
@@ -2358,7 +2490,14 @@ async function inspectInstalled(
       )
         application.kill("SIGKILL");
       await stopApplication(application);
+    } catch (cause) {
+      cleanupFailures.push(cause);
     }
+    throwCombinedFailures(
+      "Installed inspection and shutdown failed",
+      primaryFailure,
+      cleanupFailures,
+    );
   }
 }
 
