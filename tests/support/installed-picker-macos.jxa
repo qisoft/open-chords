@@ -27,7 +27,7 @@ function run(argv) {
     var probe = { elements: 0, complete: 0,
       selected_boolean: 0, selected_number: 0, selected_string: 0,
       selected_row: 0, selected_cell: 0, selected_image: 0, selected_other: 0,
-      url_strings: 0, url_matches: 0, selected_children: 0, selected_rows: 0, containers: 0, relationship_arrays: 0, relationship_other: 0 };
+      url_strings: 0, url_matches: 0, selected_children: 0, selected_rows: 0, containers: 0, relationship_arrays: 0, relationship_other: 0, selected_filter: 0, filter_errors: 0, url_other: 0 };
     try {
       var queue = [sheet];
       var visited = 0;
@@ -53,6 +53,7 @@ function run(argv) {
         probeStage = 'url';
         var url = axAttribute(element, 'AXURL');
         if (typeof url === 'string') { probe.url_strings++; if (url === expectedUrl) probe.url_matches++; }
+        else if (url !== null) probe.url_other++;
         probeStage = 'relationships';
         var children = axAttribute(element, 'AXSelectedChildren');
         var rows = axAttribute(element, 'AXSelectedRows');
@@ -64,7 +65,14 @@ function run(argv) {
         var next;
         if (selectionContainer) {
           probe.containers++;
-          next = (Array.isArray(children) ? children : []).concat(Array.isArray(rows) ? rows : []);
+          var filtered = [];
+          try {
+            probeStage = 'selected_query';
+            filtered = element.uiElements.whose({ selected: true })();
+            if (!Array.isArray(filtered) || filtered.length > 256) { exhausted = true; break; }
+            probe.selected_filter += filtered.length;
+          } catch (_) { probe.filter_errors++; }
+          next = (Array.isArray(children) ? children : []).concat(Array.isArray(rows) ? rows : [], filtered);
         } else {
           next = element.uiElements();
         }
@@ -78,7 +86,7 @@ function run(argv) {
       probeError = Number.isInteger(number) && number >= -32768 && number <= 32767 ? number : 'unknown';
     }
     var fields = ['elements', 'complete', 'selected_boolean', 'selected_number', 'selected_string',
-      'selected_row', 'selected_cell', 'selected_image', 'selected_other', 'url_strings', 'url_matches', 'selected_children', 'selected_rows', 'containers', 'relationship_arrays', 'relationship_other'];
+      'selected_row', 'selected_cell', 'selected_image', 'selected_other', 'url_strings', 'url_matches', 'selected_children', 'selected_rows', 'containers', 'relationship_arrays', 'relationship_other', 'selected_filter', 'filter_errors', 'url_other'];
     var output = ['step=' + probeStage, 'os_error=' + probeError];
     for (var f = 0; f < fields.length; f++) output.push(fields[f] + '=' + Math.min(probe[fields[f]], 999));
     console.log('Native macOS selection probe: ' + output.join(' '));

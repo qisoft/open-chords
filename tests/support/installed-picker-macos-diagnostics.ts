@@ -16,7 +16,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     .filter(
       (line) =>
         line === "Native macOS selection unavailable: fixed_probe_failure" ||
-        /^Native macOS selection probe: step=(?:elements|selected|role|url|relationships|complete|bound) os_error=(?:none|unknown|-?[0-9]{1,5}) elements=[0-9]{1,3} complete=[01] selected_boolean=[0-9]{1,3} selected_number=[0-9]{1,3} selected_string=[0-9]{1,3} selected_row=[0-9]{1,3} selected_cell=[0-9]{1,3} selected_image=[0-9]{1,3} selected_other=[0-9]{1,3} url_strings=[0-9]{1,3} url_matches=[0-9]{1,3} selected_children=[0-9]{1,3} selected_rows=[0-9]{1,3} containers=[0-9]{1,3} relationship_arrays=[0-9]{1,3} relationship_other=[0-9]{1,3}$/u.test(
+        /^Native macOS selection probe: step=(?:elements|selected|role|url|relationships|selected_query|complete|bound) os_error=(?:none|unknown|-?[0-9]{1,5}) elements=[0-9]{1,3} complete=[01] selected_boolean=[0-9]{1,3} selected_number=[0-9]{1,3} selected_string=[0-9]{1,3} selected_row=[0-9]{1,3} selected_cell=[0-9]{1,3} selected_image=[0-9]{1,3} selected_other=[0-9]{1,3} url_strings=[0-9]{1,3} url_matches=[0-9]{1,3} selected_children=[0-9]{1,3} selected_rows=[0-9]{1,3} containers=[0-9]{1,3} relationship_arrays=[0-9]{1,3} relationship_other=[0-9]{1,3} selected_filter=[0-9]{1,3} filter_errors=[0-9]{1,3} url_other=[0-9]{1,3}$/u.test(
           line,
         ),
     )
