@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 
 import {
   installedMacAxProbeDiagnostic,
+  installedMacAxActionSucceeded,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -9,6 +10,13 @@ const evidence = {
   trusted: false,
   complete: false,
   lastError: -25211,
+  firstOtherError: 0,
+  firstOtherAttribute: "none",
+  verified: false,
+  foreground: false,
+  guardMask: 0,
+  stage: "verification",
+  action: { requested: "none", pressed: false, dismissed: false },
   counts: Object.fromEntries(MAC_AX_COUNT_FIELDS.map((key) => [key, 0])),
 };
 
@@ -45,4 +53,52 @@ it("rejects oversized and non-JSON output and strips process command/error text"
   );
   expect(result).toContain("killed=true");
   expect(result).not.toContain("private");
+});
+
+it("requires exact unique selected-file evidence, guarded native press and actual dismissal", () => {
+  const successful = {
+    ...evidence,
+    trusted: true,
+    complete: true,
+    lastError: 0,
+    verified: true,
+    foreground: true,
+    guardMask: 255,
+    stage: "complete",
+    action: { requested: "open", pressed: true, dismissed: true },
+    counts: {
+      ...evidence.counts,
+      selectedLeaves: 1,
+      leafMatches: 1,
+      selectedExactUrls: 1,
+      buttons: 1,
+    },
+  };
+  expect(installedMacAxActionSucceeded(JSON.stringify(successful), "open")).toBe(true);
+  const refused = [
+    { ...successful, trusted: false },
+    { ...successful, complete: false },
+    { ...successful, verified: false },
+    { ...successful, foreground: false },
+    { ...successful, guardMask: 254 },
+    { ...successful, lastError: -25200 },
+    { ...successful, firstOtherError: -25200 },
+    { ...successful, stage: "guard" },
+    { ...successful, action: { ...successful.action, pressed: false } },
+    { ...successful, action: { ...successful.action, dismissed: false } },
+    ...["selectedLeaves", "leafMatches", "selectedExactUrls", "buttons"].map((key) => ({
+      ...successful,
+      counts: { ...successful.counts, [key]: 2 },
+    })),
+    ...["otherErrors", "cannotComplete", "apiDisabled"].map((key) => ({
+      ...successful,
+      counts: { ...successful.counts, [key]: 1 },
+    })),
+  ];
+  for (const candidate of refused)
+    expect(installedMacAxActionSucceeded(JSON.stringify(candidate), "open")).toBe(false);
+  expect(installedMacAxActionSucceeded(JSON.stringify(successful), "cancel_open_existing")).toBe(
+    false,
+  );
+  expect(installedMacAxActionSucceeded("/private/invalid", "open")).toBe(false);
 });

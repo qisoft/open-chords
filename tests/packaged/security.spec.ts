@@ -31,7 +31,10 @@ import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-side
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
-import { installedMacAxProbeDiagnostic } from "../support/installed-picker-macos-ax-diagnostics.ts";
+import {
+  installedMacAxActionSucceeded,
+  installedMacAxProbeDiagnostic,
+} from "../support/installed-picker-macos-ax-diagnostics.ts";
 import { installedMacPickerDiagnostic } from "../support/installed-picker-macos-diagnostics.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
@@ -1203,32 +1206,65 @@ function installedMacMediaPickerDriver(
         { env: installedSystemEnvironment(), timeout: 100000, maxBuffer: 65536 },
         (error, stdout, stderr) => {
           if (error) {
-            const failure = installedMacPickerDiagnostic(
-              error,
-              stderr,
-              performance.now() - started,
+            reject(
+              new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
             );
-            if (selectedPath !== undefined && failure.includes("stage=selected_file ")) {
-              const probeStarted = performance.now();
-              runNativeFile(
-                join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
-                [String(applicationPid), selectedPath],
-                { env: installedSystemEnvironment(), timeout: 5000, maxBuffer: 4096 },
-                (probeError, probeOutput) =>
-                  reject(
-                    new Error(
-                      `${failure}\n${installedMacAxProbeDiagnostic(probeOutput, probeError, performance.now() - probeStarted)}`,
-                    ),
-                  ),
-              );
-            } else reject(new Error(failure));
             return;
           }
           try {
-            resolve(JSON.parse(stdout.trim()));
+            const prepared: unknown = JSON.parse(stdout.trim());
+            if (scenario === "cancel") {
+              resolve(prepared);
+              return;
+            }
+            z.strictObject({
+              prepared: z.literal(true),
+              nativePress: z.literal(false),
+              navigationDismissed: z.literal(true),
+            }).parse(prepared);
           } catch {
-            reject(new Error("Native macOS picker returned invalid evidence"));
+            reject(new Error("Native macOS picker returned invalid preparation evidence"));
+            return;
           }
+          if (selectedPath === undefined) {
+            reject(new Error("Native macOS picker target unavailable"));
+            return;
+          }
+          const remaining = Math.floor(100000 - (performance.now() - started));
+          if (remaining <= 0) {
+            reject(new Error("Native macOS picker driver deadline exceeded"));
+            return;
+          }
+          const verifierStarted = performance.now();
+          runNativeFile(
+            join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
+            [String(applicationPid), selectedPath, scenario],
+            {
+              env: installedSystemEnvironment(),
+              timeout: Math.min(7000, remaining),
+              maxBuffer: 4096,
+            },
+            (verifierError, verifierOutput) => {
+              if (verifierError || !installedMacAxActionSucceeded(verifierOutput, scenario)) {
+                reject(
+                  new Error(
+                    installedMacAxProbeDiagnostic(
+                      verifierOutput,
+                      verifierError,
+                      performance.now() - verifierStarted,
+                    ),
+                  ),
+                );
+                return;
+              }
+              resolve({
+                action: scenario,
+                filenameSet: true,
+                nativePress: true,
+                dialogDismissed: true,
+              });
+            },
+          );
         },
       );
     });

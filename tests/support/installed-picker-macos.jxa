@@ -18,112 +18,6 @@ function run(argv) {
   function attribute(element, name) {
     try { return element[name](); } catch (_) { return null; }
   }
-  function axAttribute(element, name) {
-    try { return element.attributes.byName(name).value(); } catch (_) { return null; }
-  }
-  function selectionProbe(sheet, expectedUrl) {
-    var probeStage = 'elements';
-    var probeError = 'none';
-    var targetRole = 'none';
-    var targetCount = 0;
-    var pathValues = 0;
-    var directoryValues = 0;
-    var urlValues = 0;
-    var pathAttributes = 0;
-    var documentMatches = 0;
-    var probe = { elements: 0, complete: 0,
-      selected_boolean: 0, selected_number: 0, selected_string: 0,
-      selected_row: 0, selected_cell: 0, selected_image: 0, selected_other: 0,
-      url_strings: 0, url_matches: 0, selected_children: 0, selected_rows: 0, containers: 0, relationship_arrays: 0, relationship_other: 0, selected_filter: 0, filter_errors: 0, url_other: 0, column_children: 0, target_names: 0, target_values: 0, filename_strings: 0, filename_matches: 0 };
-    try {
-      var queue = [sheet];
-      var visited = 0;
-      var exhausted = false;
-      while (queue.length > 0) {
-        if (Date.now() >= deadline || visited >= 256) { exhausted = true; break; }
-        var element = queue.shift();
-        visited++;
-        probe.elements = visited;
-        probeStage = 'selected';
-        var selected = axAttribute(element, 'AXSelected');
-        probeStage = 'role';
-        var role = attribute(element, 'role');
-        var name = attribute(element, 'name');
-        var value = attribute(element, 'value');
-        var basename = selectedPath.split('/').pop();
-        if (name === basename) probe.target_names++;
-        if (value === basename) probe.target_values++;
-        if (name === basename || value === basename) {
-          targetCount++;
-          var roleNames = { AXRow: 'row', AXCell: 'cell', AXColumn: 'column', AXTextField: 'text_field', AXStaticText: 'static_text', AXButton: 'button', AXPopUpButton: 'popup', AXPathControl: 'path_control' };
-          targetRole = targetCount === 1 ? (roleNames[role] || 'other') : 'ambiguous';
-        }
-        if (value === selectedPath) pathValues++;
-        if (value === selectedPath.slice(0, selectedPath.lastIndexOf('/'))) directoryValues++;
-        if (value === expectedUrl) urlValues++;
-        if (axAttribute(element, 'AXPath') === selectedPath) pathAttributes++;
-        var document = axAttribute(element, 'AXDocument');
-        if (document === selectedPath || document === expectedUrl) documentMatches++;
-        var filename = axAttribute(element, 'AXFilename');
-        if (typeof filename === 'string') { probe.filename_strings++; if (filename === selectedPath) probe.filename_matches++; }
-        if (selected === true) {
-          probe.selected_boolean++;
-          if (role === 'AXRow') probe.selected_row++;
-          else if (role === 'AXCell') probe.selected_cell++;
-          else if (role === 'AXImage') probe.selected_image++;
-          else probe.selected_other++;
-        }
-        if (typeof selected === 'number' && selected === 1) probe.selected_number++;
-        if (typeof selected === 'string') probe.selected_string++;
-        probeStage = 'url';
-        var url = axAttribute(element, 'AXURL');
-        if (typeof url === 'string') { probe.url_strings++; if (url === expectedUrl) probe.url_matches++; }
-        else if (url !== null) probe.url_other++;
-        probeStage = 'relationships';
-        var children = axAttribute(element, 'AXSelectedChildren');
-        var rows = axAttribute(element, 'AXSelectedRows');
-        if (Array.isArray(children)) { probe.relationship_arrays++; probe.selected_children += Math.min(children.length, 257); }
-        else if (children !== null) probe.relationship_other++;
-        if (Array.isArray(rows)) { probe.relationship_arrays++; probe.selected_rows += Math.min(rows.length, 257); }
-        else if (rows !== null) probe.relationship_other++;
-        var selectionContainer = ['AXList', 'AXOutline', 'AXTable', 'AXColumn'].indexOf(role) !== -1;
-        var next;
-        if (selectionContainer) {
-          probe.containers++;
-          var filtered = [];
-          try {
-            probeStage = 'selected_query';
-            filtered = element.uiElements.whose({ selected: true })();
-            if (!Array.isArray(filtered) || filtered.length > 256) { exhausted = true; break; }
-            probe.selected_filter += filtered.length;
-          } catch (_) { probe.filter_errors++; }
-          probeStage = 'columns';
-          var columns = element.uiElements.whose({ role: 'AXColumn' })();
-          if (!Array.isArray(columns) || columns.length > 256) { exhausted = true; break; }
-          probe.column_children += columns.length;
-          next = (Array.isArray(children) ? children : []).concat(Array.isArray(rows) ? rows : [], filtered, columns);
-        } else {
-          next = element.uiElements();
-        }
-        if (!Array.isArray(next) || next.length > 256 || queue.length + next.length > 256) { exhausted = true; break; }
-        queue = queue.concat(next);
-      }
-      if (exhausted) probeStage = 'bound';
-      else { probe.complete = 1; probeStage = 'complete'; }
-    } catch (error) {
-      var number = error && error.errorNumber;
-      probeError = Number.isInteger(number) && number >= -32768 && number <= 32767 ? number : 'unknown';
-    }
-    var fields = ['elements', 'complete', 'selected_boolean', 'selected_number', 'selected_string',
-      'selected_row', 'selected_cell', 'selected_image', 'selected_other', 'url_strings', 'url_matches', 'selected_children', 'selected_rows', 'containers', 'relationship_arrays', 'relationship_other', 'selected_filter', 'filter_errors', 'url_other', 'column_children', 'target_names', 'target_values', 'filename_strings', 'filename_matches'];
-    var output = ['step=' + probeStage, 'os_error=' + probeError];
-    for (var f = 0; f < fields.length; f++) output.push(fields[f] + '=' + Math.min(probe[fields[f]], 999));
-    console.log('Native macOS selection probe: ' + output.join(' '));
-    console.log('Native macOS target probe: role=' + targetRole + ' matches=' + Math.min(targetCount, 999) +
-      ' path_values=' + Math.min(pathValues, 999) + ' directory_values=' + Math.min(directoryValues, 999) +
-      ' url_values=' + Math.min(urlValues, 999) + ' path_attributes=' + Math.min(pathAttributes, 999) +
-      ' document_matches=' + Math.min(documentMatches, 999));
-  }
 
   try {
     while (Date.now() < deadline) {
@@ -176,7 +70,6 @@ function run(argv) {
           attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true) {
         throw new Error('target changed');
       }
-      var filenameSet = false;
       if (scenario !== 'cancel') {
         stage = 'navigation';
         systemEvents.keystroke('g', { using: ['command down', 'shift down'] });
@@ -217,44 +110,11 @@ function run(argv) {
         stage = 'navigation_dismissal';
         while (Date.now() < navigationDeadline && navigationSheet.exists()) delay(0.05);
         if (navigationSheet.exists()) throw new Error('navigation not dismissed');
-        stage = 'selected_file';
-        var selectedDeadline = Math.min(deadline, Date.now() + 5000);
-        var expectedUrl = 'file://' + selectedPath.split('/').map(encodeURIComponent).join('/');
-        while (Date.now() < selectedDeadline) {
-          selectionStep = 'elements';
-          var panelElements = candidate.sheet.entireContents();
-          counts.elements = Math.min(panelElements.length, 257);
-          if (panelElements.length > 256) { selectionStep = 'elements_bound'; throw new Error('selection bound'); }
-          counts.selected_rows = 0;
-          counts.selected_urls = 0;
-          counts.selected_matches = 0;
-          for (var r = 0; r < panelElements.length; r++) {
-            selectionStep = 'selected_attribute';
-            if (attribute(panelElements[r], 'role') !== 'AXRow' || axAttribute(panelElements[r], 'AXSelected') !== true) continue;
-            counts.selected_rows++;
-            if (counts.selected_rows > 1) { selectionStep = 'ambiguous'; throw new Error('ambiguous selected rows'); }
-            selectionStep = 'row_elements';
-            var rowElements = [panelElements[r]].concat(panelElements[r].entireContents());
-            if (rowElements.length > 256) { selectionStep = 'row_bound'; throw new Error('selected row bound'); }
-            for (var u = 0; u < rowElements.length; u++) {
-              selectionStep = 'url';
-              var url = axAttribute(rowElements[u], 'AXURL');
-              if (typeof url !== 'string') continue;
-              counts.selected_urls++;
-              if (url === expectedUrl) counts.selected_matches++;
-            }
-          }
-          selectionStep = 'verify';
-          if (counts.selected_rows === 1 && counts.selected_urls === 1 && counts.selected_matches === 1) { filenameSet = true; break; }
-          delay(0.05);
-        }
-        if (!filenameSet) {
-          selectionStep = 'unverified';
-          throw new Error('selected file unverified');
-        }
-        candidate.button = scenario === 'open' ? candidate.open : candidate.button;
-        var actionDeadline = Math.min(deadline, Date.now() + 5000);
-        while (Date.now() < actionDeadline && attribute(candidate.button, 'enabled') !== true) delay(0.05);
+        if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
+            attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'name') !== 'Cancel' ||
+            attribute(candidate.open, 'name') !== 'Open') throw new Error('prepared target changed');
+        return JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true });
+
       }
       stage = 'action';
       if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
@@ -265,7 +125,7 @@ function run(argv) {
       var dismissDeadline = Math.min(deadline, Date.now() + 2000);
       while (Date.now() < dismissDeadline) {
         if (candidate.sheet.exists() === false) {
-          return JSON.stringify(scenario === 'cancel' ? { action: 'cancel', nativePress: true, dialogDismissed: true } : { action: scenario, filenameSet: filenameSet, nativePress: true, dialogDismissed: true });
+          return JSON.stringify({ action: 'cancel', nativePress: true, dialogDismissed: true });
         }
         delay(0.1);
       }
@@ -274,10 +134,6 @@ function run(argv) {
     stage = 'deadline';
     throw new Error('deadline');
   } catch (error) {
-    if (stage === 'selected_file') {
-      try { selectionProbe(candidate.sheet, expectedUrl); }
-      catch (_) { console.log('Native macOS selection unavailable: fixed_probe_failure'); }
-    }
     var number = error && error.errorNumber;
     if (!Number.isInteger(number) || number < -32768 || number > 32767) number = 'unknown';
     console.log('Native macOS picker failure: stage=' + stage + ' elapsed_ms=' + Math.max(0, Math.min(200000, Date.now() - started)) +
