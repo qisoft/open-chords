@@ -170,17 +170,20 @@ function run(argv) {
         }
         if (!entry || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true) throw new Error('path entry unavailable');
         stage = 'path_entry';
-        entry.value = selectedPath;
-        if (attribute(entry, 'value') !== selectedPath || attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path readback failed');
+        entry.focused = true;
+        while (Date.now() < navigationDeadline && attribute(entry, 'focused') !== true) delay(0.05);
+        if (Date.now() >= navigationDeadline || attribute(entry, 'focused') !== true || attribute(entry, 'enabled') !== true ||
+            attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path focus failed');
+        systemEvents.keystroke('a', { using: ['command down'] });
+        if (attribute(entry, 'focused') !== true || attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path focus changed');
+        systemEvents.keystroke(selectedPath);
+        while (Date.now() < navigationDeadline && attribute(entry, 'value') !== selectedPath) delay(0.05);
+        if (attribute(entry, 'value') !== selectedPath || attribute(entry, 'focused') !== true ||
+            attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path readback failed');
         systemEvents.keyCode(36);
         stage = 'navigation_dismissal';
         while (Date.now() < navigationDeadline && navigationSheet.exists()) delay(0.05);
         if (navigationSheet.exists()) throw new Error('navigation not dismissed');
-        stage = 'file_selection';
-        if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
-            attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.open, 'name') !== 'Open' ||
-            attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true) throw new Error('selection target changed');
-        systemEvents.keystroke(selectedPath.split('/').pop());
         stage = 'selected_file';
         var selectedDeadline = Math.min(deadline, Date.now() + 5000);
         var expectedUrl = 'file://' + selectedPath.split('/').map(encodeURIComponent).join('/');
