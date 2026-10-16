@@ -24,6 +24,13 @@ function run(argv) {
   function selectionProbe(sheet, expectedUrl) {
     var probeStage = 'elements';
     var probeError = 'none';
+    var targetRole = 'none';
+    var targetCount = 0;
+    var pathValues = 0;
+    var directoryValues = 0;
+    var urlValues = 0;
+    var pathAttributes = 0;
+    var documentMatches = 0;
     var probe = { elements: 0, complete: 0,
       selected_boolean: 0, selected_number: 0, selected_string: 0,
       selected_row: 0, selected_cell: 0, selected_image: 0, selected_other: 0,
@@ -41,8 +48,22 @@ function run(argv) {
         var selected = axAttribute(element, 'AXSelected');
         probeStage = 'role';
         var role = attribute(element, 'role');
-        if (attribute(element, 'name') === selectedPath.split('/').pop()) probe.target_names++;
-        if (attribute(element, 'value') === selectedPath.split('/').pop()) probe.target_values++;
+        var name = attribute(element, 'name');
+        var value = attribute(element, 'value');
+        var basename = selectedPath.split('/').pop();
+        if (name === basename) probe.target_names++;
+        if (value === basename) probe.target_values++;
+        if (name === basename || value === basename) {
+          targetCount++;
+          var roleNames = { AXRow: 'row', AXCell: 'cell', AXColumn: 'column', AXTextField: 'text_field', AXStaticText: 'static_text', AXButton: 'button', AXPopUpButton: 'popup', AXPathControl: 'path_control' };
+          targetRole = targetCount === 1 ? (roleNames[role] || 'other') : 'ambiguous';
+        }
+        if (value === selectedPath) pathValues++;
+        if (value === selectedPath.slice(0, selectedPath.lastIndexOf('/'))) directoryValues++;
+        if (value === expectedUrl) urlValues++;
+        if (axAttribute(element, 'AXPath') === selectedPath) pathAttributes++;
+        var document = axAttribute(element, 'AXDocument');
+        if (document === selectedPath || document === expectedUrl) documentMatches++;
         var filename = axAttribute(element, 'AXFilename');
         if (typeof filename === 'string') { probe.filename_strings++; if (filename === selectedPath) probe.filename_matches++; }
         if (selected === true) {
@@ -98,6 +119,10 @@ function run(argv) {
     var output = ['step=' + probeStage, 'os_error=' + probeError];
     for (var f = 0; f < fields.length; f++) output.push(fields[f] + '=' + Math.min(probe[fields[f]], 999));
     console.log('Native macOS selection probe: ' + output.join(' '));
+    console.log('Native macOS target probe: role=' + targetRole + ' matches=' + Math.min(targetCount, 999) +
+      ' path_values=' + Math.min(pathValues, 999) + ' directory_values=' + Math.min(directoryValues, 999) +
+      ' url_values=' + Math.min(urlValues, 999) + ' path_attributes=' + Math.min(pathAttributes, 999) +
+      ' document_matches=' + Math.min(documentMatches, 999));
   }
 
   try {

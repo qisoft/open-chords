@@ -84,3 +84,22 @@ it("retains a fixed probe failure without allowing an attached exception", () =>
     "selection unavailable",
   );
 });
+
+it("allows only fixed native target role and exact-match counts", () => {
+  const probe =
+    "Native macOS target probe: role=column matches=1 path_values=0 directory_values=1 url_values=0 path_attributes=0 document_matches=0";
+  const diagnostic = installedMacPickerDiagnostic(
+    {},
+    [
+      probe,
+      probe,
+      `${probe} /private/file`,
+      probe.replace("role=column", "role=private"),
+      probe.replace("matches=1", "matches=1000"),
+    ].join("\n"),
+    1,
+  );
+  expect(diagnostic.split(probe)).toHaveLength(2);
+  expect(diagnostic).not.toContain("private");
+  expect(diagnostic).not.toContain("1000");
+});

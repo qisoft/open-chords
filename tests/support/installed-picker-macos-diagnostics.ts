@@ -21,6 +21,15 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
         ),
     )
     .slice(-1);
+  const target = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS target probe: role=(?:none|row|cell|column|text_field|static_text|button|popup|path_control|other|ambiguous) matches=[0-9]{1,3} path_values=[0-9]{1,3} directory_values=[0-9]{1,3} url_values=[0-9]{1,3} path_attributes=[0-9]{1,3} document_matches=[0-9]{1,3}$/u.test(
+        line,
+      ),
+    )
+    .slice(-1);
   return [
     installedExportExitDiagnostic(error, durationMs).replace(
       "Installed export process",
@@ -28,5 +37,6 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ),
     ...probes,
     ...selection,
+    ...target,
   ].join("\n");
 }
