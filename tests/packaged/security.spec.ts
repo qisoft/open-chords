@@ -412,19 +412,20 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
   expect((await openNetworkMode(playbackState)).offline).toBe(true);
 });
 
-test("installed Choose local recording opens the native picker and committed workspace", async () => {
+test("installed Choose recording cancels without changes then opens a committed workspace", async () => {
   test.skip(process.platform !== "win32", "Windows native renderer file picker proof");
-  test.setTimeout(300_000);
+  test.setTimeout(360_000);
   const state = join(packageRoot, "renderer-native-source");
   const path = join(packageRoot, "renderer-native-source.wav");
   const original = monoPcmWav([0, 1, 2, 3]);
   writeFileSync(path, original);
-  await openProjectLibrary({ stateRoot: state });
+  const library = await openProjectLibrary({ stateRoot: state });
   await (await openNetworkMode(state)).setOffline(true);
+  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
   const result = await inspectInstalled(
     state,
     `(async () => {
-      const deadline = Date.now() + 45000;
+      const deadline = Date.now() + 55000;
       const visible = element => element?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) === true;
       let choose;
       while (Date.now() < deadline) {
@@ -434,6 +435,33 @@ test("installed Choose local recording opens the native picker and committed wor
       }
       if (!choose) throw new Error("Installed Choose recording button was unavailable");
       choose.click();
+      let busyObserved = false;
+      while (Date.now() < deadline) {
+        const busy = [...document.querySelectorAll('.empty-workspace button')].find(button => button.disabled && button.textContent.trim() === "Creating Project…" && visible(button));
+        if (busy) { busyObserved = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!busyObserved) throw new Error("Installed Choose recording did not enter its pending state");
+      let cancellation;
+      while (Date.now() < deadline) {
+        const ready = [...document.querySelectorAll('.empty-workspace button')].find(button => button.textContent.trim() === "Choose local recording" && !button.disabled && visible(button));
+        if (ready && visible(document.querySelector('main.empty-workspace'))) {
+          const projects = await window.openChords.project.list();
+          cancellation = {
+            type: projects.type,
+            projectCount: projects.type === "project.list" ? projects.projects.length : -1,
+            emptyVisible: true,
+            workspaceAbsent: document.querySelector('main.workspace') === null,
+            alertAbsent: document.querySelector('.empty-workspace [role="alert"]') === null,
+            chooseEnabled: !ready.disabled,
+            offline: (await window.openChords.youtube.perform({type: "status"})).offline,
+          };
+          ready.click();
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!cancellation) throw new Error("Native Cancel did not restore the empty workspace");
       while (Date.now() < deadline) {
         const workspace = document.querySelector('main.workspace');
         const identity = document.querySelector('.project-identity');
@@ -444,6 +472,7 @@ test("installed Choose local recording opens the native picker and committed wor
           if (response.type !== "project.snapshot") return { type: response.type };
           return {
             type: response.type,
+            cancellation,
             projectId,
             projectRevisionId: response.projectRevisionId,
             durationSamples: response.project.durationSamples,
@@ -458,11 +487,25 @@ test("installed Choose local recording opens the native picker and committed wor
       throw new Error("Native-selected recording did not open its committed workspace");
     })()`,
     installedSystemEnvironment(),
-    installedMediaPickerDriver("open", path),
+    async (applicationPid) => {
+      await installedMediaPickerDriver("cancel_open_existing", path)(applicationPid);
+      expect(canonicalSerialize(await proofTreeHashes(library.activeRoot))).toBe(baseline);
+      expect(readFileSync(path)).toEqual(original);
+      await installedMediaPickerDriver("open", path)(applicationPid);
+    },
   );
   const opened = z
     .object({
       type: z.literal("project.snapshot"),
+      cancellation: z.object({
+        type: z.literal("project.list"),
+        projectCount: z.literal(0),
+        emptyVisible: z.literal(true),
+        workspaceAbsent: z.literal(true),
+        alertAbsent: z.literal(true),
+        chooseEnabled: z.literal(true),
+        offline: z.literal(true),
+      }),
       projectId: z.string(),
       projectRevisionId: z.string(),
       durationSamples: z.literal(4),
