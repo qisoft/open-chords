@@ -13,9 +13,12 @@ function run(argv) {
   var started = Date.now();
   var deadline = started + 90000;
   var stage = 'processes';
-  var counts = { processes: 0, windows: 0, sheets: 0, elements: 0, cancel: 0, open: 0, navigation_sheets: 0, path_fields: 0 };
+  var counts = { processes: 0, windows: 0, sheets: 0, elements: 0, cancel: 0, open: 0, navigation_sheets: 0, path_fields: 0, selected_rows: 0, selected_urls: 0, selected_matches: 0 };
   function attribute(element, name) {
     try { return element[name](); } catch (_) { return null; }
+  }
+  function axAttribute(element, name) {
+    try { return element.attributes.byName(name).value(); } catch (_) { return null; }
   }
   try {
     while (Date.now() < deadline) {
@@ -97,11 +100,36 @@ function run(argv) {
         stage = 'path_entry';
         entry.value = selectedPath;
         if (attribute(entry, 'value') !== selectedPath || attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path readback failed');
-        filenameSet = true;
         systemEvents.keyCode(36);
         stage = 'navigation_dismissal';
         while (Date.now() < navigationDeadline && navigationSheet.exists()) delay(0.05);
         if (navigationSheet.exists()) throw new Error('navigation not dismissed');
+        stage = 'selected_file';
+        var selectedDeadline = Math.min(deadline, Date.now() + 5000);
+        var expectedUrl = 'file://' + selectedPath.split('/').map(encodeURIComponent).join('/');
+        while (Date.now() < selectedDeadline) {
+          var panelElements = candidate.sheet.entireContents();
+          if (panelElements.length > 256) throw new Error('selection bound');
+          counts.selected_rows = 0;
+          counts.selected_urls = 0;
+          counts.selected_matches = 0;
+          for (var r = 0; r < panelElements.length; r++) {
+            if (attribute(panelElements[r], 'role') !== 'AXRow' || axAttribute(panelElements[r], 'AXSelected') !== true) continue;
+            counts.selected_rows++;
+            if (counts.selected_rows > 1) throw new Error('ambiguous selected rows');
+            var rowElements = [panelElements[r]].concat(panelElements[r].entireContents());
+            if (rowElements.length > 256) throw new Error('selected row bound');
+            for (var u = 0; u < rowElements.length; u++) {
+              var url = axAttribute(rowElements[u], 'AXURL');
+              if (typeof url !== 'string') continue;
+              counts.selected_urls++;
+              if (url === expectedUrl) counts.selected_matches++;
+            }
+          }
+          if (counts.selected_rows === 1 && counts.selected_urls === 1 && counts.selected_matches === 1) { filenameSet = true; break; }
+          delay(0.05);
+        }
+        if (!filenameSet) throw new Error('selected file unverified');
         candidate.button = scenario === 'open' ? candidate.open : candidate.button;
         var actionDeadline = Math.min(deadline, Date.now() + 5000);
         while (Date.now() < actionDeadline && attribute(candidate.button, 'enabled') !== true) delay(0.05);
@@ -129,7 +157,9 @@ function run(argv) {
     console.log('Native macOS picker failure: stage=' + stage + ' elapsed_ms=' + Math.max(0, Math.min(200000, Date.now() - started)) +
       ' processes=' + counts.processes + ' windows=' + counts.windows + ' sheets=' + counts.sheets +
       ' elements=' + counts.elements + ' cancel=' + counts.cancel + ' open=' + counts.open +
-      ' navigation_sheets=' + counts.navigation_sheets + ' path_fields=' + counts.path_fields + ' os_error=' + number);
+      ' navigation_sheets=' + counts.navigation_sheets + ' path_fields=' + counts.path_fields +
+      ' selected_rows=' + Math.min(counts.selected_rows, 257) + ' selected_urls=' + Math.min(counts.selected_urls, 999) +
+      ' selected_matches=' + Math.min(counts.selected_matches, 999) + ' os_error=' + number);
     throw new Error('Installed native macOS picker failed');
   }
 }
