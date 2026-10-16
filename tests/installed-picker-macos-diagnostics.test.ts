@@ -33,7 +33,7 @@ it.each([
 
 it("retains only the last complete fixed selection classification without private AX data", () => {
   const probe =
-    "Native macOS selection probe: step=complete os_error=none elements=99 complete=1 selected_boolean=1 selected_number=0 selected_string=0 selected_row=0 selected_cell=1 selected_image=0 selected_other=0 url_strings=2 url_matches=1 selected_children=1 selected_rows=0";
+    "Native macOS selection probe: step=complete os_error=none elements=99 complete=1 selected_boolean=1 selected_number=0 selected_string=0 selected_row=0 selected_cell=1 selected_image=0 selected_other=0 url_strings=2 url_matches=1 selected_children=1 selected_rows=0 containers=2 relationship_arrays=2 relationship_other=0";
   const diagnostic = installedMacPickerDiagnostic(
     {},
     [
@@ -58,7 +58,7 @@ it("retains only the last complete fixed selection classification without privat
 it.each(["elements", "selected", "role", "url", "relationships", "complete", "bound"])(
   "preserves selection probe progress and numeric failures at %s",
   (step) => {
-    const probe = `Native macOS selection probe: step=${step} os_error=-1728 elements=0 complete=0 selected_boolean=0 selected_number=0 selected_string=0 selected_row=0 selected_cell=0 selected_image=0 selected_other=0 url_strings=0 url_matches=0 selected_children=0 selected_rows=0`;
+    const probe = `Native macOS selection probe: step=${step} os_error=-1728 elements=0 complete=0 selected_boolean=0 selected_number=0 selected_string=0 selected_row=0 selected_cell=0 selected_image=0 selected_other=0 url_strings=0 url_matches=0 selected_children=0 selected_rows=0 containers=0 relationship_arrays=0 relationship_other=0`;
     expect(installedMacPickerDiagnostic({}, probe, 1)).toContain(probe);
     for (const malformed of [
       probe.replace(`step=${step}`, "step=private"),
