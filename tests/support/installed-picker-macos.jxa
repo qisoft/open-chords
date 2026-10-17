@@ -4,6 +4,9 @@ function run(argv) {
   var selectedPath = argv[2];
   var selectsFile = scenario === 'open' || scenario === 'cancel_open_existing';
   var primaryAction = scenario === 'cancel_save' ? 'Save' : 'Open';
+  var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
+  var saveFormat = scenario === 'cancel_save' ? argv[2] : null;
+  if (scenario === 'cancel_save' && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
   if (['cancel', 'cancel_save', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
       (selectsFile && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
@@ -56,7 +59,7 @@ function run(argv) {
           }
           counts.cancel = cancel.length;
           counts.open = open.length;
-          if (cancel.length === 1 && open.length === 1) candidates.push({ sheet: sheets[s], button: cancel[0], open: open[0] });
+          if (cancel.length === 1 && open.length === 1) candidates.push({ sheet: sheets[s], button: cancel[0], open: open[0], elements: elements });
         }
       }
       stage = 'selection';
@@ -123,12 +126,46 @@ function run(argv) {
           attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'role') !== 'AXButton' ||
           attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true ||
           attribute(candidate.open, 'name') !== primaryAction) throw new Error('action target changed');
+      var saveProbe = null;
+      if (scenario === 'cancel_save') {
+        var fields = [];
+        var total = 0;
+        var unreadableRoles = 0;
+        var expectedFilename = saveDefaults[saveFormat];
+        var basename = expectedFilename.slice(0, expectedFilename.lastIndexOf('.'));
+        for (var f = 0; f < candidate.elements.length; f++) {
+          var field = candidate.elements[f];
+          var fieldRole = attribute(field, 'role');
+          if (fieldRole === null) unreadableRoles++;
+          if (fieldRole !== 'AXTextField' && fieldRole !== 'AXComboBox') continue;
+          total++;
+          if (fields.length === 16) continue;
+          var fieldName = attribute(field, 'name');
+          var fieldValue = attribute(field, 'value');
+          var subrole = attribute(field, 'subrole');
+          var enabled = attribute(field, 'enabled');
+          fields.push({
+            role: fieldRole === 'AXTextField' ? 'text_field' : 'combo',
+            subrole: subrole === 'AXSearchField' ? 'search' : subrole === '' ? 'empty' : subrole === null ? 'unavailable' : 'other',
+            name: fieldName === 'Save As:' || fieldName === 'Save As' ? 'save_as' : fieldName === '' ? 'empty' : fieldName === null ? 'unavailable' : 'other',
+            value: fieldValue === expectedFilename ? 'expected' : fieldValue === basename ? 'basename' : fieldValue === '' ? 'empty' : typeof fieldValue === 'string' ? 'other' : 'unavailable',
+            enabled: enabled === true ? 'true' : enabled === false ? 'false' : 'unknown'
+          });
+        }
+        saveProbe = { format: saveFormat, total: total, unreadableRoles: unreadableRoles, truncated: total > 16, fields: fields };
+      }
+      if (saveProbe !== null && (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
+          attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'role') !== 'AXButton' ||
+          attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true ||
+          attribute(candidate.open, 'name') !== primaryAction)) throw new Error('probed target changed');
       candidate.button.click();
       stage = 'dismissal';
       var dismissDeadline = Math.min(deadline, Date.now() + 2000);
       while (Date.now() < dismissDeadline) {
         if (candidate.sheet.exists() === false) {
-          return JSON.stringify({ action: scenario, nativePress: true, dialogDismissed: true });
+          var result = { action: scenario, nativePress: true, dialogDismissed: true };
+          if (saveProbe !== null) result.saveFieldProbe = saveProbe;
+          return JSON.stringify(result);
         }
         delay(0.1);
       }
