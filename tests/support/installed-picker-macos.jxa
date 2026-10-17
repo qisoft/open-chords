@@ -80,7 +80,6 @@ function run(argv) {
         systemEvents.keystroke('g', { using: ['command down', 'shift down'] });
         var navigationDeadline = Math.min(deadline, Date.now() + 5000);
         var entry = null;
-        var navigationSheet = null;
         while (Date.now() < navigationDeadline) {
           var nested = candidate.sheet.sheets();
           counts.navigation_sheets = Math.min(nested.length, 17);
@@ -95,7 +94,7 @@ function run(argv) {
             }
             counts.path_fields = Math.min(fields.length, 257);
             if (fields.length > 1) throw new Error('ambiguous path field');
-            if (fields.length === 1) { entry = fields[0]; navigationSheet = nested[0]; break; }
+            if (fields.length === 1) { entry = fields[0]; break; }
           }
           delay(0.05);
         }
@@ -113,8 +112,17 @@ function run(argv) {
             attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path readback failed');
         systemEvents.keyCode(36);
         stage = 'navigation_dismissal';
-        while (Date.now() < navigationDeadline && navigationSheet.exists()) delay(0.05);
-        if (navigationSheet.exists()) throw new Error('navigation not dismissed');
+        var navigationDismissed = false;
+        while (Date.now() < navigationDeadline) {
+          if (attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true) throw new Error('navigation parent changed');
+          var remainingSheets = candidate.sheet.sheets();
+          counts.navigation_sheets = Math.min(remainingSheets.length, 17);
+          if (remainingSheets.length > 1) throw new Error('ambiguous navigation sheet');
+          if (remainingSheets.length === 0) { navigationDismissed = true; break; }
+          if (attribute(remainingSheets[0], 'role') !== 'AXSheet') throw new Error('navigation role changed');
+          delay(0.05);
+        }
+        if (!navigationDismissed) throw new Error('navigation not dismissed');
         if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
             attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'name') !== 'Cancel' ||
             attribute(candidate.open, 'name') !== 'Open') throw new Error('prepared target changed');
