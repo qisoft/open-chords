@@ -20,7 +20,7 @@ const probeSchema = z.strictObject({
     .max(16),
 });
 
-export function installedMacSaveFieldDiagnostic(value: unknown, expectedFormat: MacSaveFormat) {
+function parseProbe(value: unknown, expectedFormat: MacSaveFormat) {
   const parsed = probeSchema.safeParse(value);
   if (
     !parsed.success ||
@@ -29,8 +29,34 @@ export function installedMacSaveFieldDiagnostic(value: unknown, expectedFormat: 
     parsed.data.fields.length !== Math.min(parsed.data.total, 16) ||
     parsed.data.truncated !== parsed.data.total > 16
   )
-    return "Native macOS Save field probe: invalid_evidence";
-  const probe = parsed.data;
+    return undefined;
+  return parsed.data;
+}
+
+export function installedMacSaveDefaultFilenameVerified(
+  value: unknown,
+  expectedFormat: MacSaveFormat,
+) {
+  const probe = parseProbe(value, expectedFormat);
+  if (
+    !probe ||
+    probe.truncated ||
+    probe.unreadableRoles !== 0 ||
+    probe.fields.some((field) => field.name === "unavailable")
+  )
+    return false;
+  const named = probe.fields.filter((field) => field.name === "save_as");
+  return (
+    named.length === 1 &&
+    named[0]?.role === "text_field" &&
+    named[0].enabled === "true" &&
+    named[0].value === "expected"
+  );
+}
+
+export function installedMacSaveFieldDiagnostic(value: unknown, expectedFormat: MacSaveFormat) {
+  const probe = parseProbe(value, expectedFormat);
+  if (!probe) return "Native macOS Save field probe: invalid_evidence";
   return [
     `Native macOS Save field probe: format=${probe.format} total=${probe.total} unreadable_roles=${probe.unreadableRoles} truncated=${probe.truncated}`,
     ...probe.fields.map(
