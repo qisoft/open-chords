@@ -51,6 +51,7 @@ var complete = true
 var verified = false
 var pressed = false
 var dismissed = false
+var dismissalLastError = 0
 var foreground = false
 var guardMask = 0
 var stage = "arguments"
@@ -213,16 +214,17 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
                     var value: CFTypeRef?
                     let sheetStatus = AXUIElementCopyAttributeValue(sheet, "AXRole" as CFString, &value)
                     if sheetStatus == .invalidUIElement { dismissed = true; break }
-                    if sheetStatus != .success { counts["lastError"] = Int(sheetStatus.rawValue) }
+                    if sheetStatus != .success { dismissalLastError = Int(sheetStatus.rawValue) }
                     var children: CFTypeRef?
                     let parentStatus = AXUIElementCopyAttributeValue(parent, "AXChildren" as CFString, &children)
-                    if parentStatus != .success { counts["lastError"] = Int(parentStatus.rawValue) }
+                    if parentStatus != .success { dismissalLastError = Int(parentStatus.rawValue) }
                     if parentStatus == .success,
                        let current = children as? [AXUIElement], current.count <= 256,
                        !current.contains(where: { same($0, sheet) }) { dismissed = true; break }
                     Thread.sleep(forTimeInterval: 0.02)
                 }
                 if dismissed { stage = "complete" }
+                else { counts["lastError"] = dismissalLastError }
             }
         }
     }
@@ -231,7 +233,8 @@ if !noReadFailures() { complete = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
-    "counts": counts, "lastError": lastError, "trusted": trusted, "complete": complete,
+    "counts": counts, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "trusted": trusted, "complete": complete,
     "firstOtherError": firstOtherError, "firstOtherAttribute": firstOtherAttribute,
     "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
     "action": ["requested": requested, "pressed": pressed, "dismissed": dismissed]

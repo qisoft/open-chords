@@ -30,6 +30,7 @@ const evidenceSchema = z.strictObject({
   trusted: z.boolean(),
   complete: z.boolean(),
   lastError: z.number().int().min(-32768).max(32767),
+  dismissalLastError: z.number().int().min(-32768).max(32767),
   firstOtherError: z.number().int().min(-32768).max(32767),
   firstOtherAttribute: z.enum([
     "none",
@@ -83,6 +84,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       trusted,
       complete,
       lastError,
+      dismissalLastError,
       counts,
       firstOtherError,
       firstOtherAttribute,
@@ -97,6 +99,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `trusted=${trusted}`,
       `complete=${complete}`,
       `last_error=${lastError}`,
+      `dismissal_last_error=${dismissalLastError}`,
       `other_error=${firstOtherError}`,
       `other_attribute=${firstOtherAttribute}`,
       `verified=${verified}`,

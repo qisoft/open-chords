@@ -10,6 +10,7 @@ const evidence = {
   trusted: false,
   complete: false,
   lastError: -25211,
+  dismissalLastError: 0,
   firstOtherError: 0,
   firstOtherAttribute: "none",
   verified: false,
@@ -23,6 +24,7 @@ const evidence = {
 it("preserves exact native AX counts and permission failures without raw data", () => {
   const output = installedMacAxProbeDiagnostic(JSON.stringify(evidence), null, 10);
   expect(output).toContain("trusted=false complete=false last_error=-25211");
+  expect(output).toContain("dismissal_last_error=0");
   for (const key of MAC_AX_COUNT_FIELDS) expect(output).toContain(`${key}=0`);
 });
 
@@ -33,6 +35,8 @@ it.each([
   { ...evidence, counts: { ...evidence.counts, visited: -1 } },
   { ...evidence, counts: {} },
   { ...evidence, lastError: "/private/error" },
+  { ...evidence, dismissalLastError: "/private/error" },
+  { ...evidence, dismissalLastError: -32769 },
   { ...evidence, complete: "private" },
 ])("rejects malformed or additional native evidence", (value) => {
   expect(installedMacAxProbeDiagnostic(JSON.stringify(value), null, 1)).toBe(
@@ -75,6 +79,12 @@ it("requires exact unique selected-file evidence, guarded native press and actua
     },
   };
   expect(installedMacAxActionSucceeded(JSON.stringify(successful), "open")).toBe(true);
+  expect(
+    installedMacAxActionSucceeded(
+      JSON.stringify({ ...successful, dismissalLastError: -25204 }),
+      "open",
+    ),
+  ).toBe(true);
   const refused = [
     { ...successful, trusted: false },
     { ...successful, complete: false },
@@ -82,6 +92,13 @@ it("requires exact unique selected-file evidence, guarded native press and actua
     { ...successful, foreground: false },
     { ...successful, guardMask: 254 },
     { ...successful, lastError: -25200 },
+    { ...successful, lastError: -25204, dismissalLastError: -25204 },
+    {
+      ...successful,
+      stage: "dismissal",
+      dismissalLastError: -25204,
+      action: { ...successful.action, dismissed: false },
+    },
     { ...successful, firstOtherError: -25200 },
     { ...successful, stage: "guard" },
     { ...successful, action: { ...successful.action, pressed: false } },
