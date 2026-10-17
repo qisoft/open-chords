@@ -16,13 +16,22 @@ import {
 import { installedMacPickerDiagnostic } from "./installed-picker-macos-diagnostics.ts";
 
 export function installedMacPickerDriver(
-  scenario: "cancel" | "cancel_save" | "cancel_save_edited" | "open" | "cancel_open_existing",
+  scenario:
+    | "cancel"
+    | "cancel_save"
+    | "cancel_save_edited"
+    | "cancel_save_directory"
+    | "open"
+    | "cancel_open_existing",
   selectedPath: string | undefined,
   environment: () => NodeJS.ProcessEnv,
   saveFormat?: MacSaveFormat,
 ) {
   return async (applicationPid: number) => {
-    const saves = scenario === "cancel_save" || scenario === "cancel_save_edited";
+    const saves =
+      scenario === "cancel_save" ||
+      scenario === "cancel_save_edited" ||
+      scenario === "cancel_save_directory";
     const started = performance.now();
     const evidence = await new Promise<unknown>((resolve, reject) => {
       runNativeFile(
@@ -33,7 +42,14 @@ export function installedMacPickerDriver(
           join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
           String(applicationPid),
           scenario,
-          ...(saves ? [saveFormat ?? ""] : selectedPath === undefined ? [] : [selectedPath]),
+          ...(saves
+            ? [
+                saveFormat ?? "",
+                ...(scenario === "cancel_save_directory" ? [selectedPath ?? ""] : []),
+              ]
+            : selectedPath === undefined
+              ? []
+              : [selectedPath]),
         ],
         { env: environment(), timeout: 100000, maxBuffer: 65536 },
         (error, stdout, stderr) => {
@@ -55,7 +71,7 @@ export function installedMacPickerDriver(
               const diagnostic = installedMacSaveFieldDiagnostic(save.saveFieldProbe, saveFormat);
               process.stdout.write(`${diagnostic}\n`);
               process.stdout.write(
-                `Native macOS Save filename: format=${saveFormat} default_verified=true input_verified=${scenario === "cancel_save_edited"}\n`,
+                `Native macOS Save filename: format=${saveFormat} default_verified=true input_verified=${scenario !== "cancel_save"} directory_navigation_verified=${scenario === "cancel_save_directory"}\n`,
               );
               resolve({ action: scenario, nativePress: true, dialogDismissed: true });
               return;

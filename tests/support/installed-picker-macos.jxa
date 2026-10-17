@@ -1,16 +1,17 @@
 function run(argv) {
   var applicationPid = Number(argv[0]);
   var scenario = argv[1] || 'cancel';
-  var selectedPath = argv[2];
+  var directoryScenario = scenario === 'cancel_save_directory';
+  var selectedPath = directoryScenario ? argv[3] : argv[2];
   var selectsFile = scenario === 'open' || scenario === 'cancel_open_existing';
-  var saves = scenario === 'cancel_save' || scenario === 'cancel_save_edited';
-  var editsFilename = scenario === 'cancel_save_edited';
+  var saves = scenario === 'cancel_save' || scenario === 'cancel_save_edited' || directoryScenario;
+  var editsFilename = scenario === 'cancel_save_edited' || directoryScenario;
   var primaryAction = saves ? 'Save' : 'Open';
   var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
   var saveFormat = saves ? argv[2] : null;
   if (saves && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
-  if (['cancel', 'cancel_save', 'cancel_save_edited', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
-      (selectsFile && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
+  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_directory', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+      ((selectsFile || directoryScenario) && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
   if (!Number.isInteger(applicationPid) || applicationPid <= 0) {
@@ -49,6 +50,100 @@ function run(argv) {
       console.log('Native macOS picker guard: phase=' + phase + ' mask=' + mask + ' unknown_mask=' + unknownMask);
       throw new Error('action target changed');
     }
+  }
+
+  function prepareNavigation(process, candidate, navigationPath) {
+    requireCancelTarget(process, candidate, 'before_input', true);
+    stage = 'navigation';
+    systemEvents.keystroke('g', { using: ['command down', 'shift down'] });
+    var navigationDeadline = Math.min(deadline, Date.now() + 5000);
+    var entry = null;
+    while (Date.now() < navigationDeadline) {
+      var nested = candidate.sheet.sheets();
+      counts.navigation_sheets = Math.min(nested.length, 17);
+      if (nested.length > 1) throw new Error('ambiguous navigation sheet');
+      if (nested.length === 1 && attribute(nested[0], 'role') === 'AXSheet') {
+        var navigationElements = nested[0].entireContents();
+        if (navigationElements.length > 256) throw new Error('navigation bound');
+        var fields = [];
+        for (var n = 0; n < navigationElements.length; n++) {
+          var role = attribute(navigationElements[n], 'role');
+          if ((role === 'AXTextField' || role === 'AXComboBox') && attribute(navigationElements[n], 'enabled') === true) fields.push(navigationElements[n]);
+        }
+        counts.path_fields = Math.min(fields.length, 257);
+        if (fields.length > 1) throw new Error('ambiguous path field');
+        if (fields.length === 1) { entry = fields[0]; break; }
+      }
+      delay(0.05);
+    }
+    if (!entry || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true) throw new Error('path entry unavailable');
+    stage = 'path_entry';
+    entry.focused = true;
+    while (Date.now() < navigationDeadline && attribute(entry, 'focused') !== true) delay(0.05);
+    if (Date.now() >= navigationDeadline || attribute(entry, 'focused') !== true || attribute(entry, 'enabled') !== true ||
+        attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path focus failed');
+    systemEvents.keystroke('a', { using: ['command down'] });
+    if (attribute(entry, 'focused') !== true || attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path focus changed');
+    systemEvents.keystroke(navigationPath);
+    while (Date.now() < navigationDeadline && attribute(entry, 'value') !== navigationPath) delay(0.05);
+    if (attribute(entry, 'value') !== navigationPath || attribute(entry, 'focused') !== true ||
+        attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path readback failed');
+    systemEvents.keyCode(36);
+    stage = 'navigation_dismissal';
+    var navigationDismissed = false;
+    while (Date.now() < navigationDeadline) {
+      if (attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true) throw new Error('navigation parent changed');
+      var remainingSheets = candidate.sheet.sheets();
+      counts.navigation_sheets = Math.min(remainingSheets.length, 17);
+      if (remainingSheets.length > 1) throw new Error('ambiguous navigation sheet');
+      if (remainingSheets.length === 0) { navigationDismissed = true; break; }
+      // The child can disappear between collection and role reads. Only the
+      // next positive empty collection proves dismissal; an unreadable child does not.
+      var navigationRole = attribute(remainingSheets[0], 'role');
+      if (navigationRole !== null && navigationRole !== 'AXSheet') throw new Error('navigation role changed');
+      delay(0.05);
+    }
+    if (!navigationDismissed) throw new Error('navigation not dismissed');
+    if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
+        attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'name') !== 'Cancel' ||
+        attribute(candidate.open, 'name') !== primaryAction) throw new Error('prepared target changed');
+  }
+
+  function verifyDefaultFilename(saveFormat, saveElements) {
+    var fields = [];
+    var filenameFields = [];
+    var total = 0;
+    var unreadableRoles = 0;
+    var expectedFilename = saveDefaults[saveFormat];
+    var basename = expectedFilename.slice(0, expectedFilename.lastIndexOf('.'));
+    for (var f = 0; f < saveElements.length; f++) {
+      var field = saveElements[f];
+      var fieldRole = attribute(field, 'role');
+      if (fieldRole === null) unreadableRoles++;
+      if (fieldRole !== 'AXTextField' && fieldRole !== 'AXComboBox') continue;
+      total++;
+      if (fields.length === 16) continue;
+      var fieldName = attribute(field, 'name');
+      if (fieldName === 'Save As:' || fieldName === 'Save As') filenameFields.push(field);
+      var fieldValue = attribute(field, 'value');
+      var subrole = attribute(field, 'subrole');
+      var enabled = attribute(field, 'enabled');
+      fields.push({
+        role: fieldRole === 'AXTextField' ? 'text_field' : 'combo',
+        subrole: subrole === 'AXSearchField' ? 'search' : subrole === '' ? 'empty' : subrole === null ? 'unavailable' : 'other',
+        name: fieldName === 'Save As:' || fieldName === 'Save As' ? 'save_as' : fieldName === '' ? 'empty' : fieldName === null ? 'unavailable' : 'other',
+        value: fieldValue === expectedFilename ? 'expected' : fieldValue === basename ? 'basename' : fieldValue === '' ? 'empty' : typeof fieldValue === 'string' ? 'other' : 'unavailable',
+        enabled: enabled === true ? 'true' : enabled === false ? 'false' : 'unknown'
+      });
+    }
+    var saveProbe = { format: saveFormat, total: total, unreadableRoles: unreadableRoles, truncated: total > 16, fields: fields };
+    if (unreadableRoles !== 0 || total > 16 || fields.some(function (field) { return field.name === 'unavailable'; }) || filenameFields.length !== 1) throw new Error('default filename unavailable');
+    var filenameField = filenameFields[0];
+    var filenameName = attribute(filenameField, 'name');
+    if (attribute(filenameField, 'role') !== 'AXTextField' ||
+        (filenameName !== 'Save As:' && filenameName !== 'Save As') ||
+        attribute(filenameField, 'enabled') !== true || attribute(filenameField, 'value') !== expectedFilename) throw new Error('default filename invalid');
+    return { probe: saveProbe, field: filenameField };
   }
 
   try {
@@ -107,99 +202,27 @@ function run(argv) {
       while (Date.now() < frontDeadline && attribute(process, 'frontmost') !== true) delay(0.05);
       requireCancelTarget(process, candidate, 'activate', false);
       if (selectsFile) {
-        stage = 'navigation';
-        systemEvents.keystroke('g', { using: ['command down', 'shift down'] });
-        var navigationDeadline = Math.min(deadline, Date.now() + 5000);
-        var entry = null;
-        while (Date.now() < navigationDeadline) {
-          var nested = candidate.sheet.sheets();
-          counts.navigation_sheets = Math.min(nested.length, 17);
-          if (nested.length > 1) throw new Error('ambiguous navigation sheet');
-          if (nested.length === 1 && attribute(nested[0], 'role') === 'AXSheet') {
-            var navigationElements = nested[0].entireContents();
-            if (navigationElements.length > 256) throw new Error('navigation bound');
-            var fields = [];
-            for (var n = 0; n < navigationElements.length; n++) {
-              var role = attribute(navigationElements[n], 'role');
-              if ((role === 'AXTextField' || role === 'AXComboBox') && attribute(navigationElements[n], 'enabled') === true) fields.push(navigationElements[n]);
-            }
-            counts.path_fields = Math.min(fields.length, 257);
-            if (fields.length > 1) throw new Error('ambiguous path field');
-            if (fields.length === 1) { entry = fields[0]; break; }
-          }
-          delay(0.05);
-        }
-        if (!entry || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true) throw new Error('path entry unavailable');
-        stage = 'path_entry';
-        entry.focused = true;
-        while (Date.now() < navigationDeadline && attribute(entry, 'focused') !== true) delay(0.05);
-        if (Date.now() >= navigationDeadline || attribute(entry, 'focused') !== true || attribute(entry, 'enabled') !== true ||
-            attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path focus failed');
-        systemEvents.keystroke('a', { using: ['command down'] });
-        if (attribute(entry, 'focused') !== true || attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path focus changed');
-        systemEvents.keystroke(selectedPath);
-        while (Date.now() < navigationDeadline && attribute(entry, 'value') !== selectedPath) delay(0.05);
-        if (attribute(entry, 'value') !== selectedPath || attribute(entry, 'focused') !== true ||
-            attribute(process, 'frontmost') !== true || attribute(process, 'unixId') !== applicationPid) throw new Error('path readback failed');
-        systemEvents.keyCode(36);
-        stage = 'navigation_dismissal';
-        var navigationDismissed = false;
-        while (Date.now() < navigationDeadline) {
-          if (attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true) throw new Error('navigation parent changed');
-          var remainingSheets = candidate.sheet.sheets();
-          counts.navigation_sheets = Math.min(remainingSheets.length, 17);
-          if (remainingSheets.length > 1) throw new Error('ambiguous navigation sheet');
-          if (remainingSheets.length === 0) { navigationDismissed = true; break; }
-          // The child can disappear between collection and role reads. Only the
-          // next positive empty collection proves dismissal; an unreadable child does not.
-          var navigationRole = attribute(remainingSheets[0], 'role');
-          if (navigationRole !== null && navigationRole !== 'AXSheet') throw new Error('navigation role changed');
-          delay(0.05);
-        }
-        if (!navigationDismissed) throw new Error('navigation not dismissed');
-        if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
-            attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'name') !== 'Cancel' ||
-            attribute(candidate.open, 'name') !== 'Open') throw new Error('prepared target changed');
+        prepareNavigation(process, candidate, selectedPath);
         return JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true });
-
       }
+
       stage = 'action';
       requireCancelTarget(process, candidate, 'before_input', true);
       var saveProbe = null;
       if (saves) {
-        var fields = [];
-        var filenameFields = [];
-        var total = 0;
-        var unreadableRoles = 0;
+        var verifiedSave = verifyDefaultFilename(saveFormat, candidate.elements);
+        saveProbe = verifiedSave.probe;
+        var filenameField = verifiedSave.field;
         var expectedFilename = saveDefaults[saveFormat];
-        var basename = expectedFilename.slice(0, expectedFilename.lastIndexOf('.'));
-        for (var f = 0; f < candidate.elements.length; f++) {
-          var field = candidate.elements[f];
-          var fieldRole = attribute(field, 'role');
-          if (fieldRole === null) unreadableRoles++;
-          if (fieldRole !== 'AXTextField' && fieldRole !== 'AXComboBox') continue;
-          total++;
-          if (fields.length === 16) continue;
-          var fieldName = attribute(field, 'name');
-          if (fieldName === 'Save As:' || fieldName === 'Save As') filenameFields.push(field);
-          var fieldValue = attribute(field, 'value');
-          var subrole = attribute(field, 'subrole');
-          var enabled = attribute(field, 'enabled');
-          fields.push({
-            role: fieldRole === 'AXTextField' ? 'text_field' : 'combo',
-            subrole: subrole === 'AXSearchField' ? 'search' : subrole === '' ? 'empty' : subrole === null ? 'unavailable' : 'other',
-            name: fieldName === 'Save As:' || fieldName === 'Save As' ? 'save_as' : fieldName === '' ? 'empty' : fieldName === null ? 'unavailable' : 'other',
-            value: fieldValue === expectedFilename ? 'expected' : fieldValue === basename ? 'basename' : fieldValue === '' ? 'empty' : typeof fieldValue === 'string' ? 'other' : 'unavailable',
-            enabled: enabled === true ? 'true' : enabled === false ? 'false' : 'unknown'
-          });
+        if (directoryScenario) {
+          prepareNavigation(process, candidate, selectedPath);
+          stage = 'action';
+          var refreshedSaveElements = candidate.sheet.entireContents();
+          if (refreshedSaveElements.length > 256) throw new Error('element bound');
+          verifiedSave = verifyDefaultFilename(saveFormat, refreshedSaveElements);
+          filenameField = verifiedSave.field;
+          saveProbe = verifiedSave.probe;
         }
-        saveProbe = { format: saveFormat, total: total, unreadableRoles: unreadableRoles, truncated: total > 16, fields: fields };
-        if (unreadableRoles !== 0 || total > 16 || fields.some(function (field) { return field.name === 'unavailable'; }) || filenameFields.length !== 1) throw new Error('default filename unavailable');
-        var filenameField = filenameFields[0];
-        var filenameName = attribute(filenameField, 'name');
-        if (attribute(filenameField, 'role') !== 'AXTextField' ||
-            (filenameName !== 'Save As:' && filenameName !== 'Save As') ||
-            attribute(filenameField, 'enabled') !== true || attribute(filenameField, 'value') !== expectedFilename) throw new Error('default filename invalid');
       }
       if (saveProbe !== null) requireCancelTarget(process, candidate, 'after_probe', true);
       if (editsFilename) {
@@ -226,7 +249,7 @@ function run(argv) {
       while (Date.now() < dismissDeadline) {
         if (candidate.sheet.exists() === false) {
           var result = { action: scenario, nativePress: true, dialogDismissed: true };
-          if (saveProbe !== null) { result.saveFieldProbe = saveProbe; result.defaultFilenameVerified = true; result.filenameInputVerified = editsFilename; }
+          if (saveProbe !== null) { result.saveFieldProbe = saveProbe; result.defaultFilenameVerified = true; result.filenameInputVerified = editsFilename; result.directoryNavigationVerified = directoryScenario; }
           return JSON.stringify(result);
         }
         delay(0.1);
