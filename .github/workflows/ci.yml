@@ -79,6 +79,12 @@ jobs:
         run: test "$(node -p process.arch)" = "${{ matrix.arch }}"
       - name: Install reviewed dependencies
         run: pnpm install --frozen-lockfile
+      - name: Build and check native macOS picker AX verifier
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p build/test-support
+          xcrun swiftc -swift-version 5 -O tests/support/installed-picker-macos-ax-probe.swift -framework ApplicationServices -framework AppKit -o build/test-support/macos-picker-ax-probe
+          build/test-support/macos-picker-ax-probe --self-test
       - name: Install exact sidecar build dependencies
         run: >-
           python -m pip install --disable-pip-version-check --require-hashes

@@ -288,8 +288,34 @@ public static class SaveNativeInput {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
       new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
     };
+    LastClick = System.Diagnostics.Stopwatch.StartNew();
     if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
       throw new InvalidOperationException("Native Save click was not delivered");
+    ProbeForeground(window, expectedProcessId, "after_input");
+    ProbeActivation(expectedProcessId, "after_input");
+  }
+  private static System.Diagnostics.Stopwatch LastClick;
+  private static void ProbeActivation(uint expectedProcessId, string phase) {
+    uint processId;
+    IntPtr foreground = GetForegroundWindow();
+    GetWindowThreadProcessId(foreground, out processId);
+    string category = foreground == IntPtr.Zero ? "none" : processId == expectedProcessId ? "application" :
+      processId == (uint)System.Diagnostics.Process.GetCurrentProcess().Id ? "driver" : "unavailable";
+    if (category == "unavailable") {
+      try {
+        using (var process = System.Diagnostics.Process.GetProcessById((int)processId)) {
+          switch (process.ProcessName.ToLowerInvariant()) {
+            case "conhost": case "openconsole": category = "console"; break;
+            case "windowsterminal": category = "terminal"; break;
+            case "explorer": case "shellexperiencehost": case "startmenuexperiencehost": category = "shell"; break;
+            case "runner.worker": case "runner.listener": category = "runner"; break;
+            default: category = "other"; break;
+          }
+        }
+      } catch { category = "unavailable"; }
+    }
+    Console.Error.WriteLine("Native Save activation probe: phase=" + phase + " process=" + category +
+      " elapsed_ms=" + (LastClick == null ? 0 : Math.Min(LastClick.ElapsedMilliseconds, 999999999)));
   }
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr parameter, IntPtr data, uint flags, uint timeout, out UIntPtr result);
   [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
@@ -334,6 +360,7 @@ public static class SaveNativeInput {
         " enabled=" + IsWindowEnabled(window).ToString().ToLowerInvariant() + " owned=" + OwnedByApplication(window, expectedProcessId).ToString().ToLowerInvariant());
       ProbeDismissalResponse(window, control, expectedProcessId);
       ProbeForeground(window, expectedProcessId, "dismissal");
+      ProbeActivation(expectedProcessId, "dismissal");
       throw new InvalidOperationException("Native Save dialog not dismissed");
     }
   }

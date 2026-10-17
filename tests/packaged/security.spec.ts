@@ -31,6 +31,10 @@ import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-side
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
+import {
+  installedMacAxActionSucceeded,
+  installedMacAxProbeDiagnostic,
+} from "../support/installed-picker-macos-ax-diagnostics.ts";
 import { installedMacPickerDiagnostic } from "../support/installed-picker-macos-diagnostics.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
@@ -435,35 +439,7 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
     return { cancelled, projects, offline };
   })()`,
     installedSystemEnvironment(),
-    async (applicationPid) => {
-      const started = performance.now();
-      const evidence = await new Promise<unknown>((resolve, reject) => {
-        runNativeFile(
-          "/usr/bin/osascript",
-          [
-            "-l",
-            "JavaScript",
-            join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
-            String(applicationPid),
-          ],
-          { env: installedSystemEnvironment(), timeout: 100000, maxBuffer: 65536 },
-          (error, stdout, stderr) => {
-            if (error) {
-              reject(
-                new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
-              );
-              return;
-            }
-            try {
-              resolve(JSON.parse(stdout.trim()));
-            } catch {
-              reject(new Error("Native macOS picker returned invalid evidence"));
-            }
-          },
-        );
-      });
-      expect(evidence).toEqual({ action: "cancel", nativePress: true, dialogDismissed: true });
-    },
+    installedMacMediaPickerDriver("cancel"),
   );
   z.object({
     cancelled: z.object({
@@ -708,7 +684,7 @@ for (const firstOutcome of ["cancel", "refusal"] as const) {
 }
 
 test("installed native local file refusals precede a durable offline Project", async () => {
-  test.skip(process.platform !== "win32", "Windows native file picker proof");
+  test.skip(!["win32", "darwin"].includes(process.platform), "Native file picker proof");
   test.setTimeout(540_000);
   const state = join(packageRoot, "native-source-create");
   const path = join(packageRoot, "native-source-create.wav");
@@ -1210,10 +1186,101 @@ test("installed local Source refusals and matching relink preserve Project revis
   }
 });
 
+function installedMacMediaPickerDriver(
+  scenario: "cancel" | "open" | "cancel_open_existing",
+  selectedPath?: string,
+) {
+  return async (applicationPid: number) => {
+    const started = performance.now();
+    const evidence = await new Promise<unknown>((resolve, reject) => {
+      runNativeFile(
+        "/usr/bin/osascript",
+        [
+          "-l",
+          "JavaScript",
+          join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
+          String(applicationPid),
+          scenario,
+          ...(selectedPath === undefined ? [] : [selectedPath]),
+        ],
+        { env: installedSystemEnvironment(), timeout: 100000, maxBuffer: 65536 },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(
+              new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
+            );
+            return;
+          }
+          try {
+            const prepared: unknown = JSON.parse(stdout.trim());
+            if (scenario === "cancel") {
+              resolve(prepared);
+              return;
+            }
+            z.strictObject({
+              prepared: z.literal(true),
+              nativePress: z.literal(false),
+              navigationDismissed: z.literal(true),
+            }).parse(prepared);
+          } catch {
+            reject(new Error("Native macOS picker returned invalid preparation evidence"));
+            return;
+          }
+          if (selectedPath === undefined) {
+            reject(new Error("Native macOS picker target unavailable"));
+            return;
+          }
+          const remaining = Math.floor(100000 - (performance.now() - started));
+          if (remaining <= 0) {
+            reject(new Error("Native macOS picker driver deadline exceeded"));
+            return;
+          }
+          const verifierStarted = performance.now();
+          runNativeFile(
+            join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
+            [String(applicationPid), selectedPath, scenario],
+            {
+              env: installedSystemEnvironment(),
+              timeout: Math.min(7000, remaining),
+              maxBuffer: 4096,
+            },
+            (verifierError, verifierOutput) => {
+              if (verifierError || !installedMacAxActionSucceeded(verifierOutput, scenario)) {
+                reject(
+                  new Error(
+                    installedMacAxProbeDiagnostic(
+                      verifierOutput,
+                      verifierError,
+                      performance.now() - verifierStarted,
+                    ),
+                  ),
+                );
+                return;
+              }
+              resolve({
+                action: scenario,
+                filenameSet: true,
+                nativePress: true,
+                dialogDismissed: true,
+              });
+            },
+          );
+        },
+      );
+    });
+    expect(evidence).toEqual(
+      scenario === "cancel"
+        ? { action: "cancel", nativePress: true, dialogDismissed: true }
+        : { action: scenario, filenameSet: true, nativePress: true, dialogDismissed: true },
+    );
+  };
+}
+
 function installedMediaPickerDriver(
   scenario: "open" | "cancel_open_existing",
   selectedPath: string,
 ) {
+  if (process.platform === "darwin") return installedMacMediaPickerDriver(scenario, selectedPath);
   const env = installedSystemEnvironment();
   const windows = process.env.SystemRoot ?? process.env.WINDIR;
   if (!windows) throw new Error("Windows OS directory unavailable");

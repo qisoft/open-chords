@@ -219,6 +219,27 @@ describe("native Save driver failure redaction", () => {
       expect(diagnostic).not.toContain("private");
     },
   );
+  it.each([
+    "none",
+    "application",
+    "driver",
+    "console",
+    "terminal",
+    "shell",
+    "runner",
+    "other",
+    "unavailable",
+  ])("retains only fixed post-input process categories: %s", (process) => {
+    const probe = `Native Save activation probe: phase=after_input process=${process} elapsed_ms=2`;
+    const diagnostic = installedSaveDriverDiagnostic(
+      {},
+      `${(probe + "\n").repeat(5)}${probe} /private/file\n${probe.replace(`process=${process}`, "process=private.exe")}\n${probe.replace("elapsed_ms=2", "elapsed_ms=1234567890")}`,
+      100,
+    );
+    expect(diagnostic.split(probe)).toHaveLength(4);
+    expect(diagnostic).not.toContain("private");
+    expect(diagnostic).not.toContain("1234567890");
+  });
   it.each(["none", "dialog", "application", "owned_other", "driver", "foreign"])(
     "retains bounded foreground categories: %s",
     (kind) => {
