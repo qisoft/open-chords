@@ -23,6 +23,22 @@ function run(argv) {
   function attribute(element, name) {
     try { return element[name](); } catch (_) { return null; }
   }
+  function requireCancelTarget(process, candidate, phase, includePrimary) {
+    var values = [attribute(process, 'unixId'), attribute(process, 'frontmost'), attribute(candidate.sheet, 'role'),
+      attribute(candidate.button, 'role'), attribute(candidate.button, 'name'), attribute(candidate.button, 'enabled'),
+      includePrimary ? attribute(candidate.open, 'name') : primaryAction, Date.now() < deadline];
+    var expected = [applicationPid, true, 'AXSheet', 'AXButton', 'Cancel', true, primaryAction, true];
+    var mask = 0;
+    var unknownMask = 0;
+    for (var i = 0; i < values.length; i++) {
+      if (values[i] === expected[i]) mask |= (1 << i);
+      if (values[i] === null) unknownMask |= (1 << i);
+    }
+    if (mask !== 255) {
+      console.log('Native macOS picker guard: phase=' + phase + ' mask=' + mask + ' unknown_mask=' + unknownMask);
+      throw new Error('action target changed');
+    }
+  }
 
   try {
     while (Date.now() < deadline) {
@@ -70,11 +86,7 @@ function run(argv) {
       process.frontmost = true;
       var frontDeadline = Math.min(deadline, Date.now() + 2000);
       while (Date.now() < frontDeadline && attribute(process, 'frontmost') !== true) delay(0.05);
-      if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
-          attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'role') !== 'AXButton' ||
-          attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true) {
-        throw new Error('target changed');
-      }
+      requireCancelTarget(process, candidate, 'activate', false);
       if (selectsFile) {
         stage = 'navigation';
         systemEvents.keystroke('g', { using: ['command down', 'shift down'] });
@@ -130,10 +142,7 @@ function run(argv) {
 
       }
       stage = 'action';
-      if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
-          attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'role') !== 'AXButton' ||
-          attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true ||
-          attribute(candidate.open, 'name') !== primaryAction) throw new Error('action target changed');
+      requireCancelTarget(process, candidate, 'before_input', true);
       var saveProbe = null;
       if (scenario === 'cancel_save') {
         var fields = [];
@@ -162,10 +171,7 @@ function run(argv) {
         }
         saveProbe = { format: saveFormat, total: total, unreadableRoles: unreadableRoles, truncated: total > 16, fields: fields };
       }
-      if (saveProbe !== null && (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
-          attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'role') !== 'AXButton' ||
-          attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true ||
-          attribute(candidate.open, 'name') !== primaryAction)) throw new Error('probed target changed');
+      if (saveProbe !== null) requireCancelTarget(process, candidate, 'after_probe', true);
       candidate.button.click();
       stage = 'dismissal';
       var dismissDeadline = Math.min(deadline, Date.now() + 2000);

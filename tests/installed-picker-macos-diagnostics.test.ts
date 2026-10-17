@@ -2,6 +2,28 @@ import { expect, it } from "vitest";
 
 import { installedMacPickerDiagnostic } from "./support/installed-picker-macos-diagnostics.ts";
 
+it.each(["activate", "before_input", "after_probe"])(
+  "retains bounded guard observations at %s",
+  (phase) => {
+    const probe = `Native macOS picker guard: phase=${phase} mask=253 unknown_mask=0`;
+    const diagnostic = installedMacPickerDiagnostic({}, (probe + "\n").repeat(5), 1);
+    expect(diagnostic.split(probe)).toHaveLength(4);
+  },
+);
+
+it.each([
+  "phase=private mask=253 unknown_mask=0",
+  "phase=activate mask=256 unknown_mask=0",
+  "phase=activate mask=253 unknown_mask=256",
+  "phase=activate mask=-1 unknown_mask=0",
+  "phase=activate mask=253 unknown_mask=0 /private/path",
+  "phase=activate mask=253 unknown_mask=private",
+])("rejects malformed or private guard observations", (fields) => {
+  expect(installedMacPickerDiagnostic({}, `Native macOS picker guard: ${fields}`, 1)).not.toContain(
+    "picker guard:",
+  );
+});
+
 it.each([
   "processes",
   "windows",
