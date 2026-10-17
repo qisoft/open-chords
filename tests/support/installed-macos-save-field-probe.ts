@@ -69,7 +69,7 @@ export function installedMacSaveFieldDiagnostic(value: unknown, expectedFormat: 
 export function installedMacSaveResultVerified(
   value: unknown,
   expectedFormat: MacSaveFormat,
-  scenario: "cancel_save" | "cancel_save_edited",
+  scenario: "cancel_save" | "cancel_save_edited" | "cancel_save_directory",
 ): value is { saveFieldProbe: unknown } {
   const result = z
     .strictObject({
@@ -77,7 +77,8 @@ export function installedMacSaveResultVerified(
       nativePress: z.literal(true),
       dialogDismissed: z.literal(true),
       defaultFilenameVerified: z.literal(true),
-      filenameInputVerified: z.literal(scenario === "cancel_save_edited"),
+      filenameInputVerified: z.literal(scenario !== "cancel_save"),
+      directoryNavigationVerified: z.literal(scenario === "cancel_save_directory"),
       saveFieldProbe: z.unknown(),
     })
     .safeParse(value);

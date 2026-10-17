@@ -15,7 +15,7 @@ const field = {
 };
 const probe = { format: "json", total: 1, unreadableRoles: 0, truncated: false, fields: [field] };
 
-it.each(["cancel_save", "cancel_save_edited"] as const)(
+it.each(["cancel_save", "cancel_save_edited", "cancel_save_directory"] as const)(
   "requires exact native acknowledgement for %s",
   (scenario) => {
     const result = {
@@ -23,7 +23,8 @@ it.each(["cancel_save", "cancel_save_edited"] as const)(
       nativePress: true,
       dialogDismissed: true,
       defaultFilenameVerified: true,
-      filenameInputVerified: scenario === "cancel_save_edited",
+      filenameInputVerified: scenario !== "cancel_save",
+      directoryNavigationVerified: scenario === "cancel_save_directory",
       saveFieldProbe: probe,
     };
     expect(installedMacSaveResultVerified(result, "json", scenario)).toBe(true);
@@ -34,6 +35,8 @@ it.each(["cancel_save", "cancel_save_edited"] as const)(
       { ...result, defaultFilenameVerified: false },
       { ...result, filenameInputVerified: !result.filenameInputVerified },
       { ...result, filenameInputVerified: undefined },
+      { ...result, directoryNavigationVerified: !result.directoryNavigationVerified },
+      { ...result, directoryNavigationVerified: undefined },
       { ...result, path: "/private/file" },
       { ...result, saveFieldProbe: { ...probe, fields: [{ ...field, value: "other" }] } },
     ])

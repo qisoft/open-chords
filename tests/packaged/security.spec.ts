@@ -463,7 +463,7 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
   expect(readFileSync(path)).toEqual(original);
 });
 
-for (const scenario of ["cancel_save", "cancel_save_edited"] as const) {
+for (const scenario of ["cancel_save", "cancel_save_edited", "cancel_save_directory"] as const) {
   test(`installed macOS native Save ${scenario} verifies filenames and preserves Project and external files`, async () => {
     test.skip(process.platform !== "darwin", "macOS native Save cancellation proof");
     test.setTimeout(360_000);
@@ -471,6 +471,9 @@ for (const scenario of ["cancel_save", "cancel_save_edited"] as const) {
     const external = join(packageRoot, `macos-native-save-preserved-${scenario}.json`);
     const original = Buffer.from("preserved external Save cancellation fixture");
     writeFileSync(external, original);
+    const directory = mkdtempSync(join(packageRoot, "macos-save-directory-"));
+    writeFileSync(join(directory, "preserved.txt"), original);
+    const directoryBaseline = canonicalSerialize(await proofTreeHashes(directory));
     const library = await openProjectLibrary({ stateRoot: state });
     const envelope = ProjectEnvelopeSchema.parse(
       JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
@@ -508,7 +511,7 @@ for (const scenario of ["cancel_save", "cancel_save_edited"] as const) {
           installedSystemEnvironment(),
           installedMacPickerDriver(
             scenario,
-            undefined,
+            scenario === "cancel_save_directory" ? realpathSync(directory) : undefined,
             installedSystemEnvironment,
             (
               {
@@ -532,7 +535,13 @@ for (const scenario of ["cancel_save", "cancel_save_edited"] as const) {
           }),
           offline: z.literal(true),
         }).parse(result);
-        for (const privatePath of [state, external, realpathSync(external)]) {
+        for (const privatePath of [
+          state,
+          external,
+          realpathSync(external),
+          directory,
+          realpathSync(directory),
+        ]) {
           const escaped = JSON.stringify(privatePath).slice(1, -1);
           for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)])
             expect(JSON.stringify(result).includes(representation)).toBe(false);
@@ -547,6 +556,7 @@ for (const scenario of ["cancel_save", "cancel_save_edited"] as const) {
         expect(reopened.listExportReceipts("project_golden")).toEqual([]);
         expect((await openNetworkMode(state)).offline).toBe(true);
         expect(readFileSync(external)).toEqual(original);
+        expect(canonicalSerialize(await proofTreeHashes(directory))).toBe(directoryBaseline);
       });
     }
   });
