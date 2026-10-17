@@ -60,6 +60,8 @@ var guardMask = 0
 var stage = "arguments"
 var firstOtherError = 0
 var firstOtherAttribute = "none"
+var firstOtherStage = "none"
+var firstOtherVisited = 0
 var firstCannotCompleteAttribute = "none"
 var firstCannotCompleteStage = "none"
 var firstCannotCompleteDurationMs = 0
@@ -85,7 +87,10 @@ func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         case .apiDisabled: counts["apiDisabled", default: 0] += 1
         default:
             counts["otherErrors", default: 0] += 1
-            if firstOtherError == 0 { firstOtherError = Int(status.rawValue); firstOtherAttribute = name }
+            if firstOtherError == 0 {
+                firstOtherError = Int(status.rawValue); firstOtherAttribute = name
+                firstOtherStage = stage; firstOtherVisited = counts["visited"] ?? 0
+            }
         }
         return nil
     }
@@ -272,6 +277,7 @@ let result: [String: Any] = [
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
     "firstOtherError": firstOtherError, "firstOtherAttribute": firstOtherAttribute,
+    "firstOtherStage": firstOtherStage, "firstOtherVisited": firstOtherVisited,
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,

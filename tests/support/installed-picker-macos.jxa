@@ -20,9 +20,17 @@ function run(argv) {
   var stage = 'processes';
   var selectionStep = 'none';
   var discoveryRefreshes = 0;
+  var attributeFailures = [];
   var counts = { processes: 0, windows: 0, sheets: 0, elements: 0, cancel: 0, open: 0, navigation_sheets: 0, path_fields: 0, selected_rows: 0, selected_urls: 0, selected_matches: 0 };
   function attribute(element, name) {
-    try { return element[name](); } catch (_) { return null; }
+    try { return element[name](); }
+    catch (error) {
+      var number = error && error.errorNumber;
+      if (!Number.isInteger(number) || number < -32768 || number > 32767) number = 'unknown';
+      attributeFailures.push('Native macOS picker attribute: stage=' + stage + ' attribute=' + name + ' os_error=' + number);
+      if (attributeFailures.length > 3) attributeFailures.shift();
+      return null;
+    }
   }
   function requireCancelTarget(process, candidate, phase, includePrimary) {
     var values = [attribute(process, 'unixId'), attribute(process, 'frontmost'), attribute(candidate.sheet, 'role'),
@@ -61,7 +69,7 @@ function run(argv) {
         try { sheets = windows[w].sheets(); }
         catch (error) {
           // A disappearing discovery window must be reacquired before any input.
-          if (error.number !== -1728 || discoveryRefreshes >= 3) throw error;
+          if (error.errorNumber !== -1728 || discoveryRefreshes >= 3) throw error;
           discoveryRefreshes++;
           delay(0.1);
           continue discovery;
@@ -197,6 +205,10 @@ function run(argv) {
     stage = 'deadline';
     throw new Error('deadline');
   } catch (error) {
+    for (var a = 0; a < attributeFailures.length; a++) console.log(attributeFailures[a]);
+    var reasons = { 'navigation parent changed': 'navigation_parent_changed', 'navigation role changed': 'navigation_role_changed', 'navigation not dismissed': 'navigation_not_dismissed', 'prepared target changed': 'prepared_target_changed', 'action target changed': 'action_target_changed' };
+    var reason = error && Object.prototype.hasOwnProperty.call(reasons, error.message) ? reasons[error.message] : 'other';
+    console.log('Native macOS picker refusal: reason=' + reason);
     var number = error && error.errorNumber;
     if (!Number.isInteger(number) || number < -32768 || number > 32767) number = 'unknown';
     console.log('Native macOS picker failure: stage=' + stage + ' elapsed_ms=' + Math.max(0, Math.min(200000, Date.now() - started)) +

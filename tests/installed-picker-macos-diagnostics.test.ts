@@ -2,6 +2,29 @@ import { expect, it } from "vitest";
 
 import { installedMacPickerDiagnostic } from "./support/installed-picker-macos-diagnostics.ts";
 
+it("retains only three fixed attribute failures and one allowlisted refusal", () => {
+  const read = "Native macOS picker attribute: stage=action attribute=role os_error=-1728";
+  const refusal = "Native macOS picker refusal: reason=navigation_parent_changed";
+  const result = installedMacPickerDiagnostic(
+    {},
+    [
+      read,
+      read,
+      read,
+      read,
+      refusal,
+      refusal,
+      read + " /private/path",
+      read.replace("attribute=role", "attribute=/private/value"),
+      refusal.replace("navigation_parent_changed", "/private/error"),
+    ].join("\n"),
+    1,
+  );
+  expect(result.split(read)).toHaveLength(4);
+  expect(result.split(refusal)).toHaveLength(2);
+  expect(result).not.toContain("private");
+});
+
 it.each(["activate", "before_input", "after_probe"])(
   "retains bounded guard observations at %s",
   (phase) => {

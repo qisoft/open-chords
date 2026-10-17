@@ -1,6 +1,24 @@
 import { installedExportExitDiagnostic } from "./installed-export-process.ts";
 
 export function installedMacPickerDiagnostic(error: unknown, stderr: string, durationMs: number) {
+  const reads = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS picker attribute: stage=(?:processes|windows|sheets|elements|selection|navigation|path_entry|navigation_dismissal|selected_file|action|dismissal|deadline) attribute=(?:unixId|frontmost|role|name|enabled|focused|value|subrole) os_error=(?:unknown|-?[0-9]{1,5})$/u.test(
+        line,
+      ),
+    )
+    .slice(-3);
+  const refusal = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS picker refusal: reason=(?:navigation_parent_changed|navigation_role_changed|navigation_not_dismissed|prepared_target_changed|action_target_changed|other)$/u.test(
+        line,
+      ),
+    )
+    .slice(-1);
   const guards = stderr
     .slice(-65536)
     .split(/\r?\n/u)
@@ -50,5 +68,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...selection,
     ...target,
     ...guards,
+    ...reads,
+    ...refusal,
   ].join("\n");
 }
