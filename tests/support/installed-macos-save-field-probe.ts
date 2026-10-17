@@ -87,3 +87,23 @@ export function installedMacSaveResultVerified(
     installedMacSaveDefaultFilenameVerified(result.data.saveFieldProbe, expectedFormat)
   );
 }
+
+export function installedMacSaveDirectoryPreparationVerified(
+  value: unknown,
+  expectedFormat: MacSaveFormat,
+) {
+  const result = z
+    .strictObject({
+      prepared: z.literal(true),
+      nativePress: z.literal(false),
+      navigationDismissed: z.literal(true),
+      directoryNavigationVerified: z.literal(true),
+      defaultFilenameVerified: z.literal(true),
+      saveFieldProbe: z.unknown(),
+    })
+    .safeParse(value);
+  return (
+    result.success &&
+    installedMacSaveDefaultFilenameVerified(result.data.saveFieldProbe, expectedFormat)
+  );
+}
