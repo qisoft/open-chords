@@ -60,18 +60,28 @@ var guardMask = 0
 var stage = "arguments"
 var firstOtherError = 0
 var firstOtherAttribute = "none"
+var firstCannotCompleteAttribute = "none"
+var firstCannotCompleteStage = "none"
+var firstCannotCompleteDurationMs = 0
 let trusted = AXIsProcessTrusted()
 let deadline = ProcessInfo.processInfo.systemUptime + 3
 
 func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     AXUIElementSetMessagingTimeout(element, 0.15)
     var value: CFTypeRef?
+    let readStarted = ProcessInfo.processInfo.systemUptime
     let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
     if status != .success {
         counts["lastError"] = Int(status.rawValue)
         switch status {
         case .attributeUnsupported, .noValue: counts["unsupported", default: 0] += 1
-        case .cannotComplete: counts["cannotComplete", default: 0] += 1
+        case .cannotComplete:
+            counts["cannotComplete", default: 0] += 1
+            if firstCannotCompleteAttribute == "none" {
+                firstCannotCompleteAttribute = name
+                firstCannotCompleteStage = stage
+                firstCannotCompleteDurationMs = min(999999, max(0, Int((ProcessInfo.processInfo.systemUptime - readStarted) * 1000)))
+            }
         case .apiDisabled: counts["apiDisabled", default: 0] += 1
         default:
             counts["otherErrors", default: 0] += 1
@@ -258,6 +268,9 @@ let result: [String: Any] = [
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
     "firstOtherError": firstOtherError, "firstOtherAttribute": firstOtherAttribute,
+    "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
+    "firstCannotCompleteStage": firstCannotCompleteStage,
+    "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
     "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
     "action": ["requested": requested, "pressed": pressed, "dismissed": dismissed]
 ]

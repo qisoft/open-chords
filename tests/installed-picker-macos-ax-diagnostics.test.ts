@@ -16,6 +16,9 @@ const evidence = {
   pressFollowupError: 0,
   firstOtherError: 0,
   firstOtherAttribute: "none",
+  firstCannotCompleteAttribute: "none",
+  firstCannotCompleteStage: "none",
+  firstCannotCompleteDurationMs: 0,
   verified: false,
   foreground: false,
   guardMask: 0,
@@ -46,6 +49,9 @@ it.each([
   { ...evidence, pressDurationMs: 1000000 },
   { ...evidence, pressSheetState: "/private/sheet" },
   { ...evidence, pressFollowupError: "/private/error" },
+  { ...evidence, firstCannotCompleteAttribute: "/private/attribute" },
+  { ...evidence, firstCannotCompleteStage: "/private/stage" },
+  { ...evidence, firstCannotCompleteDurationMs: 1000000 },
   { ...evidence, complete: "private" },
 ])("rejects malformed or additional native evidence", (value) => {
   expect(installedMacAxProbeDiagnostic(JSON.stringify(value), null, 1)).toBe(
@@ -66,6 +72,21 @@ it("rejects oversized and non-JSON output and strips process command/error text"
   );
   expect(result).toContain("killed=true");
   expect(result).not.toContain("private");
+});
+
+it("retains the fixed first cannotComplete read classification without accepting failed selection", () => {
+  const failed = {
+    ...evidence,
+    firstCannotCompleteAttribute: "AXURL",
+    firstCannotCompleteStage: "selection",
+    firstCannotCompleteDurationMs: 151,
+    counts: { ...evidence.counts, cannotComplete: 1 },
+  };
+  const output = installedMacAxProbeDiagnostic(JSON.stringify(failed), null, 1);
+  expect(output).toContain(
+    "cannot_complete_attribute=AXURL cannot_complete_stage=selection cannot_complete_duration_ms=151",
+  );
+  expect(installedMacAxActionSucceeded(JSON.stringify(failed), "open")).toBe(false);
 });
 
 it("requires exact unique selected-file evidence, guarded native press and actual dismissal", () => {
