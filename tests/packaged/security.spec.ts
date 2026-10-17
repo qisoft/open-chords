@@ -468,7 +468,7 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
 
 for (const firstOutcome of ["cancel", "refusal"] as const) {
   test(`installed Choose recording ${firstOutcome} preserves state before same-process recovery`, async () => {
-    test.skip(process.platform !== "win32", "Windows native renderer file picker proof");
+    test.skip(!["win32", "darwin"].includes(process.platform), "Native renderer file picker proof");
     test.setTimeout(360_000);
     const state = join(packageRoot, `renderer-native-source-${firstOutcome}`);
     const path = join(packageRoot, `renderer-native-source-${firstOutcome}.wav`);
