@@ -20,11 +20,12 @@ import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.
 import { prepareArchiveProofFixture } from "../support/archive-proof-fixture.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
+import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
 
-test.skip(process.platform !== "win32", "Windows native Open dialog");
+test.skip(!["win32", "darwin"].includes(process.platform), "Native Open dialog");
 
-test("installed Windows native archive Open preserves cancellation, rejects hostile input, recovers and cold-reopens both portable Projects", async () => {
+test("installed native archive Open preserves cancellation, rejects hostile input, recovers and cold-reopens both portable Projects", async () => {
   test.setTimeout(480000);
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-native-open-")));
   try {
@@ -74,7 +75,8 @@ test("installed Windows native archive Open preserves cancellation, rejects host
       { dir: join(root, "installed") },
     );
     const windows = process.env.SystemRoot ?? process.env.WINDIR;
-    if (!windows) throw new Error("Windows OS directory unavailable");
+    if (process.platform === "win32" && !windows)
+      throw new Error("Windows OS directory unavailable");
     const env: NodeJS.ProcessEnv = {};
     for (const key of [
       "SystemRoot",
@@ -87,18 +89,22 @@ test("installed Windows native archive Open preserves cancellation, rejects host
       "LOCALAPPDATA",
     ])
       if (process.env[key]) env[key] = process.env[key];
-    env.PATH = [
-      join(windows, "System32", "WindowsPowerShell", "v1.0"),
-      join(windows, "System32"),
-      windows,
-    ].join(";");
+    if (process.platform === "win32") {
+      env.PATH = [
+        join(windows!, "System32", "WindowsPowerShell", "v1.0"),
+        join(windows!, "System32"),
+        windows!,
+      ].join(";");
+    }
     const server = createServer();
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Debug port unavailable");
     await new Promise<void>((resolve) => server.close(() => resolve()));
     const child = spawn(
-      join(root, "installed", "Open Chords.exe"),
+      process.platform === "darwin"
+        ? join(root, "installed", "Open Chords.app", "Contents", "MacOS", "Open Chords")
+        : join(root, "installed", "Open Chords.exe"),
       [`--user-data-dir=${stateRoot}`, `--remote-debugging-port=${address.port}`],
       { env, stdio: "ignore" },
     );
@@ -110,11 +116,29 @@ test("installed Windows native archive Open preserves cancellation, rejects host
       if (failed || child.exitCode !== null || child.signalCode !== null)
         throw new Error("Installed native Open application exited");
     };
-    const drive = (scenario: "cancel_open" | "open", selectedPath = target) =>
-      new Promise<unknown>((resolve, reject) => {
+    const nativeActionEvidence =
+      process.platform === "darwin"
+        ? { nativePress: true }
+        : { nativeClick: true, defaultNameValid: false };
+    const drive = async (scenario: "cancel_open" | "open", selectedPath = target) => {
+      if (process.platform === "darwin") {
+        if (child.pid === undefined) throw new Error("Installed native Open PID unavailable");
+        await installedMacPickerDriver(
+          scenario === "cancel_open" ? "cancel" : "open",
+          scenario === "open" ? selectedPath : undefined,
+          () => env,
+        )(child.pid);
+        return {
+          action: scenario,
+          filenameSet: scenario === "open",
+          nativePress: true,
+          dialogDismissed: true,
+        };
+      }
+      return new Promise<unknown>((resolve, reject) => {
         const started = performance.now();
         execFile(
-          join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+          join(windows!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
           [
             "-NoProfile",
             "-NonInteractive",
@@ -147,6 +171,7 @@ test("installed Windows native archive Open preserves cancellation, rejects host
           },
         );
       });
+    };
     try {
       const endpoint = `http://127.0.0.1:${address.port}`;
       await expect
@@ -185,9 +210,8 @@ test("installed Windows native archive Open preserves cancellation, rejects host
         expect(await drive("cancel_open")).toEqual({
           action: "cancel_open",
           filenameSet: false,
-          nativeClick: true,
+          ...nativeActionEvidence,
           dialogDismissed: true,
-          defaultNameValid: false,
         });
         await expect(status).toHaveText("Import cancelled");
         expect(await proofTreeHashes(library.activeRoot)).toEqual(baseline);
@@ -195,9 +219,8 @@ test("installed Windows native archive Open preserves cancellation, rejects host
         expect(await drive("open")).toEqual({
           action: "open",
           filenameSet: true,
-          nativeClick: true,
+          ...nativeActionEvidence,
           dialogDismissed: true,
-          defaultNameValid: false,
         });
         await expect(status).toContainText("Project imported.", { timeout: 60000 });
         await expect(page.locator('.source-status[role="alert"]')).toBeVisible();
@@ -206,9 +229,8 @@ test("installed Windows native archive Open preserves cancellation, rejects host
         expect(await drive("open")).toEqual({
           action: "open",
           filenameSet: true,
-          nativeClick: true,
+          ...nativeActionEvidence,
           dialogDismissed: true,
-          defaultNameValid: false,
         });
         await expect(status).toContainText(
           "This Library already contains this exact Project history.",
@@ -232,9 +254,8 @@ test("installed Windows native archive Open preserves cancellation, rejects host
             ).toEqual({
               action: "open",
               filenameSet: true,
-              nativeClick: true,
+              ...nativeActionEvidence,
               dialogDismissed: true,
-              defaultNameValid: false,
             });
             const alert = page.getByTestId("archives.import.alert");
             await expect(alert).toHaveText(
@@ -256,9 +277,8 @@ test("installed Windows native archive Open preserves cancellation, rejects host
           expect(await drive("open", recoveryTarget)).toEqual({
             action: "open",
             filenameSet: true,
-            nativeClick: true,
+            ...nativeActionEvidence,
             dialogDismissed: true,
-            defaultNameValid: false,
           });
           await expect(status).toContainText("Project imported.", { timeout: 60000 });
           await expect(page.getByTestId("archives.import.alert")).toHaveCount(0);
