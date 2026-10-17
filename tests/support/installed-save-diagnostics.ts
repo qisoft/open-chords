@@ -80,7 +80,15 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const foregroundProbes = output
     .split(/\r?\n/)
     .filter((line) =>
-      /^Native Save foreground probe: phase=(?:before_input|dismissal) kind=(?:none|dialog|application|owned_other|driver|foreign) class=(?:none|dialog|other) visible=(?:true|false) enabled=(?:true|false)$/.test(
+      /^Native Save foreground probe: phase=(?:before_input|after_input|dismissal) kind=(?:none|dialog|application|owned_other|driver|foreign) class=(?:none|dialog|other) visible=(?:true|false) enabled=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
+  const activationProbes = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save activation probe: phase=(?:after_input|dismissal) process=(?:none|application|driver|console|terminal|shell|runner|other|unavailable) elapsed_ms=[0-9]{1,9}$/.test(
         line,
       ),
     )
@@ -121,6 +129,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...dismissalProbes,
     ...responseProbes,
     ...foregroundProbes,
+    ...activationProbes,
     ...clickProbes,
     ...controlProbes,
     ...candidates,
