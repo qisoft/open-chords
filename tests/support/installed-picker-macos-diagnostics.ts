@@ -1,6 +1,35 @@
 import { installedExportExitDiagnostic } from "./installed-export-process.ts";
 
 export function installedMacPickerDiagnostic(error: unknown, stderr: string, durationMs: number) {
+  const reads = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS picker attribute: stage=(?:processes|windows|sheets|elements|selection|navigation|path_entry|navigation_dismissal|selected_file|action|dismissal|deadline) attribute=(?:unixId|frontmost|role|name|enabled|focused|value|subrole) os_error=(?:unknown|-?[0-9]{1,5})$/u.test(
+        line,
+      ),
+    )
+    .slice(-3);
+  const refusal = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS picker refusal: reason=(?:navigation_parent_changed|navigation_role_changed|navigation_not_dismissed|prepared_target_changed|action_target_changed|other)$/u.test(
+        line,
+      ),
+    )
+    .slice(-1);
+  const guards = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS picker guard: phase=(?:activate|before_input|after_probe) mask=([0-9]{1,3}) unknown_mask=([0-9]{1,3})$/u.exec(
+          line,
+        );
+      return match !== null && Number(match[1]) <= 255 && Number(match[2]) <= 255;
+    })
+    .slice(-3);
   const probes = stderr
     .slice(-65536)
     .split(/\r?\n/u)
@@ -38,5 +67,8 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...probes,
     ...selection,
     ...target,
+    ...guards,
+    ...reads,
+    ...refusal,
   ].join("\n");
 }

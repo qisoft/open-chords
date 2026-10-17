@@ -5,6 +5,10 @@ import { expect } from "@playwright/test";
 import { z } from "zod";
 
 import {
+  installedMacSaveFieldDiagnostic,
+  type MacSaveFormat,
+} from "./installed-macos-save-field-probe.ts";
+import {
   installedMacAxActionSucceeded,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
@@ -14,6 +18,7 @@ export function installedMacPickerDriver(
   scenario: "cancel" | "cancel_save" | "open" | "cancel_open_existing",
   selectedPath: string | undefined,
   environment: () => NodeJS.ProcessEnv,
+  saveFormat?: MacSaveFormat,
 ) {
   return async (applicationPid: number) => {
     const started = performance.now();
@@ -26,7 +31,11 @@ export function installedMacPickerDriver(
           join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
           String(applicationPid),
           scenario,
-          ...(selectedPath === undefined ? [] : [selectedPath]),
+          ...(scenario === "cancel_save"
+            ? [saveFormat ?? ""]
+            : selectedPath === undefined
+              ? []
+              : [selectedPath]),
         ],
         { env: environment(), timeout: 100000, maxBuffer: 65536 },
         (error, stdout, stderr) => {
@@ -38,7 +47,28 @@ export function installedMacPickerDriver(
           }
           try {
             const prepared: unknown = JSON.parse(stdout.trim());
-            if (scenario === "cancel" || scenario === "cancel_save") {
+            if (scenario === "cancel_save") {
+              const save = z
+                .strictObject({
+                  action: z.literal("cancel_save"),
+                  nativePress: z.literal(true),
+                  dialogDismissed: z.literal(true),
+                  saveFieldProbe: z.unknown(),
+                })
+                .parse(prepared);
+              if (saveFormat === undefined) throw new Error("Save probe format unavailable");
+              const diagnostic = installedMacSaveFieldDiagnostic(save.saveFieldProbe, saveFormat);
+              if (diagnostic === "Native macOS Save field probe: invalid_evidence")
+                throw new Error("Save probe unavailable");
+              process.stdout.write(`${diagnostic}\n`);
+              resolve({
+                action: save.action,
+                nativePress: save.nativePress,
+                dialogDismissed: save.dialogDismissed,
+              });
+              return;
+            }
+            if (scenario === "cancel") {
               resolve(prepared);
               return;
             }

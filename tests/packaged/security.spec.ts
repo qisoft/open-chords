@@ -505,7 +505,20 @@ test("installed macOS native Save Cancel preserves Project and external files ac
           return { response, offline };
         })()`,
         installedSystemEnvironment(),
-        installedMacPickerDriver("cancel_save", undefined, installedSystemEnvironment),
+        installedMacPickerDriver(
+          "cancel_save",
+          undefined,
+          installedSystemEnvironment,
+          (
+            {
+              save_json: "json",
+              save_lrc: "lrc",
+              save_chordpro: "chordpro",
+              save_pdf: "pdf",
+              save_archive: "archive",
+            } as const
+          )[type],
+        ),
       );
       z.object({
         response: z.object({
