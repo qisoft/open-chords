@@ -1023,7 +1023,7 @@ test("installed local Source refusals and matching relink preserve Project revis
 
     const relocatedPath = join(packageRoot, `source-relinked-${failure}.wav`);
     writeFileSync(relocatedPath, original);
-    if (process.platform === "win32") {
+    if (["win32", "darwin"].includes(process.platform)) {
       const env = installedSystemEnvironment();
       const relink = (scenario: "open" | "cancel_open_existing", selectedPath: string) =>
         inspectInstalled(
