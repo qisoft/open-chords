@@ -218,7 +218,11 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if guardMask == 255 {
             stage = "press"
             let pressStarted = ProcessInfo.processInfo.systemUptime
-            let status = AXUIElementPerformAction(button, "AXPress" as CFString)
+            // Action callbacks can outlast the 150 ms attribute-read timeout.
+            // Keep the single action bounded inside the unchanged seven-second host budget.
+            let timeoutStatus = AXUIElementSetMessagingTimeout(button, 1)
+            let status = timeoutStatus == .success
+                ? AXUIElementPerformAction(button, "AXPress" as CFString) : timeoutStatus
             pressDurationMs = min(999999, max(0, Int((ProcessInfo.processInfo.systemUptime - pressStarted) * 1000)))
             counts["lastError"] = Int(status.rawValue)
             pressed = status == .success

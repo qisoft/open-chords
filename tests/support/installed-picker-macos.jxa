@@ -19,6 +19,7 @@ function run(argv) {
   var deadline = started + 90000;
   var stage = 'processes';
   var selectionStep = 'none';
+  var discoveryRefreshes = 0;
   var counts = { processes: 0, windows: 0, sheets: 0, elements: 0, cancel: 0, open: 0, navigation_sheets: 0, path_fields: 0, selected_rows: 0, selected_urls: 0, selected_matches: 0 };
   function attribute(element, name) {
     try { return element[name](); } catch (_) { return null; }
@@ -41,7 +42,7 @@ function run(argv) {
   }
 
   try {
-    while (Date.now() < deadline) {
+    discovery: while (Date.now() < deadline) {
       stage = 'processes';
       var processes = systemEvents.processes.whose({ unixId: applicationPid })();
       counts.processes = Math.min(processes.length, 17);
@@ -56,7 +57,15 @@ function run(argv) {
       counts.sheets = 0;
       for (var w = 0; w < windows.length; w++) {
         stage = 'sheets';
-        var sheets = windows[w].sheets();
+        var sheets;
+        try { sheets = windows[w].sheets(); }
+        catch (error) {
+          // A disappearing discovery window must be reacquired before any input.
+          if (error.number !== -1728 || discoveryRefreshes >= 3) throw error;
+          discoveryRefreshes++;
+          delay(0.1);
+          continue discovery;
+        }
         counts.sheets += sheets.length;
         if (counts.sheets > 16) { counts.sheets = 17; throw new Error('sheet bound'); }
         for (var s = 0; s < sheets.length; s++) {
