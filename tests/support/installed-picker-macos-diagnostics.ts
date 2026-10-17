@@ -14,7 +14,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     .slice(-65536)
     .split(/\r?\n/u)
     .filter((line) =>
-      /^Native macOS picker refusal: reason=(?:default_filename_unavailable|default_filename_invalid|navigation_parent_changed|navigation_role_changed|navigation_not_dismissed|prepared_target_changed|action_target_changed|other)$/u.test(
+      /^Native macOS picker refusal: reason=(?:filename_input_focus_failed|filename_input_readback_failed|default_filename_unavailable|default_filename_invalid|navigation_parent_changed|navigation_role_changed|navigation_not_dismissed|prepared_target_changed|action_target_changed|other)$/u.test(
         line,
       ),
     )

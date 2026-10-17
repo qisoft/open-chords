@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 
 import {
   installedMacSaveDefaultFilenameVerified,
+  installedMacSaveResultVerified,
   installedMacSaveFieldDiagnostic,
 } from "./support/installed-macos-save-field-probe.ts";
 
@@ -13,6 +14,33 @@ const field = {
   enabled: "true",
 };
 const probe = { format: "json", total: 1, unreadableRoles: 0, truncated: false, fields: [field] };
+
+it.each(["cancel_save", "cancel_save_edited"] as const)(
+  "requires exact native acknowledgement for %s",
+  (scenario) => {
+    const result = {
+      action: scenario,
+      nativePress: true,
+      dialogDismissed: true,
+      defaultFilenameVerified: true,
+      filenameInputVerified: scenario === "cancel_save_edited",
+      saveFieldProbe: probe,
+    };
+    expect(installedMacSaveResultVerified(result, "json", scenario)).toBe(true);
+    for (const invalid of [
+      { ...result, action: "cancel" },
+      { ...result, nativePress: false },
+      { ...result, dialogDismissed: false },
+      { ...result, defaultFilenameVerified: false },
+      { ...result, filenameInputVerified: !result.filenameInputVerified },
+      { ...result, filenameInputVerified: undefined },
+      { ...result, path: "/private/file" },
+      { ...result, saveFieldProbe: { ...probe, fields: [{ ...field, value: "other" }] } },
+    ])
+      expect(installedMacSaveResultVerified(invalid, "json", scenario)).toBe(false);
+    expect(installedMacSaveResultVerified(result, "pdf", scenario)).toBe(false);
+  },
+);
 
 it.each(["json", "lrc", "chordpro", "pdf", "archive"] as const)(
   "accepts one exact enabled Save As field for %s",

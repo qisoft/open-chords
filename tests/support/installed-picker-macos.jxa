@@ -3,11 +3,13 @@ function run(argv) {
   var scenario = argv[1] || 'cancel';
   var selectedPath = argv[2];
   var selectsFile = scenario === 'open' || scenario === 'cancel_open_existing';
-  var primaryAction = scenario === 'cancel_save' ? 'Save' : 'Open';
+  var saves = scenario === 'cancel_save' || scenario === 'cancel_save_edited';
+  var editsFilename = scenario === 'cancel_save_edited';
+  var primaryAction = saves ? 'Save' : 'Open';
   var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
-  var saveFormat = scenario === 'cancel_save' ? argv[2] : null;
-  if (scenario === 'cancel_save' && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
-  if (['cancel', 'cancel_save', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+  var saveFormat = saves ? argv[2] : null;
+  if (saves && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
+  if (['cancel', 'cancel_save', 'cancel_save_edited', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
       (selectsFile && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
@@ -164,7 +166,7 @@ function run(argv) {
       stage = 'action';
       requireCancelTarget(process, candidate, 'before_input', true);
       var saveProbe = null;
-      if (scenario === 'cancel_save') {
+      if (saves) {
         var fields = [];
         var filenameFields = [];
         var total = 0;
@@ -200,13 +202,31 @@ function run(argv) {
             attribute(filenameField, 'enabled') !== true || attribute(filenameField, 'value') !== expectedFilename) throw new Error('default filename invalid');
       }
       if (saveProbe !== null) requireCancelTarget(process, candidate, 'after_probe', true);
+      if (editsFilename) {
+        var inputFilename = 'Cancelled ' + expectedFilename;
+        var inputDeadline = Math.min(deadline, Date.now() + 5000);
+        filenameField.focused = true;
+        while (Date.now() < inputDeadline && attribute(filenameField, 'focused') !== true) delay(0.05);
+        requireCancelTarget(process, candidate, 'before_input', true);
+        if (Date.now() >= inputDeadline || attribute(filenameField, 'focused') !== true || attribute(filenameField, 'enabled') !== true ||
+            attribute(filenameField, 'role') !== 'AXTextField' || attribute(filenameField, 'value') !== expectedFilename) throw new Error('filename input focus failed');
+        systemEvents.keystroke('a', { using: ['command down'] });
+        requireCancelTarget(process, candidate, 'before_input', true);
+        if (Date.now() >= inputDeadline || attribute(filenameField, 'focused') !== true || attribute(filenameField, 'enabled') !== true) throw new Error('filename input focus failed');
+        systemEvents.keystroke(inputFilename);
+        while (Date.now() < inputDeadline && attribute(filenameField, 'value') !== inputFilename) delay(0.05);
+        if (Date.now() >= inputDeadline || attribute(filenameField, 'value') !== inputFilename ||
+            attribute(filenameField, 'focused') !== true || attribute(filenameField, 'enabled') !== true ||
+            attribute(filenameField, 'role') !== 'AXTextField') throw new Error('filename input readback failed');
+        requireCancelTarget(process, candidate, 'after_probe', true);
+      }
       candidate.button.click();
       stage = 'dismissal';
       var dismissDeadline = Math.min(deadline, Date.now() + 2000);
       while (Date.now() < dismissDeadline) {
         if (candidate.sheet.exists() === false) {
           var result = { action: scenario, nativePress: true, dialogDismissed: true };
-          if (saveProbe !== null) { result.saveFieldProbe = saveProbe; result.defaultFilenameVerified = true; }
+          if (saveProbe !== null) { result.saveFieldProbe = saveProbe; result.defaultFilenameVerified = true; result.filenameInputVerified = editsFilename; }
           return JSON.stringify(result);
         }
         delay(0.1);
@@ -217,7 +237,7 @@ function run(argv) {
     throw new Error('deadline');
   } catch (error) {
     for (var a = 0; a < attributeFailures.length; a++) console.log(attributeFailures[a]);
-    var reasons = { 'default filename unavailable': 'default_filename_unavailable', 'default filename invalid': 'default_filename_invalid', 'navigation parent changed': 'navigation_parent_changed', 'navigation role changed': 'navigation_role_changed', 'navigation not dismissed': 'navigation_not_dismissed', 'prepared target changed': 'prepared_target_changed', 'action target changed': 'action_target_changed' };
+    var reasons = { 'filename input focus failed': 'filename_input_focus_failed', 'filename input readback failed': 'filename_input_readback_failed', 'default filename unavailable': 'default_filename_unavailable', 'default filename invalid': 'default_filename_invalid', 'navigation parent changed': 'navigation_parent_changed', 'navigation role changed': 'navigation_role_changed', 'navigation not dismissed': 'navigation_not_dismissed', 'prepared target changed': 'prepared_target_changed', 'action target changed': 'action_target_changed' };
     var reason = error && Object.prototype.hasOwnProperty.call(reasons, error.message) ? reasons[error.message] : 'other';
     console.log('Native macOS picker refusal: reason=' + reason);
     var number = error && error.errorNumber;
