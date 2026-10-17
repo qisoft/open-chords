@@ -148,7 +148,10 @@ function run(argv) {
           counts.navigation_sheets = Math.min(remainingSheets.length, 17);
           if (remainingSheets.length > 1) throw new Error('ambiguous navigation sheet');
           if (remainingSheets.length === 0) { navigationDismissed = true; break; }
-          if (attribute(remainingSheets[0], 'role') !== 'AXSheet') throw new Error('navigation role changed');
+          // The child can disappear between collection and role reads. Only the
+          // next positive empty collection proves dismissal; an unreadable child does not.
+          var navigationRole = attribute(remainingSheets[0], 'role');
+          if (navigationRole !== null && navigationRole !== 'AXSheet') throw new Error('navigation role changed');
           delay(0.05);
         }
         if (!navigationDismissed) throw new Error('navigation not dismissed');
