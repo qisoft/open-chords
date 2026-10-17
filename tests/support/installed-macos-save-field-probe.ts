@@ -65,3 +65,24 @@ export function installedMacSaveFieldDiagnostic(value: unknown, expectedFormat: 
     ),
   ].join("\n");
 }
+
+export function installedMacSaveResultVerified(
+  value: unknown,
+  expectedFormat: MacSaveFormat,
+  scenario: "cancel_save" | "cancel_save_edited",
+): value is { saveFieldProbe: unknown } {
+  const result = z
+    .strictObject({
+      action: z.literal(scenario),
+      nativePress: z.literal(true),
+      dialogDismissed: z.literal(true),
+      defaultFilenameVerified: z.literal(true),
+      filenameInputVerified: z.literal(scenario === "cancel_save_edited"),
+      saveFieldProbe: z.unknown(),
+    })
+    .safeParse(value);
+  return (
+    result.success &&
+    installedMacSaveDefaultFilenameVerified(result.data.saveFieldProbe, expectedFormat)
+  );
+}

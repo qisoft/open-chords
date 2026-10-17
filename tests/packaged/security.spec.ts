@@ -463,90 +463,94 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
   expect(readFileSync(path)).toEqual(original);
 });
 
-test("installed macOS native Save verifies exact default filenames and Cancel preserves Project and external files", async () => {
-  test.skip(process.platform !== "darwin", "macOS native Save cancellation proof");
-  test.setTimeout(360_000);
-  const state = join(packageRoot, "macos-native-save-cancel");
-  const external = join(packageRoot, "macos-native-save-preserved.json");
-  const original = Buffer.from("preserved external Save cancellation fixture");
-  writeFileSync(external, original);
-  const library = await openProjectLibrary({ stateRoot: state });
-  const envelope = ProjectEnvelopeSchema.parse(
-    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
-  );
-  envelope.payload = leadSheetProject();
-  await library.createProject({ envelope, records: goldenRecords() });
-  await (await openNetworkMode(state)).setOffline(true);
-  const before = await library.readProject("project_golden");
-  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
-  for (const type of [
-    "save_json",
-    "save_lrc",
-    "save_chordpro",
-    "save_pdf",
-    "save_archive",
-  ] as const) {
-    await test.step(`Native Save Cancel for ${type}`, async () => {
-      const action = {
-        type,
-        projectId: "project_golden",
-        expectedProjectRevisionId: before.projectRevisionId,
-        ...(type === "save_archive"
-          ? { includeMedia: false }
-          : type === "save_lrc"
-            ? {}
-            : { presentation: "current" }),
-      };
-      const result = await inspectInstalled(
-        state,
-        `(async () => {
+for (const scenario of ["cancel_save", "cancel_save_edited"] as const) {
+  test(`installed macOS native Save ${scenario} verifies filenames and preserves Project and external files`, async () => {
+    test.skip(process.platform !== "darwin", "macOS native Save cancellation proof");
+    test.setTimeout(360_000);
+    const state = join(packageRoot, `macos-native-save-${scenario}`);
+    const external = join(packageRoot, `macos-native-save-preserved-${scenario}.json`);
+    const original = Buffer.from("preserved external Save cancellation fixture");
+    writeFileSync(external, original);
+    const library = await openProjectLibrary({ stateRoot: state });
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+    );
+    envelope.payload = leadSheetProject();
+    await library.createProject({ envelope, records: goldenRecords() });
+    await (await openNetworkMode(state)).setOffline(true);
+    const before = await library.readProject("project_golden");
+    const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+    for (const type of [
+      "save_json",
+      "save_lrc",
+      "save_chordpro",
+      "save_pdf",
+      "save_archive",
+    ] as const) {
+      await test.step(`Native Save Cancel for ${type}`, async () => {
+        const action = {
+          type,
+          projectId: "project_golden",
+          expectedProjectRevisionId: before.projectRevisionId,
+          ...(type === "save_archive"
+            ? { includeMedia: false }
+            : type === "save_lrc"
+              ? {}
+              : { presentation: "current" }),
+        };
+        const result = await inspectInstalled(
+          state,
+          `(async () => {
           const response = await window.openChords.exports.perform(${JSON.stringify(action)});
           const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
           return { response, offline };
         })()`,
-        installedSystemEnvironment(),
-        installedMacPickerDriver(
-          "cancel_save",
-          undefined,
-          installedSystemEnvironment,
-          (
-            {
-              save_json: "json",
-              save_lrc: "lrc",
-              save_chordpro: "chordpro",
-              save_pdf: "pdf",
-              save_archive: "archive",
-            } as const
-          )[type],
-        ),
-      );
-      z.object({
-        response: z.object({
-          type: z.literal("exports.result"),
-          projectId: z.literal("project_golden"),
-          state: z.literal("cancelled"),
-          busy: z.literal(false),
-          pendingRecovery: z.literal(0),
-          receipts: z.array(z.unknown()).length(0),
-        }),
-        offline: z.literal(true),
-      }).parse(result);
-      for (const privatePath of [state, external, realpathSync(external)]) {
-        const escaped = JSON.stringify(privatePath).slice(1, -1);
-        for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)])
-          expect(JSON.stringify(result).includes(representation)).toBe(false);
-      }
-      expect(JSON.stringify(result).includes(original.toString())).toBe(false);
-      const reopened = await openProjectLibrary({ stateRoot: state });
-      expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
-      expect(await reopened.readProject("project_golden")).toEqual(before);
-      expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(baseline);
-      expect(reopened.listExportReceipts("project_golden")).toEqual([]);
-      expect((await openNetworkMode(state)).offline).toBe(true);
-      expect(readFileSync(external)).toEqual(original);
-    });
-  }
-});
+          installedSystemEnvironment(),
+          installedMacPickerDriver(
+            scenario,
+            undefined,
+            installedSystemEnvironment,
+            (
+              {
+                save_json: "json",
+                save_lrc: "lrc",
+                save_chordpro: "chordpro",
+                save_pdf: "pdf",
+                save_archive: "archive",
+              } as const
+            )[type],
+          ),
+        );
+        z.object({
+          response: z.object({
+            type: z.literal("exports.result"),
+            projectId: z.literal("project_golden"),
+            state: z.literal("cancelled"),
+            busy: z.literal(false),
+            pendingRecovery: z.literal(0),
+            receipts: z.array(z.unknown()).length(0),
+          }),
+          offline: z.literal(true),
+        }).parse(result);
+        for (const privatePath of [state, external, realpathSync(external)]) {
+          const escaped = JSON.stringify(privatePath).slice(1, -1);
+          for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)])
+            expect(JSON.stringify(result).includes(representation)).toBe(false);
+        }
+        expect(JSON.stringify(result).includes(original.toString())).toBe(false);
+        const reopened = await openProjectLibrary({ stateRoot: state });
+        expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual([
+          "project_golden",
+        ]);
+        expect(await reopened.readProject("project_golden")).toEqual(before);
+        expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(baseline);
+        expect(reopened.listExportReceipts("project_golden")).toEqual([]);
+        expect((await openNetworkMode(state)).offline).toBe(true);
+        expect(readFileSync(external)).toEqual(original);
+      });
+    }
+  });
+}
 
 for (const firstOutcome of ["cancel", "refusal"] as const) {
   test(`installed Choose recording ${firstOutcome} preserves state before same-process recovery`, async () => {

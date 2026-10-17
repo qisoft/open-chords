@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import {
   installedMacSaveFieldDiagnostic,
-  installedMacSaveDefaultFilenameVerified,
+  installedMacSaveResultVerified,
   type MacSaveFormat,
 } from "./installed-macos-save-field-probe.ts";
 import {
@@ -16,12 +16,13 @@ import {
 import { installedMacPickerDiagnostic } from "./installed-picker-macos-diagnostics.ts";
 
 export function installedMacPickerDriver(
-  scenario: "cancel" | "cancel_save" | "open" | "cancel_open_existing",
+  scenario: "cancel" | "cancel_save" | "cancel_save_edited" | "open" | "cancel_open_existing",
   selectedPath: string | undefined,
   environment: () => NodeJS.ProcessEnv,
   saveFormat?: MacSaveFormat,
 ) {
   return async (applicationPid: number) => {
+    const saves = scenario === "cancel_save" || scenario === "cancel_save_edited";
     const started = performance.now();
     const evidence = await new Promise<unknown>((resolve, reject) => {
       runNativeFile(
@@ -32,11 +33,7 @@ export function installedMacPickerDriver(
           join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
           String(applicationPid),
           scenario,
-          ...(scenario === "cancel_save"
-            ? [saveFormat ?? ""]
-            : selectedPath === undefined
-              ? []
-              : [selectedPath]),
+          ...(saves ? [saveFormat ?? ""] : selectedPath === undefined ? [] : [selectedPath]),
         ],
         { env: environment(), timeout: 100000, maxBuffer: 65536 },
         (error, stdout, stderr) => {
@@ -48,31 +45,19 @@ export function installedMacPickerDriver(
           }
           try {
             const prepared: unknown = JSON.parse(stdout.trim());
-            if (scenario === "cancel_save") {
-              const save = z
-                .strictObject({
-                  action: z.literal("cancel_save"),
-                  nativePress: z.literal(true),
-                  dialogDismissed: z.literal(true),
-                  saveFieldProbe: z.unknown(),
-                  defaultFilenameVerified: z.literal(true),
-                })
-                .parse(prepared);
-              if (saveFormat === undefined) throw new Error("Save probe format unavailable");
+            if (saves) {
+              if (
+                saveFormat === undefined ||
+                !installedMacSaveResultVerified(prepared, saveFormat, scenario)
+              )
+                throw new Error("Save filename verification unavailable");
+              const save = prepared;
               const diagnostic = installedMacSaveFieldDiagnostic(save.saveFieldProbe, saveFormat);
-              if (diagnostic === "Native macOS Save field probe: invalid_evidence")
-                throw new Error("Save probe unavailable");
               process.stdout.write(`${diagnostic}\n`);
-              if (!installedMacSaveDefaultFilenameVerified(save.saveFieldProbe, saveFormat))
-                throw new Error("Save default filename verification unavailable");
               process.stdout.write(
-                `Native macOS Save default filename: format=${saveFormat} verified=true\n`,
+                `Native macOS Save filename: format=${saveFormat} default_verified=true input_verified=${scenario === "cancel_save_edited"}\n`,
               );
-              resolve({
-                action: save.action,
-                nativePress: save.nativePress,
-                dialogDismissed: save.dialogDismissed,
-              });
+              resolve({ action: scenario, nativePress: true, dialogDismissed: true });
               return;
             }
             if (scenario === "cancel") {
@@ -131,7 +116,7 @@ export function installedMacPickerDriver(
       );
     });
     expect(evidence).toEqual(
-      scenario === "cancel" || scenario === "cancel_save"
+      scenario === "cancel" || saves
         ? { action: scenario, nativePress: true, dialogDismissed: true }
         : { action: scenario, filenameSet: true, nativePress: true, dialogDismissed: true },
     );
