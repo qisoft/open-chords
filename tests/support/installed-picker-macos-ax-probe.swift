@@ -69,7 +69,9 @@ let trusted = AXIsProcessTrusted()
 let deadline = ProcessInfo.processInfo.systemUptime + 3
 
 func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
-    AXUIElementSetMessagingTimeout(element, 0.15)
+    // Native CI observed AXRole timing out at 164 ms with the 150 ms read cap.
+    // Give this identity read a separate cap; any failed read still prevents action.
+    AXUIElementSetMessagingTimeout(element, name == "AXRole" ? 0.5 : 0.15)
     var value: CFTypeRef?
     let readStarted = ProcessInfo.processInfo.systemUptime
     let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
