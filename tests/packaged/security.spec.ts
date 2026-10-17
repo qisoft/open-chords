@@ -30,6 +30,7 @@ import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/pa
 import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-sidecar-proof-failures.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { leadSheetProject } from "../support/export-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
@@ -460,6 +461,78 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
   expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(baseline);
   expect((await openNetworkMode(state)).offline).toBe(true);
   expect(readFileSync(path)).toEqual(original);
+});
+
+test("installed macOS native Save Cancel preserves Project and external files across export formats", async () => {
+  test.skip(process.platform !== "darwin", "macOS native Save cancellation proof");
+  test.setTimeout(360_000);
+  const state = join(packageRoot, "macos-native-save-cancel");
+  const external = join(packageRoot, "macos-native-save-preserved.json");
+  const original = Buffer.from("preserved external Save cancellation fixture");
+  writeFileSync(external, original);
+  const library = await openProjectLibrary({ stateRoot: state });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+  );
+  envelope.payload = leadSheetProject();
+  await library.createProject({ envelope, records: goldenRecords() });
+  await (await openNetworkMode(state)).setOffline(true);
+  const before = await library.readProject("project_golden");
+  const baseline = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+  for (const type of [
+    "save_json",
+    "save_lrc",
+    "save_chordpro",
+    "save_pdf",
+    "save_archive",
+  ] as const) {
+    await test.step(`Native Save Cancel for ${type}`, async () => {
+      const action = {
+        type,
+        projectId: "project_golden",
+        expectedProjectRevisionId: before.projectRevisionId,
+        ...(type === "save_archive"
+          ? { includeMedia: false }
+          : type === "save_lrc"
+            ? {}
+            : { presentation: "current" }),
+      };
+      const result = await inspectInstalled(
+        state,
+        `(async () => {
+          const response = await window.openChords.exports.perform(${JSON.stringify(action)});
+          const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+          return { response, offline };
+        })()`,
+        installedSystemEnvironment(),
+        installedMacPickerDriver("cancel_save", undefined, installedSystemEnvironment),
+      );
+      z.object({
+        response: z.object({
+          type: z.literal("exports.result"),
+          projectId: z.literal("project_golden"),
+          state: z.literal("cancelled"),
+          busy: z.literal(false),
+          pendingRecovery: z.literal(0),
+          receipts: z.array(z.unknown()).length(0),
+        }),
+        offline: z.literal(true),
+      }).parse(result);
+      for (const privatePath of [state, external, realpathSync(external)]) {
+        const escaped = JSON.stringify(privatePath).slice(1, -1);
+        for (const representation of [privatePath, escaped, JSON.stringify(escaped).slice(1, -1)])
+          expect(JSON.stringify(result).includes(representation)).toBe(false);
+      }
+      expect(JSON.stringify(result).includes(original.toString())).toBe(false);
+      const reopened = await openProjectLibrary({ stateRoot: state });
+      expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
+      expect(await reopened.readProject("project_golden")).toEqual(before);
+      expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(baseline);
+      expect(reopened.listExportReceipts("project_golden")).toEqual([]);
+      expect((await openNetworkMode(state)).offline).toBe(true);
+      expect(readFileSync(external)).toEqual(original);
+    });
+  }
 });
 
 for (const firstOutcome of ["cancel", "refusal"] as const) {

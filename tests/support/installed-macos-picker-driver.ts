@@ -11,7 +11,7 @@ import {
 import { installedMacPickerDiagnostic } from "./installed-picker-macos-diagnostics.ts";
 
 export function installedMacPickerDriver(
-  scenario: "cancel" | "open" | "cancel_open_existing",
+  scenario: "cancel" | "cancel_save" | "open" | "cancel_open_existing",
   selectedPath: string | undefined,
   environment: () => NodeJS.ProcessEnv,
 ) {
@@ -38,7 +38,7 @@ export function installedMacPickerDriver(
           }
           try {
             const prepared: unknown = JSON.parse(stdout.trim());
-            if (scenario === "cancel") {
+            if (scenario === "cancel" || scenario === "cancel_save") {
               resolve(prepared);
               return;
             }
@@ -94,8 +94,8 @@ export function installedMacPickerDriver(
       );
     });
     expect(evidence).toEqual(
-      scenario === "cancel"
-        ? { action: "cancel", nativePress: true, dialogDismissed: true }
+      scenario === "cancel" || scenario === "cancel_save"
+        ? { action: scenario, nativePress: true, dialogDismissed: true }
         : { action: scenario, filenameSet: true, nativePress: true, dialogDismissed: true },
     );
   };

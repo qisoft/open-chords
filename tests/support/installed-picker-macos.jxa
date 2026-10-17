@@ -2,8 +2,10 @@ function run(argv) {
   var applicationPid = Number(argv[0]);
   var scenario = argv[1] || 'cancel';
   var selectedPath = argv[2];
-  if (['cancel', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
-      (scenario !== 'cancel' && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
+  var selectsFile = scenario === 'open' || scenario === 'cancel_open_existing';
+  var primaryAction = scenario === 'cancel_save' ? 'Save' : 'Open';
+  if (['cancel', 'cancel_save', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+      (selectsFile && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
   if (!Number.isInteger(applicationPid) || applicationPid <= 0) {
@@ -50,7 +52,7 @@ function run(argv) {
             if (attribute(elements[e], 'role') !== 'AXButton') continue;
             var name = attribute(elements[e], 'name');
             if (name === 'Cancel' && attribute(elements[e], 'enabled') === true) cancel.push(elements[e]);
-            if (name === 'Open') open.push(elements[e]);
+            if (name === primaryAction) open.push(elements[e]);
           }
           counts.cancel = cancel.length;
           counts.open = open.length;
@@ -70,7 +72,7 @@ function run(argv) {
           attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true) {
         throw new Error('target changed');
       }
-      if (scenario !== 'cancel') {
+      if (selectsFile) {
         stage = 'navigation';
         systemEvents.keystroke('g', { using: ['command down', 'shift down'] });
         var navigationDeadline = Math.min(deadline, Date.now() + 5000);
@@ -119,13 +121,14 @@ function run(argv) {
       stage = 'action';
       if (Date.now() >= deadline || attribute(process, 'unixId') !== applicationPid || attribute(process, 'frontmost') !== true ||
           attribute(candidate.sheet, 'role') !== 'AXSheet' || attribute(candidate.button, 'role') !== 'AXButton' ||
-          attribute(candidate.button, 'name') !== (scenario === 'open' ? 'Open' : 'Cancel') || attribute(candidate.button, 'enabled') !== true) throw new Error('action target changed');
+          attribute(candidate.button, 'name') !== 'Cancel' || attribute(candidate.button, 'enabled') !== true ||
+          attribute(candidate.open, 'name') !== primaryAction) throw new Error('action target changed');
       candidate.button.click();
       stage = 'dismissal';
       var dismissDeadline = Math.min(deadline, Date.now() + 2000);
       while (Date.now() < dismissDeadline) {
         if (candidate.sheet.exists() === false) {
-          return JSON.stringify({ action: 'cancel', nativePress: true, dialogDismissed: true });
+          return JSON.stringify({ action: scenario, nativePress: true, dialogDismissed: true });
         }
         delay(0.1);
       }
