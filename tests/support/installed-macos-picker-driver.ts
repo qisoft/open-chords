@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import {
   installedMacSaveFieldDiagnostic,
+  installedMacSaveDefaultFilenameVerified,
   type MacSaveFormat,
 } from "./installed-macos-save-field-probe.ts";
 import {
@@ -54,6 +55,7 @@ export function installedMacPickerDriver(
                   nativePress: z.literal(true),
                   dialogDismissed: z.literal(true),
                   saveFieldProbe: z.unknown(),
+                  defaultFilenameVerified: z.literal(true),
                 })
                 .parse(prepared);
               if (saveFormat === undefined) throw new Error("Save probe format unavailable");
@@ -61,6 +63,11 @@ export function installedMacPickerDriver(
               if (diagnostic === "Native macOS Save field probe: invalid_evidence")
                 throw new Error("Save probe unavailable");
               process.stdout.write(`${diagnostic}\n`);
+              if (!installedMacSaveDefaultFilenameVerified(save.saveFieldProbe, saveFormat))
+                throw new Error("Save default filename verification unavailable");
+              process.stdout.write(
+                `Native macOS Save default filename: format=${saveFormat} verified=true\n`,
+              );
               resolve({
                 action: save.action,
                 nativePress: save.nativePress,

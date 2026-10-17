@@ -463,7 +463,7 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
   expect(readFileSync(path)).toEqual(original);
 });
 
-test("installed macOS native Save Cancel preserves Project and external files across export formats", async () => {
+test("installed macOS native Save verifies exact default filenames and Cancel preserves Project and external files", async () => {
   test.skip(process.platform !== "darwin", "macOS native Save cancellation proof");
   test.setTimeout(360_000);
   const state = join(packageRoot, "macos-native-save-cancel");

@@ -166,6 +166,7 @@ function run(argv) {
       var saveProbe = null;
       if (scenario === 'cancel_save') {
         var fields = [];
+        var filenameFields = [];
         var total = 0;
         var unreadableRoles = 0;
         var expectedFilename = saveDefaults[saveFormat];
@@ -178,6 +179,7 @@ function run(argv) {
           total++;
           if (fields.length === 16) continue;
           var fieldName = attribute(field, 'name');
+          if (fieldName === 'Save As:' || fieldName === 'Save As') filenameFields.push(field);
           var fieldValue = attribute(field, 'value');
           var subrole = attribute(field, 'subrole');
           var enabled = attribute(field, 'enabled');
@@ -190,6 +192,12 @@ function run(argv) {
           });
         }
         saveProbe = { format: saveFormat, total: total, unreadableRoles: unreadableRoles, truncated: total > 16, fields: fields };
+        if (unreadableRoles !== 0 || total > 16 || fields.some(function (field) { return field.name === 'unavailable'; }) || filenameFields.length !== 1) throw new Error('default filename unavailable');
+        var filenameField = filenameFields[0];
+        var filenameName = attribute(filenameField, 'name');
+        if (attribute(filenameField, 'role') !== 'AXTextField' ||
+            (filenameName !== 'Save As:' && filenameName !== 'Save As') ||
+            attribute(filenameField, 'enabled') !== true || attribute(filenameField, 'value') !== expectedFilename) throw new Error('default filename invalid');
       }
       if (saveProbe !== null) requireCancelTarget(process, candidate, 'after_probe', true);
       candidate.button.click();
@@ -198,7 +206,7 @@ function run(argv) {
       while (Date.now() < dismissDeadline) {
         if (candidate.sheet.exists() === false) {
           var result = { action: scenario, nativePress: true, dialogDismissed: true };
-          if (saveProbe !== null) result.saveFieldProbe = saveProbe;
+          if (saveProbe !== null) { result.saveFieldProbe = saveProbe; result.defaultFilenameVerified = true; }
           return JSON.stringify(result);
         }
         delay(0.1);
@@ -209,7 +217,7 @@ function run(argv) {
     throw new Error('deadline');
   } catch (error) {
     for (var a = 0; a < attributeFailures.length; a++) console.log(attributeFailures[a]);
-    var reasons = { 'navigation parent changed': 'navigation_parent_changed', 'navigation role changed': 'navigation_role_changed', 'navigation not dismissed': 'navigation_not_dismissed', 'prepared target changed': 'prepared_target_changed', 'action target changed': 'action_target_changed' };
+    var reasons = { 'default filename unavailable': 'default_filename_unavailable', 'default filename invalid': 'default_filename_invalid', 'navigation parent changed': 'navigation_parent_changed', 'navigation role changed': 'navigation_role_changed', 'navigation not dismissed': 'navigation_not_dismissed', 'prepared target changed': 'prepared_target_changed', 'action target changed': 'action_target_changed' };
     var reason = error && Object.prototype.hasOwnProperty.call(reasons, error.message) ? reasons[error.message] : 'other';
     console.log('Native macOS picker refusal: reason=' + reason);
     var number = error && error.errorNumber;

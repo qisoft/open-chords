@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 
-import { installedMacSaveFieldDiagnostic } from "./support/installed-macos-save-field-probe.ts";
+import {
+  installedMacSaveDefaultFilenameVerified,
+  installedMacSaveFieldDiagnostic,
+} from "./support/installed-macos-save-field-probe.ts";
 
 const field = {
   role: "text_field",
@@ -10,6 +13,42 @@ const field = {
   enabled: "true",
 };
 const probe = { format: "json", total: 1, unreadableRoles: 0, truncated: false, fields: [field] };
+
+it.each(["json", "lrc", "chordpro", "pdf", "archive"] as const)(
+  "accepts one exact enabled Save As field for %s",
+  (format) => {
+    expect(
+      installedMacSaveDefaultFilenameVerified(
+        {
+          ...probe,
+          format,
+          total: 2,
+          fields: [field, { ...field, name: "other", value: "empty" }],
+        },
+        format,
+      ),
+    ).toBe(true);
+  },
+);
+
+it.each([
+  { ...probe, total: 0, fields: [] },
+  { ...probe, unreadableRoles: 1 },
+  { ...probe, total: 17, truncated: true, fields: Array(16).fill(field) },
+  { ...probe, total: 2, fields: [field, { ...field, enabled: "false" }] },
+  ...["combo"].map((role) => ({ ...probe, fields: [{ ...field, role }] })),
+  ...["false", "unknown"].map((enabled) => ({ ...probe, fields: [{ ...field, enabled }] })),
+  ...["basename", "empty", "other", "unavailable"].map((value) => ({
+    ...probe,
+    fields: [{ ...field, value }],
+  })),
+  ...["empty", "other", "unavailable"].map((name) => ({ ...probe, fields: [{ ...field, name }] })),
+  { ...probe, total: 2, fields: [field, { ...field, name: "unavailable" }] },
+  { ...probe, format: "pdf" },
+  { ...probe, path: "/private/file" },
+])("refuses ambiguous, incomplete or inexact default filename evidence", (value) => {
+  expect(installedMacSaveDefaultFilenameVerified(value, "json")).toBe(false);
+});
 
 it.each(["json", "lrc", "chordpro", "pdf", "archive"] as const)(
   "retains fixed Save categories for %s",
