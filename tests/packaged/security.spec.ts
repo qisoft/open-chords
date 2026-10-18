@@ -32,6 +32,7 @@ import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
+import { installedEffectiveCspDiagnostic } from "../support/installed-effective-csp-diagnostics.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
@@ -1884,6 +1885,11 @@ async function evaluateRendererTarget(webSocketUrl: string) {
                     const result = {
                       evalBlocked: evalBlocked && globalThis.__openChordsEvalCspProbe !== true,
                       inlineScriptBlocked: globalThis.__openChordsInlineCspProbe !== true,
+                      documentUrl: location.href === "about:blank" ? "about_blank" : location.protocol === "open-chords:" && location.hostname === "app" ? location.pathname === "/index.html" ? "app_index" : "app_other" : "other",
+                      readyState: document.readyState,
+                      preloadPresent: typeof window.openChords === "object" && window.openChords !== null,
+                      metaCount: Math.min(17, document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]').length),
+                      metaMatches: document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute("content") === ${JSON.stringify(EXPECTED_RENDERER_CSP)},
                     };
                     delete globalThis.__openChordsInlineCspProbe;
                     delete globalThis.__openChordsEvalCspProbe;
@@ -1908,7 +1914,10 @@ async function evaluateRendererTarget(webSocketUrl: string) {
               `Effective packaged CSP probe threw: ${JSON.stringify(response.result.exceptionDetails)}`,
             );
           }
-          effectiveCsp = EffectiveCspProbeSchema.parse(response.result.result.value);
+          const observed = response.result.result.value;
+          const verifiedCsp = EffectiveCspProbeSchema.safeParse(observed);
+          if (!verifiedCsp.success) throw new Error(installedEffectiveCspDiagnostic(observed));
+          effectiveCsp = verifiedCsp.data;
           socket.send(
             JSON.stringify({
               id: 3,
