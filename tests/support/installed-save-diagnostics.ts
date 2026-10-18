@@ -93,6 +93,14 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const pointerProbes = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save pointer probe: phase=(?:before_input|after_input|dismissal) cursor_match=(?:true|false) point_root=(?:none|dialog|owned_other|foreign) hit_control=(?:true|false) foreground_at_point=(?:true|false) left_down=(?:true|false) modifier_mask=(?:[0-9]|1[0-5])$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   const controlProbes = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -130,6 +138,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...responseProbes,
     ...foregroundProbes,
     ...activationProbes,
+    ...pointerProbes,
     ...clickProbes,
     ...controlProbes,
     ...candidates,

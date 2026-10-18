@@ -283,6 +283,8 @@ public static class SaveNativeInput {
       " hit_control=" + (known && clickedControl == control).ToString().ToLowerInvariant() +
       " hit_child=" + (known && IsChild(control, clickedControl)).ToString().ToLowerInvariant() +
       " cursor_match=" + cursorMatches.ToString().ToLowerInvariant());
+    LastClickPoint = new Point { x = x, y = y };
+    ProbePointer(window, control, expectedProcessId, "before_input");
     ProbeForeground(window, expectedProcessId, "before_input");
     var inputs = new[] {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
@@ -293,6 +295,26 @@ public static class SaveNativeInput {
       throw new InvalidOperationException("Native Save click was not delivered");
     ProbeForeground(window, expectedProcessId, "after_input");
     ProbeActivation(expectedProcessId, "after_input");
+    ProbePointer(window, control, expectedProcessId, "after_input");
+  }
+  private static Point LastClickPoint;
+  private static void ProbePointer(IntPtr dialog, IntPtr control, uint expectedProcessId, string phase) {
+    Point cursor;
+    bool cursorKnown = GetCursorPos(out cursor);
+    IntPtr hit = cursorKnown ? WindowFromPoint(cursor) : IntPtr.Zero;
+    IntPtr root = GetAncestor(hit, 2);
+    string category = root == IntPtr.Zero ? "none" : root == dialog ? "dialog" :
+      OwnedByApplication(root, expectedProcessId) ? "owned_other" : "foreign";
+    int modifiers = ((GetAsyncKeyState(0x10) & 0x8000) != 0 ? 1 : 0) |
+      ((GetAsyncKeyState(0x11) & 0x8000) != 0 ? 2 : 0) |
+      ((GetAsyncKeyState(0x12) & 0x8000) != 0 ? 4 : 0) |
+      (((GetAsyncKeyState(0x5B) | GetAsyncKeyState(0x5C)) & 0x8000) != 0 ? 8 : 0);
+    Console.Error.WriteLine("Native Save pointer probe: phase=" + phase +
+      " cursor_match=" + (cursorKnown && cursor.x == LastClickPoint.x && cursor.y == LastClickPoint.y).ToString().ToLowerInvariant() +
+      " point_root=" + category + " hit_control=" + (control != IntPtr.Zero && hit == control).ToString().ToLowerInvariant() +
+      " foreground_at_point=" + (root != IntPtr.Zero && root == GetForegroundWindow()).ToString().ToLowerInvariant() +
+      " left_down=" + ((GetAsyncKeyState(1) & 0x8000) != 0).ToString().ToLowerInvariant() +
+      " modifier_mask=" + modifiers);
   }
   private static System.Diagnostics.Stopwatch LastClick;
   private static void ProbeActivation(uint expectedProcessId, string phase) {
@@ -361,6 +383,7 @@ public static class SaveNativeInput {
       ProbeDismissalResponse(window, control, expectedProcessId);
       ProbeForeground(window, expectedProcessId, "dismissal");
       ProbeActivation(expectedProcessId, "dismissal");
+      ProbePointer(window, control, expectedProcessId, "dismissal");
       throw new InvalidOperationException("Native Save dialog not dismissed");
     }
   }

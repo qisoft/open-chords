@@ -240,6 +240,27 @@ describe("native Save driver failure redaction", () => {
     expect(diagnostic).not.toContain("private");
     expect(diagnostic).not.toContain("1234567890");
   });
+  it.each(["before_input", "after_input", "dismissal"])(
+    "retains bounded pointer state at %s",
+    (phase) => {
+      const probe = `Native Save pointer probe: phase=${phase} cursor_match=true point_root=foreign hit_control=false foreground_at_point=true left_down=false modifier_mask=15`;
+      const diagnostic = installedSaveDriverDiagnostic(
+        {},
+        [
+          ...Array(5).fill(probe),
+          `${probe} /private/path`,
+          probe.replace("modifier_mask=15", "modifier_mask=16"),
+          probe.replace("point_root=foreign", "point_root=private"),
+          probe.replace(`phase=${phase}`, "phase=private"),
+          probe.replace("cursor_match=true", "cursor_match=private"),
+        ].join("\n"),
+        100,
+      );
+      expect(diagnostic.split(probe)).toHaveLength(4);
+      expect(diagnostic).not.toContain("private");
+      expect(diagnostic).not.toContain("modifier_mask=16");
+    },
+  );
   it.each(["none", "dialog", "application", "owned_other", "driver", "foreign"])(
     "retains bounded foreground categories: %s",
     (kind) => {
