@@ -24,6 +24,10 @@ function run(argv) {
   var stage = 'processes';
   var selectionStep = 'none';
   var discoveryRefreshes = 0;
+  var referenceRefreshes = 0;
+  var nativeInputStarted = false;
+  var guardReading = false;
+  var guardErrors = [];
   var attributeFailures = [];
   var counts = { processes: 0, windows: 0, sheets: 0, elements: 0, cancel: 0, open: 0, navigation_sheets: 0, path_fields: 0, selected_rows: 0, selected_urls: 0, selected_matches: 0 };
   function attribute(element, name) {
@@ -31,6 +35,7 @@ function run(argv) {
     catch (error) {
       var number = error && error.errorNumber;
       if (!Number.isInteger(number) || number < -32768 || number > 32767) number = 'unknown';
+      if (guardReading) guardErrors.push(number);
       attributeFailures.push('Native macOS picker attribute: stage=' + stage + ' attribute=' + name + ' os_error=' + number);
       if (attributeFailures.length > 3) attributeFailures.shift();
       return null;
@@ -71,11 +76,15 @@ function run(argv) {
       ' age_ms=' + Math.max(0, Math.min(200000, Date.now() - candidate.capturedAt)) +
       ' sheet_exists=' + sheetExists + ' button_exists=' + buttonExists +
       ' windows=' + windows + ' sheets=' + sheets + ' os_error=' + osError);
+    return status === 'complete' && sheetExists === 'false' && buttonExists === 'false' && windows === 1 && sheets === 1;
   }
   function requireCancelTarget(process, candidate, phase, includePrimary) {
+    guardReading = true;
+    guardErrors = [];
     var values = [attribute(process, 'unixId'), attribute(process, 'frontmost'), attribute(candidate.sheet, 'role'),
       attribute(candidate.button, 'role'), attribute(candidate.button, 'name'), attribute(candidate.button, 'enabled'),
       includePrimary ? attribute(candidate.open, 'name') : primaryAction, Date.now() < deadline];
+    guardReading = false;
     var expected = [applicationPid, true, 'AXSheet', 'AXButton', 'Cancel', true, primaryAction, true];
     var mask = 0;
     var unknownMask = 0;
@@ -85,7 +94,11 @@ function run(argv) {
     }
     if (mask !== 255) {
       console.log('Native macOS picker guard: phase=' + phase + ' mask=' + mask + ' unknown_mask=' + unknownMask);
-      reportGuardSnapshot(process, candidate, phase);
+      var staleReferences = reportGuardSnapshot(process, candidate, phase);
+      if (saves && !nativeInputStarted && referenceRefreshes === 0 && (mask & 3) === 3 &&
+          (unknownMask & ~124) === 0 && guardErrors.length > 0 &&
+          guardErrors.every(function (number) { return number === -1728; }) && staleReferences)
+        throw new Error('stale before input');
       throw new Error('action target changed');
     }
   }
@@ -93,6 +106,7 @@ function run(argv) {
   function prepareNavigation(process, candidate, navigationPath) {
     requireCancelTarget(process, candidate, 'before_input', true);
     stage = 'navigation';
+    nativeInputStarted = true;
     systemEvents.keystroke('g', { using: ['command down', 'shift down'] });
     var navigationDeadline = Math.min(deadline, Date.now() + 5000);
     var entry = null;
@@ -186,6 +200,7 @@ function run(argv) {
 
   try {
     discovery: while (Date.now() < deadline) {
+      try {
       stage = 'processes';
       var processes = systemEvents.processes.whose({ unixId: applicationPid })();
       counts.processes = Math.min(processes.length, 17);
@@ -267,6 +282,7 @@ function run(argv) {
       if (editsFilename) {
         var inputFilename = 'Cancelled ' + expectedFilename;
         var inputDeadline = Math.min(deadline, Date.now() + 5000);
+        nativeInputStarted = true;
         filenameField.focused = true;
         while (Date.now() < inputDeadline && attribute(filenameField, 'focused') !== true) delay(0.05);
         requireCancelTarget(process, candidate, 'before_input', true);
@@ -282,6 +298,7 @@ function run(argv) {
             attribute(filenameField, 'role') !== 'AXTextField') throw new Error('filename input readback failed');
         requireCancelTarget(process, candidate, 'after_probe', true);
       }
+      nativeInputStarted = true;
       candidate.button.click();
       stage = 'dismissal';
       var dismissDeadline = Math.min(deadline, Date.now() + 2000);
@@ -294,6 +311,14 @@ function run(argv) {
         delay(0.1);
       }
       throw new Error('not dismissed');
+      } catch (error) {
+        if (error && error.message === 'stale before input' && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
+          referenceRefreshes++;
+          console.log('Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true');
+          continue discovery;
+        }
+        throw error;
+      }
     }
     stage = 'deadline';
     throw new Error('deadline');

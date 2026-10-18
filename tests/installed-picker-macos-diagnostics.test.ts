@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 
-import { installedMacPickerDiagnostic } from "./support/installed-picker-macos-diagnostics.ts";
+import {
+  installedMacPickerDiagnostic,
+  installedMacPickerRefreshDiagnostic,
+} from "./support/installed-picker-macos-diagnostics.ts";
 
 it("retains only three fixed attribute failures and one allowlisted refusal", () => {
   const read = "Native macOS picker attribute: stage=action attribute=role os_error=-1728";
@@ -171,3 +174,17 @@ it.each(["complete", "deadline", "bound", "error"])(
     expect(diagnostic).not.toContain("1234567");
   },
 );
+
+it("retains only the fixed single pre-input stale-reference refresh", () => {
+  const probe = "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true";
+  expect(installedMacPickerRefreshDiagnostic(`/private/path\n${probe}\n`)).toBe(probe);
+  expect(installedMacPickerDiagnostic({}, probe, 1)).toContain(probe);
+  for (const line of [
+    probe + " /private/path",
+    probe.replace("attempt=1", "attempt=2"),
+    probe.replace("before_input=true", "before_input=false"),
+    probe.replace("stale_reference", "private"),
+  ]) {
+    expect(installedMacPickerRefreshDiagnostic(line)).toBeUndefined();
+  }
+});

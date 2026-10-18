@@ -78,7 +78,20 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...target,
     ...guards,
     ...guardSnapshots,
+    ...(installedMacPickerRefreshDiagnostic(stderr)
+      ? [installedMacPickerRefreshDiagnostic(stderr)]
+      : []),
     ...reads,
     ...refusal,
   ].join("\n");
+}
+
+export function installedMacPickerRefreshDiagnostic(stderr: string) {
+  return stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .find(
+      (line) =>
+        line === "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true",
+    );
 }
