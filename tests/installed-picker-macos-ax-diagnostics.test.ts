@@ -18,6 +18,7 @@ const evidence = {
   firstOtherAttribute: "none",
   firstOtherStage: "none",
   firstOtherVisited: 0,
+  firstOtherOrigin: "none",
   firstCannotCompleteAttribute: "none",
   firstCannotCompleteStage: "none",
   firstCannotCompleteDurationMs: 0,
@@ -155,6 +156,32 @@ it("retains the fixed first cannotComplete read classification without accepting
     "cannot_complete_attribute=AXURL cannot_complete_stage=selection cannot_complete_duration_ms=151",
   );
   expect(installedMacAxActionSucceeded(JSON.stringify(failed), "open")).toBe(false);
+});
+
+it.each([
+  "none",
+  "discovery",
+  "sheet",
+  "AXChildren",
+  "AXColumns",
+  "AXSelectedChildren",
+  "AXSelectedRows",
+  "AXSelectedCells",
+  "AXSelectedColumns",
+  "selected_verification",
+  "guard",
+])("retains only fixed failed-element origin %s", (origin) => {
+  const observed = { ...evidence, firstOtherOrigin: origin, firstOtherError: -25202 };
+  const stdout = JSON.stringify(observed);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(`other_origin=${origin}`);
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  expect(
+    installedMacAxProbeDiagnostic(
+      JSON.stringify({ ...observed, firstOtherOrigin: "/private/node" }),
+      null,
+      1,
+    ),
+  ).toBe("Native macOS AX probe: invalid_evidence");
 });
 
 it("requires exact unique selected-file evidence, guarded native press and actual dismissal", () => {

@@ -48,6 +48,7 @@ const snapshot = {
   firstOtherAttribute: "none",
   firstOtherStage: "none",
   firstOtherVisited: 0,
+  firstOtherOrigin: "none",
   firstCannotCompleteAttribute: "none",
   firstCannotCompleteStage: "none",
   firstCannotCompleteDurationMs: 0,

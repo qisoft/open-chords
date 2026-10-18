@@ -105,6 +105,8 @@ var firstOtherError = 0
 var firstOtherAttribute = "none"
 var firstOtherStage = "none"
 var firstOtherVisited = 0
+var firstOtherOrigin = "none"
+var readOrigin = "discovery"
 var firstCannotCompleteAttribute = "none"
 var firstCannotCompleteStage = "none"
 var firstCannotCompleteDurationMs = 0
@@ -129,6 +131,7 @@ func recordReadError(_ status: AXError, name: String, duration: TimeInterval) {
         if firstOtherError == 0 {
             firstOtherError = Int(status.rawValue); firstOtherAttribute = name
             firstOtherStage = stage; firstOtherVisited = counts["visited"] ?? 0
+            firstOtherOrigin = readOrigin
         }
     }
 }
@@ -211,12 +214,13 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     if sheets.count != 1 || parents.count != 1 { complete = false }
     var selected: [AXUIElement] = []
     var buttons: [AXUIElement] = []
-    var queue = sheets.count == 1 ? sheets : []
+    var queue: [(AXUIElement, String)] = sheets.count == 1 ? sheets.map { ($0, "sheet") } : []
     seen = []
     stage = "selection"
     while !queue.isEmpty && complete {
         if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
-        let element = queue.removeFirst()
+        let (element, origin) = queue.removeFirst()
+        readOrigin = origin
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
         counts["visited"] = seen.count
@@ -263,19 +267,20 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
             else { counts["urlStrings", default: 0] += 1 }
             if url.absoluteString == expected { counts["exactUrls", default: 0] += 1 }
         }
-        var next: [AXUIElement] = []
+        var next: [(AXUIElement, String)] = []
         for name in ["AXSelectedChildren", "AXSelectedRows", "AXSelectedCells", "AXSelectedColumns"] {
             for child in elements(element, name) {
                 if !selected.contains(where: { same($0, child) }) { selected.append(child) }
-                next.append(child)
+                next.append((child, name))
             }
         }
-        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns")) }
-        else { next.append(contentsOf: elements(element, "AXChildren")) }
+        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns").map { ($0, "AXColumns") }) }
+        else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren") }) }
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
     }
     stage = "verification"
+    readOrigin = "selected_verification"
     counts["selectedRoots"] = selected.count
     counts["buttons"] = buttons.count
     var selectedURLs: [URL] = []
@@ -303,6 +308,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     verified = trusted && complete && selection.verified
     if requested != "none" && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
         stage = "guard"
+        readOrigin = "guard"
         let sheet = sheets[0]
         let parent = parents[0]
         let button = buttons[0]
@@ -373,7 +379,7 @@ let result: [String: Any] = [
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
     "firstOtherError": firstOtherError, "firstOtherAttribute": firstOtherAttribute,
-    "firstOtherStage": firstOtherStage, "firstOtherVisited": firstOtherVisited,
+    "firstOtherStage": firstOtherStage, "firstOtherVisited": firstOtherVisited, "firstOtherOrigin": firstOtherOrigin,
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,

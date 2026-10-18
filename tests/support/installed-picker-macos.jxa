@@ -36,6 +36,42 @@ function run(argv) {
       return null;
     }
   }
+  function reportGuardSnapshot(process, candidate, phase) {
+    var status = 'complete', windows = 0, sheets = 0, osError = 'none';
+    var sheetExists = 'unknown', buttonExists = 'unknown';
+    function existence(element) {
+      try {
+        var value = element.exists();
+        return value === true ? 'true' : value === false ? 'false' : 'unknown';
+      } catch (error) {
+        status = 'error';
+        osError = error && Number.isInteger(error.errorNumber) && error.errorNumber >= -32768 && error.errorNumber <= 32767 ? error.errorNumber : 'unknown';
+        return 'unknown';
+      }
+    }
+    try {
+      if (Date.now() >= deadline) status = 'deadline';
+      else {
+        sheetExists = existence(candidate.sheet);
+        buttonExists = existence(candidate.button);
+        var currentWindows = process.windows();
+        windows = Math.min(currentWindows.length, 17);
+        if (windows > 16) status = 'bound';
+        else for (var w = 0; w < currentWindows.length; w++) {
+          if (Date.now() >= deadline) { status = 'deadline'; break; }
+          sheets = Math.min(17, sheets + currentWindows[w].sheets().length);
+          if (sheets > 16) { status = 'bound'; break; }
+        }
+      }
+    } catch (error) {
+      status = 'error';
+      osError = error && Number.isInteger(error.errorNumber) && error.errorNumber >= -32768 && error.errorNumber <= 32767 ? error.errorNumber : 'unknown';
+    }
+    console.log('Native macOS picker guard snapshot: phase=' + phase + ' status=' + status +
+      ' age_ms=' + Math.max(0, Math.min(200000, Date.now() - candidate.capturedAt)) +
+      ' sheet_exists=' + sheetExists + ' button_exists=' + buttonExists +
+      ' windows=' + windows + ' sheets=' + sheets + ' os_error=' + osError);
+  }
   function requireCancelTarget(process, candidate, phase, includePrimary) {
     var values = [attribute(process, 'unixId'), attribute(process, 'frontmost'), attribute(candidate.sheet, 'role'),
       attribute(candidate.button, 'role'), attribute(candidate.button, 'name'), attribute(candidate.button, 'enabled'),
@@ -49,6 +85,7 @@ function run(argv) {
     }
     if (mask !== 255) {
       console.log('Native macOS picker guard: phase=' + phase + ' mask=' + mask + ' unknown_mask=' + unknownMask);
+      reportGuardSnapshot(process, candidate, phase);
       throw new Error('action target changed');
     }
   }
@@ -190,7 +227,7 @@ function run(argv) {
           }
           counts.cancel = cancel.length;
           counts.open = open.length;
-          if (cancel.length === 1 && open.length === 1) candidates.push({ sheet: sheets[s], button: cancel[0], open: open[0], elements: elements });
+          if (cancel.length === 1 && open.length === 1) candidates.push({ sheet: sheets[s], button: cancel[0], open: open[0], elements: elements, capturedAt: Date.now() });
         }
       }
       stage = 'selection';
