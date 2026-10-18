@@ -34,6 +34,12 @@ export const MAC_AX_COUNT_FIELDS = [
   "collapsedDisclosures",
   "pathControlMatches",
   "popupPathMatches",
+  "enabledDisclosures",
+  "zeroValueDisclosures",
+  "oneValueDisclosures",
+  "unknownValueDisclosures",
+  "disclosureActions",
+  "pressableDisclosures",
 ] as const;
 
 const AX_ATTRIBUTE_KEYS = [
@@ -54,6 +60,7 @@ const AX_ATTRIBUTE_KEYS = [
   "AXEnabled",
   "AXDocument",
   "AXExpanded",
+  "AXActions",
 ] as const;
 
 const evidenceSchema = z.strictObject({

@@ -53,6 +53,10 @@ it("reports bounded read-only directory attributes without authorizing an action
       popupPathMatches: 1,
       disclosures: 1,
       collapsedDisclosures: 1,
+      enabledDisclosures: 1,
+      zeroValueDisclosures: 1,
+      disclosureActions: 1,
+      pressableDisclosures: 1,
     },
   };
   const stdout = JSON.stringify(observation);
@@ -60,6 +64,43 @@ it("reports bounded read-only directory attributes without authorizing an action
   expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("documentPathMatches=1");
   expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("collapsedDisclosures=1");
   expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  expect(installedMacAxActionSucceeded(stdout, "cancel_open_existing")).toBe(false);
+});
+
+it.each([
+  "enabledDisclosures",
+  "zeroValueDisclosures",
+  "oneValueDisclosures",
+  "unknownValueDisclosures",
+  "disclosureActions",
+  "pressableDisclosures",
+])("rejects private, negative, unbounded or missing %s observations", (key) => {
+  for (const value of ["/private/disclosure", -1, 1000, null, undefined]) {
+    const observation = { ...evidence, counts: { ...evidence.counts, [key]: value } };
+    expect(installedMacAxProbeDiagnostic(JSON.stringify(observation), null, 1)).toBe(
+      "Native macOS AX probe: invalid_evidence",
+    );
+  }
+});
+
+it("retains fixed AXActions failures without raw action names or authorizing an action", () => {
+  const observation = {
+    ...evidence,
+    firstOtherError: -25200,
+    firstOtherAttribute: "AXActions",
+    firstOtherStage: "selection",
+    counts: { ...evidence.counts, otherErrors: 1 },
+  };
+  const stdout = JSON.stringify(observation);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("other_attribute=AXActions");
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  expect(
+    installedMacAxProbeDiagnostic(
+      JSON.stringify({ ...observation, actions: ["/private/action"] }),
+      null,
+      1,
+    ),
+  ).toBe("Native macOS AX probe: invalid_evidence");
 });
 
 it.each([
