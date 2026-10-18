@@ -14,7 +14,7 @@ export function installedAcquisitionFailureDiagnostic(error: unknown, durationMs
   const lines = stderr.split(/\r?\n/u);
   const stages = lines
     .filter((line) =>
-      /^Acquisition proof stage: (?:application_ready|runtime_setup|extractor_run|artifact_verification|extractor_cleanup|extractor_reaped|jobs|jobs_ready|jobs_bot_check|jobs_invalid_media|jobs_overlong|jobs_offline_cancel|jobs_closing|jobs_closed)(?: duration_ms=[0-9]{1,10})?$/u.test(
+      /^Acquisition proof stage: (?:application_ready|runtime_setup|extractor_run|artifact_verification|extractor_cleanup|extractor_reaped|jobs|jobs_ready|jobs_bot_check|jobs_invalid_media|jobs_overlong|jobs_offline_cancel|jobs_closing|jobs_closed|snapshot_verification|failure_history|offline_reopen|network_reset|start_cancellation|initialization_cleanup|result_writing|complete)(?: duration_ms=[0-9]{1,10})?$/u.test(
         line,
       ),
     )

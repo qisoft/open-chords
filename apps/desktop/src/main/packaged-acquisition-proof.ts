@@ -42,7 +42,15 @@ type AcquisitionProofStage =
   | "jobs_overlong"
   | "jobs_offline_cancel"
   | "jobs_closing"
-  | "jobs_closed";
+  | "jobs_closed"
+  | "snapshot_verification"
+  | "failure_history"
+  | "offline_reopen"
+  | "network_reset"
+  | "start_cancellation"
+  | "initialization_cleanup"
+  | "result_writing"
+  | "complete";
 
 export async function runPackagedAcquisitionProof() {
   const started = performance.now();
@@ -335,6 +343,7 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
     await jobs.close();
     reportStage("jobs_closed");
   }
+  reportStage("snapshot_verification");
   if (job.state !== "succeeded") throw new Error(`acquisition_job_${job.reason ?? "incomplete"}`);
   const snapshotPublished = (await library.listYouTubeSources()).some((source) =>
     source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
@@ -360,15 +369,21 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
   const snapshotReopened = (await reopened.listYouTubeSources()).some((source) =>
     source.snapshots.some((snapshot) => snapshot.id === job.snapshotId),
   );
+  reportStage("failure_history");
   const failureHistory = await proveAcquisitionFailureHistoryReopen(
     jobOptions,
     failedJobs,
     libraryBaseline,
   );
+  reportStage("offline_reopen");
   const offlineReopen = await proveOfflineAcquisitionReopen(jobOptions);
+  reportStage("network_reset");
   await network.setOffline(false);
+  reportStage("start_cancellation");
   const startCancellation = await proveAcquisitionStartCancellation(jobOptions);
+  reportStage("initialization_cleanup");
   const initializationCleanupRecoverable = await proveInitializationCleanupRecovery(jobOptions);
+  reportStage("result_writing");
   process.stdout.write(
     JSON.stringify({
       proof: "brokered-extractor",
@@ -394,4 +409,5 @@ async function runAcquisitionProof(reportStage: (stage: AcquisitionProofStage) =
         "snapshot.json",
     }) + "\n",
   );
+  reportStage("complete");
 }
