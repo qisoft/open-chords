@@ -56,11 +56,11 @@ function run(argv) {
         buttonExists = existence(candidate.button);
         var currentWindows = process.windows();
         windows = Math.min(currentWindows.length, 17);
-        if (windows > 16) status = 'bound';
+        if (windows > 16) { if (status === 'complete') status = 'bound'; }
         else for (var w = 0; w < currentWindows.length; w++) {
-          if (Date.now() >= deadline) { status = 'deadline'; break; }
+          if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; break; }
           sheets = Math.min(17, sheets + currentWindows[w].sheets().length);
-          if (sheets > 16) { status = 'bound'; break; }
+          if (sheets > 16) { if (status === 'complete') status = 'bound'; break; }
         }
       }
     } catch (error) {
