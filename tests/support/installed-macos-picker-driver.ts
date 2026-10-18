@@ -1,5 +1,6 @@
 import { execFile as runNativeFile } from "node:child_process";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { expect } from "@playwright/test";
 import { z } from "zod";
@@ -7,6 +8,7 @@ import { z } from "zod";
 import {
   installedMacSaveFieldDiagnostic,
   installedMacSaveResultVerified,
+  installedMacSaveDirectoryPreparationVerified,
   type MacSaveFormat,
 } from "./installed-macos-save-field-probe.ts";
 import {
@@ -14,6 +16,8 @@ import {
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
 import { installedMacPickerDiagnostic } from "./installed-picker-macos-diagnostics.ts";
+
+const executeNativeFile = promisify(runNativeFile);
 
 export function installedMacPickerDriver(
   scenario:
@@ -26,22 +30,31 @@ export function installedMacPickerDriver(
   selectedPath: string | undefined,
   environment: () => NodeJS.ProcessEnv,
   saveFormat?: MacSaveFormat,
+  budgetMs = 100000,
 ) {
   return async (applicationPid: number) => {
+    if (!Number.isFinite(budgetMs) || budgetMs <= 0 || budgetMs > 100000)
+      throw new Error("Native macOS picker driver budget unavailable");
+    const started = performance.now();
+    const remainingBudget = () => {
+      const remaining = Math.floor(budgetMs - (performance.now() - started));
+      if (remaining <= 0) throw new Error("Native macOS picker driver deadline exceeded");
+      return remaining;
+    };
     const saves =
       scenario === "cancel_save" ||
       scenario === "cancel_save_edited" ||
       scenario === "cancel_save_directory";
-    const started = performance.now();
-    const evidence = await new Promise<unknown>((resolve, reject) => {
-      runNativeFile(
+    let stdout: string;
+    try {
+      ({ stdout } = await executeNativeFile(
         "/usr/bin/osascript",
         [
           "-l",
           "JavaScript",
           join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
           String(applicationPid),
-          scenario,
+          scenario === "cancel_save_directory" ? "prepare_save_directory" : scenario,
           ...(saves
             ? [
                 saveFormat ?? "",
@@ -51,86 +64,99 @@ export function installedMacPickerDriver(
               ? []
               : [selectedPath]),
         ],
-        { env: environment(), timeout: 100000, maxBuffer: 65536 },
-        (error, stdout, stderr) => {
-          if (error) {
-            reject(
-              new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started)),
-            );
-            return;
-          }
-          try {
-            const prepared: unknown = JSON.parse(stdout.trim());
-            if (saves) {
-              if (
-                saveFormat === undefined ||
-                !installedMacSaveResultVerified(prepared, saveFormat, scenario)
-              )
-                throw new Error("Save filename verification unavailable");
-              const save = prepared;
-              const diagnostic = installedMacSaveFieldDiagnostic(save.saveFieldProbe, saveFormat);
-              process.stdout.write(`${diagnostic}\n`);
-              process.stdout.write(
-                `Native macOS Save filename: format=${saveFormat} default_verified=true input_verified=${scenario !== "cancel_save"} directory_navigation_verified=${scenario === "cancel_save_directory"}\n`,
-              );
-              resolve({ action: scenario, nativePress: true, dialogDismissed: true });
-              return;
-            }
-            if (scenario === "cancel") {
-              resolve(prepared);
-              return;
-            }
-            z.strictObject({
-              prepared: z.literal(true),
-              nativePress: z.literal(false),
-              navigationDismissed: z.literal(true),
-            }).parse(prepared);
-          } catch {
-            reject(new Error("Native macOS picker returned invalid preparation evidence"));
-            return;
-          }
-          if (selectedPath === undefined) {
-            reject(new Error("Native macOS picker target unavailable"));
-            return;
-          }
-          const remaining = Math.floor(100000 - (performance.now() - started));
-          if (remaining <= 0) {
-            reject(new Error("Native macOS picker driver deadline exceeded"));
-            return;
-          }
-          const verifierStarted = performance.now();
-          runNativeFile(
-            join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
-            [String(applicationPid), selectedPath, scenario],
-            {
-              env: environment(),
-              timeout: Math.min(7000, remaining),
-              maxBuffer: 4096,
-            },
-            (verifierError, verifierOutput) => {
-              if (verifierError || !installedMacAxActionSucceeded(verifierOutput, scenario)) {
-                reject(
-                  new Error(
-                    installedMacAxProbeDiagnostic(
-                      verifierOutput,
-                      verifierError,
-                      performance.now() - verifierStarted,
-                    ),
-                  ),
-                );
-                return;
-              }
-              resolve({
-                action: scenario,
-                filenameSet: true,
-                nativePress: true,
-                dialogDismissed: true,
-              });
-            },
-          );
-        },
+        { env: environment(), timeout: remainingBudget(), maxBuffer: 65536 },
+      ));
+    } catch (error) {
+      const stderr =
+        typeof error === "object" &&
+        error !== null &&
+        "stderr" in error &&
+        typeof error.stderr === "string"
+          ? error.stderr
+          : "";
+      // Raw exec errors contain private paths/output; retaining cause defeats redaction.
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started));
+    }
+    let prepared: unknown;
+    try {
+      prepared = JSON.parse(stdout.trim());
+    } catch {
+      throw new Error("Native macOS picker returned invalid preparation evidence");
+    }
+
+    const readNativeAx = async (requested?: "open" | "cancel_open_existing") => {
+      if (selectedPath === undefined) throw new Error("Native macOS picker target unavailable");
+      const probeStarted = performance.now();
+      let output: string;
+      try {
+        ({ stdout: output } = await executeNativeFile(
+          join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
+          [String(applicationPid), selectedPath, ...(requested === undefined ? [] : [requested])],
+          { env: environment(), timeout: Math.min(7000, remainingBudget()), maxBuffer: 4096 },
+        ));
+      } catch (error) {
+        // Raw exec errors contain private paths/output; retaining cause defeats redaction.
+        // eslint-disable-next-line preserve-caught-error
+        throw new Error(installedMacAxProbeDiagnostic("", error, performance.now() - probeStarted));
+      }
+      const diagnostic = installedMacAxProbeDiagnostic(
+        output,
+        null,
+        performance.now() - probeStarted,
       );
-    });
+      if (
+        diagnostic === "Native macOS AX probe: invalid_evidence" ||
+        (requested !== undefined && !installedMacAxActionSucceeded(output, requested))
+      )
+        throw new Error(diagnostic);
+      return diagnostic;
+    };
+
+    let evidence: unknown;
+    if (scenario === "cancel_save_directory") {
+      if (
+        saveFormat === undefined ||
+        !installedMacSaveDirectoryPreparationVerified(prepared, saveFormat)
+      )
+        throw new Error("Native macOS Save directory preparation unavailable");
+      process.stdout.write("Native macOS Save directory preparation: verified=true\n");
+      // Read-only observations do not authorize Save or imply a verified directory.
+      process.stdout.write(`Native macOS Save directory snapshot: ${await readNativeAx()}\n`);
+      await installedMacPickerDriver(
+        "cancel_save_edited",
+        undefined,
+        environment,
+        saveFormat,
+        remainingBudget(),
+      )(applicationPid);
+      evidence = { action: scenario, nativePress: true, dialogDismissed: true };
+    } else if (saves) {
+      if (
+        saveFormat === undefined ||
+        !installedMacSaveResultVerified(prepared, saveFormat, scenario)
+      )
+        throw new Error("Native macOS picker returned invalid preparation evidence");
+      process.stdout.write(
+        `${installedMacSaveFieldDiagnostic(prepared.saveFieldProbe, saveFormat)}\n`,
+      );
+      process.stdout.write(
+        `Native macOS Save filename: format=${saveFormat} default_verified=true input_verified=${scenario !== "cancel_save"} directory_navigation_verified=false\n`,
+      );
+      evidence = { action: scenario, nativePress: true, dialogDismissed: true };
+    } else if (scenario === "cancel") {
+      evidence = prepared;
+    } else {
+      const preparation = z.strictObject({
+        prepared: z.literal(true),
+        nativePress: z.literal(false),
+        navigationDismissed: z.literal(true),
+      });
+      if (!preparation.safeParse(prepared).success)
+        throw new Error("Native macOS picker returned invalid preparation evidence");
+      await readNativeAx(scenario);
+      evidence = { action: scenario, filenameSet: true, nativePress: true, dialogDismissed: true };
+    }
     expect(evidence).toEqual(
       scenario === "cancel" || saves
         ? { action: scenario, nativePress: true, dialogDismissed: true }

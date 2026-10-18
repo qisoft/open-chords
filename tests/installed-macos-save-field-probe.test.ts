@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   installedMacSaveDefaultFilenameVerified,
   installedMacSaveResultVerified,
+  installedMacSaveDirectoryPreparationVerified,
   installedMacSaveFieldDiagnostic,
 } from "./support/installed-macos-save-field-probe.ts";
 
@@ -14,6 +15,29 @@ const field = {
   enabled: "true",
 };
 const probe = { format: "json", total: 1, unreadableRoles: 0, truncated: false, fields: [field] };
+
+it("requires read-only directory preparation and exact default evidence before the snapshot", () => {
+  const preparation = {
+    prepared: true,
+    nativePress: false,
+    navigationDismissed: true,
+    directoryNavigationVerified: true,
+    defaultFilenameVerified: true,
+    saveFieldProbe: probe,
+  };
+  expect(installedMacSaveDirectoryPreparationVerified(preparation, "json")).toBe(true);
+  for (const invalid of [
+    { ...preparation, prepared: false },
+    { ...preparation, nativePress: true },
+    { ...preparation, navigationDismissed: false },
+    { ...preparation, directoryNavigationVerified: false },
+    { ...preparation, defaultFilenameVerified: false },
+    { ...preparation, path: "/private/file" },
+    { ...preparation, saveFieldProbe: { ...probe, unreadableRoles: 1 } },
+  ])
+    expect(installedMacSaveDirectoryPreparationVerified(invalid, "json")).toBe(false);
+  expect(installedMacSaveDirectoryPreparationVerified(preparation, "pdf")).toBe(false);
+});
 
 it.each(["cancel_save", "cancel_save_edited", "cancel_save_directory"] as const)(
   "requires exact native acknowledgement for %s",

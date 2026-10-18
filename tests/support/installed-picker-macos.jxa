@@ -1,7 +1,8 @@
 function run(argv) {
   var applicationPid = Number(argv[0]);
   var scenario = argv[1] || 'cancel';
-  var directoryScenario = scenario === 'cancel_save_directory';
+  var preparesDirectory = scenario === 'prepare_save_directory';
+  var directoryScenario = scenario === 'cancel_save_directory' || preparesDirectory;
   var selectedPath = directoryScenario ? argv[3] : argv[2];
   var selectsFile = scenario === 'open' || scenario === 'cancel_open_existing';
   var saves = scenario === 'cancel_save' || scenario === 'cancel_save_edited' || directoryScenario;
@@ -10,7 +11,7 @@ function run(argv) {
   var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
   var saveFormat = saves ? argv[2] : null;
   if (saves && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
-  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_directory', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_directory', 'prepare_save_directory', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
       ((selectsFile || directoryScenario) && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
@@ -225,6 +226,7 @@ function run(argv) {
         }
       }
       if (saveProbe !== null) requireCancelTarget(process, candidate, 'after_probe', true);
+      if (preparesDirectory) return JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true, directoryNavigationVerified: true, defaultFilenameVerified: true, saveFieldProbe: saveProbe });
       if (editsFilename) {
         var inputFilename = 'Cancelled ' + expectedFilename;
         var inputDeadline = Math.min(deadline, Date.now() + 5000);
