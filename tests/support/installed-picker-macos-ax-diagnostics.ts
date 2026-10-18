@@ -24,6 +24,16 @@ export const MAC_AX_COUNT_FIELDS = [
   "selectedLeaves",
   "leafMatches",
   "buttons",
+  "valuePathMatches",
+  "filenamePathMatches",
+  "documentPathMatches",
+  "pathControls",
+  "popupControls",
+  "disclosures",
+  "expandedDisclosures",
+  "collapsedDisclosures",
+  "pathControlMatches",
+  "popupPathMatches",
 ] as const;
 
 const AX_ATTRIBUTE_KEYS = [
@@ -42,6 +52,8 @@ const AX_ATTRIBUTE_KEYS = [
   "AXSelectedColumns",
   "AXColumns",
   "AXEnabled",
+  "AXDocument",
+  "AXExpanded",
 ] as const;
 
 const evidenceSchema = z.strictObject({
