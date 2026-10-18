@@ -18,6 +18,13 @@ func selectedFileEvidence(_ input: [URL], expected: URL) -> (leaves: [URL], matc
     return (leaves, matches, validURLs && leaves.count == 1 && matches == 1)
 }
 
+func exactTargetAttribute(_ value: CFTypeRef?, target: URL, path: String) -> Bool {
+    guard let value = value else { return false }
+    if let text = value as? String, text == path { return true }
+    guard let url = nativeURL(value), url.isFileURL, url.query == nil, url.fragment == nil else { return false }
+    return url.absoluteString == target.absoluteString
+}
+
 let arguments = CommandLine.arguments
 if arguments.count == 2 && arguments[1] == "--self-test" {
     let target = URL(fileURLWithPath: "/fixture/input.wav")
@@ -35,7 +42,19 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
         print("Native macOS selected-file checks failed")
         exit(1)
     }
+    let attributes: [(CFTypeRef?, Bool)] = [
+        (target as CFURL, true), (target.absoluteString as CFString, true), (target.path as CFString, true),
+        (nil, false), (sibling as CFURL, false), (wrongCase as CFURL, false),
+        (prefixTrap.path as CFString, false), (hostTrap as CFURL, false),
+        ((target.absoluteString + "?private=1") as CFString, false),
+        ((target.absoluteString + "#private") as CFString, false)
+    ]
+    if !attributes.allSatisfy({ exactTargetAttribute($0.0, target: target, path: target.path) == $0.1 }) {
+        print("Native macOS exact attribute checks failed")
+        exit(1)
+    }
     print("Native macOS selected-file checks passed: 9")
+    print("Native macOS exact attribute checks passed: 10")
     exit(0)
 }
 let requested = arguments.count == 4 ? arguments[3] : "none"
@@ -45,7 +64,10 @@ var counts: [String: Int] = [
     "urlStrings": 0, "urlObjects": 0, "exactUrls": 0, "exactFilenames": 0,
     "basenameMatches": 0, "unsupported": 0, "cannotComplete": 0,
     "apiDisabled": 0, "otherErrors": 0, "lastError": 0,
-    "selectedUrls": 0, "selectedExactUrls": 0, "selectedLeaves": 0, "leafMatches": 0, "buttons": 0
+    "selectedUrls": 0, "selectedExactUrls": 0, "selectedLeaves": 0, "leafMatches": 0, "buttons": 0,
+    "valuePathMatches": 0, "filenamePathMatches": 0, "documentPathMatches": 0,
+    "pathControls": 0, "popupControls": 0, "disclosures": 0,
+    "expandedDisclosures": 0, "collapsedDisclosures": 0, "pathControlMatches": 0, "popupPathMatches": 0
 ]
 var complete = true
 var verified = false
@@ -160,8 +182,30 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         let role = string(element, "AXRole") ?? ""
         if (read(element, "AXSelected") as? Bool) == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
         if requested == "none" {
-            if string(element, "AXTitle") == target.lastPathComponent || string(element, "AXValue") == target.lastPathComponent { counts["basenameMatches", default: 0] += 1 }
-            if string(element, "AXFilename") == arguments[2] { counts["exactFilenames", default: 0] += 1 }
+            let title = string(element, "AXTitle")
+            let value = read(element, "AXValue")
+            let filename = read(element, "AXFilename")
+            let document = read(element, "AXDocument")
+            if title == target.lastPathComponent || (value as? String) == target.lastPathComponent { counts["basenameMatches", default: 0] += 1 }
+            if (filename as? String) == arguments[2] { counts["exactFilenames", default: 0] += 1 }
+            let valueMatches = exactTargetAttribute(value, target: target, path: arguments[2])
+            if valueMatches { counts["valuePathMatches", default: 0] += 1 }
+            if exactTargetAttribute(filename, target: target, path: arguments[2]) { counts["filenamePathMatches", default: 0] += 1 }
+            if exactTargetAttribute(document, target: target, path: arguments[2]) { counts["documentPathMatches", default: 0] += 1 }
+            if role == "AXPathControl" {
+                counts["pathControls", default: 0] += 1
+                if valueMatches { counts["pathControlMatches", default: 0] += 1 }
+            }
+            if role == "AXPopUpButton" {
+                counts["popupControls", default: 0] += 1
+                if valueMatches { counts["popupPathMatches", default: 0] += 1 }
+            }
+            if role == "AXDisclosureTriangle" {
+                counts["disclosures", default: 0] += 1
+                if let expanded = read(element, "AXExpanded") as? Bool {
+                    counts[expanded ? "expandedDisclosures" : "collapsedDisclosures", default: 0] += 1
+                }
+            }
         }
         if role == "AXButton" && string(element, "AXTitle") == (requested == "open" ? "Open" : "Cancel") { buttons.append(element) }
         if let value = read(element, "AXURL"), let url = nativeURL(value) {

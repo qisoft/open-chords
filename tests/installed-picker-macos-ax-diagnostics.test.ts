@@ -39,6 +39,29 @@ it("preserves exact native AX counts and permission failures without raw data", 
   for (const key of MAC_AX_COUNT_FIELDS) expect(output).toContain(`${key}=0`);
 });
 
+it("reports bounded read-only directory attributes without authorizing an action", () => {
+  const observation = {
+    ...evidence,
+    trusted: true,
+    complete: true,
+    lastError: 0,
+    counts: {
+      ...evidence.counts,
+      valuePathMatches: 1,
+      documentPathMatches: 1,
+      popupControls: 1,
+      popupPathMatches: 1,
+      disclosures: 1,
+      collapsedDisclosures: 1,
+    },
+  };
+  const stdout = JSON.stringify(observation);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("valuePathMatches=1");
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("documentPathMatches=1");
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("collapsedDisclosures=1");
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+});
+
 it.each([
   { ...evidence, path: "/private/fixture" },
   { ...evidence, counts: { ...evidence.counts, url: "file:///private/fixture" } },
