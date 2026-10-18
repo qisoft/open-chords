@@ -19,6 +19,7 @@ const evidence = {
   firstOtherStage: "none",
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
+  firstOtherParentRole: "none",
   firstCannotCompleteAttribute: "none",
   firstCannotCompleteStage: "none",
   firstCannotCompleteDurationMs: 0,
@@ -252,3 +253,26 @@ it("requires exact unique selected-file evidence, guarded native press and actua
   );
   expect(installedMacAxActionSucceeded("/private/invalid", "open")).toBe(false);
 });
+
+it.each(["none", "AXBrowser", "AXColumn", "AXRow", "AXImage", "other"])(
+  "retains only fixed parent role %s without accepting failed verification",
+  (role) => {
+    const observed = {
+      ...evidence,
+      firstOtherError: -25202,
+      firstOtherOrigin: "AXChildren",
+      firstOtherParentRole: role,
+    };
+    const stdout = JSON.stringify(observed);
+    expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(`other_parent_role=${role}`);
+    expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+    expect(installedMacAxActionSucceeded(stdout, "cancel_open_existing")).toBe(false);
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...observed, firstOtherParentRole: "/private/role" }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+  },
+);
