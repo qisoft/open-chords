@@ -34,6 +34,29 @@ func binaryDisclosureValue(_ value: CFTypeRef?) -> Int? {
     return nil
 }
 
+// Categories only: no private title/value or hierarchy identifiers leave the probe.
+func fieldTextCategory(_ value: CFTypeRef?, target: URL, path: String) -> String {
+    guard let value = value else { return "unavailable" }
+    if exactTargetAttribute(value, target: target, path: path) { return "target_path" }
+    guard let text = value as? String else { return "other" }
+    if text == target.lastPathComponent { return "target_basename" }
+    if text == "Save As:" || text == "Save As" { return "save_as" }
+    if text == "Where:" || text == "Where" { return "where" }
+    if text == "Search" || text == "Search:" { return "search" }
+    return text.isEmpty ? "empty" : "other"
+}
+func traversalRoleBit(_ role: String) -> Int {
+    switch role {
+    case "AXBrowser": return 1
+    case "AXScrollArea": return 2
+    case "AXSplitGroup": return 4
+    case "AXGroup": return 8
+    case "AXPathControl": return 16
+    case "AXPopUpButton": return 32
+    default: return 0
+    }
+}
+
 let arguments = CommandLine.arguments
 if arguments.count == 2 && arguments[1] == "--self-test" {
     let target = URL(fileURLWithPath: "/fixture/input.wav")
@@ -71,6 +94,15 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
         print("Native macOS disclosure value checks failed")
         exit(1)
     }
+    let categories: [(CFTypeRef?, String)] = [
+        (nil, "unavailable"), ("Save As:" as CFString, "save_as"), ("Where" as CFString, "where"),
+        ("Search:" as CFString, "search"), ("" as CFString, "empty"), ("fixture" as CFString, "other"),
+        (target.absoluteString as CFString, "target_path"), (target.path as CFString, "target_path"),
+        (target as CFURL, "target_path"), (target.lastPathComponent as CFString, "target_basename")
+    ]
+    if !categories.allSatisfy({ fieldTextCategory($0.0, target: target, path: target.path) == $0.1 }) { exit(1) }
+    if (traversalRoleBit("AXBrowser") | traversalRoleBit("AXGroup")) != 9 || traversalRoleBit("private") != 0 { exit(1) }
+    print("Native macOS field context checks passed: 10")
     print("Native macOS disclosure value checks passed: 7")
     print("Native macOS selected-file checks passed: 9")
     print("Native macOS exact attribute checks passed: 10")
@@ -107,7 +139,7 @@ var firstOtherStage = "none"
 var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
-var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none"]
+var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none", "titleCategory": "unavailable", "valueCategory": "unavailable", "traversalRoleMask": 0, "traversalDepth": 0]
 var firstOtherSelectedReference = false
 var firstOtherSelectedBranch = false
 var readSelectedReference = false
@@ -228,12 +260,12 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     if sheets.count != 1 || parents.count != 1 { complete = false }
     var selected: [AXUIElement] = []
     var buttons: [AXUIElement] = []
-    var queue: [(AXUIElement, String, String, Bool)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none", false) } : []
+    var queue: [(AXUIElement, String, String, Bool, Int, Int)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none", false, 0, 0) } : []
     seen = []
     stage = "selection"
     while !queue.isEmpty && complete {
         if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
-        let (element, origin, parentRole, selectedBranch) = queue.removeFirst()
+        let (element, origin, parentRole, selectedBranch, traversalMask, traversalDepth) = queue.removeFirst()
         readOrigin = origin
         readParentRole = parentRole
         readSelectedReference = selected.contains(where: { same($0, element) })
@@ -245,11 +277,14 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         let selectedFlag = read(element, "AXSelected") as? Bool
         if selectedFlag == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
         readSelectedReference = readSelectedReference || selectedFlag == true
+        var titleCategory = "unavailable", valueCategory = "unavailable"
         if requested == "none" {
             let title = string(element, "AXTitle")
             let value = read(element, "AXValue")
             let filename = read(element, "AXFilename")
             let document = read(element, "AXDocument")
+            titleCategory = fieldTextCategory(title.map { $0 as CFString }, target: target, path: arguments[2])
+            valueCategory = fieldTextCategory(value, target: target, path: arguments[2])
             if title == target.lastPathComponent || (value as? String) == target.lastPathComponent { counts["basenameMatches", default: 0] += 1 }
             if (filename as? String) == arguments[2] { counts["exactFilenames", default: 0] += 1 }
             let valueMatches = exactTargetAttribute(value, target: target, path: arguments[2])
@@ -289,19 +324,22 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
                 if requested == "none" && (firstExactURL["origin"] as? String) == "none" {
                     firstExactURL = ["role": diagnosticRole(role), "parentRole": parentRole, "origin": origin,
                         "selected": selectedFlag == true ? "true" : selectedFlag == false ? "false" : "unknown",
-                        "directory": url.hasDirectoryPath, "kind": CFGetTypeID(value) == CFURLGetTypeID() ? "native" : "string"]
+                        "directory": url.hasDirectoryPath, "kind": CFGetTypeID(value) == CFURLGetTypeID() ? "native" : "string",
+                        "titleCategory": titleCategory, "valueCategory": valueCategory,
+                        "traversalRoleMask": traversalMask, "traversalDepth": traversalDepth]
                 }
             }
         }
-        var next: [(AXUIElement, String, String, Bool)] = []
+        let childMask = traversalMask | traversalRoleBit(role)
+        var next: [(AXUIElement, String, String, Bool, Int, Int)] = []
         for name in ["AXSelectedChildren", "AXSelectedRows", "AXSelectedCells", "AXSelectedColumns"] {
             for child in elements(element, name) {
                 if !selected.contains(where: { same($0, child) }) { selected.append(child) }
-                next.append((child, name, diagnosticRole(role), true))
+                next.append((child, name, diagnosticRole(role), true, childMask, traversalDepth + 1))
             }
         }
-        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns").map { ($0, "AXColumns", diagnosticRole(role), selectedBranch || readSelectedReference) }) }
-        else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role), selectedBranch || readSelectedReference) }) }
+        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns").map { ($0, "AXColumns", diagnosticRole(role), selectedBranch || readSelectedReference, childMask, traversalDepth + 1) }) }
+        else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role), selectedBranch || readSelectedReference, childMask, traversalDepth + 1) }) }
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
     }

@@ -29,6 +29,10 @@ const evidence = {
     selected: "unknown",
     directory: false,
     kind: "none",
+    titleCategory: "unavailable",
+    valueCategory: "unavailable",
+    traversalRoleMask: 0,
+    traversalDepth: 0,
   },
   firstCannotCompleteAttribute: "none",
   firstCannotCompleteStage: "none",
@@ -298,6 +302,10 @@ it("reports categorical exact URL provenance without granting directory or actio
       selected: "unknown",
       directory: true,
       kind: "native",
+      titleCategory: "other",
+      valueCategory: "target_basename",
+      traversalRoleMask: 8,
+      traversalDepth: 3,
     },
     counts: { ...evidence.counts, exactUrls: 1 },
   };
@@ -343,5 +351,38 @@ it("reports only boolean selection provenance for a failed native read", () => {
     expect(installedMacAxProbeDiagnostic(JSON.stringify({ ...observed, ...change }), null, 1)).toBe(
       "Native macOS AX probe: invalid_evidence",
     );
+  }
+});
+
+it("bounds exact-field context and rejects all private labels without authorizing an action", () => {
+  const observed = {
+    ...evidence,
+    firstExactURL: {
+      ...evidence.firstExactURL,
+      titleCategory: "where",
+      valueCategory: "target_basename",
+      traversalRoleMask: 9,
+      traversalDepth: 4,
+    },
+  };
+  const stdout = JSON.stringify(observed);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("exact_url_titleCategory=where");
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("exact_url_traversalRoleMask=9");
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  for (const change of [
+    { titleCategory: "/private/title" },
+    { valueCategory: "/private/value" },
+    { traversalRoleMask: 64 },
+    { traversalRoleMask: -1 },
+    { traversalDepth: 257 },
+    { traversalDepth: 0.5 },
+  ]) {
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...observed, firstExactURL: { ...observed.firstExactURL, ...change } }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
   }
 });
