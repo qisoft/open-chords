@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   installedMacPickerDiagnostic,
   installedMacPickerRefreshDiagnostic,
+  installedMacSaveControlsDiagnostic,
 } from "./support/installed-picker-macos-diagnostics.ts";
 
 it("retains only three fixed attribute failures and one allowlisted refusal", () => {
@@ -186,5 +187,70 @@ it("retains only the fixed single pre-input stale-reference refresh", () => {
     probe.replace("stale_reference", "private"),
   ]) {
     expect(installedMacPickerRefreshDiagnostic(line)).toBeUndefined();
+  }
+});
+
+it("retains only bounded dialog-control traversal evidence without private UI content", () => {
+  const probe = "Native macOS Save controls probe: elements=18 skipped_content=1 complete=true";
+  expect(installedMacSaveControlsDiagnostic(probe)).toBe(probe);
+  expect(installedMacPickerDiagnostic({}, probe, 1)).toContain(probe);
+  for (const line of [
+    probe + " /private/path",
+    probe.replace("elements=18", "elements=257"),
+    probe.replace("skipped_content=1", "skipped_content=19"),
+    probe.replace("complete=true", "complete=private"),
+  ]) {
+    expect(installedMacSaveControlsDiagnostic(line)).toBeUndefined();
+  }
+});
+
+it("retains only schema-validated filename categories on native failure", () => {
+  const evidence = {
+    format: "json",
+    total: 1,
+    unreadableRoles: 0,
+    truncated: false,
+    fields: [
+      { role: "text_field", subrole: "empty", name: "other", value: "expected", enabled: "true" },
+    ],
+  };
+  const prefix = "Native macOS Save field evidence: ";
+  const diagnostic = (value: unknown) =>
+    installedMacPickerDiagnostic({}, prefix + JSON.stringify(value), 1);
+  expect(diagnostic(evidence)).toContain("name=other value=expected");
+  expect(diagnostic({ ...evidence, privatePath: "/private/secret" })).not.toContain(
+    "Save field probe",
+  );
+  expect(
+    diagnostic({ ...evidence, fields: [{ ...evidence.fields[0], name: "/private/secret" }] }),
+  ).not.toContain("secret");
+  expect(installedMacPickerDiagnostic({}, prefix + "{invalid", 1)).not.toContain(
+    "Save field probe",
+  );
+});
+
+it("reports only bounded initial disclosure counts on expanded preparation failure", () => {
+  const line =
+    "Native macOS Save initial disclosure: controls=29 disclosures=1 zero=0 one=1 unknown=0";
+  expect(installedMacPickerDiagnostic({}, line, 1)).toContain(line);
+  for (const invalid of [
+    line + " /private/path",
+    line.replace("controls=29", "controls=257"),
+    line.replace("one=1", "one=2"),
+    line.replace("disclosures=1", "disclosures=30"),
+  ]) {
+    expect(installedMacPickerDiagnostic({}, invalid, 1)).not.toContain("initial disclosure");
+  }
+});
+
+it("keeps only bounded unreadable reference classifications", () => {
+  const line = "Native macOS Save unreadable references: total=14 gone=14 live=0 unknown=0";
+  expect(installedMacPickerDiagnostic({}, line, 1)).toContain(line);
+  for (const invalid of [
+    line + " /private/path",
+    line.replace("total=14", "total=257"),
+    line.replace("gone=14", "gone=15"),
+  ]) {
+    expect(installedMacPickerDiagnostic({}, invalid, 1)).not.toContain("unreadable references");
   }
 });

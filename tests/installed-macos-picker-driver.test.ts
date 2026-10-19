@@ -137,3 +137,123 @@ it("redacts snapshot process failures and never continues after them", async () 
   expect(failure).not.toHaveProperty("cause");
   expect(execute).toHaveBeenCalledTimes(2);
 });
+
+const expanded = {
+  trusted: true,
+  complete: true,
+  foreground: true,
+  guardMask: 255,
+  lastError: 0,
+  firstErrorAttribute: "none",
+  firstErrorDurationMs: 0,
+  stage: "complete",
+  pressed: true,
+  expanded: true,
+  initialValue: 0,
+  finalValue: 1,
+  windows: 1,
+  sheets: 1,
+  visited: 10,
+  unsupported: 0,
+  disclosures: 1,
+  saveButtons: 1,
+  cancelButtons: 1,
+};
+it("expands only in the isolated expanded journey before a fresh read-only snapshot and Cancel", async () => {
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    { ...expanded, expanded: false, initialValue: 1, finalValue: 0 },
+    { ...cancelled, action: "cancel_save_restored" },
+  ];
+  execute.mockImplementation(async () => {
+    now += 300;
+    return { stdout: JSON.stringify(responses.shift()), stderr: "" };
+  });
+  await installedMacPickerDriver(
+    "cancel_save_directory_expanded",
+    "/private/directory",
+    () => ({ LANG: "en_US.UTF-8" }),
+    "json",
+  )(42);
+  expect(execute).toHaveBeenCalledTimes(5);
+  expect(execute.mock.calls[0]?.[1]).toContain("prepare_save_directory_expanded");
+  expect(execute.mock.calls[1]?.[0]).toContain("macos-save-expand");
+  expect(execute.mock.calls[1]?.[1]).toEqual(["42"]);
+  expect(execute.mock.calls[2]?.[1]).toEqual(["42", "/private/directory"]);
+  expect(execute.mock.calls[3]?.[1]).toEqual(["42", "--collapse"]);
+  expect(execute.mock.calls[4]?.[1]).toContain("cancel_save_restored");
+  expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
+    100000, 7000, 7000, 7000, 98800,
+  ]);
+  for (const call of execute.mock.calls) expect(call[2].env).toEqual({ LANG: "en_US.UTF-8" });
+  expect(output.mock.calls.flat().join("")).not.toContain("private");
+});
+it.each([
+  { guardMask: 254 },
+  { expanded: false },
+  { pressed: false },
+  { finalValue: 0 },
+  { path: "/private/path" },
+])("never snapshots or continues after refused expansion %j", async (change) => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  execute
+    .mockResolvedValueOnce({ stdout: JSON.stringify(prepared), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify({ ...expanded, ...change }), stderr: "" });
+  await expect(
+    installedMacPickerDriver(
+      "cancel_save_directory_expanded",
+      "/private/directory",
+      () => ({}),
+      "json",
+    )(42),
+  ).rejects.toThrow("Native macOS Save expansion:");
+  expect(execute).toHaveBeenCalledTimes(2);
+});
+it("redacts expansion process failures and retains no private cause or continuation", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  execute
+    .mockResolvedValueOnce({ stdout: JSON.stringify(prepared), stderr: "" })
+    .mockRejectedValueOnce({ code: 1, message: "/private/command", stderr: "/private/error" });
+  let failure: unknown;
+  try {
+    await installedMacPickerDriver(
+      "cancel_save_directory_expanded",
+      "/private/directory",
+      () => ({}),
+      "json",
+    )(42);
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  expect(String(failure)).toContain("exit_code=1");
+  expect(String(failure)).not.toContain("private");
+  expect(failure).not.toHaveProperty("cause");
+  expect(execute).toHaveBeenCalledTimes(2);
+});
+
+it("stops before filename input when restoration cannot prove native collapse", async () => {
+  execute
+    .mockResolvedValueOnce({ stdout: JSON.stringify(prepared), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(expanded), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(snapshot), stderr: "" })
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({ ...expanded, initialValue: 1, finalValue: 1 }),
+      stderr: "",
+    });
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  await expect(
+    installedMacPickerDriver(
+      "cancel_save_directory_expanded",
+      "/private/directory",
+      () => ({}),
+      "json",
+    )(42),
+  ).rejects.toThrow("Native macOS Save expansion");
+  expect(execute).toHaveBeenCalledTimes(4);
+});

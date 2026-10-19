@@ -1,4 +1,5 @@
 import { installedExportExitDiagnostic } from "./installed-export-process.ts";
+import { installedMacSaveFieldDiagnostic } from "./installed-macos-save-field-probe.ts";
 
 export function installedMacPickerDiagnostic(error: unknown, stderr: string, durationMs: number) {
   const reads = stderr
@@ -78,11 +79,17 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...target,
     ...guards,
     ...guardSnapshots,
+    ...(installedMacSaveControlsDiagnostic(stderr)
+      ? [installedMacSaveControlsDiagnostic(stderr)]
+      : []),
     ...(installedMacPickerRefreshDiagnostic(stderr)
       ? [installedMacPickerRefreshDiagnostic(stderr)]
       : []),
     ...reads,
     ...refusal,
+    ...installedMacSaveUnreadableReferences(stderr),
+    ...installedMacSaveInitialDisclosure(stderr),
+    ...installedMacSaveFailureFields(stderr),
   ].join("\n");
 }
 
@@ -92,6 +99,88 @@ export function installedMacPickerRefreshDiagnostic(stderr: string) {
     .split(/\r?\n/u)
     .find(
       (line) =>
-        line === "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true",
+        line ===
+          "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true" ||
+        line ===
+          "Native macOS picker refresh: reason=stale_filename_references attempt=1 before_input=true",
     );
+}
+
+export function installedMacSaveControlsDiagnostic(stderr: string) {
+  return stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS Save controls probe: elements=([0-9]{1,3}) skipped_content=([0-9]{1,3}) complete=(?:true|false)$/u.exec(
+          line,
+        );
+      return match !== null && Number(match[1]) <= 256 && Number(match[2]) <= Number(match[1]);
+    })
+    .at(-1);
+}
+
+export function installedMacSaveFailureFields(stderr: string): string[] {
+  const prefix = "Native macOS Save field evidence: ";
+  const line = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((entry) => entry.startsWith(prefix))
+    .at(-1);
+  if (!line || line.length > 4096) return [];
+  try {
+    const value: unknown = JSON.parse(line.slice(prefix.length));
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      !("format" in value) ||
+      (value.format !== "json" &&
+        value.format !== "lrc" &&
+        value.format !== "chordpro" &&
+        value.format !== "pdf" &&
+        value.format !== "archive")
+    )
+      return [];
+    const diagnostic = installedMacSaveFieldDiagnostic(value, value.format);
+    return diagnostic.endsWith("invalid_evidence") ? [] : [diagnostic];
+  } catch {
+    return [];
+  }
+}
+
+export function installedMacSaveInitialDisclosure(stderr: string): string[] {
+  const entries = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS Save initial disclosure: controls=([0-9]{1,3}) disclosures=([0-9]{1,3}) zero=([0-9]{1,3}) one=([0-9]{1,3}) unknown=([0-9]{1,3})$/u.exec(
+          line,
+        );
+      return (
+        match !== null &&
+        Number(match[1]) <= 256 &&
+        Number(match[2]) <= Number(match[1]) &&
+        Number(match[3]) + Number(match[4]) + Number(match[5]) === Number(match[2])
+      );
+    });
+  return entries.slice(-1);
+}
+
+export function installedMacSaveUnreadableReferences(stderr: string): string[] {
+  return stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS Save unreadable references: total=([0-9]{1,3}) gone=([0-9]{1,3}) live=([0-9]{1,3}) unknown=([0-9]{1,3})$/u.exec(
+          line,
+        );
+      return (
+        match !== null &&
+        Number(match[1]) <= 256 &&
+        Number(match[2]) + Number(match[3]) + Number(match[4]) === Number(match[1])
+      );
+    })
+    .slice(-1);
 }

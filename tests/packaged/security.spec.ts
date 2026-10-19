@@ -464,7 +464,12 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
   expect(readFileSync(path)).toEqual(original);
 });
 
-for (const scenario of ["cancel_save", "cancel_save_edited", "cancel_save_directory"] as const) {
+for (const scenario of [
+  "cancel_save",
+  "cancel_save_edited",
+  "cancel_save_directory",
+  "cancel_save_directory_expanded",
+] as const) {
   test(`installed macOS native Save ${scenario} verifies filenames and preserves Project and external files`, async () => {
     test.skip(process.platform !== "darwin", "macOS native Save cancellation proof");
     test.setTimeout(360_000);
@@ -512,7 +517,9 @@ for (const scenario of ["cancel_save", "cancel_save_edited", "cancel_save_direct
           installedSystemEnvironment(),
           installedMacPickerDriver(
             scenario,
-            scenario === "cancel_save_directory" ? realpathSync(directory) : undefined,
+            scenario === "cancel_save_directory" || scenario === "cancel_save_directory_expanded"
+              ? realpathSync(directory)
+              : undefined,
             installedSystemEnvironment,
             (
               {

@@ -69,7 +69,12 @@ export function installedMacSaveFieldDiagnostic(value: unknown, expectedFormat: 
 export function installedMacSaveResultVerified(
   value: unknown,
   expectedFormat: MacSaveFormat,
-  scenario: "cancel_save" | "cancel_save_edited" | "cancel_save_directory",
+  scenario:
+    | "cancel_save"
+    | "cancel_save_edited"
+    | "cancel_save_directory"
+    | "cancel_save_edited_expanded"
+    | "cancel_save_restored",
 ): value is { saveFieldProbe: unknown } {
   const result = z
     .strictObject({

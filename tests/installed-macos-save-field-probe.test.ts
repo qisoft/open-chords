@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+
 import { expect, it } from "vitest";
 
 import {
@@ -146,4 +149,78 @@ it.each([
   expect(installedMacSaveFieldDiagnostic(value, "json")).toBe(
     "Native macOS Save field probe: invalid_evidence",
   );
+});
+
+it("expanded filename verification excludes only identified search fields", () => {
+  const source = readFileSync(
+    new URL("./support/installed-picker-macos.jxa", import.meta.url),
+    "utf8",
+  );
+  const start = source.indexOf("  function verifyDefaultFilename(");
+  const end = source.indexOf("\n  try {\n    discovery:", start);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  const fixture = `
+    var expandedControls = true;
+    var restoredControls = false;
+    var saveDefaults = { json: 'Open Chords.json' };
+    function attribute(field, key) { return Object.prototype.hasOwnProperty.call(field, key) ? field[key] : null; }
+    var filename = { role: 'AXTextField', name: 'Save As:', value: 'Open Chords.json', enabled: true };
+    var search = { role: 'AXTextField', subrole: 'AXSearchField', enabled: true };
+    ${source.slice(start, end)}
+    verifyDefaultFilename('json', [filename, search]).probe.total;
+  `;
+  expect(runInNewContext(fixture, { console: { log() {} } }, { timeout: 1000 })).toBe(1);
+  expect(() =>
+    runInNewContext(
+      fixture.replace("var expandedControls = true", "var expandedControls = false"),
+      {},
+      { timeout: 1000 },
+    ),
+  ).toThrow("default filename unavailable");
+  expect(() =>
+    runInNewContext(
+      fixture.replace("subrole: 'AXSearchField'", "subrole: 'other'"),
+      { console: { log() {} } },
+      { timeout: 1000 },
+    ),
+  ).toThrow("default filename unavailable");
+  expect(() =>
+    runInNewContext(
+      fixture.replace("[filename, search]", "[filename, filename, search]"),
+      { console: { log() {} } },
+      { timeout: 1000 },
+    ),
+  ).toThrow("default filename unavailable");
+});
+
+it("signals one pre-input refresh only for positively vanished index references after restoration", () => {
+  const source = readFileSync(
+    new URL("./support/installed-picker-macos.jxa", import.meta.url),
+    "utf8",
+  );
+  const start = source.indexOf("  function verifyDefaultFilename(");
+  const end = source.indexOf("\n  try {\n    discovery:", start);
+  const fixture = `
+    var expandedControls = false, restoredControls = true, nativeInputStarted = false, referenceRefreshes = 0;
+    var saveDefaults = { json: 'Open Chords.json' }, lastAttributeError = null;
+    function attribute(field, key) { lastAttributeError = field.invalid ? -1719 : null; return field.invalid ? null : Object.prototype.hasOwnProperty.call(field, key) ? field[key] : null; }
+    var filename = { role: 'AXTextField', name: 'Save As:', value: 'Open Chords.json', enabled: true };
+    var gone = { invalid: true, exists: () => false };
+    ${source.slice(start, end)}
+    verifyDefaultFilename('json', [filename, gone]);
+  `;
+  const run = (code: string) => runInNewContext(code, { console: { log() {} } }, { timeout: 1000 });
+  expect(() => run(fixture)).toThrow("stale filename before input");
+  for (const [from, to] of [
+    ["restoredControls = true", "restoredControls = false"],
+    ["nativeInputStarted = false", "nativeInputStarted = true"],
+    ["referenceRefreshes = 0", "referenceRefreshes = 1"],
+    ["exists: () => false", "exists: () => true"],
+    ["exists: () => false", "exists: () => null"],
+    ["? -1719", "? -1728"],
+    ["[filename, gone]", "[filename, filename, gone]"],
+  ]) {
+    expect(() => run(fixture.replace(from!, to!))).toThrow("default filename unavailable");
+  }
 });

@@ -6,6 +6,11 @@ import { expect } from "@playwright/test";
 import { z } from "zod";
 
 import {
+  installedMacSaveExpansionDiagnostic,
+  installedMacSaveExpansionSucceeded,
+  installedMacSaveCollapseSucceeded,
+} from "./installed-macos-save-expansion.ts";
+import {
   installedMacSaveFieldDiagnostic,
   installedMacSaveResultVerified,
   installedMacSaveDirectoryPreparationVerified,
@@ -18,6 +23,7 @@ import {
 import {
   installedMacPickerDiagnostic,
   installedMacPickerRefreshDiagnostic,
+  installedMacSaveControlsDiagnostic,
 } from "./installed-picker-macos-diagnostics.ts";
 
 const executeNativeFile = promisify(runNativeFile);
@@ -27,7 +33,10 @@ export function installedMacPickerDriver(
     | "cancel"
     | "cancel_save"
     | "cancel_save_edited"
+    | "cancel_save_edited_expanded"
+    | "cancel_save_restored"
     | "cancel_save_directory"
+    | "cancel_save_directory_expanded"
     | "open"
     | "cancel_open_existing",
   selectedPath: string | undefined,
@@ -44,10 +53,14 @@ export function installedMacPickerDriver(
       if (remaining <= 0) throw new Error("Native macOS picker driver deadline exceeded");
       return remaining;
     };
+    const directoryScenario =
+      scenario === "cancel_save_directory" || scenario === "cancel_save_directory_expanded";
     const saves =
       scenario === "cancel_save" ||
       scenario === "cancel_save_edited" ||
-      scenario === "cancel_save_directory";
+      scenario === "cancel_save_edited_expanded" ||
+      scenario === "cancel_save_restored" ||
+      directoryScenario;
     let stdout: string;
     let nativeStderr = "";
     try {
@@ -58,12 +71,13 @@ export function installedMacPickerDriver(
           "JavaScript",
           join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
           String(applicationPid),
-          scenario === "cancel_save_directory" ? "prepare_save_directory" : scenario,
+          scenario === "cancel_save_directory_expanded"
+            ? "prepare_save_directory_expanded"
+            : directoryScenario
+              ? "prepare_save_directory"
+              : scenario,
           ...(saves
-            ? [
-                saveFormat ?? "",
-                ...(scenario === "cancel_save_directory" ? [selectedPath ?? ""] : []),
-              ]
+            ? [saveFormat ?? "", ...(directoryScenario ? [selectedPath ?? ""] : [])]
             : selectedPath === undefined
               ? []
               : [selectedPath]),
@@ -84,6 +98,8 @@ export function installedMacPickerDriver(
     }
     const refresh = installedMacPickerRefreshDiagnostic(nativeStderr);
     if (refresh) process.stdout.write(`${refresh}\n`);
+    const controls = installedMacSaveControlsDiagnostic(nativeStderr);
+    if (controls) process.stdout.write(`${controls}\n`);
     let prepared: unknown;
     try {
       prepared = JSON.parse(stdout.trim());
@@ -120,17 +136,67 @@ export function installedMacPickerDriver(
     };
 
     let evidence: unknown;
-    if (scenario === "cancel_save_directory") {
+    if (directoryScenario) {
       if (
         saveFormat === undefined ||
         !installedMacSaveDirectoryPreparationVerified(prepared, saveFormat)
       )
         throw new Error("Native macOS Save directory preparation unavailable");
       process.stdout.write("Native macOS Save directory preparation: verified=true\n");
+      if (scenario === "cancel_save_directory_expanded") {
+        const expansionStarted = performance.now();
+        let expansion: string;
+        try {
+          ({ stdout: expansion } = await executeNativeFile(
+            join(process.cwd(), "build/test-support/macos-save-expand"),
+            [String(applicationPid)],
+            { env: environment(), timeout: Math.min(7000, remainingBudget()), maxBuffer: 4096 },
+          ));
+        } catch (error) {
+          // Raw native errors expose private command/output; retain only fixed diagnostics.
+          // eslint-disable-next-line preserve-caught-error
+          throw new Error(
+            installedMacSaveExpansionDiagnostic("", error, performance.now() - expansionStarted),
+          );
+        }
+        const diagnostic = installedMacSaveExpansionDiagnostic(
+          expansion,
+          null,
+          performance.now() - expansionStarted,
+        );
+        if (!installedMacSaveExpansionSucceeded(expansion)) throw new Error(diagnostic);
+        process.stdout.write(`${diagnostic}\n`);
+      }
       // Read-only observations do not authorize Save or imply a verified directory.
       process.stdout.write(`Native macOS Save directory snapshot: ${await readNativeAx()}\n`);
+      if (scenario === "cancel_save_directory_expanded") {
+        const collapseStarted = performance.now();
+        let collapse: string;
+        try {
+          ({ stdout: collapse } = await executeNativeFile(
+            join(process.cwd(), "build/test-support/macos-save-expand"),
+            [String(applicationPid), "--collapse"],
+            { env: environment(), timeout: Math.min(7000, remainingBudget()), maxBuffer: 4096 },
+          ));
+        } catch (error) {
+          // Raw native errors expose private command/output; retain fixed evidence only.
+          // eslint-disable-next-line preserve-caught-error
+          throw new Error(
+            installedMacSaveExpansionDiagnostic("", error, performance.now() - collapseStarted),
+          );
+        }
+        const diagnostic = installedMacSaveExpansionDiagnostic(
+          collapse,
+          null,
+          performance.now() - collapseStarted,
+        );
+        if (!installedMacSaveCollapseSucceeded(collapse)) throw new Error(diagnostic);
+        process.stdout.write(`${diagnostic}\n`);
+      }
       await installedMacPickerDriver(
-        "cancel_save_edited",
+        scenario === "cancel_save_directory_expanded"
+          ? "cancel_save_restored"
+          : "cancel_save_edited",
         undefined,
         environment,
         saveFormat,
