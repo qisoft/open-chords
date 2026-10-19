@@ -2,18 +2,19 @@ function run(argv) {
   var applicationPid = Number(argv[0]);
   var scenario = argv[1] || 'cancel';
   var expandedControls = scenario === 'cancel_save_edited_expanded';
+  var restoredControls = scenario === 'cancel_save_restored';
   var preparesExpandedDirectory = scenario === 'prepare_save_directory_expanded';
   var preparesDirectory = scenario === 'prepare_save_directory' || preparesExpandedDirectory;
   var directoryScenario = scenario === 'cancel_save_directory' || preparesDirectory;
   var selectedPath = directoryScenario ? argv[3] : argv[2];
   var selectsFile = scenario === 'open' || scenario === 'cancel_open_existing';
-  var saves = expandedControls || scenario === 'cancel_save' || scenario === 'cancel_save_edited' || directoryScenario;
-  var editsFilename = expandedControls || scenario === 'cancel_save_edited' || directoryScenario;
+  var saves = restoredControls || expandedControls || scenario === 'cancel_save' || scenario === 'cancel_save_edited' || directoryScenario;
+  var editsFilename = restoredControls || expandedControls || scenario === 'cancel_save_edited' || directoryScenario;
   var primaryAction = saves ? 'Save' : 'Open';
   var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
   var saveFormat = saves ? argv[2] : null;
   if (saves && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
-  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_directory', 'prepare_save_directory', 'prepare_save_directory_expanded', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_restored', 'cancel_save_directory', 'prepare_save_directory', 'prepare_save_directory_expanded', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
       ((selectsFile || directoryScenario) && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
@@ -32,11 +33,14 @@ function run(argv) {
   var guardErrors = [];
   var attributeFailures = [];
   var counts = { processes: 0, windows: 0, sheets: 0, elements: 0, cancel: 0, open: 0, navigation_sheets: 0, path_fields: 0, selected_rows: 0, selected_urls: 0, selected_matches: 0 };
+  var lastAttributeError = null;
   function attribute(element, name) {
+    lastAttributeError = null;
     try { return element[name](); }
     catch (error) {
       var number = error && error.errorNumber;
       if (!Number.isInteger(number) || number < -32768 || number > 32767) number = 'unknown';
+      lastAttributeError = number;
       if (guardReading) guardErrors.push(number);
       attributeFailures.push('Native macOS picker attribute: stage=' + stage + ' attribute=' + name + ' os_error=' + number);
       if (attributeFailures.length > 3) attributeFailures.shift();
@@ -196,6 +200,7 @@ function run(argv) {
     var total = 0;
     var unreadableRoles = 0;
     var unreadableGone = 0, unreadableLive = 0, unreadableUnknown = 0;
+    var onlyIndexErrors = true;
     var expectedFilename = saveDefaults[saveFormat];
     var basename = expectedFilename.slice(0, expectedFilename.lastIndexOf('.'));
     for (var f = 0; f < saveElements.length; f++) {
@@ -203,6 +208,7 @@ function run(argv) {
       var fieldRole = attribute(field, 'role');
       if (fieldRole === null) {
         unreadableRoles++;
+        if (lastAttributeError !== -1719) onlyIndexErrors = false;
         try {
           var exists = field.exists();
           if (exists === false) unreadableGone++;
@@ -232,6 +238,12 @@ function run(argv) {
     console.log('Native macOS Save field evidence: ' + JSON.stringify(saveProbe));
     if (unreadableRoles > 0) console.log('Native macOS Save unreadable references: total=' + unreadableRoles +
       ' gone=' + unreadableGone + ' live=' + unreadableLive + ' unknown=' + unreadableUnknown);
+    var exactNamed = fields.filter(function (field) { return field.name === 'save_as'; });
+    if (restoredControls && !nativeInputStarted && referenceRefreshes === 0 && unreadableRoles > 0 &&
+        unreadableGone === unreadableRoles && unreadableLive === 0 && unreadableUnknown === 0 && onlyIndexErrors &&
+        total <= 16 && !fields.some(function (field) { return field.name === 'unavailable'; }) &&
+        exactNamed.length === 1 && exactNamed[0].role === 'text_field' && exactNamed[0].value === 'expected' && exactNamed[0].enabled === 'true')
+      throw new Error('stale filename before input');
     if (unreadableRoles !== 0 || total > 16 || fields.some(function (field) { return field.name === 'unavailable'; }) || filenameFields.length !== 1) throw new Error('default filename unavailable');
     var filenameField = filenameFields[0];
     var filenameName = attribute(filenameField, 'name');
@@ -371,6 +383,12 @@ function run(argv) {
       }
       throw new Error('not dismissed');
       } catch (error) {
+        if (error && error.message === 'stale filename before input' && restoredControls && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
+          requireCancelTarget(process, candidate, 'before_input', true);
+          referenceRefreshes++;
+          console.log('Native macOS picker refresh: reason=stale_filename_references attempt=1 before_input=true');
+          continue discovery;
+        }
         if (error && error.message === 'stale before input' && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
           referenceRefreshes++;
           console.log('Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true');

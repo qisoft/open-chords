@@ -34,6 +34,7 @@ export function installedMacPickerDriver(
     | "cancel_save"
     | "cancel_save_edited"
     | "cancel_save_edited_expanded"
+    | "cancel_save_restored"
     | "cancel_save_directory"
     | "cancel_save_directory_expanded"
     | "open"
@@ -58,6 +59,7 @@ export function installedMacPickerDriver(
       scenario === "cancel_save" ||
       scenario === "cancel_save_edited" ||
       scenario === "cancel_save_edited_expanded" ||
+      scenario === "cancel_save_restored" ||
       directoryScenario;
     let stdout: string;
     let nativeStderr = "";
@@ -192,7 +194,9 @@ export function installedMacPickerDriver(
         process.stdout.write(`${diagnostic}\n`);
       }
       await installedMacPickerDriver(
-        "cancel_save_edited",
+        scenario === "cancel_save_directory_expanded"
+          ? "cancel_save_restored"
+          : "cancel_save_edited",
         undefined,
         environment,
         saveFormat,

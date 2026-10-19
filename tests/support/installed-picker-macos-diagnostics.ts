@@ -99,7 +99,10 @@ export function installedMacPickerRefreshDiagnostic(stderr: string) {
     .split(/\r?\n/u)
     .find(
       (line) =>
-        line === "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true",
+        line ===
+          "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true" ||
+        line ===
+          "Native macOS picker refresh: reason=stale_filename_references attempt=1 before_input=true",
     );
 }
 
