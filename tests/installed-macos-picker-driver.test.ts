@@ -168,7 +168,7 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     expanded,
     snapshot,
     { ...expanded, expanded: false, initialValue: 1, finalValue: 0 },
-    { ...cancelled, action: "cancel_save_edited_expanded" },
+    { ...cancelled, action: "cancel_save_edited" },
   ];
   execute.mockImplementation(async () => {
     now += 300;
@@ -186,7 +186,7 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
   expect(execute.mock.calls[1]?.[1]).toEqual(["42"]);
   expect(execute.mock.calls[2]?.[1]).toEqual(["42", "/private/directory"]);
   expect(execute.mock.calls[3]?.[1]).toEqual(["42", "--collapse"]);
-  expect(execute.mock.calls[4]?.[1]).toContain("cancel_save_edited_expanded");
+  expect(execute.mock.calls[4]?.[1]).toContain("cancel_save_edited");
   expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
     100000, 7000, 7000, 7000, 98800,
   ]);

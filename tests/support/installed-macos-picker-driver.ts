@@ -192,9 +192,7 @@ export function installedMacPickerDriver(
         process.stdout.write(`${diagnostic}\n`);
       }
       await installedMacPickerDriver(
-        scenario === "cancel_save_directory_expanded"
-          ? "cancel_save_edited_expanded"
-          : "cancel_save_edited",
+        "cancel_save_edited",
         undefined,
         environment,
         saveFormat,
