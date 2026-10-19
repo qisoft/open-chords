@@ -1893,6 +1893,13 @@ async function evaluateRendererTarget(webSocketUrl: string) {
                       evalBlocked: evalBlocked && globalThis.__openChordsEvalCspProbe !== true,
                       inlineScriptBlocked: globalThis.__openChordsInlineCspProbe !== true,
                       documentUrl: location.href === "about:blank" ? "about_blank" : location.protocol === "open-chords:" && location.hostname === "app" ? location.pathname === "/index.html" ? "app_index" : "app_other" : "other",
+                      isTopFrame: window.top === window,
+                      topDocumentUrl: (() => {
+                        try {
+                          const topLocation = window.top.location;
+                          return topLocation.href === "about:blank" ? "about_blank" : topLocation.protocol === "open-chords:" && topLocation.hostname === "app" ? topLocation.pathname === "/index.html" ? "app_index" : "app_other" : "other";
+                        } catch { return "unavailable"; }
+                      })(),
                       readyState: document.readyState,
                       preloadPresent: typeof window.openChords === "object" && window.openChords !== null,
                       metaCount: Math.min(17, document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]').length),

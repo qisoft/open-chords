@@ -213,8 +213,17 @@ public static class SaveNativeInput {
     RequireFilename(dialog, field, processId);
     var text = new StringBuilder(4096);
     UIntPtr result;
-    if (SendMessageTimeout(field, 0x000D, (UIntPtr)(uint)text.Capacity, text, 2, 250, out result) == IntPtr.Zero || result.ToUInt64() >= 4095)
+    var readStarted = System.Diagnostics.Stopwatch.StartNew();
+    bool completed = SendMessageTimeout(field, 0x000D, (UIntPtr)(uint)text.Capacity, text, 2, 250, out result) != IntPtr.Zero;
+    if (!completed || result.ToUInt64() >= 4095) {
+      Console.Error.WriteLine("Native Save filename read probe: completed=" + completed.ToString().ToLowerInvariant() +
+        " length_bound=" + (completed ? (result.ToUInt64() >= 4095).ToString().ToLowerInvariant() : "unknown") +
+        " duration_ms=" + Math.Min(999999, readStarted.ElapsedMilliseconds) +
+        " dialog_exists=" + IsWindow(dialog).ToString().ToLowerInvariant() +
+        " field_exists=" + IsWindow(field).ToString().ToLowerInvariant() +
+        " field_child=" + IsChild(dialog, field).ToString().ToLowerInvariant());
       throw new InvalidOperationException("Native Save filename read unavailable");
+    }
     return text.ToString();
   }
   public static void TypeFilename(IntPtr dialog, IntPtr field, uint processId, string target) {

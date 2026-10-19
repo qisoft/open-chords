@@ -275,3 +275,28 @@ describe("native Save driver failure redaction", () => {
     },
   );
 });
+
+it("keeps bounded filename read outcomes and prioritizes the fixed failure code", () => {
+  const probe =
+    "Native Save filename read probe: completed=false length_bound=unknown duration_ms=251 dialog_exists=true field_exists=true field_child=true";
+  const counter =
+    "native_save_failed code=filename_read_unavailable stage=filename_set windows=1 elements=81 filenames=1 actions=1 fallback_misses=0";
+  const output = installedSaveDriverDiagnostic(
+    {},
+    [
+      probe,
+      probe,
+      probe,
+      probe,
+      `${probe} /private/path`,
+      probe.replace("duration_ms=251", "duration_ms=1234567"),
+      probe.replace("field_child=true", "field_child=private"),
+      counter,
+    ].join("\n"),
+    1,
+  );
+  expect(output.split(probe)).toHaveLength(4);
+  expect(output.indexOf(counter)).toBeLessThan(output.indexOf(probe));
+  expect(output).not.toContain("private");
+  expect(output).not.toContain("1234567");
+});
