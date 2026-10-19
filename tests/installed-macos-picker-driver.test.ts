@@ -45,6 +45,8 @@ const snapshot = {
   pressSheetState: "not_checked",
   pressFollowupError: 0,
   firstOtherError: 0,
+  firstOtherSelectedReference: false,
+  firstOtherSelectedBranch: false,
   firstOtherAttribute: "none",
   firstOtherStage: "none",
   firstOtherVisited: 0,

@@ -15,6 +15,8 @@ const evidence = {
   pressSheetState: "not_checked",
   pressFollowupError: 0,
   firstOtherError: 0,
+  firstOtherSelectedReference: false,
+  firstOtherSelectedBranch: false,
   firstOtherAttribute: "none",
   firstOtherStage: "none",
   firstOtherVisited: 0,
@@ -320,5 +322,26 @@ it("reports categorical exact URL provenance without granting directory or actio
         1,
       ),
     ).toBe("Native macOS AX probe: invalid_evidence");
+  }
+});
+
+it("reports only boolean selection provenance for a failed native read", () => {
+  const observed = {
+    ...evidence,
+    firstOtherError: -25202,
+    firstOtherSelectedReference: false,
+    firstOtherSelectedBranch: true,
+  };
+  expect(installedMacAxProbeDiagnostic(JSON.stringify(observed), null, 1)).toContain(
+    "other_selected_branch=true",
+  );
+  expect(installedMacAxActionSucceeded(JSON.stringify(observed), "open")).toBe(false);
+  for (const change of [
+    { firstOtherSelectedReference: "/private/reference" },
+    { firstOtherSelectedBranch: "/private/branch" },
+  ]) {
+    expect(installedMacAxProbeDiagnostic(JSON.stringify({ ...observed, ...change }), null, 1)).toBe(
+      "Native macOS AX probe: invalid_evidence",
+    );
   }
 });
