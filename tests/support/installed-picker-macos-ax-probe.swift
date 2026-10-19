@@ -18,6 +18,17 @@ func selectedFileEvidence(_ input: [URL], expected: URL) -> (leaves: [URL], matc
     return (leaves, matches, validURLs && leaves.count == 1 && matches == 1)
 }
 
+// Observation only: selected-parent URL fields do not authorize a Save action.
+func selectedDirectoryObservation(_ input: [URL], expected: URL) -> [String: Any] {
+    let selection = selectedFileEvidence(input, expected: expected)
+    var unique: [URL] = []
+    for url in input where !unique.contains(where: { $0.absoluteString == url.absoluteString }) { unique.append(url) }
+    return ["fields": input.count, "uniqueUrls": unique.count, "terminalUrls": selection.leaves.count,
+        "terminalMatches": selection.matches,
+        "validShape": !input.isEmpty && expected.isFileURL && expected.hasDirectoryPath && expected.query == nil && expected.fragment == nil &&
+            input.allSatisfy { $0.isFileURL && $0.hasDirectoryPath && $0.host == expected.host && $0.query == nil && $0.fragment == nil }]
+}
+
 func exactTargetAttribute(_ value: CFTypeRef?, target: URL, path: String) -> Bool {
     guard let value = value else { return false }
     if let text = value as? String, text == path { return true }
@@ -106,6 +117,19 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
     ]
     if !categories.allSatisfy({ fieldTextCategory($0.0, target: target, path: target.path) == $0.1 }) { exit(1) }
     if (traversalRoleBit("AXBrowser") | traversalRoleBit("AXGroup")) != 9 || traversalRoleBit("private") != 0 { exit(1) }
+    let descendant = URL(fileURLWithPath: "/fixture/subfolder", isDirectory: true)
+    let otherDirectory = URL(fileURLWithPath: "/other", isDirectory: true)
+    let directoryCases: [([URL], Int, Int, Bool)] = [
+        ([directory], 1, 1, true), ([directory, directory], 1, 1, true),
+        ([directory, descendant], 1, 0, true), ([directory, otherDirectory], 2, 1, true),
+        ([], 0, 0, false), ([target], 1, 0, false), ([directory, target], 1, 0, false),
+        ([hostTrap], 1, 0, false), ([URL(string: "https://example.invalid/fixture/")!], 1, 0, false)
+    ]
+    for item in directoryCases {
+        let observed = selectedDirectoryObservation(item.0, expected: directory)
+        if observed["terminalUrls"] as? Int != item.1 || observed["terminalMatches"] as? Int != item.2 || observed["validShape"] as? Bool != item.3 { exit(1) }
+    }
+    print("Native macOS selected directory observation checks passed: 9")
     let parentCases: [(AXError, String)] = [(.noValue, "missing_parent"), (.cannotComplete, "unreadable_parent"),
         (.invalidUIElement, "unreadable_parent"), (.attributeUnsupported, "unreadable_parent"), (.success, "unreadable_parent")]
     if !parentCases.allSatisfy({ absentParentStatus($0.0) == $0.1 }) { exit(1) }
@@ -147,6 +171,7 @@ var firstOtherStage = "none"
 var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
+var selectedDirectory: [String: Any] = ["fields": 0, "uniqueUrls": 0, "terminalUrls": 0, "terminalMatches": 0, "validShape": false]
 var firstExactElement: AXUIElement? = nil
 var parentChain: [String: Any] = ["status": "not_checked", "visited": 0, "selected": 0, "unknownSelected": 0, "roleMask": 0, "nodes": [[String: Any]]()]
 var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none", "titleCategory": "unavailable", "valueCategory": "unavailable", "traversalRoleMask": 0, "traversalDepth": 0]
@@ -273,12 +298,13 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     if sheets.count != 1 || parents.count != 1 { complete = false }
     var selected: [AXUIElement] = []
     var buttons: [AXUIElement] = []
-    var queue: [(AXUIElement, String, String, Bool, Int, Int)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none", false, 0, 0) } : []
+    var directoryFields: [(URL, AXUIElement)] = []
+    var queue: [(AXUIElement, String, String, Bool, Int, Int, AXUIElement?)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none", false, 0, 0, nil) } : []
     seen = []
     stage = "selection"
     while !queue.isEmpty && complete {
         if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
-        let (element, origin, parentRole, selectedBranch, traversalMask, traversalDepth) = queue.removeFirst()
+        let (element, origin, parentRole, selectedBranch, traversalMask, traversalDepth, directParent) = queue.removeFirst()
         readOrigin = origin
         readParentRole = parentRole
         readSelectedReference = selected.contains(where: { same($0, element) })
@@ -330,6 +356,9 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         }
         if role == "AXButton" && string(element, "AXTitle") == (requested == "open" ? "Open" : "Cancel") { buttons.append(element) }
         if let value = read(element, "AXURL"), let url = nativeURL(value) {
+            if requested == "none", role == "AXTextField", origin == "AXChildren", parentRole == "AXGroup", let parent = directParent {
+                directoryFields.append((url, parent))
+            }
             if CFGetTypeID(value) == CFURLGetTypeID() { counts["urlObjects", default: 0] += 1 }
             else { counts["urlStrings", default: 0] += 1 }
             if url.absoluteString == expected {
@@ -345,17 +374,21 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
             }
         }
         let childMask = traversalMask | traversalRoleBit(role)
-        var next: [(AXUIElement, String, String, Bool, Int, Int)] = []
+        var next: [(AXUIElement, String, String, Bool, Int, Int, AXUIElement?)] = []
         for name in ["AXSelectedChildren", "AXSelectedRows", "AXSelectedCells", "AXSelectedColumns"] {
             for child in elements(element, name) {
                 if !selected.contains(where: { same($0, child) }) { selected.append(child) }
-                next.append((child, name, diagnosticRole(role), true, childMask, traversalDepth + 1))
+                next.append((child, name, diagnosticRole(role), true, childMask, traversalDepth + 1, nil))
             }
         }
-        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns").map { ($0, "AXColumns", diagnosticRole(role), selectedBranch || readSelectedReference, childMask, traversalDepth + 1) }) }
-        else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role), selectedBranch || readSelectedReference, childMask, traversalDepth + 1) }) }
+        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns").map { ($0, "AXColumns", diagnosticRole(role), selectedBranch || readSelectedReference, childMask, traversalDepth + 1, nil) }) }
+        else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role), selectedBranch || readSelectedReference, childMask, traversalDepth + 1, element) }) }
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
+    }
+    if requested == "none" {
+        let selectedFields = directoryFields.filter { item in selected.contains(where: { same($0, item.1) }) }.map { $0.0 }
+        selectedDirectory = selectedDirectoryObservation(selectedFields, expected: target)
     }
     // Read-only actual-parent observations, independent of traversal provenance.
     if requested == "none", let exactElement = firstExactElement, sheets.count == 1 {
@@ -499,7 +532,7 @@ if !noReadFailures() { complete = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
-    "counts": counts, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "counts": counts, "selectedDirectory": selectedDirectory, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,

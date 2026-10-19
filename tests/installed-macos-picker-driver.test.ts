@@ -52,6 +52,13 @@ const snapshot = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  selectedDirectory: {
+    fields: 0,
+    uniqueUrls: 0,
+    terminalUrls: 0,
+    terminalMatches: 0,
+    validShape: false,
+  },
   parentChain: {
     status: "not_checked",
     visited: 0,
