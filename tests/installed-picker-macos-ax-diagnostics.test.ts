@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   installedMacAxProbeDiagnostic,
   installedMacAxActionSucceeded,
+  installedMacAxSnapshotRefreshAllowed,
   installedMacSelectedDirectoryVerified,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
@@ -23,6 +24,13 @@ const evidence = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  staleSnapshot: {
+    eligible: false,
+    traversalComplete: false,
+    candidates: 0,
+    allVanished: false,
+    onlyInvalidChildErrors: false,
+  },
   invalidChildParent: {
     status: "not_checked",
     role: "none",
@@ -729,3 +737,96 @@ it("reports bounded invalid-child parent observations without authorizing an act
       ),
     ).toBe("Native macOS AX probe: invalid_evidence");
 });
+
+const vanished = {
+  ...evidence,
+  trusted: true,
+  complete: false,
+  firstOtherVisited: 52,
+  firstOtherError: -25202,
+  firstOtherAttribute: "AXRole",
+  firstOtherStage: "selection",
+  firstOtherOrigin: "AXChildren",
+  firstOtherParentRole: "AXScrollArea",
+  action: { requested: "open", pressed: false, dismissed: false },
+  invalidChildParent: {
+    status: "complete",
+    role: "AXScrollArea",
+    pidMatches: true,
+    selectedReference: false,
+    children: 14,
+    containsFailedReference: "false",
+    attribute: "none",
+    error: 0,
+  },
+  staleSnapshot: {
+    eligible: true,
+    traversalComplete: true,
+    candidates: 2,
+    allVanished: true,
+    onlyInvalidChildErrors: true,
+  },
+  counts: {
+    ...evidence.counts,
+    windows: 1,
+    sheets: 1,
+    buttons: 1,
+    visited: 110,
+    selectedRoots: 9,
+    otherErrors: 16,
+    selectedLeaves: 1,
+    leafMatches: 1,
+    selectedExactUrls: 1,
+  },
+};
+it("permits only a new snapshot and never accepts a stale snapshot as an action", () => {
+  const stdout = JSON.stringify(vanished);
+  expect(installedMacAxSnapshotRefreshAllowed(stdout, "open")).toBe(true);
+  expect(installedMacAxSnapshotRefreshAllowed(stdout, "cancel_open_existing")).toBe(false);
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+});
+it.each([
+  { trusted: false },
+  { complete: true },
+  { verified: true },
+  { directoryVerified: true },
+  { stage: "press" },
+  { guardMask: 255 },
+  { pressDurationMs: 1 },
+  { pressSheetState: "invalid_sheet" },
+  { action: { requested: "open", pressed: true, dismissed: false } },
+  { action: { requested: "open", pressed: false, dismissed: true } },
+  { action: { requested: "none", pressed: false, dismissed: false } },
+  { firstOtherError: -25204 },
+  { firstOtherSelectedReference: true },
+  { firstOtherSelectedBranch: true },
+  { firstOtherOrigin: "AXSelectedChildren" },
+  { firstOtherParentRole: "AXGroup" },
+  { staleSnapshot: { ...vanished.staleSnapshot, candidates: 0 } },
+  { staleSnapshot: { ...vanished.staleSnapshot, traversalComplete: false } },
+  { counts: { ...vanished.counts, visited: 257 } },
+  { firstOtherVisited: 0 },
+  { staleSnapshot: { ...vanished.staleSnapshot, allVanished: false } },
+  { staleSnapshot: { ...vanished.staleSnapshot, onlyInvalidChildErrors: false } },
+  { staleSnapshot: { ...vanished.staleSnapshot, eligible: false } },
+  { invalidChildParent: { ...vanished.invalidChildParent, containsFailedReference: "true" } },
+  { invalidChildParent: { ...vanished.invalidChildParent, containsFailedReference: "unknown" } },
+  { invalidChildParent: { ...vanished.invalidChildParent, status: "error" } },
+  { invalidChildParent: { ...vanished.invalidChildParent, selectedReference: true } },
+  { invalidChildParent: { ...vanished.invalidChildParent, pidMatches: false } },
+  { counts: { ...vanished.counts, cannotComplete: 1 } },
+  { counts: { ...vanished.counts, apiDisabled: 1 } },
+  { counts: { ...vanished.counts, selectedLeaves: 2 } },
+  { counts: { ...vanished.counts, leafMatches: 0 } },
+  { counts: { ...vanished.counts, buttons: 2 } },
+  { counts: { ...vanished.counts, otherErrors: 0 } },
+  { staleSnapshot: { ...vanished.staleSnapshot, candidates: 257 } },
+  { privatePath: "/private/path" },
+])(
+  "refuses snapshot refresh for live, selected, unverified or action-bearing evidence %j",
+  (change) => {
+    expect(
+      installedMacAxSnapshotRefreshAllowed(JSON.stringify({ ...vanished, ...change }), "open"),
+    ).toBe(false);
+  },
+);

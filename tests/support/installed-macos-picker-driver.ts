@@ -18,6 +18,7 @@ import {
 } from "./installed-macos-save-field-probe.ts";
 import {
   installedMacAxActionSucceeded,
+  installedMacAxSnapshotRefreshAllowed,
   installedMacSelectedDirectoryVerified,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
@@ -112,32 +113,47 @@ export function installedMacPickerDriver(
       requested?: "open" | "cancel_open_existing" | "directory_snapshot",
     ) => {
       if (selectedPath === undefined) throw new Error("Native macOS picker target unavailable");
-      const probeStarted = performance.now();
-      let output: string;
-      try {
-        ({ stdout: output } = await executeNativeFile(
-          join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
-          [String(applicationPid), selectedPath, ...(requested === undefined ? [] : [requested])],
-          { env: environment(), timeout: Math.min(7000, remainingBudget()), maxBuffer: 4096 },
-        ));
-      } catch (error) {
-        // Raw exec errors contain private paths/output; retaining cause defeats redaction.
-        // eslint-disable-next-line preserve-caught-error
-        throw new Error(installedMacAxProbeDiagnostic("", error, performance.now() - probeStarted));
-      }
-      const diagnostic = installedMacAxProbeDiagnostic(
-        output,
-        null,
-        performance.now() - probeStarted,
-      );
-      if (
-        diagnostic === "Native macOS AX probe: invalid_evidence" ||
-        (requested === "directory_snapshot"
-          ? !installedMacSelectedDirectoryVerified(output)
-          : requested !== undefined && !installedMacAxActionSucceeded(output, requested))
-      )
+      const phaseStarted = performance.now();
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const probeBudget = Math.min(7000 - (performance.now() - phaseStarted), remainingBudget());
+        if (probeBudget <= 0) throw new Error("Native macOS AX probe deadline exceeded");
+        const probeStarted = performance.now();
+        let output: string;
+        try {
+          ({ stdout: output } = await executeNativeFile(
+            join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
+            [String(applicationPid), selectedPath, ...(requested === undefined ? [] : [requested])],
+            { env: environment(), timeout: Math.floor(probeBudget), maxBuffer: 4096 },
+          ));
+        } catch (error) {
+          // Raw exec errors contain private paths/output; retaining cause defeats redaction.
+          // eslint-disable-next-line preserve-caught-error
+          throw new Error(
+            installedMacAxProbeDiagnostic("", error, performance.now() - probeStarted),
+          );
+        }
+        const diagnostic = installedMacAxProbeDiagnostic(
+          output,
+          null,
+          performance.now() - probeStarted,
+        );
+        const refused =
+          diagnostic === "Native macOS AX probe: invalid_evidence" ||
+          (requested === "directory_snapshot"
+            ? !installedMacSelectedDirectoryVerified(output)
+            : requested !== undefined && !installedMacAxActionSucceeded(output, requested));
+        if (!refused) return diagnostic;
+        if (
+          attempt === 0 &&
+          (requested === "open" || requested === "cancel_open_existing") &&
+          installedMacAxSnapshotRefreshAllowed(output, requested)
+        ) {
+          process.stdout.write("Native macOS AX snapshot refresh: attempt=1 before_action=true\n");
+          continue;
+        }
         throw new Error(diagnostic);
-      return diagnostic;
+      }
+      throw new Error("Native macOS AX probe unavailable");
     };
 
     let evidence: unknown;

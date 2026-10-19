@@ -29,6 +29,14 @@ func selectedDirectoryObservation(_ input: [URL], expected: URL) -> [String: Any
             input.allSatisfy { $0.isFileURL && $0.hasDirectoryPath && $0.host == expected.host && $0.query == nil && $0.fragment == nil }]
 }
 
+func vanishedChildParent(_ observation: [String: Any]) -> Bool {
+    guard let children = observation["children"] as? Int, (0...256).contains(children) else { return false }
+    return (observation["status"] as? String) == "complete" && (observation["role"] as? String) == "AXScrollArea" &&
+        (observation["pidMatches"] as? Bool) == true && (observation["selectedReference"] as? Bool) == false &&
+        (observation["containsFailedReference"] as? String) == "false" && (observation["attribute"] as? String) == "none" &&
+        (observation["error"] as? Int) == 0
+}
+
 func exactTargetAttribute(_ value: CFTypeRef?, target: URL, path: String) -> Bool {
     guard let value = value else { return false }
     if let text = value as? String, text == path { return true }
@@ -130,6 +138,17 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
         if observed["terminalUrls"] as? Int != item.1 || observed["terminalMatches"] as? Int != item.2 || observed["validShape"] as? Bool != item.3 { exit(1) }
     }
     print("Native macOS selected directory observation checks passed: 9")
+    let vanishedParent: [String: Any] = ["status": "complete", "role": "AXScrollArea", "pidMatches": true, "selectedReference": false,
+        "children": 14, "containsFailedReference": "false", "attribute": "none", "error": 0]
+    if !vanishedChildParent(vanishedParent) { exit(1) }
+    let refusedParents: [[String: Any]] = [["status": "error"], ["role": "AXGroup"], ["pidMatches": false], ["selectedReference": true],
+        ["children": 257], ["containsFailedReference": "true"], ["containsFailedReference": "unknown"], ["attribute": "AXChildren"], ["error": -25202]]
+    for change in refusedParents {
+        var observation = vanishedParent
+        for (key, value) in change { observation[key] = value }
+        if vanishedChildParent(observation) { exit(1) }
+    }
+    print("Native macOS vanished-child parent checks passed: 10")
     let parentCases: [(AXError, String)] = [(.noValue, "missing_parent"), (.cannotComplete, "unreadable_parent"),
         (.invalidUIElement, "unreadable_parent"), (.attributeUnsupported, "unreadable_parent"), (.success, "unreadable_parent")]
     if !parentCases.allSatisfy({ absentParentStatus($0.0) == $0.1 }) { exit(1) }
@@ -155,6 +174,13 @@ var counts: [String: Int] = [
     "unknownValueDisclosures": 0, "disclosureActions": 0, "pressableDisclosures": 0
 ]
 var complete = true
+var onlyInvalidChildErrors = true
+var vanishedChildCandidates = 0
+var allInvalidChildrenVanished = true
+var staleChildContext = false
+var invalidRoleElement: AXUIElement? = nil
+var snapshotRefreshEligible = false
+var snapshotTraversalComplete = false
 var directoryVerified = false
 var verified = false
 var pressed = false
@@ -189,20 +215,22 @@ var firstCannotCompleteDurationMs = 0
 let trusted = AXIsProcessTrusted()
 let deadline = ProcessInfo.processInfo.systemUptime + 3
 
-func recordReadError(_ status: AXError, name: String, duration: TimeInterval) {
+func recordReadError(_ status: AXError, name: String, duration: TimeInterval, invalidChildRead: Bool = false) {
     if status == .success { return }
     counts["lastError"] = Int(status.rawValue)
     switch status {
     case .attributeUnsupported, .noValue: counts["unsupported", default: 0] += 1
     case .cannotComplete:
+        onlyInvalidChildErrors = false
         counts["cannotComplete", default: 0] += 1
         if firstCannotCompleteAttribute == "none" {
             firstCannotCompleteAttribute = name
             firstCannotCompleteStage = stage
             firstCannotCompleteDurationMs = min(999999, max(0, Int(duration * 1000)))
         }
-    case .apiDisabled: counts["apiDisabled", default: 0] += 1
+    case .apiDisabled: onlyInvalidChildErrors = false; counts["apiDisabled", default: 0] += 1
     default:
+        onlyInvalidChildErrors = onlyInvalidChildErrors && status == .invalidUIElement && invalidChildRead
         counts["otherErrors", default: 0] += 1
         if firstOtherError == 0 {
             firstOtherError = Int(status.rawValue); firstOtherAttribute = name
@@ -223,7 +251,9 @@ func readResult(_ element: AXUIElement, _ name: String) -> (status: AXError, val
     let readStarted = ProcessInfo.processInfo.systemUptime
     let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
     if status != .success {
-        recordReadError(status, name: name, duration: ProcessInfo.processInfo.systemUptime - readStarted)
+        let invalidChildRead = staleChildContext && !readSelectedReference && !readSelectedBranch &&
+            (name == "AXRole" || invalidRoleElement.map { same($0, element) } == true)
+        recordReadError(status, name: name, duration: ProcessInfo.processInfo.systemUptime - readStarted, invalidChildRead: invalidChildRead)
         return (status, nil)
     }
     return (status, value)
@@ -348,13 +378,20 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
         counts["visited"] = seen.count
+        staleChildContext = ["open", "cancel_open_existing"].contains(requested) && origin == "AXChildren" &&
+            parentRole == "AXScrollArea" && !readSelectedReference && !selectedBranch
+        invalidRoleElement = nil
         let roleRead = readResult(element, "AXRole")
         let role = roleRead.value as? String ?? ""
-        if ["open", "cancel_open_existing"].contains(requested), roleRead.status == .invalidUIElement,
-           origin == "AXChildren", parentRole == "AXScrollArea", !readSelectedReference, !selectedBranch,
-           (invalidChildParent["status"] as? String) == "not_checked", let parent = directParent {
-            invalidChildParent = invalidChildParentObservation(parent, child: element, pid: pid,
-                selectedReference: selected.contains(where: { same($0, parent) }))
+        if staleChildContext && roleRead.status == .invalidUIElement {
+            invalidRoleElement = element
+            vanishedChildCandidates += 1
+            if let parent = directParent {
+                let observation = invalidChildParentObservation(parent, child: element, pid: pid,
+                    selectedReference: selected.contains(where: { same($0, parent) }))
+                if (invalidChildParent["status"] as? String) == "not_checked" { invalidChildParent = observation }
+                allInvalidChildrenVanished = allInvalidChildrenVanished && vanishedChildParent(observation)
+            } else { allInvalidChildrenVanished = false }
         }
         let selectedFlag = read(element, "AXSelected") as? Bool
         if selectedFlag == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
@@ -433,6 +470,8 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
     }
+    staleChildContext = false
+    invalidRoleElement = nil
     if ["none", "directory_snapshot"].contains(requested) {
         let selectedFields = directoryFields.filter { item in selected.contains(where: { same($0, item.1) }) }.map { $0.0 }
         selectedDirectory = selectedDirectoryObservation(selectedFields, expected: target)
@@ -506,7 +545,12 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     let selection = selectedFileEvidence(selectedURLs, expected: target)
     counts["selectedLeaves"] = selection.leaves.count
     counts["leafMatches"] = selection.matches
+    snapshotTraversalComplete = complete
     if !noReadFailures() { complete = false }
+    snapshotRefreshEligible = ["open", "cancel_open_existing"].contains(requested) && trusted && selection.verified && snapshotTraversalComplete &&
+        onlyInvalidChildErrors && vanishedChildCandidates > 0 && allInvalidChildrenVanished &&
+        counts["otherErrors", default: 0] > 0 && counts["cannotComplete", default: 0] == 0 && counts["apiDisabled", default: 0] == 0 &&
+        counts["windows"] == 1 && sheets.count == 1 && parents.count == 1 && buttons.count == 1 && ProcessInfo.processInfo.systemUptime < deadline
     verified = trusted && complete && selection.verified
     // Independent read-only verification: no AXValue/title inventory on browser content, no action.
     if requested == "directory_snapshot" {
@@ -618,6 +662,9 @@ if !noReadFailures() { complete = false; directoryVerified = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
+    "staleSnapshot": ["eligible": snapshotRefreshEligible, "traversalComplete": snapshotTraversalComplete, "candidates": vanishedChildCandidates,
+        "allVanished": vanishedChildCandidates > 0 && allInvalidChildrenVanished,
+        "onlyInvalidChildErrors": counts["otherErrors", default: 0] > 0 && onlyInvalidChildErrors],
     "counts": counts, "invalidChildParent": invalidChildParent, "selectedDirectory": selectedDirectory, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,

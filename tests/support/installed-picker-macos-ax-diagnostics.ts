@@ -103,6 +103,13 @@ const AX_ORIGIN_KEYS = [
 ] as const;
 
 const evidenceSchema = z.strictObject({
+  staleSnapshot: z.strictObject({
+    eligible: z.boolean(),
+    traversalComplete: z.boolean(),
+    candidates: z.number().int().min(0).max(256),
+    allVanished: z.boolean(),
+    onlyInvalidChildErrors: z.boolean(),
+  }),
   invalidChildParent: z.strictObject({
     status: z.enum(["not_checked", "complete", "deadline", "error", "invalid_value", "bound"]),
     role: z.enum(AX_ROLE_KEYS),
@@ -284,6 +291,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       firstOtherParentRole,
       firstExactURL,
       selectedDirectory,
+      staleSnapshot,
       invalidChildParent,
       parentChain,
       firstCannotCompleteAttribute,
@@ -314,6 +322,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `other_visited=${firstOtherVisited}`,
       `other_origin=${firstOtherOrigin}`,
       `other_parent_role=${firstOtherParentRole}`,
+      ...Object.entries(staleSnapshot).map(([key, value]) => `stale_snapshot_${key}=${value}`),
       ...Object.entries(invalidChildParent).map(
         ([key, value]) => `invalid_child_parent_${key}=${value}`,
       ),
@@ -424,6 +433,68 @@ export function installedMacSelectedDirectoryVerified(stdout: string) {
       value.parentChain.nodes[0]?.role === "AXGroup" &&
       value.parentChain.nodes[0]?.selectedReference &&
       value.parentChain.nodes.at(-1)?.role === "AXSheet"
+    );
+  } catch {
+    return false;
+  }
+}
+
+// A fresh complete snapshot may be taken once before any native action; this never accepts the failed snapshot.
+export function installedMacAxSnapshotRefreshAllowed(
+  stdout: string,
+  requested: "open" | "cancel_open_existing",
+) {
+  try {
+    if (stdout.length > 4096) return false;
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const value = parsed.data;
+    return (
+      value.trusted &&
+      !value.complete &&
+      !value.verified &&
+      !value.directoryVerified &&
+      value.stage === "verification" &&
+      value.guardMask === 0 &&
+      value.pressDurationMs === 0 &&
+      value.pressSheetState === "not_checked" &&
+      value.action.requested === requested &&
+      !value.action.pressed &&
+      !value.action.dismissed &&
+      value.staleSnapshot.eligible &&
+      value.staleSnapshot.traversalComplete &&
+      value.staleSnapshot.candidates > 0 &&
+      value.staleSnapshot.allVanished &&
+      value.staleSnapshot.onlyInvalidChildErrors &&
+      value.firstOtherError === -25202 &&
+      value.firstOtherAttribute === "AXRole" &&
+      value.firstOtherStage === "selection" &&
+      value.firstOtherOrigin === "AXChildren" &&
+      value.firstOtherParentRole === "AXScrollArea" &&
+      !value.firstOtherSelectedReference &&
+      !value.firstOtherSelectedBranch &&
+      value.invalidChildParent.status === "complete" &&
+      value.invalidChildParent.role === "AXScrollArea" &&
+      value.invalidChildParent.pidMatches &&
+      !value.invalidChildParent.selectedReference &&
+      value.invalidChildParent.containsFailedReference === "false" &&
+      value.invalidChildParent.attribute === "none" &&
+      value.invalidChildParent.error === 0 &&
+      value.firstOtherVisited > 0 &&
+      value.firstOtherVisited <= value.counts.visited &&
+      value.counts.visited <= 256 &&
+      value.staleSnapshot.candidates <= value.counts.visited &&
+      value.counts.selectedRoots > 0 &&
+      value.counts.selectedRoots <= 256 &&
+      value.counts.otherErrors >= value.staleSnapshot.candidates &&
+      value.counts.cannotComplete === 0 &&
+      value.counts.apiDisabled === 0 &&
+      value.counts.windows === 1 &&
+      value.counts.sheets === 1 &&
+      value.counts.buttons === 1 &&
+      value.counts.selectedLeaves === 1 &&
+      value.counts.leafMatches === 1 &&
+      value.counts.selectedExactUrls === 1
     );
   } catch {
     return false;

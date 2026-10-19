@@ -52,6 +52,13 @@ const snapshot = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  staleSnapshot: {
+    eligible: false,
+    traversalComplete: false,
+    candidates: 0,
+    allVanished: false,
+    onlyInvalidChildErrors: false,
+  },
   invalidChildParent: {
     status: "not_checked",
     role: "none",
@@ -392,4 +399,153 @@ it("redacts selected-directory process failures without continuation or a raw ca
   expect(String(failure)).not.toContain("private");
   expect(failure).not.toHaveProperty("cause");
   expect(execute).toHaveBeenCalledTimes(4);
+});
+
+const vanishedSnapshot = {
+  ...snapshot,
+  complete: false,
+  firstOtherVisited: 52,
+  firstOtherError: -25202,
+  firstOtherAttribute: "AXRole",
+  firstOtherStage: "selection",
+  firstOtherOrigin: "AXChildren",
+  firstOtherParentRole: "AXScrollArea",
+  action: { requested: "open", pressed: false, dismissed: false },
+  invalidChildParent: {
+    status: "complete",
+    role: "AXScrollArea",
+    pidMatches: true,
+    selectedReference: false,
+    children: 14,
+    containsFailedReference: "false",
+    attribute: "none",
+    error: 0,
+  },
+  staleSnapshot: {
+    eligible: true,
+    traversalComplete: true,
+    candidates: 2,
+    allVanished: true,
+    onlyInvalidChildErrors: true,
+  },
+  counts: {
+    ...snapshot.counts,
+    windows: 1,
+    sheets: 1,
+    buttons: 1,
+    visited: 110,
+    selectedRoots: 9,
+    selectedUrls: 1,
+    selectedExactUrls: 1,
+    selectedLeaves: 1,
+    leafMatches: 1,
+    otherErrors: 16,
+  },
+};
+const freshOpen = {
+  ...snapshot,
+  verified: true,
+  foreground: true,
+  guardMask: 255,
+  stage: "complete",
+  action: { requested: "open", pressed: true, dismissed: true },
+  counts: { ...vanishedSnapshot.counts, otherErrors: 0 },
+};
+it("takes one complete fresh native snapshot before action when every invalid child is proven vanished", async () => {
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    { prepared: true, nativePress: false, navigationDismissed: true },
+    vanishedSnapshot,
+    freshOpen,
+  ];
+  execute.mockImplementation(async () => {
+    now += 300;
+    return { stdout: JSON.stringify(responses.shift()), stderr: "" };
+  });
+  await installedMacPickerDriver("open", "/private/fixture.wav", () => ({ LANG: "en_US.UTF-8" }))(
+    42,
+  );
+  expect(execute).toHaveBeenCalledTimes(3);
+  expect(execute.mock.calls[1]?.[1]).toEqual(["42", "/private/fixture.wav", "open"]);
+  expect(execute.mock.calls[2]?.[1]).toEqual(execute.mock.calls[1]?.[1]);
+  expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([100000, 7000, 6700]);
+  for (const call of execute.mock.calls) expect(call[2].env).toEqual({ LANG: "en_US.UTF-8" });
+});
+
+it("does not refresh again if the complete second snapshot also fails", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  execute
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true }),
+      stderr: "",
+    })
+    .mockResolvedValue({ stdout: JSON.stringify(vanishedSnapshot), stderr: "" });
+  await expect(
+    installedMacPickerDriver("open", "/private/fixture.wav", () => ({}))(42),
+  ).rejects.toThrow("Native macOS AX probe:");
+  expect(execute).toHaveBeenCalledTimes(3);
+});
+it("never refreshes after a native action has started", async () => {
+  execute
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true }),
+      stderr: "",
+    })
+    .mockResolvedValue({
+      stdout: JSON.stringify({
+        ...vanishedSnapshot,
+        guardMask: 255,
+        stage: "press",
+        pressDurationMs: 1,
+      }),
+      stderr: "",
+    });
+  await expect(
+    installedMacPickerDriver("open", "/private/fixture.wav", () => ({}))(42),
+  ).rejects.toThrow("Native macOS AX probe:");
+  expect(execute).toHaveBeenCalledTimes(2);
+});
+it("uses the same bounded fresh-snapshot rule for selected-file Cancel", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  execute
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true }),
+      stderr: "",
+    })
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        ...vanishedSnapshot,
+        action: { ...vanishedSnapshot.action, requested: "cancel_open_existing" },
+      }),
+      stderr: "",
+    })
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        ...freshOpen,
+        action: { ...freshOpen.action, requested: "cancel_open_existing" },
+      }),
+      stderr: "",
+    });
+  await installedMacPickerDriver("cancel_open_existing", "/private/fixture.wav", () => ({}))(42);
+  expect(execute).toHaveBeenCalledTimes(3);
+});
+it("keeps both native snapshots inside the original shared seven-second budget", async () => {
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  execute
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true }),
+      stderr: "",
+    })
+    .mockImplementationOnce(async () => {
+      now = 7001;
+      return { stdout: JSON.stringify(vanishedSnapshot), stderr: "" };
+    });
+  await expect(
+    installedMacPickerDriver("open", "/private/fixture.wav", () => ({}))(42),
+  ).rejects.toThrow("AX probe deadline exceeded");
+  expect(execute).toHaveBeenCalledTimes(2);
 });
