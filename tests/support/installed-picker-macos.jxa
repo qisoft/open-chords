@@ -201,6 +201,8 @@ function run(argv) {
       var fieldRole = attribute(field, 'role');
       if (fieldRole === null) unreadableRoles++;
       if (fieldRole !== 'AXTextField' && fieldRole !== 'AXComboBox') continue;
+      // Expanded browser search is not a filename input; all other fields remain checked.
+      if (expandedControls && fieldRole === 'AXTextField' && attribute(field, 'subrole') === 'AXSearchField') continue;
       total++;
       if (fields.length === 16) continue;
       var fieldName = attribute(field, 'name');
