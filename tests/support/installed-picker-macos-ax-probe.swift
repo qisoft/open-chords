@@ -107,6 +107,7 @@ var firstOtherStage = "none"
 var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
+var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none"]
 var readParentRole = "none"
 var readOrigin = "discovery"
 var firstCannotCompleteAttribute = "none"
@@ -233,7 +234,8 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         seen.append(element)
         counts["visited"] = seen.count
         let role = string(element, "AXRole") ?? ""
-        if (read(element, "AXSelected") as? Bool) == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
+        let selectedFlag = read(element, "AXSelected") as? Bool
+        if selectedFlag == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
         if requested == "none" {
             let title = string(element, "AXTitle")
             let value = read(element, "AXValue")
@@ -273,7 +275,14 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if let value = read(element, "AXURL"), let url = nativeURL(value) {
             if CFGetTypeID(value) == CFURLGetTypeID() { counts["urlObjects", default: 0] += 1 }
             else { counts["urlStrings", default: 0] += 1 }
-            if url.absoluteString == expected { counts["exactUrls", default: 0] += 1 }
+            if url.absoluteString == expected {
+                counts["exactUrls", default: 0] += 1
+                if requested == "none" && (firstExactURL["origin"] as? String) == "none" {
+                    firstExactURL = ["role": diagnosticRole(role), "parentRole": parentRole, "origin": origin,
+                        "selected": selectedFlag == true ? "true" : selectedFlag == false ? "false" : "unknown",
+                        "directory": url.hasDirectoryPath, "kind": CFGetTypeID(value) == CFURLGetTypeID() ? "native" : "string"]
+                }
+            }
         }
         var next: [(AXUIElement, String, String)] = []
         for name in ["AXSelectedChildren", "AXSelectedRows", "AXSelectedCells", "AXSelectedColumns"] {
@@ -384,7 +393,7 @@ if !noReadFailures() { complete = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
-    "counts": counts, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "counts": counts, "firstExactURL": firstExactURL, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,

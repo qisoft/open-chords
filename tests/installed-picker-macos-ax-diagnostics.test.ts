@@ -20,6 +20,14 @@ const evidence = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  firstExactURL: {
+    role: "none",
+    parentRole: "none",
+    origin: "none",
+    selected: "unknown",
+    directory: false,
+    kind: "none",
+  },
   firstCannotCompleteAttribute: "none",
   firstCannotCompleteStage: "none",
   firstCannotCompleteDurationMs: 0,
@@ -276,3 +284,41 @@ it.each(["none", "AXBrowser", "AXColumn", "AXRow", "AXImage", "other"])(
     ).toBe("Native macOS AX probe: invalid_evidence");
   },
 );
+
+it("reports categorical exact URL provenance without granting directory or action verification", () => {
+  const observed = {
+    ...evidence,
+    trusted: true,
+    firstExactURL: {
+      role: "AXImage",
+      parentRole: "AXRow",
+      origin: "AXChildren",
+      selected: "unknown",
+      directory: true,
+      kind: "native",
+    },
+    counts: { ...evidence.counts, exactUrls: 1 },
+  };
+  const stdout = JSON.stringify(observed);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("exact_url_role=AXImage");
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("exact_url_parentRole=AXRow");
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("exact_url_directory=true");
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  for (const change of [
+    { role: "/private/role" },
+    { parentRole: "/private/parent" },
+    { origin: "/private/path" },
+    { selected: "private" },
+    { directory: "/private/path" },
+    { kind: "/private/value" },
+    { path: "/private/target" },
+  ]) {
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...observed, firstExactURL: { ...observed.firstExactURL, ...change } }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+  }
+});
