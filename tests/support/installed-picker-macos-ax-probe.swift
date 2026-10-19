@@ -244,6 +244,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         let role = string(element, "AXRole") ?? ""
         let selectedFlag = read(element, "AXSelected") as? Bool
         if selectedFlag == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
+        readSelectedReference = readSelectedReference || selectedFlag == true
         if requested == "none" {
             let title = string(element, "AXTitle")
             let value = read(element, "AXValue")
