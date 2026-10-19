@@ -68,7 +68,11 @@ export function installedMacPickerDriver(
           "JavaScript",
           join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
           String(applicationPid),
-          directoryScenario ? "prepare_save_directory" : scenario,
+          scenario === "cancel_save_directory_expanded"
+            ? "prepare_save_directory_expanded"
+            : directoryScenario
+              ? "prepare_save_directory"
+              : scenario,
           ...(saves
             ? [saveFormat ?? "", ...(directoryScenario ? [selectedPath ?? ""] : [])]
             : selectedPath === undefined

@@ -87,6 +87,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       : []),
     ...reads,
     ...refusal,
+    ...installedMacSaveInitialDisclosure(stderr),
     ...installedMacSaveFailureFields(stderr),
   ].join("\n");
 }
@@ -141,4 +142,23 @@ export function installedMacSaveFailureFields(stderr: string): string[] {
   } catch {
     return [];
   }
+}
+
+export function installedMacSaveInitialDisclosure(stderr: string): string[] {
+  const entries = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS Save initial disclosure: controls=([0-9]{1,3}) disclosures=([0-9]{1,3}) zero=([0-9]{1,3}) one=([0-9]{1,3}) unknown=([0-9]{1,3})$/u.exec(
+          line,
+        );
+      return (
+        match !== null &&
+        Number(match[1]) <= 256 &&
+        Number(match[2]) <= Number(match[1]) &&
+        Number(match[3]) + Number(match[4]) + Number(match[5]) === Number(match[2])
+      );
+    });
+  return entries.slice(-1);
 }

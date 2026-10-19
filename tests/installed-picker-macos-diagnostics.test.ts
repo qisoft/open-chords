@@ -228,3 +228,17 @@ it("retains only schema-validated filename categories on native failure", () => 
     "Save field probe",
   );
 });
+
+it("reports only bounded initial disclosure counts on expanded preparation failure", () => {
+  const line =
+    "Native macOS Save initial disclosure: controls=29 disclosures=1 zero=0 one=1 unknown=0";
+  expect(installedMacPickerDiagnostic({}, line, 1)).toContain(line);
+  for (const invalid of [
+    line + " /private/path",
+    line.replace("controls=29", "controls=257"),
+    line.replace("one=1", "one=2"),
+    line.replace("disclosures=1", "disclosures=30"),
+  ]) {
+    expect(installedMacPickerDiagnostic({}, invalid, 1)).not.toContain("initial disclosure");
+  }
+});

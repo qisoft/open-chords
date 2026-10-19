@@ -2,7 +2,8 @@ function run(argv) {
   var applicationPid = Number(argv[0]);
   var scenario = argv[1] || 'cancel';
   var expandedControls = scenario === 'cancel_save_edited_expanded';
-  var preparesDirectory = scenario === 'prepare_save_directory';
+  var preparesExpandedDirectory = scenario === 'prepare_save_directory_expanded';
+  var preparesDirectory = scenario === 'prepare_save_directory' || preparesExpandedDirectory;
   var directoryScenario = scenario === 'cancel_save_directory' || preparesDirectory;
   var selectedPath = directoryScenario ? argv[3] : argv[2];
   var selectsFile = scenario === 'open' || scenario === 'cancel_open_existing';
@@ -12,7 +13,7 @@ function run(argv) {
   var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
   var saveFormat = saves ? argv[2] : null;
   if (saves && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
-  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_directory', 'prepare_save_directory', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_directory', 'prepare_save_directory', 'prepare_save_directory_expanded', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
       ((selectsFile || directoryScenario) && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
@@ -262,7 +263,23 @@ function run(argv) {
           stage = 'elements';
           var elements = expandedControls ? expandedSaveControls(sheets[s]) : sheets[s].entireContents();
           counts.elements = Math.min(elements.length, 257);
-          if (elements.length > 256) throw new Error('element bound');
+          if (elements.length > 256) {
+            if (preparesExpandedDirectory) {
+              var controls = expandedSaveControls(sheets[s]);
+              var disclosures = 0, zero = 0, one = 0, unknown = 0;
+              for (var d = 0; d < controls.length; d++) {
+                if (attribute(controls[d], 'role') !== 'AXDisclosureTriangle') continue;
+                disclosures++;
+                var disclosureValue = attribute(controls[d], 'value');
+                if (disclosureValue === 0 || disclosureValue === '0') zero++;
+                else if (disclosureValue === 1 || disclosureValue === '1') one++;
+                else unknown++;
+              }
+              console.log('Native macOS Save initial disclosure: controls=' + controls.length +
+                ' disclosures=' + disclosures + ' zero=' + zero + ' one=' + one + ' unknown=' + unknown);
+            }
+            throw new Error('element bound');
+          }
           var cancel = [];
           var open = [];
           for (var e = 0; e < elements.length; e++) {

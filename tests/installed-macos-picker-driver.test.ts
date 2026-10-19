@@ -179,7 +179,7 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     "json",
   )(42);
   expect(execute).toHaveBeenCalledTimes(4);
-  expect(execute.mock.calls[0]?.[1]).toContain("prepare_save_directory");
+  expect(execute.mock.calls[0]?.[1]).toContain("prepare_save_directory_expanded");
   expect(execute.mock.calls[1]?.[0]).toContain("macos-save-expand");
   expect(execute.mock.calls[1]?.[1]).toEqual(["42"]);
   expect(execute.mock.calls[2]?.[1]).toEqual(["42", "/private/directory"]);
