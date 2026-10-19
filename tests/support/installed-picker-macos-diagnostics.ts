@@ -1,8 +1,5 @@
 import { installedExportExitDiagnostic } from "./installed-export-process.ts";
-import {
-  installedMacSaveFieldDiagnostic,
-  type MacSaveFormat,
-} from "./installed-macos-save-field-probe.ts";
+import { installedMacSaveFieldDiagnostic } from "./installed-macos-save-field-probe.ts";
 
 export function installedMacPickerDiagnostic(error: unknown, stderr: string, durationMs: number) {
   const reads = stderr
@@ -132,10 +129,14 @@ export function installedMacSaveFailureFields(stderr: string): string[] {
       typeof value !== "object" ||
       value === null ||
       !("format" in value) ||
-      !["json", "lrc", "chordpro", "pdf", "archive"].includes(String(value.format))
+      (value.format !== "json" &&
+        value.format !== "lrc" &&
+        value.format !== "chordpro" &&
+        value.format !== "pdf" &&
+        value.format !== "archive")
     )
       return [];
-    const diagnostic = installedMacSaveFieldDiagnostic(value, value.format as MacSaveFormat);
+    const diagnostic = installedMacSaveFieldDiagnostic(value, value.format);
     return diagnostic.endsWith("invalid_evidence") ? [] : [diagnostic];
   } catch {
     return [];
