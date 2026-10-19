@@ -119,8 +119,24 @@ const evidenceSchema = z.strictObject({
       selected: z.number().int().min(0).max(16),
       unknownSelected: z.number().int().min(0).max(16),
       roleMask: z.number().int().min(0).max(63),
+      nodes: z
+        .array(
+          z.strictObject({
+            role: z.enum(AX_ROLE_KEYS),
+            selectedReference: z.boolean(),
+            selectedState: z.enum(["true", "false", "unknown", "not_read"]),
+          }),
+        )
+        .max(16),
     })
-    .refine((value) => value.selected + value.unknownSelected <= value.visited),
+    .refine(
+      (value) =>
+        value.selected + value.unknownSelected <= value.visited &&
+        value.nodes.length === value.visited &&
+        value.nodes.filter((node) => node.selectedState === "true").length === value.selected &&
+        value.nodes.filter((node) => node.selectedState === "unknown").length ===
+          value.unknownSelected,
+    ),
   firstExactURL: z.strictObject({
     role: z.enum(AX_ROLE_KEYS),
     parentRole: z.enum(AX_ROLE_KEYS),
@@ -249,6 +265,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       stage,
       action,
     } = evidence.data;
+    const { nodes: parentNodes, ...parentSummary } = parentChain;
     return [
       "Native macOS AX probe:",
       `trusted=${trusted}`,
@@ -266,7 +283,12 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `other_visited=${firstOtherVisited}`,
       `other_origin=${firstOtherOrigin}`,
       `other_parent_role=${firstOtherParentRole}`,
-      ...Object.entries(parentChain).map(([key, value]) => `parent_chain_${key}=${value}`),
+      ...Object.entries(parentSummary).map(([key, value]) => `parent_chain_${key}=${value}`),
+      ...parentNodes.flatMap((node, index) => [
+        `parent_chain_node_${index}_role=${node.role}`,
+        `parent_chain_node_${index}_selected_reference=${node.selectedReference}`,
+        `parent_chain_node_${index}_selected_state=${node.selectedState}`,
+      ]),
       ...Object.entries(firstExactURL).map(([key, value]) => `exact_url_${key}=${value}`),
       `cannot_complete_attribute=${firstCannotCompleteAttribute}`,
       `cannot_complete_stage=${firstCannotCompleteStage}`,

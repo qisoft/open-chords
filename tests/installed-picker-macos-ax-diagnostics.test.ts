@@ -22,7 +22,14 @@ const evidence = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
-  parentChain: { status: "not_checked", visited: 0, selected: 0, unknownSelected: 0, roleMask: 0 },
+  parentChain: {
+    status: "not_checked",
+    visited: 0,
+    selected: 0,
+    unknownSelected: 0,
+    roleMask: 0,
+    nodes: [],
+  },
   firstExactURL: {
     role: "none",
     parentRole: "none",
@@ -400,6 +407,11 @@ it("reports bounded actual-parent observations without granting directory or act
       selected: 1,
       unknownSelected: 4,
       roleMask: 15,
+      nodes: Array.from({ length: 8 }, (_, index) => ({
+        role: "AXGroup",
+        selectedReference: index === 1,
+        selectedState: index === 0 ? "true" : index < 4 ? "false" : "unknown",
+      })),
     },
   };
   const stdout = JSON.stringify(observed);
@@ -437,4 +449,84 @@ it("distinguishes absent and unreadable parent diagnostics without authorizing a
     );
     expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
   }
+});
+
+it("keeps selected relationship membership independent of the AXSelected value", () => {
+  const node = { role: "AXBrowser", selectedReference: true, selectedState: "unknown" };
+  const parentChain = {
+    status: "captured_sheet",
+    visited: 1,
+    selected: 0,
+    unknownSelected: 1,
+    roleMask: 1,
+    nodes: [node],
+  };
+  const stdout = JSON.stringify({ ...evidence, parentChain });
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
+    "parent_chain_node_0_role=AXBrowser",
+  );
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
+    "parent_chain_node_0_selected_reference=true",
+  );
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
+    "parent_chain_node_0_selected_state=unknown",
+  );
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  for (const change of [
+    { nodes: [{ ...node, role: "/private/role" }] },
+    { nodes: [{ ...node, selectedReference: "private" }] },
+    { nodes: [{ ...node, selectedState: "private" }] },
+    { nodes: [{ ...node, path: "/private/path" }] },
+    { nodes: [] },
+    { nodes: Array(17).fill(node) },
+    { selected: 1 },
+    { unknownSelected: 0 },
+  ]) {
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...evidence, parentChain: { ...parentChain, ...change } }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+  }
+});
+
+it("reports unattempted selected reads after an unreadable parent role", () => {
+  const stdout = JSON.stringify({
+    ...evidence,
+    parentChain: {
+      status: "unreadable_role",
+      visited: 1,
+      selected: 0,
+      unknownSelected: 0,
+      roleMask: 0,
+      nodes: [{ role: "other", selectedReference: true, selectedState: "not_read" }],
+    },
+  });
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
+    "parent_chain_node_0_selected_state=not_read",
+  );
+});
+
+it("keeps the maximum ancestor chain within the existing diagnostic byte limit", () => {
+  const stdout = JSON.stringify({
+    ...evidence,
+    parentChain: {
+      status: "bound",
+      visited: 16,
+      selected: 0,
+      unknownSelected: 16,
+      roleMask: 1,
+      nodes: Array.from({ length: 16 }, () => ({
+        role: "AXBrowser",
+        selectedReference: false,
+        selectedState: "unknown",
+      })),
+    },
+  });
+  expect(stdout.length).toBeLessThanOrEqual(4096);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
+    "parent_chain_node_15_role=AXBrowser",
+  );
 });

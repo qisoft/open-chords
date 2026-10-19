@@ -148,7 +148,7 @@ var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
 var firstExactElement: AXUIElement? = nil
-var parentChain: [String: Any] = ["status": "not_checked", "visited": 0, "selected": 0, "unknownSelected": 0, "roleMask": 0]
+var parentChain: [String: Any] = ["status": "not_checked", "visited": 0, "selected": 0, "unknownSelected": 0, "roleMask": 0, "nodes": [[String: Any]]()]
 var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none", "titleCategory": "unavailable", "valueCategory": "unavailable", "traversalRoleMask": 0, "traversalDepth": 0]
 var firstOtherSelectedReference = false
 var firstOtherSelectedBranch = false
@@ -367,6 +367,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         var current = exactElement
         var chainSeen: [AXUIElement] = [exactElement]
         var chainVisited = 0, chainSelected = 0, chainUnknown = 0, chainMask = 0
+        var chainNodes: [[String: Any]] = []
         var chainStatus = "bound"
         for _ in 0..<16 {
             if ProcessInfo.processInfo.systemUptime >= deadline { chainStatus = "deadline"; break }
@@ -378,17 +379,24 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
             if chainSeen.contains(where: { same($0, parent) }) { chainStatus = "cycle"; break }
             chainSeen.append(parent)
             chainVisited += 1
-            guard let role = string(parent, "AXRole") else { chainStatus = "unreadable_role"; break }
+            let selectedReference = readSelectedReference
+            guard let role = string(parent, "AXRole") else {
+                chainNodes.append(["role": "other", "selectedReference": selectedReference, "selectedState": "not_read"])
+                chainStatus = "unreadable_role"; break
+            }
             chainMask |= traversalRoleBit(role)
+            var selectedState = "unknown"
             if let selected = read(parent, "AXSelected") as? Bool {
+                selectedState = selected ? "true" : "false"
                 if selected { chainSelected += 1; readSelectedReference = true }
             } else { chainUnknown += 1 }
+            chainNodes.append(["role": diagnosticRole(role), "selectedReference": selectedReference, "selectedState": selectedState])
             if same(parent, sheets[0]) { chainStatus = "captured_sheet"; break }
             current = parent
             readParentRole = "none"
         }
         parentChain = ["status": chainStatus, "visited": chainVisited, "selected": chainSelected,
-            "unknownSelected": chainUnknown, "roleMask": chainMask]
+            "unknownSelected": chainUnknown, "roleMask": chainMask, "nodes": chainNodes]
     }
     stage = "verification"
     readOrigin = "selected_verification"
