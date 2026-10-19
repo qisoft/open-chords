@@ -147,7 +147,7 @@ var counts: [String: Int] = [
     "urlStrings": 0, "urlObjects": 0, "exactUrls": 0, "exactFilenames": 0,
     "basenameMatches": 0, "unsupported": 0, "cannotComplete": 0,
     "apiDisabled": 0, "otherErrors": 0, "lastError": 0,
-    "selectedUrls": 0, "selectedExactUrls": 0, "selectedLeaves": 0, "leafMatches": 0, "buttons": 0,
+    "saveButtons": 0, "selectedUrls": 0, "selectedExactUrls": 0, "selectedLeaves": 0, "leafMatches": 0, "buttons": 0,
     "valuePathMatches": 0, "filenamePathMatches": 0, "documentPathMatches": 0,
     "pathControls": 0, "popupControls": 0, "disclosures": 0,
     "expandedDisclosures": 0, "collapsedDisclosures": 0, "pathControlMatches": 0, "popupPathMatches": 0,
@@ -155,6 +155,7 @@ var counts: [String: Int] = [
     "unknownValueDisclosures": 0, "disclosureActions": 0, "pressableDisclosures": 0
 ]
 var complete = true
+var directoryVerified = false
 var verified = false
 var pressed = false
 var dismissed = false
@@ -265,7 +266,7 @@ func noReadFailures() -> Bool {
     counts["cannotComplete", default: 0] == 0 && counts["apiDisabled", default: 0] == 0 && counts["otherErrors", default: 0] == 0
 }
 
-if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open_existing"].contains(requested),
+if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open_existing", "directory_snapshot"].contains(requested),
    let pid = Int32(arguments[1]), pid > 0, arguments[2].hasPrefix("/") {
     let target = URL(fileURLWithPath: arguments[2])
     let expected = target.absoluteString
@@ -298,6 +299,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     if sheets.count != 1 || parents.count != 1 { complete = false }
     var selected: [AXUIElement] = []
     var buttons: [AXUIElement] = []
+    var saveButtons: [AXUIElement] = []
     var directoryFields: [(URL, AXUIElement)] = []
     var queue: [(AXUIElement, String, String, Bool, Int, Int, AXUIElement?)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none", false, 0, 0, nil) } : []
     seen = []
@@ -354,16 +356,20 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
                 }
             }
         }
-        if role == "AXButton" && string(element, "AXTitle") == (requested == "open" ? "Open" : "Cancel") { buttons.append(element) }
+        if requested == "directory_snapshot", role == "AXButton" {
+            let title = string(element, "AXTitle")
+            if title == "Save" { saveButtons.append(element) }
+            if title == "Cancel" { buttons.append(element) }
+        } else if role == "AXButton" && string(element, "AXTitle") == (requested == "open" ? "Open" : "Cancel") { buttons.append(element) }
         if let value = read(element, "AXURL"), let url = nativeURL(value) {
-            if requested == "none", role == "AXTextField", origin == "AXChildren", parentRole == "AXGroup", let parent = directParent {
+            if ["none", "directory_snapshot"].contains(requested), role == "AXTextField", origin == "AXChildren", parentRole == "AXGroup", let parent = directParent {
                 directoryFields.append((url, parent))
             }
             if CFGetTypeID(value) == CFURLGetTypeID() { counts["urlObjects", default: 0] += 1 }
             else { counts["urlStrings", default: 0] += 1 }
             if url.absoluteString == expected {
                 counts["exactUrls", default: 0] += 1
-                if requested == "none" && (firstExactURL["origin"] as? String) == "none" {
+                if ["none", "directory_snapshot"].contains(requested) && (firstExactURL["origin"] as? String) == "none" {
                     firstExactElement = element
                     firstExactURL = ["role": diagnosticRole(role), "parentRole": parentRole, "origin": origin,
                         "selected": selectedFlag == true ? "true" : selectedFlag == false ? "false" : "unknown",
@@ -386,12 +392,12 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
     }
-    if requested == "none" {
+    if ["none", "directory_snapshot"].contains(requested) {
         let selectedFields = directoryFields.filter { item in selected.contains(where: { same($0, item.1) }) }.map { $0.0 }
         selectedDirectory = selectedDirectoryObservation(selectedFields, expected: target)
     }
     // Read-only actual-parent observations, independent of traversal provenance.
-    if requested == "none", let exactElement = firstExactElement, sheets.count == 1 {
+    if ["none", "directory_snapshot"].contains(requested), let exactElement = firstExactElement, sheets.count == 1 {
         stage = "parent_chain"
         readOrigin = "exact_url_parent_chain"
         readParentRole = "none"
@@ -461,7 +467,46 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     counts["leafMatches"] = selection.matches
     if !noReadFailures() { complete = false }
     verified = trusted && complete && selection.verified
-    if requested != "none" && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
+    // Independent read-only verification: no AXValue/title inventory on browser content, no action.
+    if requested == "directory_snapshot" {
+        verified = false
+        counts["saveButtons"] = saveButtons.count
+        let selectedFields = directoryFields.filter { item in selected.contains(where: { same($0, item.1) }) }
+        let covered = !selected.isEmpty && selected.allSatisfy { root in selectedFields.filter { same($0.1, root) }.count == 1 }
+        let firstParent = (parentChain["nodes"] as? [[String: Any]])?.first
+        let directoryShape = (selectedDirectory["validShape"] as? Bool) == true &&
+            (selectedDirectory["uniqueUrls"] as? Int) == selected.count &&
+            (selectedDirectory["terminalUrls"] as? Int) == 1 && (selectedDirectory["terminalMatches"] as? Int) == 1
+        let exactField = (firstExactURL["role"] as? String) == "AXTextField" &&
+            (firstExactURL["origin"] as? String) == "AXChildren" && (firstExactURL["parentRole"] as? String) == "AXGroup" &&
+            (firstExactURL["kind"] as? String) == "native" && (firstExactURL["directory"] as? Bool) == true
+        let capturedSelection = (parentChain["status"] as? String) == "captured_sheet" &&
+            (firstParent?["role"] as? String) == "AXGroup" && (firstParent?["selectedReference"] as? Bool) == true
+        let candidate = trusted && complete && noReadFailures() && covered && directoryShape && exactField && capturedSelection &&
+            counts["windows"] == 1 && counts["exactUrls"] == 1 && counts["urlStrings"] == 0 && counts["urlObjects"] == selectedFields.count
+        if candidate && buttons.count == 1 && saveButtons.count == 1 && sheets.count == 1 && parents.count == 1 && ProcessInfo.processInfo.systemUptime < deadline {
+            stage = "guard"
+            readOrigin = "guard"
+            readSelectedReference = false
+            readSelectedBranch = false
+            readParentRole = "none"
+            let sheet = sheets[0], parent = parents[0], cancel = buttons[0], save = saveButtons[0]
+            var actualPid: pid_t = 0
+            foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+            if AXUIElementGetPid(app, &actualPid) == .success && actualPid == pid { guardMask |= 1 }
+            if foreground { guardMask |= 2 }
+            if elements(parent, "AXChildren").contains(where: { same($0, sheet) }) { guardMask |= 4 }
+            if string(sheet, "AXRole") == "AXSheet" { guardMask |= 8 }
+            if string(cancel, "AXRole") == "AXButton" && string(cancel, "AXTitle") == "Cancel" &&
+                string(save, "AXRole") == "AXButton" && string(save, "AXTitle") == "Save" { guardMask |= 16 }
+            if (read(cancel, "AXEnabled") as? Bool) == true && (read(save, "AXEnabled") as? Bool) == true { guardMask |= 32 }
+            if noReadFailures() { guardMask |= 64 }
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { guardMask |= 128 }
+            directoryVerified = guardMask == 255 && ProcessInfo.processInfo.systemUptime < deadline
+            if directoryVerified { stage = "directory_complete" }
+        }
+    }
+    if ["open", "cancel_open_existing"].contains(requested) && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
         stage = "guard"
         readOrigin = "guard"
         readSelectedReference = false
@@ -528,7 +573,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         }
     }
 } else { complete = false }
-if !noReadFailures() { complete = false }
+if !noReadFailures() { complete = false; directoryVerified = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
@@ -542,7 +587,7 @@ let result: [String: Any] = [
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
-    "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
+    "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
     "action": ["requested": requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),

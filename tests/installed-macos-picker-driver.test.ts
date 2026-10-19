@@ -82,6 +82,7 @@ const snapshot = {
   firstCannotCompleteAttribute: "none",
   firstCannotCompleteStage: "none",
   firstCannotCompleteDurationMs: 0,
+  directoryVerified: false,
   verified: false,
   foreground: false,
   guardMask: 0,
@@ -89,6 +90,54 @@ const snapshot = {
   action: { requested: "none", pressed: false, dismissed: false },
   counts: Object.fromEntries(MAC_AX_COUNT_FIELDS.map((key) => [key, 0])),
 };
+const directorySnapshot = {
+  ...snapshot,
+  trusted: true,
+  complete: true,
+  directoryVerified: true,
+  foreground: true,
+  guardMask: 255,
+  stage: "directory_complete",
+  verified: false,
+  action: { requested: "directory_snapshot", pressed: false, dismissed: false },
+  counts: {
+    ...snapshot.counts,
+    windows: 1,
+    sheets: 1,
+    buttons: 1,
+    saveButtons: 1,
+    selectedRoots: 8,
+    urlObjects: 8,
+    exactUrls: 1,
+  },
+  selectedDirectory: {
+    fields: 8,
+    uniqueUrls: 8,
+    terminalUrls: 1,
+    terminalMatches: 1,
+    validShape: true,
+  },
+  firstExactURL: {
+    ...snapshot.firstExactURL,
+    role: "AXTextField",
+    parentRole: "AXGroup",
+    origin: "AXChildren",
+    kind: "native",
+    directory: true,
+  },
+  parentChain: {
+    status: "captured_sheet",
+    visited: 2,
+    selected: 0,
+    unknownSelected: 2,
+    roleMask: 8,
+    nodes: [
+      { role: "AXGroup", selectedReference: true, selectedState: "unknown" },
+      { role: "AXSheet", selectedReference: false, selectedState: "unknown" },
+    ],
+  },
+};
+
 const cancelled = {
   action: "cancel_save_edited",
   nativePress: true,
@@ -196,6 +245,7 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     prepared,
     expanded,
     snapshot,
+    directorySnapshot,
     { ...expanded, expanded: false, initialValue: 1, finalValue: 0 },
     { ...cancelled, action: "cancel_save_restored" },
   ];
@@ -209,15 +259,16 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     () => ({ LANG: "en_US.UTF-8" }),
     "json",
   )(42);
-  expect(execute).toHaveBeenCalledTimes(5);
+  expect(execute).toHaveBeenCalledTimes(6);
   expect(execute.mock.calls[0]?.[1]).toContain("prepare_save_directory_expanded");
   expect(execute.mock.calls[1]?.[0]).toContain("macos-save-expand");
   expect(execute.mock.calls[1]?.[1]).toEqual(["42"]);
   expect(execute.mock.calls[2]?.[1]).toEqual(["42", "/private/directory"]);
-  expect(execute.mock.calls[3]?.[1]).toEqual(["42", "--collapse"]);
-  expect(execute.mock.calls[4]?.[1]).toContain("cancel_save_restored");
+  expect(execute.mock.calls[3]?.[1]).toEqual(["42", "/private/directory", "directory_snapshot"]);
+  expect(execute.mock.calls[4]?.[1]).toEqual(["42", "--collapse"]);
+  expect(execute.mock.calls[5]?.[1]).toContain("cancel_save_restored");
   expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
-    100000, 7000, 7000, 7000, 98800,
+    100000, 7000, 7000, 7000, 7000, 98500,
   ]);
   for (const call of execute.mock.calls) expect(call[2].env).toEqual({ LANG: "en_US.UTF-8" });
   expect(output.mock.calls.flat().join("")).not.toContain("private");
@@ -271,6 +322,7 @@ it("stops before filename input when restoration cannot prove native collapse", 
     .mockResolvedValueOnce({ stdout: JSON.stringify(prepared), stderr: "" })
     .mockResolvedValueOnce({ stdout: JSON.stringify(expanded), stderr: "" })
     .mockResolvedValueOnce({ stdout: JSON.stringify(snapshot), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(directorySnapshot), stderr: "" })
     .mockResolvedValueOnce({
       stdout: JSON.stringify({ ...expanded, initialValue: 1, finalValue: 1 }),
       stderr: "",
@@ -284,5 +336,50 @@ it("stops before filename input when restoration cannot prove native collapse", 
       "json",
     )(42),
   ).rejects.toThrow("Native macOS Save expansion");
+  expect(execute).toHaveBeenCalledTimes(5);
+});
+
+it("stops before restoration or filename input when selected-directory proof fails", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  execute
+    .mockResolvedValueOnce({ stdout: JSON.stringify(prepared), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(expanded), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(snapshot), stderr: "" })
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({ ...directorySnapshot, complete: false }),
+      stderr: "",
+    });
+  await expect(
+    installedMacPickerDriver(
+      "cancel_save_directory_expanded",
+      "/private/directory",
+      () => ({}),
+      "json",
+    )(42),
+  ).rejects.toThrow("Native macOS AX probe:");
+  expect(execute).toHaveBeenCalledTimes(4);
+});
+
+it("redacts selected-directory process failures without continuation or a raw cause", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  execute
+    .mockResolvedValueOnce({ stdout: JSON.stringify(prepared), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(expanded), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(snapshot), stderr: "" })
+    .mockRejectedValueOnce({ code: 1, message: "/private/command", stderr: "/private/error" });
+  let failure: unknown;
+  try {
+    await installedMacPickerDriver(
+      "cancel_save_directory_expanded",
+      "/private/directory",
+      () => ({}),
+      "json",
+    )(42);
+  } catch (error) {
+    failure = error;
+  }
+  expect(String(failure)).toContain("exit_code=1");
+  expect(String(failure)).not.toContain("private");
+  expect(failure).not.toHaveProperty("cause");
   expect(execute).toHaveBeenCalledTimes(4);
 });

@@ -18,6 +18,7 @@ import {
 } from "./installed-macos-save-field-probe.ts";
 import {
   installedMacAxActionSucceeded,
+  installedMacSelectedDirectoryVerified,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
 import {
@@ -107,7 +108,9 @@ export function installedMacPickerDriver(
       throw new Error("Native macOS picker returned invalid preparation evidence");
     }
 
-    const readNativeAx = async (requested?: "open" | "cancel_open_existing") => {
+    const readNativeAx = async (
+      requested?: "open" | "cancel_open_existing" | "directory_snapshot",
+    ) => {
       if (selectedPath === undefined) throw new Error("Native macOS picker target unavailable");
       const probeStarted = performance.now();
       let output: string;
@@ -129,7 +132,9 @@ export function installedMacPickerDriver(
       );
       if (
         diagnostic === "Native macOS AX probe: invalid_evidence" ||
-        (requested !== undefined && !installedMacAxActionSucceeded(output, requested))
+        (requested === "directory_snapshot"
+          ? !installedMacSelectedDirectoryVerified(output)
+          : requested !== undefined && !installedMacAxActionSucceeded(output, requested))
       )
         throw new Error(diagnostic);
       return diagnostic;
@@ -170,6 +175,9 @@ export function installedMacPickerDriver(
       // Read-only observations do not authorize Save or imply a verified directory.
       process.stdout.write(`Native macOS Save directory snapshot: ${await readNativeAx()}\n`);
       if (scenario === "cancel_save_directory_expanded") {
+        process.stdout.write(
+          `Native macOS selected directory verification: ${await readNativeAx("directory_snapshot")}\n`,
+        );
         const collapseStarted = performance.now();
         let collapse: string;
         try {

@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   installedMacAxProbeDiagnostic,
   installedMacAxActionSucceeded,
+  installedMacSelectedDirectoryVerified,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -52,6 +53,7 @@ const evidence = {
   firstCannotCompleteAttribute: "none",
   firstCannotCompleteStage: "none",
   firstCannotCompleteDurationMs: 0,
+  directoryVerified: false,
   verified: false,
   foreground: false,
   guardMask: 0,
@@ -570,4 +572,115 @@ it("reports selected-parent directory URL observations without granting action p
       ),
     ).toBe("Native macOS AX probe: invalid_evidence");
   }
+});
+
+const directorySnapshot = {
+  ...evidence,
+  trusted: true,
+  complete: true,
+  lastError: -25212,
+  directoryVerified: true,
+  foreground: true,
+  guardMask: 255,
+  stage: "directory_complete",
+  verified: false,
+  action: { requested: "directory_snapshot", pressed: false, dismissed: false },
+  counts: {
+    ...evidence.counts,
+    windows: 1,
+    sheets: 1,
+    buttons: 1,
+    saveButtons: 1,
+    selectedRoots: 8,
+    urlObjects: 8,
+    exactUrls: 1,
+  },
+  selectedDirectory: {
+    fields: 8,
+    uniqueUrls: 8,
+    terminalUrls: 1,
+    terminalMatches: 1,
+    validShape: true,
+  },
+  firstExactURL: {
+    ...evidence.firstExactURL,
+    role: "AXTextField",
+    parentRole: "AXGroup",
+    origin: "AXChildren",
+    kind: "native",
+    directory: true,
+  },
+  parentChain: {
+    status: "captured_sheet",
+    visited: 2,
+    selected: 0,
+    unknownSelected: 2,
+    roleMask: 8,
+    nodes: [
+      { role: "AXGroup", selectedReference: true, selectedState: "unknown" },
+      { role: "AXSheet", selectedReference: false, selectedState: "unknown" },
+    ],
+  },
+};
+
+it("requires independent native selected-directory proof and never accepts it as an Open action", () => {
+  const stdout = JSON.stringify(directorySnapshot);
+  expect(installedMacSelectedDirectoryVerified(stdout)).toBe(true);
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  expect(installedMacAxActionSucceeded(stdout, "cancel_open_existing")).toBe(false);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("directory_verified=true");
+});
+it.each([
+  { trusted: false },
+  { complete: false },
+  { directoryVerified: false },
+  { foreground: false },
+  { guardMask: 254 },
+  { stage: "press" },
+  { action: { requested: "directory_snapshot", pressed: true, dismissed: false } },
+  { action: { requested: "none", pressed: false, dismissed: false } },
+  { counts: { ...directorySnapshot.counts, selectedRoots: 9 } },
+  { counts: { ...directorySnapshot.counts, urlStrings: 1 } },
+  { counts: { ...directorySnapshot.counts, urlObjects: 7 } },
+  { counts: { ...directorySnapshot.counts, windows: 2 } },
+  { counts: { ...directorySnapshot.counts, saveButtons: 2 } },
+  { counts: { ...directorySnapshot.counts, cannotComplete: 1 } },
+  { counts: { ...directorySnapshot.counts, otherErrors: 1 } },
+  { counts: { ...directorySnapshot.counts, apiDisabled: 1 } },
+  { firstOtherError: -25202 },
+  { firstOtherAttribute: "AXURL" },
+  { selectedDirectory: { ...directorySnapshot.selectedDirectory, terminalMatches: 0 } },
+  { selectedDirectory: { ...directorySnapshot.selectedDirectory, terminalUrls: 2 } },
+  { selectedDirectory: { ...directorySnapshot.selectedDirectory, validShape: false } },
+  { firstExactURL: { ...directorySnapshot.firstExactURL, kind: "string" } },
+  { firstExactURL: { ...directorySnapshot.firstExactURL, directory: false } },
+  { firstExactURL: { ...directorySnapshot.firstExactURL, origin: "AXSelectedChildren" } },
+  { parentChain: { ...directorySnapshot.parentChain, status: "bound" } },
+  {
+    parentChain: {
+      ...directorySnapshot.parentChain,
+      nodes: [
+        { role: "AXGroup", selectedReference: false, selectedState: "unknown" },
+        directorySnapshot.parentChain.nodes[1],
+      ],
+    },
+  },
+  {
+    parentChain: {
+      ...directorySnapshot.parentChain,
+      nodes: [
+        directorySnapshot.parentChain.nodes[0],
+        { role: "AXGroup", selectedReference: false, selectedState: "unknown" },
+      ],
+    },
+  },
+  { path: "/private/path" },
+])("refuses incomplete, ambiguous or action-bearing directory evidence %j", (change) => {
+  expect(
+    installedMacSelectedDirectoryVerified(JSON.stringify({ ...directorySnapshot, ...change })),
+  ).toBe(false);
+});
+it("refuses malformed or oversized selected-directory evidence", () => {
+  for (const input of ["private", "x".repeat(4097), JSON.stringify(evidence)])
+    expect(installedMacSelectedDirectoryVerified(input)).toBe(false);
 });

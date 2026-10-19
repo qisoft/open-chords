@@ -3,6 +3,7 @@ import { z } from "zod";
 import { installedExportExitDiagnostic } from "./installed-export-process.ts";
 
 export const MAC_AX_COUNT_FIELDS = [
+  "saveButtons",
   "windows",
   "sheets",
   "visited",
@@ -220,6 +221,7 @@ const evidenceSchema = z.strictObject({
     "guard",
   ]),
   firstCannotCompleteDurationMs: z.number().int().min(0).max(999999),
+  directoryVerified: z.boolean(),
   verified: z.boolean(),
   foreground: z.boolean(),
   guardMask: z.number().int().min(0).max(255),
@@ -233,9 +235,10 @@ const evidenceSchema = z.strictObject({
     "press",
     "dismissal",
     "complete",
+    "directory_complete",
   ]),
   action: z.strictObject({
-    requested: z.enum(["none", "open", "cancel_open_existing"]),
+    requested: z.enum(["none", "open", "cancel_open_existing", "directory_snapshot"]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
   }),
@@ -275,6 +278,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       firstCannotCompleteAttribute,
       firstCannotCompleteStage,
       firstCannotCompleteDurationMs,
+      directoryVerified,
       verified,
       foreground,
       guardMask,
@@ -312,6 +316,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `cannot_complete_attribute=${firstCannotCompleteAttribute}`,
       `cannot_complete_stage=${firstCannotCompleteStage}`,
       `cannot_complete_duration_ms=${firstCannotCompleteDurationMs}`,
+      `directory_verified=${directoryVerified}`,
       `verified=${verified}`,
       `foreground=${foreground}`,
       `guard_mask=${guardMask}`,
@@ -355,6 +360,56 @@ export function installedMacAxActionSucceeded(
       value.counts.otherErrors === 0 &&
       value.counts.cannotComplete === 0 &&
       value.counts.apiDisabled === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Read-only selected terminal directory proof; never an input/action authorization.
+export function installedMacSelectedDirectoryVerified(stdout: string) {
+  try {
+    if (stdout.length > 4096) return false;
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const value = parsed.data;
+    return (
+      value.trusted &&
+      value.complete &&
+      value.directoryVerified &&
+      value.foreground &&
+      value.guardMask === 255 &&
+      value.stage === "directory_complete" &&
+      value.action.requested === "directory_snapshot" &&
+      !value.action.pressed &&
+      !value.action.dismissed &&
+      value.firstOtherError === 0 &&
+      value.firstOtherAttribute === "none" &&
+      value.counts.otherErrors === 0 &&
+      value.counts.cannotComplete === 0 &&
+      value.counts.apiDisabled === 0 &&
+      value.counts.windows === 1 &&
+      value.counts.sheets === 1 &&
+      value.counts.buttons === 1 &&
+      value.counts.saveButtons === 1 &&
+      value.selectedDirectory.validShape &&
+      value.selectedDirectory.fields === value.counts.selectedRoots &&
+      value.selectedDirectory.uniqueUrls === value.counts.selectedRoots &&
+      value.selectedDirectory.fields > 0 &&
+      value.selectedDirectory.terminalUrls === 1 &&
+      value.selectedDirectory.terminalMatches === 1 &&
+      value.counts.exactUrls === 1 &&
+      value.counts.urlStrings === 0 &&
+      value.counts.urlObjects === value.selectedDirectory.fields &&
+      value.firstExactURL.role === "AXTextField" &&
+      value.firstExactURL.origin === "AXChildren" &&
+      value.firstExactURL.parentRole === "AXGroup" &&
+      value.firstExactURL.kind === "native" &&
+      value.firstExactURL.directory &&
+      value.parentChain.status === "captured_sheet" &&
+      value.parentChain.nodes[0]?.role === "AXGroup" &&
+      value.parentChain.nodes[0]?.selectedReference &&
+      value.parentChain.nodes.at(-1)?.role === "AXSheet"
     );
   } catch {
     return false;
