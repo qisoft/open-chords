@@ -7,6 +7,7 @@ const schema = z.strictObject({
   complete: z.boolean(),
   foreground: z.boolean(),
   guardMask: z.number().int().min(0).max(255),
+  firstErrorDurationMs: z.number().int().min(0).max(999999),
   lastError: z.number().int().min(-32768).max(32767),
   firstErrorAttribute: z.enum([
     "none",

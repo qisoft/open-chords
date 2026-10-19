@@ -24,21 +24,23 @@ var complete = true, foreground = false, pressed = false, expanded = false
 var guardMask = 0, lastError = 0, unsupported = 0, visited = 0, windowsCount = 0, sheetsCount = 0
 var initialValue = -1, finalValue = -1
 var firstErrorAttribute = "none", stage = "arguments"
+var firstErrorDurationMs = 0
 var disclosures: [AXUIElement] = [], saves: [AXUIElement] = [], cancels: [AXUIElement] = []
-func failure(_ status: AXError, _ attribute: String) {
+func failure(_ status: AXError, _ attribute: String, _ durationMs: Int = 0) {
     complete = false
     lastError = Int(status.rawValue)
-    if firstErrorAttribute == "none" { firstErrorAttribute = attribute }
+    if firstErrorAttribute == "none" { firstErrorAttribute = attribute; firstErrorDurationMs = durationMs }
 }
 func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     AXUIElementSetMessagingTimeout(element, name == "AXRole" ? 0.5 : 0.15)
     var value: CFTypeRef?
+    let readStarted = ProcessInfo.processInfo.systemUptime
     let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
     if status == .success { return value }
     if status == .attributeUnsupported || status == .noValue {
         unsupported += 1
         if name == "AXRole" { complete = false }
-    } else { failure(status, name) }
+    } else { failure(status, name, min(999999, max(0, Int((ProcessInfo.processInfo.systemUptime - readStarted) * 1000)))) }
     return nil
 }
 func children(_ element: AXUIElement, _ name: String) -> [AXUIElement] {
@@ -143,7 +145,7 @@ if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
     }
 } else { complete = false }
 let result: [String: Any] = ["trusted": trusted, "complete": complete, "foreground": foreground,
-    "guardMask": guardMask, "lastError": lastError, "firstErrorAttribute": firstErrorAttribute, "stage": stage,
+    "guardMask": guardMask, "lastError": lastError, "firstErrorAttribute": firstErrorAttribute, "firstErrorDurationMs": firstErrorDurationMs, "stage": stage,
     "pressed": pressed, "expanded": expanded, "initialValue": initialValue, "finalValue": finalValue,
     "windows": windowsCount, "sheets": sheetsCount, "visited": visited, "unsupported": min(unsupported, 999),
     "disclosures": min(disclosures.count, 999), "saveButtons": min(saves.count, 999), "cancelButtons": min(cancels.count, 999)]

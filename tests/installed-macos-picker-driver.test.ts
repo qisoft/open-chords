@@ -145,6 +145,7 @@ const expanded = {
   guardMask: 255,
   lastError: 0,
   firstErrorAttribute: "none",
+  firstErrorDurationMs: 0,
   stage: "complete",
   pressed: true,
   expanded: true,

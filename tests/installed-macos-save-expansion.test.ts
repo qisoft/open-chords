@@ -13,6 +13,7 @@ const evidence = {
   guardMask: 255,
   lastError: 0,
   firstErrorAttribute: "none",
+  firstErrorDurationMs: 0,
   stage: "complete",
   pressed: true,
   expanded: true,
@@ -104,6 +105,16 @@ it("requires a separate guarded native 1-to-0 collapse and rejects no-op/restora
   ]) {
     expect(installedMacSaveCollapseSucceeded(JSON.stringify({ ...collapsed, ...change }))).toBe(
       false,
+    );
+  }
+});
+
+it("bounds native read timing and never forwards private duration text", () => {
+  for (const firstErrorDurationMs of [-1, 1000000, 0.5, "/private/path"]) {
+    const output = JSON.stringify({ ...evidence, firstErrorDurationMs });
+    expect(installedMacSaveExpansionSucceeded(output)).toBe(false);
+    expect(installedMacSaveExpansionDiagnostic(output, null, 1)).toBe(
+      "Native macOS Save expansion: invalid_evidence",
     );
   }
 });
