@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   installedMacSaveExpansionDiagnostic,
   installedMacSaveExpansionSucceeded,
+  installedMacSaveCollapseSucceeded,
 } from "./installed-macos-save-expansion.ts";
 import {
   installedMacSaveFieldDiagnostic,
@@ -166,6 +167,30 @@ export function installedMacPickerDriver(
       }
       // Read-only observations do not authorize Save or imply a verified directory.
       process.stdout.write(`Native macOS Save directory snapshot: ${await readNativeAx()}\n`);
+      if (scenario === "cancel_save_directory_expanded") {
+        const collapseStarted = performance.now();
+        let collapse: string;
+        try {
+          ({ stdout: collapse } = await executeNativeFile(
+            join(process.cwd(), "build/test-support/macos-save-expand"),
+            [String(applicationPid), "--collapse"],
+            { env: environment(), timeout: Math.min(7000, remainingBudget()), maxBuffer: 4096 },
+          ));
+        } catch (error) {
+          // Raw native errors expose private command/output; retain fixed evidence only.
+          // eslint-disable-next-line preserve-caught-error
+          throw new Error(
+            installedMacSaveExpansionDiagnostic("", error, performance.now() - collapseStarted),
+          );
+        }
+        const diagnostic = installedMacSaveExpansionDiagnostic(
+          collapse,
+          null,
+          performance.now() - collapseStarted,
+        );
+        if (!installedMacSaveCollapseSucceeded(collapse)) throw new Error(diagnostic);
+        process.stdout.write(`${diagnostic}\n`);
+      }
       await installedMacPickerDriver(
         scenario === "cancel_save_directory_expanded"
           ? "cancel_save_edited_expanded"

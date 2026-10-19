@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   installedMacSaveExpansionDiagnostic,
   installedMacSaveExpansionSucceeded,
+  installedMacSaveCollapseSucceeded,
 } from "./support/installed-macos-save-expansion.ts";
 
 const evidence = {
@@ -86,4 +87,23 @@ it("rejects oversized or malformed output and never leaks native process errors"
   );
   expect(output).toContain("killed=true exit_code=1 exit_signal=SIGTERM");
   expect(output).not.toContain("private");
+});
+
+it("requires a separate guarded native 1-to-0 collapse and rejects no-op/restoration failures", () => {
+  const collapsed = { ...evidence, expanded: false, initialValue: 1, finalValue: 0 };
+  expect(installedMacSaveCollapseSucceeded(JSON.stringify(collapsed))).toBe(true);
+  expect(installedMacSaveExpansionSucceeded(JSON.stringify(collapsed))).toBe(false);
+  expect(installedMacSaveCollapseSucceeded(JSON.stringify(evidence))).toBe(false);
+  for (const change of [
+    { initialValue: 0 },
+    { finalValue: 1 },
+    { pressed: false },
+    { guardMask: 254 },
+    { complete: false },
+    { lastError: -25204 },
+  ]) {
+    expect(installedMacSaveCollapseSucceeded(JSON.stringify({ ...collapsed, ...change }))).toBe(
+      false,
+    );
+  }
 });

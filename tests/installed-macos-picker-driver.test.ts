@@ -166,6 +166,7 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     prepared,
     expanded,
     snapshot,
+    { ...expanded, expanded: false, initialValue: 1, finalValue: 0 },
     { ...cancelled, action: "cancel_save_edited_expanded" },
   ];
   execute.mockImplementation(async () => {
@@ -178,13 +179,16 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     () => ({ LANG: "en_US.UTF-8" }),
     "json",
   )(42);
-  expect(execute).toHaveBeenCalledTimes(4);
+  expect(execute).toHaveBeenCalledTimes(5);
   expect(execute.mock.calls[0]?.[1]).toContain("prepare_save_directory_expanded");
   expect(execute.mock.calls[1]?.[0]).toContain("macos-save-expand");
   expect(execute.mock.calls[1]?.[1]).toEqual(["42"]);
   expect(execute.mock.calls[2]?.[1]).toEqual(["42", "/private/directory"]);
-  expect(execute.mock.calls[3]?.[1]).toContain("cancel_save_edited_expanded");
-  expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([100000, 7000, 7000, 99100]);
+  expect(execute.mock.calls[3]?.[1]).toEqual(["42", "--collapse"]);
+  expect(execute.mock.calls[4]?.[1]).toContain("cancel_save_edited_expanded");
+  expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
+    100000, 7000, 7000, 7000, 98800,
+  ]);
   for (const call of execute.mock.calls) expect(call[2].env).toEqual({ LANG: "en_US.UTF-8" });
   expect(output.mock.calls.flat().join("")).not.toContain("private");
 });
@@ -230,4 +234,25 @@ it("redacts expansion process failures and retains no private cause or continuat
   expect(String(failure)).not.toContain("private");
   expect(failure).not.toHaveProperty("cause");
   expect(execute).toHaveBeenCalledTimes(2);
+});
+
+it("stops before filename input when restoration cannot prove native collapse", async () => {
+  execute
+    .mockResolvedValueOnce({ stdout: JSON.stringify(prepared), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(expanded), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(snapshot), stderr: "" })
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({ ...expanded, initialValue: 1, finalValue: 1 }),
+      stderr: "",
+    });
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  await expect(
+    installedMacPickerDriver(
+      "cancel_save_directory_expanded",
+      "/private/directory",
+      () => ({}),
+      "json",
+    )(42),
+  ).rejects.toThrow("Native macOS Save expansion");
+  expect(execute).toHaveBeenCalledTimes(4);
 });

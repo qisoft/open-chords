@@ -41,6 +41,12 @@ function parse(stdout: string) {
   }
 }
 export function installedMacSaveExpansionSucceeded(stdout: string) {
+  return disclosureTransitionSucceeded(stdout, false);
+}
+export function installedMacSaveCollapseSucceeded(stdout: string) {
+  return disclosureTransitionSucceeded(stdout, true);
+}
+function disclosureTransitionSucceeded(stdout: string, collapse: boolean) {
   const parsed = parse(stdout);
   if (!parsed?.success) return false;
   const value = parsed.data;
@@ -53,9 +59,9 @@ export function installedMacSaveExpansionSucceeded(stdout: string) {
     value.firstErrorAttribute === "none" &&
     value.stage === "complete" &&
     value.pressed &&
-    value.expanded &&
-    value.initialValue === 0 &&
-    value.finalValue === 1 &&
+    value.expanded === !collapse &&
+    value.initialValue === (collapse ? 1 : 0) &&
+    value.finalValue === (collapse ? 0 : 1) &&
     value.visited >= 4 &&
     value.windows === 1 &&
     value.sheets === 1 &&
