@@ -23,6 +23,16 @@ const evidence = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  invalidChildParent: {
+    status: "not_checked",
+    role: "none",
+    pidMatches: false,
+    selectedReference: false,
+    children: 0,
+    containsFailedReference: "unknown",
+    attribute: "none",
+    error: 0,
+  },
   selectedDirectory: {
     fields: 0,
     uniqueUrls: 0,
@@ -683,4 +693,39 @@ it.each([
 it("refuses malformed or oversized selected-directory evidence", () => {
   for (const input of ["private", "x".repeat(4097), JSON.stringify(evidence)])
     expect(installedMacSelectedDirectoryVerified(input)).toBe(false);
+});
+
+it("reports bounded invalid-child parent observations without authorizing an action", () => {
+  const parent = {
+    status: "complete",
+    role: "AXScrollArea",
+    pidMatches: true,
+    selectedReference: false,
+    children: 5,
+    containsFailedReference: "false",
+    attribute: "none",
+    error: 0,
+  };
+  const stdout = JSON.stringify({ ...evidence, invalidChildParent: parent });
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
+    "invalid_child_parent_containsFailedReference=false",
+  );
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  for (const change of [
+    { status: "/private/status" },
+    { role: "/private/role" },
+    { pidMatches: "private" },
+    { children: 258 },
+    { containsFailedReference: "/private/reference" },
+    { attribute: "/private/attribute" },
+    { error: -32769 },
+    { path: "/private/path" },
+  ])
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...evidence, invalidChildParent: { ...parent, ...change } }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
 });

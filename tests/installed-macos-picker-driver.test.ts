@@ -52,6 +52,16 @@ const snapshot = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  invalidChildParent: {
+    status: "not_checked",
+    role: "none",
+    pidMatches: false,
+    selectedReference: false,
+    children: 0,
+    containsFailedReference: "unknown",
+    attribute: "none",
+    error: 0,
+  },
   selectedDirectory: {
     fields: 0,
     uniqueUrls: 0,

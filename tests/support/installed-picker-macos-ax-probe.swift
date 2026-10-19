@@ -173,6 +173,7 @@ var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
 var selectedDirectory: [String: Any] = ["fields": 0, "uniqueUrls": 0, "terminalUrls": 0, "terminalMatches": 0, "validShape": false]
+var invalidChildParent: [String: Any] = ["status": "not_checked", "role": "none", "pidMatches": false, "selectedReference": false, "children": 0, "containsFailedReference": "unknown", "attribute": "none", "error": 0]
 var firstExactElement: AXUIElement? = nil
 var parentChain: [String: Any] = ["status": "not_checked", "visited": 0, "selected": 0, "unknownSelected": 0, "roleMask": 0, "nodes": [[String: Any]]()]
 var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none", "titleCategory": "unavailable", "valueCategory": "unavailable", "traversalRoleMask": 0, "traversalDepth": 0]
@@ -262,6 +263,39 @@ func diagnosticRole(_ role: String) -> String {
     return ["AXSheet", "AXBrowser", "AXScrollArea", "AXSplitGroup", "AXGroup", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell", "AXImage", "AXStaticText", "AXTextField", "AXButton", "AXPopUpButton", "AXDisclosureTriangle"].contains(role) ? role : "other"
 }
 
+// Failure-only diagnostic. It neither retries the failed child nor changes read-error accounting.
+func invalidChildParentObservation(_ parent: AXUIElement, child: AXUIElement, pid: pid_t, selectedReference: Bool) -> [String: Any] {
+    var result: [String: Any] = ["status": "complete", "role": "none", "pidMatches": false, "selectedReference": selectedReference,
+        "children": 0, "containsFailedReference": "unknown", "attribute": "pid", "error": 0]
+    if ProcessInfo.processInfo.systemUptime >= deadline { result["status"] = "deadline"; return result }
+    var actualPid: pid_t = 0
+    let pidStatus = AXUIElementGetPid(parent, &actualPid)
+    if pidStatus != .success { result["status"] = "error"; result["error"] = Int(pidStatus.rawValue); return result }
+    result["pidMatches"] = actualPid == pid
+    result["attribute"] = "AXRole"
+    var status = AXUIElementSetMessagingTimeout(parent, 0.5)
+    if status != .success { result["status"] = "error"; result["error"] = Int(status.rawValue); return result }
+    var value: CFTypeRef?
+    status = AXUIElementCopyAttributeValue(parent, "AXRole" as CFString, &value)
+    if status != .success { result["status"] = "error"; result["error"] = Int(status.rawValue); return result }
+    guard let role = value as? String else { result["status"] = "invalid_value"; return result }
+    result["role"] = diagnosticRole(role)
+    if ProcessInfo.processInfo.systemUptime >= deadline { result["status"] = "deadline"; return result }
+    result["attribute"] = "AXChildren"
+    status = AXUIElementSetMessagingTimeout(parent, 0.15)
+    if status != .success { result["status"] = "error"; result["error"] = Int(status.rawValue); return result }
+    value = nil
+    status = AXUIElementCopyAttributeValue(parent, "AXChildren" as CFString, &value)
+    if status != .success { result["status"] = "error"; result["error"] = Int(status.rawValue); return result }
+    guard let children = value as? [AXUIElement] else { result["status"] = "invalid_value"; return result }
+    result["children"] = min(children.count, 257)
+    if children.count > 256 { result["status"] = "bound"; return result }
+    result["containsFailedReference"] = children.contains(where: { same($0, child) }) ? "true" : "false"
+    result["attribute"] = "none"
+    if ProcessInfo.processInfo.systemUptime >= deadline { result["status"] = "deadline" }
+    return result
+}
+
 func noReadFailures() -> Bool {
     counts["cannotComplete", default: 0] == 0 && counts["apiDisabled", default: 0] == 0 && counts["otherErrors", default: 0] == 0
 }
@@ -314,7 +348,14 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
         counts["visited"] = seen.count
-        let role = string(element, "AXRole") ?? ""
+        let roleRead = readResult(element, "AXRole")
+        let role = roleRead.value as? String ?? ""
+        if ["open", "cancel_open_existing"].contains(requested), roleRead.status == .invalidUIElement,
+           origin == "AXChildren", parentRole == "AXScrollArea", !readSelectedReference, !selectedBranch,
+           (invalidChildParent["status"] as? String) == "not_checked", let parent = directParent {
+            invalidChildParent = invalidChildParentObservation(parent, child: element, pid: pid,
+                selectedReference: selected.contains(where: { same($0, parent) }))
+        }
         let selectedFlag = read(element, "AXSelected") as? Bool
         if selectedFlag == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
         readSelectedReference = readSelectedReference || selectedFlag == true
@@ -577,7 +618,7 @@ if !noReadFailures() { complete = false; directoryVerified = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
-    "counts": counts, "selectedDirectory": selectedDirectory, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "counts": counts, "invalidChildParent": invalidChildParent, "selectedDirectory": selectedDirectory, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,

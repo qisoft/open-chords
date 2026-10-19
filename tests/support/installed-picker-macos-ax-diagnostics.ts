@@ -103,6 +103,16 @@ const AX_ORIGIN_KEYS = [
 ] as const;
 
 const evidenceSchema = z.strictObject({
+  invalidChildParent: z.strictObject({
+    status: z.enum(["not_checked", "complete", "deadline", "error", "invalid_value", "bound"]),
+    role: z.enum(AX_ROLE_KEYS),
+    pidMatches: z.boolean(),
+    selectedReference: z.boolean(),
+    children: z.number().int().min(0).max(257),
+    containsFailedReference: z.enum(["true", "false", "unknown"]),
+    attribute: z.enum(["none", "pid", "AXRole", "AXChildren"]),
+    error: z.number().int().min(-32768).max(32767),
+  }),
   selectedDirectory: z
     .strictObject({
       fields: z.number().int().min(0).max(256),
@@ -274,6 +284,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       firstOtherParentRole,
       firstExactURL,
       selectedDirectory,
+      invalidChildParent,
       parentChain,
       firstCannotCompleteAttribute,
       firstCannotCompleteStage,
@@ -303,6 +314,9 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `other_visited=${firstOtherVisited}`,
       `other_origin=${firstOtherOrigin}`,
       `other_parent_role=${firstOtherParentRole}`,
+      ...Object.entries(invalidChildParent).map(
+        ([key, value]) => `invalid_child_parent_${key}=${value}`,
+      ),
       ...Object.entries(selectedDirectory).map(
         ([key, value]) => `selected_directory_${key}=${value}`,
       ),
