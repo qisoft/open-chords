@@ -52,6 +52,7 @@ const snapshot = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  parentChain: { status: "not_checked", visited: 0, selected: 0, unknownSelected: 0, roleMask: 0 },
   firstExactURL: {
     role: "none",
     parentRole: "none",

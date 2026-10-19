@@ -22,6 +22,7 @@ const evidence = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  parentChain: { status: "not_checked", visited: 0, selected: 0, unknownSelected: 0, roleMask: 0 },
   firstExactURL: {
     role: "none",
     parentRole: "none",
@@ -380,6 +381,44 @@ it("bounds exact-field context and rejects all private labels without authorizin
     expect(
       installedMacAxProbeDiagnostic(
         JSON.stringify({ ...observed, firstExactURL: { ...observed.firstExactURL, ...change } }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+  }
+});
+
+it("reports bounded actual-parent observations without granting directory or action proof", () => {
+  const observed = {
+    ...evidence,
+    firstOtherAttribute: "AXParent",
+    firstOtherStage: "parent_chain",
+    firstOtherOrigin: "exact_url_parent_chain",
+    parentChain: {
+      status: "captured_sheet",
+      visited: 8,
+      selected: 1,
+      unknownSelected: 4,
+      roleMask: 15,
+    },
+  };
+  const stdout = JSON.stringify(observed);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
+    "parent_chain_status=captured_sheet",
+  );
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("parent_chain_selected=1");
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  for (const change of [
+    { status: "/private/status" },
+    { visited: 17 },
+    { roleMask: 64 },
+    { selected: 9 },
+    { unknownSelected: 8 },
+    { path: "/private/path" },
+  ]) {
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...observed, parentChain: { ...observed.parentChain, ...change } }),
         null,
         1,
       ),

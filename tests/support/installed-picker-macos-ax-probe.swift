@@ -139,6 +139,8 @@ var firstOtherStage = "none"
 var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
+var firstExactElement: AXUIElement? = nil
+var parentChain: [String: Any] = ["status": "not_checked", "visited": 0, "selected": 0, "unknownSelected": 0, "roleMask": 0]
 var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none", "titleCategory": "unavailable", "valueCategory": "unavailable", "traversalRoleMask": 0, "traversalDepth": 0]
 var firstOtherSelectedReference = false
 var firstOtherSelectedBranch = false
@@ -322,6 +324,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
             if url.absoluteString == expected {
                 counts["exactUrls", default: 0] += 1
                 if requested == "none" && (firstExactURL["origin"] as? String) == "none" {
+                    firstExactElement = element
                     firstExactURL = ["role": diagnosticRole(role), "parentRole": parentRole, "origin": origin,
                         "selected": selectedFlag == true ? "true" : selectedFlag == false ? "false" : "unknown",
                         "directory": url.hasDirectoryPath, "kind": CFGetTypeID(value) == CFURLGetTypeID() ? "native" : "string",
@@ -342,6 +345,38 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role), selectedBranch || readSelectedReference, childMask, traversalDepth + 1) }) }
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
+    }
+    // Read-only actual-parent observations, independent of traversal provenance.
+    if requested == "none", let exactElement = firstExactElement, sheets.count == 1 {
+        stage = "parent_chain"
+        readOrigin = "exact_url_parent_chain"
+        readParentRole = "none"
+        readSelectedReference = false
+        readSelectedBranch = false
+        var current = exactElement
+        var chainSeen: [AXUIElement] = [exactElement]
+        var chainVisited = 0, chainSelected = 0, chainUnknown = 0, chainMask = 0
+        var chainStatus = "bound"
+        for _ in 0..<16 {
+            if ProcessInfo.processInfo.systemUptime >= deadline { chainStatus = "deadline"; break }
+            guard let value = read(current, "AXParent") else { chainStatus = "missing_parent"; break }
+            guard CFGetTypeID(value) == AXUIElementGetTypeID() else { chainStatus = "invalid_parent"; break }
+            let parent = unsafeBitCast(value, to: AXUIElement.self)
+            readSelectedReference = selected.contains(where: { same($0, parent) })
+            if chainSeen.contains(where: { same($0, parent) }) { chainStatus = "cycle"; break }
+            chainSeen.append(parent)
+            chainVisited += 1
+            guard let role = string(parent, "AXRole") else { chainStatus = "unreadable_role"; break }
+            chainMask |= traversalRoleBit(role)
+            if let selected = read(parent, "AXSelected") as? Bool {
+                if selected { chainSelected += 1; readSelectedReference = true }
+            } else { chainUnknown += 1 }
+            if same(parent, sheets[0]) { chainStatus = "captured_sheet"; break }
+            current = parent
+            readParentRole = "none"
+        }
+        parentChain = ["status": chainStatus, "visited": chainVisited, "selected": chainSelected,
+            "unknownSelected": chainUnknown, "roleMask": chainMask]
     }
     stage = "verification"
     readOrigin = "selected_verification"
@@ -444,7 +479,7 @@ if !noReadFailures() { complete = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
-    "counts": counts, "firstExactURL": firstExactURL, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "counts": counts, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
