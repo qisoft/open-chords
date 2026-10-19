@@ -254,3 +254,24 @@ it("keeps only bounded unreadable reference classifications", () => {
     expect(installedMacPickerDiagnostic({}, invalid, 1)).not.toContain("unreadable references");
   }
 });
+
+it("retains only bounded fixed fresh-control evidence after a guard refusal", () => {
+  const probe =
+    "Native macOS picker fresh controls: phase=activate status=complete before_input=true elements=9 primary=1 cancel=1 os_error=none";
+  const output = installedMacPickerDiagnostic(
+    {},
+    [
+      probe,
+      probe,
+      `${probe} /private/path`,
+      probe.replace("elements=9", "elements=258"),
+      probe.replace("primary=1", "primary=18"),
+      probe.replace("status=complete", "status=private"),
+    ].join("\n"),
+    1,
+  );
+  expect(output.split(probe)).toHaveLength(2);
+  expect(output).not.toContain("private");
+  expect(output).not.toContain("elements=258");
+  expect(output).not.toContain("primary=18");
+});

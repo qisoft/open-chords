@@ -40,6 +40,22 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       ),
     )
     .slice(-1);
+  const freshControls = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS picker fresh controls: phase=(?:activate|before_input|after_probe) status=(?:complete|deadline|bound|error) before_input=(?:true|false) elements=([0-9]{1,3}) primary=([0-9]{1,2}) cancel=([0-9]{1,2}) os_error=(?:none|unknown|-?[0-9]{1,5})$/u.exec(
+          line,
+        );
+      return (
+        match !== null &&
+        Number(match[1]) <= 257 &&
+        Number(match[2]) <= 17 &&
+        Number(match[3]) <= 17
+      );
+    })
+    .slice(-1);
   const probes = stderr
     .slice(-65536)
     .split(/\r?\n/u)
@@ -79,6 +95,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...target,
     ...guards,
     ...guardSnapshots,
+    ...freshControls,
     ...(installedMacSaveControlsDiagnostic(stderr)
       ? [installedMacSaveControlsDiagnostic(stderr)]
       : []),
