@@ -531,21 +531,24 @@ it("uses the same bounded fresh-snapshot rule for selected-file Cancel", async (
   await installedMacPickerDriver("cancel_open_existing", "/private/fixture.wav", () => ({}))(42);
   expect(execute).toHaveBeenCalledTimes(3);
 });
-it("keeps both native snapshots inside the original shared seven-second budget", async () => {
-  let now = 0;
-  vi.spyOn(performance, "now").mockImplementation(() => now);
-  vi.spyOn(process.stdout, "write").mockReturnValue(true);
-  execute
-    .mockResolvedValueOnce({
-      stdout: JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true }),
-      stderr: "",
-    })
-    .mockImplementationOnce(async () => {
-      now = 7001;
-      return { stdout: JSON.stringify(vanishedSnapshot), stderr: "" };
-    });
-  await expect(
-    installedMacPickerDriver("open", "/private/fixture.wav", () => ({}))(42),
-  ).rejects.toThrow("AX probe deadline exceeded");
-  expect(execute).toHaveBeenCalledTimes(2);
-});
+it.each([6999.6, 7001])(
+  "refuses another snapshot with less than one millisecond remaining after %s ms",
+  async (elapsed) => {
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    execute
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ prepared: true, nativePress: false, navigationDismissed: true }),
+        stderr: "",
+      })
+      .mockImplementationOnce(async () => {
+        now = elapsed;
+        return { stdout: JSON.stringify(vanishedSnapshot), stderr: "" };
+      });
+    await expect(
+      installedMacPickerDriver("open", "/private/fixture.wav", () => ({}))(42),
+    ).rejects.toThrow("AX probe deadline exceeded");
+    expect(execute).toHaveBeenCalledTimes(2);
+  },
+);

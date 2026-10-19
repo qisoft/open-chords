@@ -115,7 +115,9 @@ export function installedMacPickerDriver(
       if (selectedPath === undefined) throw new Error("Native macOS picker target unavailable");
       const phaseStarted = performance.now();
       for (let attempt = 0; attempt < 2; attempt++) {
-        const probeBudget = Math.min(7000 - (performance.now() - phaseStarted), remainingBudget());
+        const probeBudget = Math.floor(
+          Math.min(7000 - (performance.now() - phaseStarted), remainingBudget()),
+        );
         if (probeBudget <= 0) throw new Error("Native macOS AX probe deadline exceeded");
         const probeStarted = performance.now();
         let output: string;
@@ -123,7 +125,7 @@ export function installedMacPickerDriver(
           ({ stdout: output } = await executeNativeFile(
             join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
             [String(applicationPid), selectedPath, ...(requested === undefined ? [] : [requested])],
-            { env: environment(), timeout: Math.floor(probeBudget), maxBuffer: 4096 },
+            { env: environment(), timeout: probeBudget, maxBuffer: 4096 },
           ));
         } catch (error) {
           // Raw exec errors contain private paths/output; retaining cause defeats redaction.
