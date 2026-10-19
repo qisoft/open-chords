@@ -107,6 +107,11 @@ var firstOtherStage = "none"
 var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
+var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none"]
+var firstOtherSelectedReference = false
+var firstOtherSelectedBranch = false
+var readSelectedReference = false
+var readSelectedBranch = false
 var readParentRole = "none"
 var readOrigin = "discovery"
 var firstCannotCompleteAttribute = "none"
@@ -135,6 +140,8 @@ func recordReadError(_ status: AXError, name: String, duration: TimeInterval) {
             firstOtherStage = stage; firstOtherVisited = counts["visited"] ?? 0
             firstOtherOrigin = readOrigin
             firstOtherParentRole = readParentRole
+            firstOtherSelectedReference = readSelectedReference
+            firstOtherSelectedBranch = readSelectedBranch
         }
     }
 }
@@ -221,19 +228,23 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     if sheets.count != 1 || parents.count != 1 { complete = false }
     var selected: [AXUIElement] = []
     var buttons: [AXUIElement] = []
-    var queue: [(AXUIElement, String, String)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none") } : []
+    var queue: [(AXUIElement, String, String, Bool)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none", false) } : []
     seen = []
     stage = "selection"
     while !queue.isEmpty && complete {
         if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
-        let (element, origin, parentRole) = queue.removeFirst()
+        let (element, origin, parentRole, selectedBranch) = queue.removeFirst()
         readOrigin = origin
         readParentRole = parentRole
+        readSelectedReference = selected.contains(where: { same($0, element) })
+        readSelectedBranch = selectedBranch
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
         counts["visited"] = seen.count
         let role = string(element, "AXRole") ?? ""
-        if (read(element, "AXSelected") as? Bool) == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
+        let selectedFlag = read(element, "AXSelected") as? Bool
+        if selectedFlag == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
+        readSelectedReference = readSelectedReference || selectedFlag == true
         if requested == "none" {
             let title = string(element, "AXTitle")
             let value = read(element, "AXValue")
@@ -273,22 +284,31 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if let value = read(element, "AXURL"), let url = nativeURL(value) {
             if CFGetTypeID(value) == CFURLGetTypeID() { counts["urlObjects", default: 0] += 1 }
             else { counts["urlStrings", default: 0] += 1 }
-            if url.absoluteString == expected { counts["exactUrls", default: 0] += 1 }
+            if url.absoluteString == expected {
+                counts["exactUrls", default: 0] += 1
+                if requested == "none" && (firstExactURL["origin"] as? String) == "none" {
+                    firstExactURL = ["role": diagnosticRole(role), "parentRole": parentRole, "origin": origin,
+                        "selected": selectedFlag == true ? "true" : selectedFlag == false ? "false" : "unknown",
+                        "directory": url.hasDirectoryPath, "kind": CFGetTypeID(value) == CFURLGetTypeID() ? "native" : "string"]
+                }
+            }
         }
-        var next: [(AXUIElement, String, String)] = []
+        var next: [(AXUIElement, String, String, Bool)] = []
         for name in ["AXSelectedChildren", "AXSelectedRows", "AXSelectedCells", "AXSelectedColumns"] {
             for child in elements(element, name) {
                 if !selected.contains(where: { same($0, child) }) { selected.append(child) }
-                next.append((child, name, diagnosticRole(role)))
+                next.append((child, name, diagnosticRole(role), true))
             }
         }
-        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns").map { ($0, "AXColumns", diagnosticRole(role)) }) }
-        else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role)) }) }
+        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns").map { ($0, "AXColumns", diagnosticRole(role), selectedBranch || readSelectedReference) }) }
+        else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role), selectedBranch || readSelectedReference) }) }
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
     }
     stage = "verification"
     readOrigin = "selected_verification"
+    readSelectedReference = true
+    readSelectedBranch = true
     readParentRole = "none"
     counts["selectedRoots"] = selected.count
     counts["buttons"] = buttons.count
@@ -318,6 +338,8 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     if requested != "none" && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
         stage = "guard"
         readOrigin = "guard"
+        readSelectedReference = false
+        readSelectedBranch = false
         readParentRole = "none"
         let sheet = sheets[0]
         let parent = parents[0]
@@ -384,10 +406,11 @@ if !noReadFailures() { complete = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
-    "counts": counts, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "counts": counts, "firstExactURL": firstExactURL, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
+    "firstOtherSelectedReference": firstOtherSelectedReference, "firstOtherSelectedBranch": firstOtherSelectedBranch,
     "firstOtherError": firstOtherError, "firstOtherAttribute": firstOtherAttribute,
     "firstOtherStage": firstOtherStage, "firstOtherVisited": firstOtherVisited, "firstOtherOrigin": firstOtherOrigin, "firstOtherParentRole": firstOtherParentRole,
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
