@@ -34,3 +34,21 @@ it("bounds retained events even across many chunks", () => {
     collect("YouTube shutdown event: event=window_closed kind=created\n");
   expect(output).toHaveLength(32);
 });
+
+it("accepts only fixed quit prevention and event-loop checkpoints", () => {
+  const output: string[] = [];
+  const collect = rendererShutdownCollector((line) => output.push(line));
+  const events = [
+    "quit_prevented",
+    "quit_allowed",
+    "quit_loop_100ms",
+    "quit_loop_1s",
+    "quit_loop_5s",
+  ];
+  for (const event of events) {
+    collect(`YouTube shutdown event: event=${event} kind=app\n`);
+    collect(`YouTube shutdown event: event=${event} kind=app /private/path\n`);
+  }
+  collect("YouTube shutdown event: event=quit_loop_30s kind=app\n");
+  expect(output).toEqual(events.map((event) => `YouTube shutdown event: event=${event} kind=app`));
+});
