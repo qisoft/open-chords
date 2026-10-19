@@ -41,6 +41,23 @@ def destroy_timeout_revoke_probe(stderr: bytes | str | None) -> str:
     return "unknown"
 
 
+def destroy_timeout_revoke_timing(stderr: bytes | str | None) -> str:
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not isinstance(stderr, str):
+        return "unknown"
+    pattern = re.compile(
+        r"Native revoke timing: ancestor=([0-5]) step="
+        r"(runtime_root|ancestor_attributes|canonical|path_attributes|mutex_create|mutex_wait|"
+        r"security_read|acl_build|security_write|release|complete) elapsed_ms=([0-9]{1,9})")
+    entries = []
+    for line in stderr[-65536:].splitlines():
+        match = pattern.fullmatch(line)
+        if match:
+            entries.append(f"ancestor={match[1]} step={match[2]} elapsed_ms={match[3]}")
+    return ";".join(entries[-16:]) if entries else "unknown"
+
+
 class NativeDestroyDiagnosticsTests(unittest.TestCase):
     def test_retains_last_allowlisted_phase_without_private_text(self) -> None:
         self.assertEqual(destroy_timeout_phase(
@@ -49,6 +66,16 @@ class NativeDestroyDiagnosticsTests(unittest.TestCase):
         self.assertEqual(destroy_timeout_phase("Native destroy phase: lock /private/token"), "unknown")
         self.assertEqual(destroy_timeout_phase("Native destroy phase: /private/profile"), "unknown")
         self.assertEqual(destroy_timeout_phase(None), "unknown")
+
+    def test_retains_bounded_revoke_timing_without_private_text(self) -> None:
+        line = "Native revoke timing: ancestor=5 step=security_write elapsed_ms=1234"
+        self.assertEqual(destroy_timeout_revoke_timing((line + "\n") * 20).count("ancestor="), 16)
+        self.assertEqual(destroy_timeout_revoke_timing(line.encode()),
+                         "ancestor=5 step=security_write elapsed_ms=1234")
+        for value in (None, line + " /private/profile", line.replace("ancestor=5", "ancestor=6"),
+                      line.replace("1234", "1234567890"), line.replace("security_write", "private"),
+                      line + "\n" + "x" * 65536):
+            self.assertEqual(destroy_timeout_revoke_timing(value), "unknown")
 
     def test_retains_only_exact_bounded_revoke_probe_fields(self) -> None:
         self.assertEqual(destroy_timeout_revoke_probe(
@@ -157,7 +184,8 @@ class WindowsNativeContainmentBuildTests(unittest.TestCase):
                 except subprocess.TimeoutExpired as error:
                     raise AssertionError(
                         f"Native destroy timed out: phase={destroy_timeout_phase(error.stderr)} "
-                        f"revoke_probe={destroy_timeout_revoke_probe(error.stderr)}"
+                        f"revoke_probe={destroy_timeout_revoke_probe(error.stderr)} "
+                        f"revoke_timing={destroy_timeout_revoke_timing(error.stderr)}"
                     ) from None
 
 
