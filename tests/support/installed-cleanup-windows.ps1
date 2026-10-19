@@ -32,17 +32,20 @@ public static class CleanupNativeInput {
     uint processId;
     if (GetWindowThreadProcessId(window, out processId) == 0 || processId != expectedProcessId ||
         !IsWindowVisible(window) || !IsWindowEnabled(window))
-      throw new InvalidOperationException("Native cleanup input target unavailable");
+      throw new InvalidOperationException("Native cleanup input failure: target");
     SetForegroundWindow(window);
-    if (GetForegroundWindow() != window ||
-        GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2) != window || !SetCursorPos(x, y))
-      throw new InvalidOperationException("Native cleanup dialog could not receive input");
+    if (GetForegroundWindow() != window)
+      throw new InvalidOperationException("Native cleanup input failure: foreground");
+    if (GetAncestor(WindowFromPoint(new Point { x = x, y = y }), 2) != window)
+      throw new InvalidOperationException("Native cleanup input failure: hit_test");
+    if (!SetCursorPos(x, y))
+      throw new InvalidOperationException("Native cleanup input failure: cursor_position");
     var inputs = new[] {
       new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
       new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
     };
     if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
-      throw new InvalidOperationException("Native cleanup click was not delivered");
+      throw new InvalidOperationException("Native cleanup input failure: send_input");
   }
 }
 '@
