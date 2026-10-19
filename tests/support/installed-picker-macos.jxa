@@ -195,12 +195,21 @@ function run(argv) {
     var filenameFields = [];
     var total = 0;
     var unreadableRoles = 0;
+    var unreadableGone = 0, unreadableLive = 0, unreadableUnknown = 0;
     var expectedFilename = saveDefaults[saveFormat];
     var basename = expectedFilename.slice(0, expectedFilename.lastIndexOf('.'));
     for (var f = 0; f < saveElements.length; f++) {
       var field = saveElements[f];
       var fieldRole = attribute(field, 'role');
-      if (fieldRole === null) unreadableRoles++;
+      if (fieldRole === null) {
+        unreadableRoles++;
+        try {
+          var exists = field.exists();
+          if (exists === false) unreadableGone++;
+          else if (exists === true) unreadableLive++;
+          else unreadableUnknown++;
+        } catch (_) { unreadableUnknown++; }
+      }
       if (fieldRole !== 'AXTextField' && fieldRole !== 'AXComboBox') continue;
       // Expanded browser search is not a filename input; all other fields remain checked.
       if (expandedControls && fieldRole === 'AXTextField' && attribute(field, 'subrole') === 'AXSearchField') continue;
@@ -221,6 +230,8 @@ function run(argv) {
     }
     var saveProbe = { format: saveFormat, total: total, unreadableRoles: unreadableRoles, truncated: total > 16, fields: fields };
     console.log('Native macOS Save field evidence: ' + JSON.stringify(saveProbe));
+    if (unreadableRoles > 0) console.log('Native macOS Save unreadable references: total=' + unreadableRoles +
+      ' gone=' + unreadableGone + ' live=' + unreadableLive + ' unknown=' + unreadableUnknown);
     if (unreadableRoles !== 0 || total > 16 || fields.some(function (field) { return field.name === 'unavailable'; }) || filenameFields.length !== 1) throw new Error('default filename unavailable');
     var filenameField = filenameFields[0];
     var filenameName = attribute(filenameField, 'name');

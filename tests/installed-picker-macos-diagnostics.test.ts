@@ -242,3 +242,15 @@ it("reports only bounded initial disclosure counts on expanded preparation failu
     expect(installedMacPickerDiagnostic({}, invalid, 1)).not.toContain("initial disclosure");
   }
 });
+
+it("keeps only bounded unreadable reference classifications", () => {
+  const line = "Native macOS Save unreadable references: total=14 gone=14 live=0 unknown=0";
+  expect(installedMacPickerDiagnostic({}, line, 1)).toContain(line);
+  for (const invalid of [
+    line + " /private/path",
+    line.replace("total=14", "total=257"),
+    line.replace("gone=14", "gone=15"),
+  ]) {
+    expect(installedMacPickerDiagnostic({}, invalid, 1)).not.toContain("unreadable references");
+  }
+});

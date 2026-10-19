@@ -87,6 +87,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       : []),
     ...reads,
     ...refusal,
+    ...installedMacSaveUnreadableReferences(stderr),
     ...installedMacSaveInitialDisclosure(stderr),
     ...installedMacSaveFailureFields(stderr),
   ].join("\n");
@@ -161,4 +162,22 @@ export function installedMacSaveInitialDisclosure(stderr: string): string[] {
       );
     });
   return entries.slice(-1);
+}
+
+export function installedMacSaveUnreadableReferences(stderr: string): string[] {
+  return stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS Save unreadable references: total=([0-9]{1,3}) gone=([0-9]{1,3}) live=([0-9]{1,3}) unknown=([0-9]{1,3})$/u.exec(
+          line,
+        );
+      return (
+        match !== null &&
+        Number(match[1]) <= 256 &&
+        Number(match[2]) + Number(match[3]) + Number(match[4]) === Number(match[1])
+      );
+    })
+    .slice(-1);
 }
