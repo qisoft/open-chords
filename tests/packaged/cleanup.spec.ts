@@ -13,6 +13,7 @@ import { z } from "zod";
 import { openNetworkMode } from "../../apps/desktop/src/main/network-mode.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import { installedWindowsCleanupFailure } from "../support/installed-cleanup-windows-diagnostics.ts";
 
 // System accessibility clients drive the installed native dialogs without replacing Electron APIs.
 test.skip(
@@ -152,10 +153,18 @@ for (const scenario of ["unchecked", "cancel-final", "confirm-models"] as const)
                 scenario,
               ],
             };
-      const { stdout } = await execute(driver.command, driver.args, {
-        timeout: 100000,
-        maxBuffer: 16384,
-      });
+      let stdout: string;
+      try {
+        ({ stdout } = await execute(driver.command, driver.args, {
+          timeout: 100000,
+          maxBuffer: 16384,
+        }));
+      } catch (error) {
+        // Native process errors include private command arguments and output; never attach them as a cause.
+        // eslint-disable-next-line preserve-caught-error
+        if (process.platform === "win32") throw new Error(installedWindowsCleanupFailure(error));
+        throw error;
+      }
       const events = z
         .array(z.object({ category: z.string(), checked: z.boolean(), action: z.string() }))
         .parse(JSON.parse(stdout));

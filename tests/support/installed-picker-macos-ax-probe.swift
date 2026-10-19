@@ -57,6 +57,10 @@ func traversalRoleBit(_ role: String) -> Int {
     }
 }
 
+func absentParentStatus(_ status: AXError) -> String {
+    return status == .noValue ? "missing_parent" : "unreadable_parent"
+}
+
 let arguments = CommandLine.arguments
 if arguments.count == 2 && arguments[1] == "--self-test" {
     let target = URL(fileURLWithPath: "/fixture/input.wav")
@@ -102,6 +106,10 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
     ]
     if !categories.allSatisfy({ fieldTextCategory($0.0, target: target, path: target.path) == $0.1 }) { exit(1) }
     if (traversalRoleBit("AXBrowser") | traversalRoleBit("AXGroup")) != 9 || traversalRoleBit("private") != 0 { exit(1) }
+    let parentCases: [(AXError, String)] = [(.noValue, "missing_parent"), (.cannotComplete, "unreadable_parent"),
+        (.invalidUIElement, "unreadable_parent"), (.attributeUnsupported, "unreadable_parent"), (.success, "unreadable_parent")]
+    if !parentCases.allSatisfy({ absentParentStatus($0.0) == $0.1 }) { exit(1) }
+    print("Native macOS absent parent checks passed: 5")
     print("Native macOS field context checks passed: 10")
     print("Native macOS disclosure value checks passed: 7")
     print("Native macOS selected-file checks passed: 9")
@@ -139,6 +147,8 @@ var firstOtherStage = "none"
 var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
+var firstExactElement: AXUIElement? = nil
+var parentChain: [String: Any] = ["status": "not_checked", "visited": 0, "selected": 0, "unknownSelected": 0, "roleMask": 0]
 var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none", "titleCategory": "unavailable", "valueCategory": "unavailable", "traversalRoleMask": 0, "traversalDepth": 0]
 var firstOtherSelectedReference = false
 var firstOtherSelectedBranch = false
@@ -178,7 +188,7 @@ func recordReadError(_ status: AXError, name: String, duration: TimeInterval) {
     }
 }
 
-func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+func readResult(_ element: AXUIElement, _ name: String) -> (status: AXError, value: CFTypeRef?) {
     // Native CI observed AXRole timing out at 164 ms with the 150 ms read cap.
     // Give this identity read a separate cap; any failed read still prevents action.
     AXUIElementSetMessagingTimeout(element, name == "AXRole" ? 0.5 : 0.15)
@@ -187,9 +197,12 @@ func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
     if status != .success {
         recordReadError(status, name: name, duration: ProcessInfo.processInfo.systemUptime - readStarted)
-        return nil
+        return (status, nil)
     }
-    return value
+    return (status, value)
+}
+func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    return readResult(element, name).value
 }
 
 // Read-only action availability; this never performs an action or grants authorization.
@@ -322,6 +335,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
             if url.absoluteString == expected {
                 counts["exactUrls", default: 0] += 1
                 if requested == "none" && (firstExactURL["origin"] as? String) == "none" {
+                    firstExactElement = element
                     firstExactURL = ["role": diagnosticRole(role), "parentRole": parentRole, "origin": origin,
                         "selected": selectedFlag == true ? "true" : selectedFlag == false ? "false" : "unknown",
                         "directory": url.hasDirectoryPath, "kind": CFGetTypeID(value) == CFURLGetTypeID() ? "native" : "string",
@@ -342,6 +356,39 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role), selectedBranch || readSelectedReference, childMask, traversalDepth + 1) }) }
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
+    }
+    // Read-only actual-parent observations, independent of traversal provenance.
+    if requested == "none", let exactElement = firstExactElement, sheets.count == 1 {
+        stage = "parent_chain"
+        readOrigin = "exact_url_parent_chain"
+        readParentRole = "none"
+        readSelectedReference = false
+        readSelectedBranch = false
+        var current = exactElement
+        var chainSeen: [AXUIElement] = [exactElement]
+        var chainVisited = 0, chainSelected = 0, chainUnknown = 0, chainMask = 0
+        var chainStatus = "bound"
+        for _ in 0..<16 {
+            if ProcessInfo.processInfo.systemUptime >= deadline { chainStatus = "deadline"; break }
+            let parentRead = readResult(current, "AXParent")
+            guard let value = parentRead.value else { chainStatus = absentParentStatus(parentRead.status); break }
+            guard CFGetTypeID(value) == AXUIElementGetTypeID() else { chainStatus = "invalid_parent"; break }
+            let parent = unsafeBitCast(value, to: AXUIElement.self)
+            readSelectedReference = selected.contains(where: { same($0, parent) })
+            if chainSeen.contains(where: { same($0, parent) }) { chainStatus = "cycle"; break }
+            chainSeen.append(parent)
+            chainVisited += 1
+            guard let role = string(parent, "AXRole") else { chainStatus = "unreadable_role"; break }
+            chainMask |= traversalRoleBit(role)
+            if let selected = read(parent, "AXSelected") as? Bool {
+                if selected { chainSelected += 1; readSelectedReference = true }
+            } else { chainUnknown += 1 }
+            if same(parent, sheets[0]) { chainStatus = "captured_sheet"; break }
+            current = parent
+            readParentRole = "none"
+        }
+        parentChain = ["status": chainStatus, "visited": chainVisited, "selected": chainSelected,
+            "unknownSelected": chainUnknown, "roleMask": chainMask]
     }
     stage = "verification"
     readOrigin = "selected_verification"
@@ -444,7 +491,7 @@ if !noReadFailures() { complete = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
-    "counts": counts, "firstExactURL": firstExactURL, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "counts": counts, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
