@@ -1,7 +1,7 @@
 import type { ElectronApplication } from "@playwright/test";
 
 const shutdownLine =
-  /^YouTube shutdown event: event=(?:before_quit|quit_prevented|quit_allowed|quit_loop_100ms|quit_loop_1s|quit_loop_5s|will_quit|quit|window_close|window_closed|window_unresponsive|contents_destroyed|render_gone|process_exit|process_closed|application_closed) kind=(?:app|initial|created|process)$/;
+  /^YouTube shutdown event: event=(?:before_quit|quit_call|quit_return|exit_call|exit_return|quit_prevented|quit_allowed|quit_loop_100ms|quit_loop_1s|quit_loop_5s|will_quit|quit|window_close|window_closed|window_unresponsive|contents_destroyed|render_gone|process_exit|process_closed|application_closed) kind=(?:app|initial|created|process)$/;
 
 export function rendererShutdownCollector(report: (line: string) => void) {
   let pending = "";
@@ -43,6 +43,24 @@ export async function installRendererShutdownProbe(application: ElectronApplicat
     const report = (event: string, kind: string) => {
       if (emitted++ < 32)
         process.stderr.write(`YouTube shutdown event: event=${event} kind=${kind}\n`);
+    };
+    const originalQuit = app.quit.bind(app);
+    app.quit = () => {
+      report("quit_call", "app");
+      try {
+        return originalQuit();
+      } finally {
+        report("quit_return", "app");
+      }
+    };
+    const originalExit = app.exit.bind(app);
+    app.exit = (code?: number) => {
+      report("exit_call", "app");
+      try {
+        return originalExit(code);
+      } finally {
+        report("exit_return", "app");
+      }
     };
     let quitObserved = false;
     app.on("before-quit", (event) => {

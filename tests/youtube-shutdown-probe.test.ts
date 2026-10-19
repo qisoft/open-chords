@@ -39,6 +39,10 @@ it("accepts only fixed quit prevention and event-loop checkpoints", () => {
   const output: string[] = [];
   const collect = rendererShutdownCollector((line) => output.push(line));
   const events = [
+    "quit_call",
+    "quit_return",
+    "exit_call",
+    "exit_return",
     "quit_prevented",
     "quit_allowed",
     "quit_loop_100ms",
