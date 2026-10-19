@@ -15,7 +15,10 @@ import {
   installedMacAxActionSucceeded,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
-import { installedMacPickerDiagnostic } from "./installed-picker-macos-diagnostics.ts";
+import {
+  installedMacPickerDiagnostic,
+  installedMacPickerRefreshDiagnostic,
+} from "./installed-picker-macos-diagnostics.ts";
 
 const executeNativeFile = promisify(runNativeFile);
 
@@ -46,8 +49,9 @@ export function installedMacPickerDriver(
       scenario === "cancel_save_edited" ||
       scenario === "cancel_save_directory";
     let stdout: string;
+    let nativeStderr = "";
     try {
-      ({ stdout } = await executeNativeFile(
+      ({ stdout, stderr: nativeStderr } = await executeNativeFile(
         "/usr/bin/osascript",
         [
           "-l",
@@ -78,6 +82,8 @@ export function installedMacPickerDriver(
       // eslint-disable-next-line preserve-caught-error
       throw new Error(installedMacPickerDiagnostic(error, stderr, performance.now() - started));
     }
+    const refresh = installedMacPickerRefreshDiagnostic(nativeStderr);
+    if (refresh) process.stdout.write(`${refresh}\n`);
     let prepared: unknown;
     try {
       prepared = JSON.parse(stdout.trim());

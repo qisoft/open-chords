@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 
-import { installedMacPickerDiagnostic } from "./support/installed-picker-macos-diagnostics.ts";
+import {
+  installedMacPickerDiagnostic,
+  installedMacPickerRefreshDiagnostic,
+} from "./support/installed-picker-macos-diagnostics.ts";
 
 it("retains only three fixed attribute failures and one allowlisted refusal", () => {
   const read = "Native macOS picker attribute: stage=action attribute=role os_error=-1728";
@@ -147,4 +150,41 @@ it("allows only fixed native target role and exact-match counts", () => {
   expect(diagnostic.split(probe)).toHaveLength(2);
   expect(diagnostic).not.toContain("private");
   expect(diagnostic).not.toContain("1000");
+});
+
+it.each(["complete", "deadline", "bound", "error"])(
+  "retains only the final fixed guard snapshot with status %s",
+  (status) => {
+    const probe = `Native macOS picker guard snapshot: phase=activate status=${status} age_ms=210 sheet_exists=false button_exists=false windows=1 sheets=1 os_error=-1728`;
+    const diagnostic = installedMacPickerDiagnostic(
+      {},
+      [
+        ...Array(4).fill(probe),
+        `${probe} /private/path`,
+        probe.replace("age_ms=210", "age_ms=1234567"),
+        probe.replace("windows=1", "windows=18"),
+        probe.replace("status=" + status, "status=private"),
+        probe.replace("sheet_exists=false", "sheet_exists=private"),
+      ].join("\n"),
+      1,
+    );
+    expect(diagnostic.split(probe)).toHaveLength(2);
+    expect(diagnostic).not.toContain("private");
+    expect(diagnostic).not.toContain("windows=18");
+    expect(diagnostic).not.toContain("1234567");
+  },
+);
+
+it("retains only the fixed single pre-input stale-reference refresh", () => {
+  const probe = "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true";
+  expect(installedMacPickerRefreshDiagnostic(`/private/path\n${probe}\n`)).toBe(probe);
+  expect(installedMacPickerDiagnostic({}, probe, 1)).toContain(probe);
+  for (const line of [
+    probe + " /private/path",
+    probe.replace("attempt=1", "attempt=2"),
+    probe.replace("before_input=true", "before_input=false"),
+    probe.replace("stale_reference", "private"),
+  ]) {
+    expect(installedMacPickerRefreshDiagnostic(line)).toBeUndefined();
+  }
 });

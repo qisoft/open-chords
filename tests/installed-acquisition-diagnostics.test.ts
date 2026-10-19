@@ -51,3 +51,31 @@ it("redacts the actual child rejection without retaining its cause", async () =>
   expect(failure.message).not.toContain("private");
   expect(failure.cause).toBeUndefined();
 });
+
+it.each([
+  "snapshot_verification",
+  "failure_history",
+  "offline_reopen",
+  "network_reset",
+  "start_cancellation",
+  "initialization_cleanup",
+  "result_writing",
+  "complete",
+])("retains only fixed post-jobs acquisition phase %s", (stage) => {
+  const probe = `Acquisition proof stage: ${stage} duration_ms=374603`;
+  const diagnostic = installedAcquisitionFailureDiagnostic(
+    {
+      stderr: [
+        probe,
+        probe + " /private/path",
+        probe.replace(stage, "private"),
+        probe.replace("374603", "12345678901"),
+      ].join("\n"),
+    },
+    450069,
+  );
+  expect(diagnostic).toContain(probe);
+  expect(diagnostic.split(probe)).toHaveLength(2);
+  expect(diagnostic).not.toContain("private");
+  expect(diagnostic).not.toContain("12345678901");
+});

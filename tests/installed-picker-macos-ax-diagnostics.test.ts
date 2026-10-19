@@ -18,6 +18,8 @@ const evidence = {
   firstOtherAttribute: "none",
   firstOtherStage: "none",
   firstOtherVisited: 0,
+  firstOtherOrigin: "none",
+  firstOtherParentRole: "none",
   firstCannotCompleteAttribute: "none",
   firstCannotCompleteStage: "none",
   firstCannotCompleteDurationMs: 0,
@@ -53,6 +55,10 @@ it("reports bounded read-only directory attributes without authorizing an action
       popupPathMatches: 1,
       disclosures: 1,
       collapsedDisclosures: 1,
+      enabledDisclosures: 1,
+      zeroValueDisclosures: 1,
+      disclosureActions: 1,
+      pressableDisclosures: 1,
     },
   };
   const stdout = JSON.stringify(observation);
@@ -60,6 +66,43 @@ it("reports bounded read-only directory attributes without authorizing an action
   expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("documentPathMatches=1");
   expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("collapsedDisclosures=1");
   expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  expect(installedMacAxActionSucceeded(stdout, "cancel_open_existing")).toBe(false);
+});
+
+it.each([
+  "enabledDisclosures",
+  "zeroValueDisclosures",
+  "oneValueDisclosures",
+  "unknownValueDisclosures",
+  "disclosureActions",
+  "pressableDisclosures",
+])("rejects private, negative, unbounded or missing %s observations", (key) => {
+  for (const value of ["/private/disclosure", -1, 1000, null, undefined]) {
+    const observation = { ...evidence, counts: { ...evidence.counts, [key]: value } };
+    expect(installedMacAxProbeDiagnostic(JSON.stringify(observation), null, 1)).toBe(
+      "Native macOS AX probe: invalid_evidence",
+    );
+  }
+});
+
+it("retains fixed AXActions failures without raw action names or authorizing an action", () => {
+  const observation = {
+    ...evidence,
+    firstOtherError: -25200,
+    firstOtherAttribute: "AXActions",
+    firstOtherStage: "selection",
+    counts: { ...evidence.counts, otherErrors: 1 },
+  };
+  const stdout = JSON.stringify(observation);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain("other_attribute=AXActions");
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  expect(
+    installedMacAxProbeDiagnostic(
+      JSON.stringify({ ...observation, actions: ["/private/action"] }),
+      null,
+      1,
+    ),
+  ).toBe("Native macOS AX probe: invalid_evidence");
 });
 
 it.each([
@@ -114,6 +157,32 @@ it("retains the fixed first cannotComplete read classification without accepting
     "cannot_complete_attribute=AXURL cannot_complete_stage=selection cannot_complete_duration_ms=151",
   );
   expect(installedMacAxActionSucceeded(JSON.stringify(failed), "open")).toBe(false);
+});
+
+it.each([
+  "none",
+  "discovery",
+  "sheet",
+  "AXChildren",
+  "AXColumns",
+  "AXSelectedChildren",
+  "AXSelectedRows",
+  "AXSelectedCells",
+  "AXSelectedColumns",
+  "selected_verification",
+  "guard",
+])("retains only fixed failed-element origin %s", (origin) => {
+  const observed = { ...evidence, firstOtherOrigin: origin, firstOtherError: -25202 };
+  const stdout = JSON.stringify(observed);
+  expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(`other_origin=${origin}`);
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  expect(
+    installedMacAxProbeDiagnostic(
+      JSON.stringify({ ...observed, firstOtherOrigin: "/private/node" }),
+      null,
+      1,
+    ),
+  ).toBe("Native macOS AX probe: invalid_evidence");
 });
 
 it("requires exact unique selected-file evidence, guarded native press and actual dismissal", () => {
@@ -184,3 +253,26 @@ it("requires exact unique selected-file evidence, guarded native press and actua
   );
   expect(installedMacAxActionSucceeded("/private/invalid", "open")).toBe(false);
 });
+
+it.each(["none", "AXBrowser", "AXColumn", "AXRow", "AXImage", "other"])(
+  "retains only fixed parent role %s without accepting failed verification",
+  (role) => {
+    const observed = {
+      ...evidence,
+      firstOtherError: -25202,
+      firstOtherOrigin: "AXChildren",
+      firstOtherParentRole: role,
+    };
+    const stdout = JSON.stringify(observed);
+    expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(`other_parent_role=${role}`);
+    expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+    expect(installedMacAxActionSucceeded(stdout, "cancel_open_existing")).toBe(false);
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...observed, firstOtherParentRole: "/private/role" }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+  },
+);

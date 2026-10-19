@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { _electron as electron, expect, test } from "@playwright/test";
 
+import { installRendererShutdownProbe } from "../support/renderer-shutdown-probe.ts";
 import { installYouTubeProviderFixture } from "../support/youtube-provider-fixture.ts";
 
 for (const [code, error] of [
@@ -33,6 +34,7 @@ for (const [code, error] of [
       env,
     });
     try {
+      await installRendererShutdownProbe(application);
       probe("fixture");
       await installYouTubeProviderFixture(application.context(), code);
       probe("window");

@@ -30,6 +30,15 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       return match !== null && Number(match[1]) <= 255 && Number(match[2]) <= 255;
     })
     .slice(-3);
+  const guardSnapshots = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS picker guard snapshot: phase=(?:activate|before_input|after_probe) status=(?:complete|deadline|bound|error) age_ms=[0-9]{1,6} sheet_exists=(?:true|false|unknown) button_exists=(?:true|false|unknown) windows=(?:[0-9]|1[0-7]) sheets=(?:[0-9]|1[0-7]) os_error=(?:none|unknown|-?[0-9]{1,5})$/u.test(
+        line,
+      ),
+    )
+    .slice(-1);
   const probes = stderr
     .slice(-65536)
     .split(/\r?\n/u)
@@ -68,7 +77,21 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...selection,
     ...target,
     ...guards,
+    ...guardSnapshots,
+    ...(installedMacPickerRefreshDiagnostic(stderr)
+      ? [installedMacPickerRefreshDiagnostic(stderr)]
+      : []),
     ...reads,
     ...refusal,
   ].join("\n");
+}
+
+export function installedMacPickerRefreshDiagnostic(stderr: string) {
+  return stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .find(
+      (line) =>
+        line === "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true",
+    );
 }

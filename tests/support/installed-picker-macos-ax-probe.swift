@@ -25,6 +25,15 @@ func exactTargetAttribute(_ value: CFTypeRef?, target: URL, path: String) -> Boo
     return url.absoluteString == target.absoluteString
 }
 
+func binaryDisclosureValue(_ value: CFTypeRef?) -> Int? {
+    guard let value = value,
+          CFGetTypeID(value) == CFBooleanGetTypeID() || CFGetTypeID(value) == CFNumberGetTypeID(),
+          let number = value as? NSNumber else { return nil }
+    if number.doubleValue == 0 { return 0 }
+    if number.doubleValue == 1 { return 1 }
+    return nil
+}
+
 let arguments = CommandLine.arguments
 if arguments.count == 2 && arguments[1] == "--self-test" {
     let target = URL(fileURLWithPath: "/fixture/input.wav")
@@ -53,6 +62,16 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
         print("Native macOS exact attribute checks failed")
         exit(1)
     }
+    let disclosureValues: [(CFTypeRef?, Int?)] = [
+        (kCFBooleanFalse, 0), (kCFBooleanTrue, 1),
+        (NSNumber(value: 0), 0), (NSNumber(value: 1), 1),
+        (NSNumber(value: 2), nil), ("0" as CFString, nil), (nil, nil)
+    ]
+    if !disclosureValues.allSatisfy({ binaryDisclosureValue($0.0) == $0.1 }) {
+        print("Native macOS disclosure value checks failed")
+        exit(1)
+    }
+    print("Native macOS disclosure value checks passed: 7")
     print("Native macOS selected-file checks passed: 9")
     print("Native macOS exact attribute checks passed: 10")
     exit(0)
@@ -67,7 +86,9 @@ var counts: [String: Int] = [
     "selectedUrls": 0, "selectedExactUrls": 0, "selectedLeaves": 0, "leafMatches": 0, "buttons": 0,
     "valuePathMatches": 0, "filenamePathMatches": 0, "documentPathMatches": 0,
     "pathControls": 0, "popupControls": 0, "disclosures": 0,
-    "expandedDisclosures": 0, "collapsedDisclosures": 0, "pathControlMatches": 0, "popupPathMatches": 0
+    "expandedDisclosures": 0, "collapsedDisclosures": 0, "pathControlMatches": 0, "popupPathMatches": 0,
+    "enabledDisclosures": 0, "zeroValueDisclosures": 0, "oneValueDisclosures": 0,
+    "unknownValueDisclosures": 0, "disclosureActions": 0, "pressableDisclosures": 0
 ]
 var complete = true
 var verified = false
@@ -84,11 +105,39 @@ var firstOtherError = 0
 var firstOtherAttribute = "none"
 var firstOtherStage = "none"
 var firstOtherVisited = 0
+var firstOtherOrigin = "none"
+var firstOtherParentRole = "none"
+var readParentRole = "none"
+var readOrigin = "discovery"
 var firstCannotCompleteAttribute = "none"
 var firstCannotCompleteStage = "none"
 var firstCannotCompleteDurationMs = 0
 let trusted = AXIsProcessTrusted()
 let deadline = ProcessInfo.processInfo.systemUptime + 3
+
+func recordReadError(_ status: AXError, name: String, duration: TimeInterval) {
+    if status == .success { return }
+    counts["lastError"] = Int(status.rawValue)
+    switch status {
+    case .attributeUnsupported, .noValue: counts["unsupported", default: 0] += 1
+    case .cannotComplete:
+        counts["cannotComplete", default: 0] += 1
+        if firstCannotCompleteAttribute == "none" {
+            firstCannotCompleteAttribute = name
+            firstCannotCompleteStage = stage
+            firstCannotCompleteDurationMs = min(999999, max(0, Int(duration * 1000)))
+        }
+    case .apiDisabled: counts["apiDisabled", default: 0] += 1
+    default:
+        counts["otherErrors", default: 0] += 1
+        if firstOtherError == 0 {
+            firstOtherError = Int(status.rawValue); firstOtherAttribute = name
+            firstOtherStage = stage; firstOtherVisited = counts["visited"] ?? 0
+            firstOtherOrigin = readOrigin
+            firstOtherParentRole = readParentRole
+        }
+    }
+}
 
 func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     // Native CI observed AXRole timing out at 164 ms with the 150 ms read cap.
@@ -98,27 +147,25 @@ func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     let readStarted = ProcessInfo.processInfo.systemUptime
     let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
     if status != .success {
-        counts["lastError"] = Int(status.rawValue)
-        switch status {
-        case .attributeUnsupported, .noValue: counts["unsupported", default: 0] += 1
-        case .cannotComplete:
-            counts["cannotComplete", default: 0] += 1
-            if firstCannotCompleteAttribute == "none" {
-                firstCannotCompleteAttribute = name
-                firstCannotCompleteStage = stage
-                firstCannotCompleteDurationMs = min(999999, max(0, Int((ProcessInfo.processInfo.systemUptime - readStarted) * 1000)))
-            }
-        case .apiDisabled: counts["apiDisabled", default: 0] += 1
-        default:
-            counts["otherErrors", default: 0] += 1
-            if firstOtherError == 0 {
-                firstOtherError = Int(status.rawValue); firstOtherAttribute = name
-                firstOtherStage = stage; firstOtherVisited = counts["visited"] ?? 0
-            }
-        }
+        recordReadError(status, name: name, duration: ProcessInfo.processInfo.systemUptime - readStarted)
         return nil
     }
     return value
+}
+
+// Read-only action availability; this never performs an action or grants authorization.
+// https://developer.apple.com/documentation/applicationservices/1462053-axuielementcopyactionnames
+func disclosureActionNames(_ element: AXUIElement) -> [String] {
+    AXUIElementSetMessagingTimeout(element, 0.15)
+    var names: CFArray?
+    let started = ProcessInfo.processInfo.systemUptime
+    let status = AXUIElementCopyActionNames(element, &names)
+    if status != .success {
+        recordReadError(status, name: "AXActions", duration: ProcessInfo.processInfo.systemUptime - started)
+        return []
+    }
+    guard let names = names as? [String], names.count <= 16 else { complete = false; return [] }
+    return names
 }
 
 func elements(_ element: AXUIElement, _ name: String) -> [AXUIElement] {
@@ -133,6 +180,10 @@ func nativeURL(_ value: CFTypeRef) -> URL? {
     if let text = value as? String { return URL(string: text) }
     return nil
 }
+func diagnosticRole(_ role: String) -> String {
+    return ["AXSheet", "AXBrowser", "AXScrollArea", "AXSplitGroup", "AXGroup", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell", "AXImage", "AXStaticText", "AXTextField", "AXButton", "AXPopUpButton", "AXDisclosureTriangle"].contains(role) ? role : "other"
+}
+
 func noReadFailures() -> Bool {
     counts["cannotComplete", default: 0] == 0 && counts["apiDisabled", default: 0] == 0 && counts["otherErrors", default: 0] == 0
 }
@@ -170,12 +221,14 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     if sheets.count != 1 || parents.count != 1 { complete = false }
     var selected: [AXUIElement] = []
     var buttons: [AXUIElement] = []
-    var queue = sheets.count == 1 ? sheets : []
+    var queue: [(AXUIElement, String, String)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none") } : []
     seen = []
     stage = "selection"
     while !queue.isEmpty && complete {
         if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
-        let element = queue.removeFirst()
+        let (element, origin, parentRole) = queue.removeFirst()
+        readOrigin = origin
+        readParentRole = parentRole
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
         counts["visited"] = seen.count
@@ -202,6 +255,15 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
             }
             if role == "AXDisclosureTriangle" {
                 counts["disclosures", default: 0] += 1
+                if (read(element, "AXEnabled") as? Bool) == true { counts["enabledDisclosures", default: 0] += 1 }
+                switch binaryDisclosureValue(value) {
+                case 0: counts["zeroValueDisclosures", default: 0] += 1
+                case 1: counts["oneValueDisclosures", default: 0] += 1
+                default: counts["unknownValueDisclosures", default: 0] += 1
+                }
+                let actions = disclosureActionNames(element)
+                counts["disclosureActions", default: 0] += actions.count
+                if actions.contains("AXPress") { counts["pressableDisclosures", default: 0] += 1 }
                 if let expanded = read(element, "AXExpanded") as? Bool {
                     counts[expanded ? "expandedDisclosures" : "collapsedDisclosures", default: 0] += 1
                 }
@@ -213,19 +275,21 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
             else { counts["urlStrings", default: 0] += 1 }
             if url.absoluteString == expected { counts["exactUrls", default: 0] += 1 }
         }
-        var next: [AXUIElement] = []
+        var next: [(AXUIElement, String, String)] = []
         for name in ["AXSelectedChildren", "AXSelectedRows", "AXSelectedCells", "AXSelectedColumns"] {
             for child in elements(element, name) {
                 if !selected.contains(where: { same($0, child) }) { selected.append(child) }
-                next.append(child)
+                next.append((child, name, diagnosticRole(role)))
             }
         }
-        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns")) }
-        else { next.append(contentsOf: elements(element, "AXChildren")) }
+        if ["AXList", "AXOutline", "AXTable", "AXColumn"].contains(role) { next.append(contentsOf: elements(element, "AXColumns").map { ($0, "AXColumns", diagnosticRole(role)) }) }
+        else { next.append(contentsOf: elements(element, "AXChildren").map { ($0, "AXChildren", diagnosticRole(role)) }) }
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
     }
     stage = "verification"
+    readOrigin = "selected_verification"
+    readParentRole = "none"
     counts["selectedRoots"] = selected.count
     counts["buttons"] = buttons.count
     var selectedURLs: [URL] = []
@@ -253,6 +317,8 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     verified = trusted && complete && selection.verified
     if requested != "none" && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
         stage = "guard"
+        readOrigin = "guard"
+        readParentRole = "none"
         let sheet = sheets[0]
         let parent = parents[0]
         let button = buttons[0]
@@ -323,7 +389,7 @@ let result: [String: Any] = [
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
     "firstOtherError": firstOtherError, "firstOtherAttribute": firstOtherAttribute,
-    "firstOtherStage": firstOtherStage, "firstOtherVisited": firstOtherVisited,
+    "firstOtherStage": firstOtherStage, "firstOtherVisited": firstOtherVisited, "firstOtherOrigin": firstOtherOrigin, "firstOtherParentRole": firstOtherParentRole,
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
