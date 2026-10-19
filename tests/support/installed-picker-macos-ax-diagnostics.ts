@@ -109,6 +109,7 @@ const evidenceSchema = z.strictObject({
         "bound",
         "deadline",
         "missing_parent",
+        "unreadable_parent",
         "invalid_parent",
         "cycle",
         "unreadable_role",

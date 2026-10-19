@@ -57,6 +57,10 @@ func traversalRoleBit(_ role: String) -> Int {
     }
 }
 
+func absentParentStatus(_ status: AXError) -> String {
+    return status == .noValue ? "missing_parent" : "unreadable_parent"
+}
+
 let arguments = CommandLine.arguments
 if arguments.count == 2 && arguments[1] == "--self-test" {
     let target = URL(fileURLWithPath: "/fixture/input.wav")
@@ -102,6 +106,10 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
     ]
     if !categories.allSatisfy({ fieldTextCategory($0.0, target: target, path: target.path) == $0.1 }) { exit(1) }
     if (traversalRoleBit("AXBrowser") | traversalRoleBit("AXGroup")) != 9 || traversalRoleBit("private") != 0 { exit(1) }
+    let parentCases: [(AXError, String)] = [(.noValue, "missing_parent"), (.cannotComplete, "unreadable_parent"),
+        (.invalidUIElement, "unreadable_parent"), (.attributeUnsupported, "unreadable_parent"), (.success, "unreadable_parent")]
+    if !parentCases.allSatisfy({ absentParentStatus($0.0) == $0.1 }) { exit(1) }
+    print("Native macOS absent parent checks passed: 5")
     print("Native macOS field context checks passed: 10")
     print("Native macOS disclosure value checks passed: 7")
     print("Native macOS selected-file checks passed: 9")
@@ -180,7 +188,7 @@ func recordReadError(_ status: AXError, name: String, duration: TimeInterval) {
     }
 }
 
-func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+func readResult(_ element: AXUIElement, _ name: String) -> (status: AXError, value: CFTypeRef?) {
     // Native CI observed AXRole timing out at 164 ms with the 150 ms read cap.
     // Give this identity read a separate cap; any failed read still prevents action.
     AXUIElementSetMessagingTimeout(element, name == "AXRole" ? 0.5 : 0.15)
@@ -189,9 +197,12 @@ func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
     if status != .success {
         recordReadError(status, name: name, duration: ProcessInfo.processInfo.systemUptime - readStarted)
-        return nil
+        return (status, nil)
     }
-    return value
+    return (status, value)
+}
+func read(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    return readResult(element, name).value
 }
 
 // Read-only action availability; this never performs an action or grants authorization.
@@ -359,7 +370,8 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         var chainStatus = "bound"
         for _ in 0..<16 {
             if ProcessInfo.processInfo.systemUptime >= deadline { chainStatus = "deadline"; break }
-            guard let value = read(current, "AXParent") else { chainStatus = "missing_parent"; break }
+            let parentRead = readResult(current, "AXParent")
+            guard let value = parentRead.value else { chainStatus = absentParentStatus(parentRead.status); break }
             guard CFGetTypeID(value) == AXUIElementGetTypeID() else { chainStatus = "invalid_parent"; break }
             let parent = unsafeBitCast(value, to: AXUIElement.self)
             readSelectedReference = selected.contains(where: { same($0, parent) })

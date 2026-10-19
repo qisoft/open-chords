@@ -425,3 +425,16 @@ it("reports bounded actual-parent observations without granting directory or act
     ).toBe("Native macOS AX probe: invalid_evidence");
   }
 });
+
+it("distinguishes absent and unreadable parent diagnostics without authorizing an action", () => {
+  for (const status of ["missing_parent", "unreadable_parent"]) {
+    const stdout = JSON.stringify({
+      ...evidence,
+      parentChain: { ...evidence.parentChain, status },
+    });
+    expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
+      `parent_chain_status=${status}`,
+    );
+    expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  }
+});
