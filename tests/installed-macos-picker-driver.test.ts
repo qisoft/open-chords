@@ -162,7 +162,12 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
   let now = 0;
   vi.spyOn(performance, "now").mockImplementation(() => now);
   const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
-  const responses = [prepared, expanded, snapshot, cancelled];
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    { ...cancelled, action: "cancel_save_edited_expanded" },
+  ];
   execute.mockImplementation(async () => {
     now += 300;
     return { stdout: JSON.stringify(responses.shift()), stderr: "" };
@@ -178,7 +183,7 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
   expect(execute.mock.calls[1]?.[0]).toContain("macos-save-expand");
   expect(execute.mock.calls[1]?.[1]).toEqual(["42"]);
   expect(execute.mock.calls[2]?.[1]).toEqual(["42", "/private/directory"]);
-  expect(execute.mock.calls[3]?.[1]).toContain("cancel_save_edited");
+  expect(execute.mock.calls[3]?.[1]).toContain("cancel_save_edited_expanded");
   expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([100000, 7000, 7000, 99100]);
   for (const call of execute.mock.calls) expect(call[2].env).toEqual({ LANG: "en_US.UTF-8" });
   expect(output.mock.calls.flat().join("")).not.toContain("private");

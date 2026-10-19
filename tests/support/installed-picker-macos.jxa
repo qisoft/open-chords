@@ -1,17 +1,18 @@
 function run(argv) {
   var applicationPid = Number(argv[0]);
   var scenario = argv[1] || 'cancel';
+  var expandedControls = scenario === 'cancel_save_edited_expanded';
   var preparesDirectory = scenario === 'prepare_save_directory';
   var directoryScenario = scenario === 'cancel_save_directory' || preparesDirectory;
   var selectedPath = directoryScenario ? argv[3] : argv[2];
   var selectsFile = scenario === 'open' || scenario === 'cancel_open_existing';
-  var saves = scenario === 'cancel_save' || scenario === 'cancel_save_edited' || directoryScenario;
-  var editsFilename = scenario === 'cancel_save_edited' || directoryScenario;
+  var saves = expandedControls || scenario === 'cancel_save' || scenario === 'cancel_save_edited' || directoryScenario;
+  var editsFilename = expandedControls || scenario === 'cancel_save_edited' || directoryScenario;
   var primaryAction = saves ? 'Save' : 'Open';
   var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
   var saveFormat = saves ? argv[2] : null;
   if (saves && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
-  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_directory', 'prepare_save_directory', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_directory', 'prepare_save_directory', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
       ((selectsFile || directoryScenario) && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
@@ -161,6 +162,33 @@ function run(argv) {
         attribute(candidate.open, 'name') !== primaryAction) throw new Error('prepared target changed');
   }
 
+  function expandedSaveControls(sheet) {
+    var queue = [sheet], elements = [], skipped = 0, complete = false;
+    try {
+      while (queue.length > 0) {
+        if (Date.now() >= deadline) throw new Error('deadline');
+        if (elements.length >= 256 || queue.length > 256) throw new Error('element bound');
+        var element = queue.shift();
+        elements.push(element);
+        var role = attribute(element, 'role');
+        if (role === null) throw new Error('save control role unavailable');
+        // File-browser descendants are not dialog action or Save As controls.
+        if (['AXBrowser', 'AXList', 'AXOutline', 'AXTable', 'AXColumn', 'AXRow', 'AXCell', 'AXWebArea'].indexOf(role) !== -1) {
+          skipped++;
+          continue;
+        }
+        var children = element.uiElements();
+        if (children.length > 256 || queue.length + children.length > 256) throw new Error('element bound');
+        queue = queue.concat(children);
+      }
+      complete = true;
+      return elements;
+    } finally {
+      console.log('Native macOS Save controls probe: elements=' + Math.min(elements.length, 256) +
+        ' skipped_content=' + Math.min(skipped, 256) + ' complete=' + complete);
+    }
+  }
+
   function verifyDefaultFilename(saveFormat, saveElements) {
     var fields = [];
     var filenameFields = [];
@@ -229,7 +257,7 @@ function run(argv) {
         for (var s = 0; s < sheets.length; s++) {
           if (attribute(sheets[s], 'role') !== 'AXSheet') continue;
           stage = 'elements';
-          var elements = sheets[s].entireContents();
+          var elements = expandedControls ? expandedSaveControls(sheets[s]) : sheets[s].entireContents();
           counts.elements = Math.min(elements.length, 257);
           if (elements.length > 256) throw new Error('element bound');
           var cancel = [];

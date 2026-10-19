@@ -22,6 +22,7 @@ import {
 import {
   installedMacPickerDiagnostic,
   installedMacPickerRefreshDiagnostic,
+  installedMacSaveControlsDiagnostic,
 } from "./installed-picker-macos-diagnostics.ts";
 
 const executeNativeFile = promisify(runNativeFile);
@@ -31,6 +32,7 @@ export function installedMacPickerDriver(
     | "cancel"
     | "cancel_save"
     | "cancel_save_edited"
+    | "cancel_save_edited_expanded"
     | "cancel_save_directory"
     | "cancel_save_directory_expanded"
     | "open"
@@ -52,7 +54,10 @@ export function installedMacPickerDriver(
     const directoryScenario =
       scenario === "cancel_save_directory" || scenario === "cancel_save_directory_expanded";
     const saves =
-      scenario === "cancel_save" || scenario === "cancel_save_edited" || directoryScenario;
+      scenario === "cancel_save" ||
+      scenario === "cancel_save_edited" ||
+      scenario === "cancel_save_edited_expanded" ||
+      directoryScenario;
     let stdout: string;
     let nativeStderr = "";
     try {
@@ -86,6 +91,8 @@ export function installedMacPickerDriver(
     }
     const refresh = installedMacPickerRefreshDiagnostic(nativeStderr);
     if (refresh) process.stdout.write(`${refresh}\n`);
+    const controls = installedMacSaveControlsDiagnostic(nativeStderr);
+    if (controls) process.stdout.write(`${controls}\n`);
     let prepared: unknown;
     try {
       prepared = JSON.parse(stdout.trim());
@@ -156,7 +163,9 @@ export function installedMacPickerDriver(
       // Read-only observations do not authorize Save or imply a verified directory.
       process.stdout.write(`Native macOS Save directory snapshot: ${await readNativeAx()}\n`);
       await installedMacPickerDriver(
-        "cancel_save_edited",
+        scenario === "cancel_save_directory_expanded"
+          ? "cancel_save_edited_expanded"
+          : "cancel_save_edited",
         undefined,
         environment,
         saveFormat,

@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   installedMacPickerDiagnostic,
   installedMacPickerRefreshDiagnostic,
+  installedMacSaveControlsDiagnostic,
 } from "./support/installed-picker-macos-diagnostics.ts";
 
 it("retains only three fixed attribute failures and one allowlisted refusal", () => {
@@ -186,5 +187,19 @@ it("retains only the fixed single pre-input stale-reference refresh", () => {
     probe.replace("stale_reference", "private"),
   ]) {
     expect(installedMacPickerRefreshDiagnostic(line)).toBeUndefined();
+  }
+});
+
+it("retains only bounded dialog-control traversal evidence without private UI content", () => {
+  const probe = "Native macOS Save controls probe: elements=18 skipped_content=1 complete=true";
+  expect(installedMacSaveControlsDiagnostic(probe)).toBe(probe);
+  expect(installedMacPickerDiagnostic({}, probe, 1)).toContain(probe);
+  for (const line of [
+    probe + " /private/path",
+    probe.replace("elements=18", "elements=257"),
+    probe.replace("skipped_content=1", "skipped_content=19"),
+    probe.replace("complete=true", "complete=private"),
+  ]) {
+    expect(installedMacSaveControlsDiagnostic(line)).toBeUndefined();
   }
 });

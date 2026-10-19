@@ -78,6 +78,9 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...target,
     ...guards,
     ...guardSnapshots,
+    ...(installedMacSaveControlsDiagnostic(stderr)
+      ? [installedMacSaveControlsDiagnostic(stderr)]
+      : []),
     ...(installedMacPickerRefreshDiagnostic(stderr)
       ? [installedMacPickerRefreshDiagnostic(stderr)]
       : []),
@@ -94,4 +97,18 @@ export function installedMacPickerRefreshDiagnostic(stderr: string) {
       (line) =>
         line === "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true",
     );
+}
+
+export function installedMacSaveControlsDiagnostic(stderr: string) {
+  return stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS Save controls probe: elements=([0-9]{1,3}) skipped_content=([0-9]{1,3}) complete=(?:true|false)$/u.exec(
+          line,
+        );
+      return match !== null && Number(match[1]) <= 256 && Number(match[2]) <= Number(match[1]);
+    })
+    .at(-1);
 }
