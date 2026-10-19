@@ -22,6 +22,13 @@ const evidence = {
   firstOtherVisited: 0,
   firstOtherOrigin: "none",
   firstOtherParentRole: "none",
+  selectedDirectory: {
+    fields: 0,
+    uniqueUrls: 0,
+    terminalUrls: 0,
+    terminalMatches: 0,
+    validShape: false,
+  },
   parentChain: {
     status: "not_checked",
     visited: 0,
@@ -529,4 +536,38 @@ it("keeps the maximum ancestor chain within the existing diagnostic byte limit",
   expect(installedMacAxProbeDiagnostic(stdout, null, 1)).toContain(
     "parent_chain_node_15_role=AXBrowser",
   );
+});
+
+it("reports selected-parent directory URL observations without granting action proof", () => {
+  const observed = {
+    fields: 8,
+    uniqueUrls: 8,
+    terminalUrls: 1,
+    terminalMatches: 1,
+    validShape: true,
+  };
+  const stdout = JSON.stringify({ ...evidence, selectedDirectory: observed });
+  const diagnostic = installedMacAxProbeDiagnostic(stdout, null, 1);
+  expect(diagnostic).toContain("selected_directory_fields=8");
+  expect(diagnostic).toContain("selected_directory_terminalMatches=1");
+  expect(diagnostic).toContain("selected_directory_validShape=true");
+  expect(installedMacAxActionSucceeded(stdout, "open")).toBe(false);
+  for (const change of [
+    { fields: 257 },
+    { fields: 7 },
+    { uniqueUrls: 0 },
+    { terminalUrls: 0 },
+    { terminalMatches: 2 },
+    { validShape: "private" },
+    { path: "/private/path" },
+    { fields: 0, uniqueUrls: 0, terminalUrls: 0, terminalMatches: 0 },
+  ]) {
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...evidence, selectedDirectory: { ...observed, ...change } }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+  }
 });

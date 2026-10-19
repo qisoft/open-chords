@@ -102,6 +102,21 @@ const AX_ORIGIN_KEYS = [
 ] as const;
 
 const evidenceSchema = z.strictObject({
+  selectedDirectory: z
+    .strictObject({
+      fields: z.number().int().min(0).max(256),
+      uniqueUrls: z.number().int().min(0).max(256),
+      terminalUrls: z.number().int().min(0).max(256),
+      terminalMatches: z.number().int().min(0).max(1),
+      validShape: z.boolean(),
+    })
+    .refine(
+      (value) =>
+        value.fields >= value.uniqueUrls &&
+        value.uniqueUrls >= value.terminalUrls &&
+        value.terminalUrls >= value.terminalMatches &&
+        (!value.validShape || value.fields > 0),
+    ),
   parentChain: z
     .strictObject({
       status: z.enum([
@@ -255,6 +270,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       firstOtherOrigin,
       firstOtherParentRole,
       firstExactURL,
+      selectedDirectory,
       parentChain,
       firstCannotCompleteAttribute,
       firstCannotCompleteStage,
@@ -283,6 +299,9 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `other_visited=${firstOtherVisited}`,
       `other_origin=${firstOtherOrigin}`,
       `other_parent_role=${firstOtherParentRole}`,
+      ...Object.entries(selectedDirectory).map(
+        ([key, value]) => `selected_directory_${key}=${value}`,
+      ),
       ...Object.entries(parentSummary).map(([key, value]) => `parent_chain_${key}=${value}`),
       ...parentNodes.flatMap((node, index) => [
         `parent_chain_node_${index}_role=${node.role}`,
