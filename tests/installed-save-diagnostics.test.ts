@@ -300,3 +300,23 @@ it("keeps bounded filename read outcomes and prioritizes the fixed failure code"
   expect(output).not.toContain("private");
   expect(output).not.toContain("1234567");
 });
+
+it.each(["after_input", "dismissal"])("retains bounded native target identity at %s", (phase) => {
+  const probe = `Native Save input target probe: phase=${phase} class=button id=cancel child=true owned=true thread_known=true active_dialog=false focus_control=false capture_control=unknown`;
+  const diagnostic = installedSaveDriverDiagnostic(
+    {},
+    [
+      ...Array(5).fill(probe),
+      `${probe} /private/title`,
+      probe.replace("id=cancel", "id=12345"),
+      probe.replace("class=button", "class=private"),
+      probe.replace("active_dialog=false", "active_dialog=private"),
+      probe.replace(`phase=${phase}`, "phase=before_input"),
+    ].join("\n"),
+    100,
+  );
+  expect(diagnostic.split(probe)).toHaveLength(4);
+  expect(diagnostic).not.toContain("private");
+  expect(diagnostic).not.toContain("12345");
+  expect(diagnostic).not.toContain("before_input");
+});

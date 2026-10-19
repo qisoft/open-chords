@@ -305,6 +305,29 @@ public static class SaveNativeInput {
     ProbeForeground(window, expectedProcessId, "after_input");
     ProbeActivation(expectedProcessId, "after_input");
     ProbePointer(window, control, expectedProcessId, "after_input");
+    ProbeInputTarget(window, control, expectedProcessId, "after_input");
+  }
+  private static void ProbeInputTarget(IntPtr dialog, IntPtr control, uint expectedProcessId, string phase) {
+    bool known = control != IntPtr.Zero && IsWindow(control);
+    bool child = known && IsChild(dialog, control) && GetAncestor(control, 2) == dialog;
+    var kind = new StringBuilder(64);
+    if (known) GetClassName(control, kind, kind.Capacity);
+    string controlClass = !known ? "none" : kind.ToString() == "Button" ? "button" :
+      kind.ToString() == "Edit" ? "edit" : "other";
+    int id = known ? GetDlgCtrlID(control) : -1;
+    string controlId = !known ? "none" : id == 2 ? "cancel" : id == 1 ? "primary" :
+      id == ExpectedFilenameId ? "filename" : "other";
+    uint processId;
+    uint thread = IsWindow(dialog) ? GetWindowThreadProcessId(dialog, out processId) : 0;
+    var info = new GuiInfo { size = (uint)Marshal.SizeOf(typeof(GuiInfo)) };
+    bool threadKnown = thread != 0 && GetGUIThreadInfo(thread, ref info);
+    Console.Error.WriteLine("Native Save input target probe: phase=" + phase + " class=" + controlClass +
+      " id=" + controlId + " child=" + child.ToString().ToLowerInvariant() +
+      " owned=" + (known && OwnedByApplication(control, expectedProcessId)).ToString().ToLowerInvariant() +
+      " thread_known=" + threadKnown.ToString().ToLowerInvariant() +
+      " active_dialog=" + (threadKnown ? (info.active == dialog).ToString().ToLowerInvariant() : "unknown") +
+      " focus_control=" + (threadKnown && known ? (info.focus == control).ToString().ToLowerInvariant() : "unknown") +
+      " capture_control=" + (threadKnown && known ? (info.capture == control).ToString().ToLowerInvariant() : "unknown"));
   }
   private static Point LastClickPoint;
   private static void ProbePointer(IntPtr dialog, IntPtr control, uint expectedProcessId, string phase) {
@@ -393,6 +416,7 @@ public static class SaveNativeInput {
       ProbeForeground(window, expectedProcessId, "dismissal");
       ProbeActivation(expectedProcessId, "dismissal");
       ProbePointer(window, control, expectedProcessId, "dismissal");
+      ProbeInputTarget(window, control, expectedProcessId, "dismissal");
       throw new InvalidOperationException("Native Save dialog not dismissed");
     }
   }

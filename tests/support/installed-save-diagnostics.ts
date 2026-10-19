@@ -101,6 +101,14 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const inputTargets = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save input target probe: phase=(?:after_input|dismissal) class=(?:none|button|edit|other) id=(?:none|cancel|primary|filename|other) child=(?:true|false) owned=(?:true|false) thread_known=(?:true|false) active_dialog=(?:true|false|unknown) focus_control=(?:true|false|unknown) capture_control=(?:true|false|unknown)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   const filenameReads = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -150,6 +158,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...activationProbes,
     ...pointerProbes,
     ...clickProbes,
+    ...inputTargets,
     ...controlProbes,
     ...candidates,
     ...children,
