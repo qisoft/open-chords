@@ -203,3 +203,28 @@ it("retains only bounded dialog-control traversal evidence without private UI co
     expect(installedMacSaveControlsDiagnostic(line)).toBeUndefined();
   }
 });
+
+it("retains only schema-validated filename categories on native failure", () => {
+  const evidence = {
+    format: "json",
+    total: 1,
+    unreadableRoles: 0,
+    truncated: false,
+    fields: [
+      { role: "text_field", subrole: "empty", name: "other", value: "expected", enabled: "true" },
+    ],
+  };
+  const prefix = "Native macOS Save field evidence: ";
+  const diagnostic = (value: unknown) =>
+    installedMacPickerDiagnostic({}, prefix + JSON.stringify(value), 1);
+  expect(diagnostic(evidence)).toContain("name=other value=expected");
+  expect(diagnostic({ ...evidence, privatePath: "/private/secret" })).not.toContain(
+    "Save field probe",
+  );
+  expect(
+    diagnostic({ ...evidence, fields: [{ ...evidence.fields[0], name: "/private/secret" }] }),
+  ).not.toContain("secret");
+  expect(installedMacPickerDiagnostic({}, prefix + "{invalid", 1)).not.toContain(
+    "Save field probe",
+  );
+});

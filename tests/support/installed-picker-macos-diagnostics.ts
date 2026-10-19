@@ -1,4 +1,8 @@
 import { installedExportExitDiagnostic } from "./installed-export-process.ts";
+import {
+  installedMacSaveFieldDiagnostic,
+  type MacSaveFormat,
+} from "./installed-macos-save-field-probe.ts";
 
 export function installedMacPickerDiagnostic(error: unknown, stderr: string, durationMs: number) {
   const reads = stderr
@@ -86,6 +90,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       : []),
     ...reads,
     ...refusal,
+    ...installedMacSaveFailureFields(stderr),
   ].join("\n");
 }
 
@@ -111,4 +116,28 @@ export function installedMacSaveControlsDiagnostic(stderr: string) {
       return match !== null && Number(match[1]) <= 256 && Number(match[2]) <= Number(match[1]);
     })
     .at(-1);
+}
+
+export function installedMacSaveFailureFields(stderr: string): string[] {
+  const prefix = "Native macOS Save field evidence: ";
+  const line = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((entry) => entry.startsWith(prefix))
+    .at(-1);
+  if (!line || line.length > 4096) return [];
+  try {
+    const value: unknown = JSON.parse(line.slice(prefix.length));
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      !("format" in value) ||
+      !["json", "lrc", "chordpro", "pdf", "archive"].includes(String(value.format))
+    )
+      return [];
+    const diagnostic = installedMacSaveFieldDiagnostic(value, value.format as MacSaveFormat);
+    return diagnostic.endsWith("invalid_evidence") ? [] : [diagnostic];
+  } catch {
+    return [];
+  }
 }

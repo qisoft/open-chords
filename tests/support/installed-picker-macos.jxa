@@ -217,6 +217,7 @@ function run(argv) {
       });
     }
     var saveProbe = { format: saveFormat, total: total, unreadableRoles: unreadableRoles, truncated: total > 16, fields: fields };
+    if (expandedControls) console.log('Native macOS Save field evidence: ' + JSON.stringify(saveProbe));
     if (unreadableRoles !== 0 || total > 16 || fields.some(function (field) { return field.name === 'unavailable'; }) || filenameFields.length !== 1) throw new Error('default filename unavailable');
     var filenameField = filenameFields[0];
     var filenameName = attribute(filenameField, 'name');
