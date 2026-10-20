@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { promisify } from "node:util";
 
-import { windowsLocalVolumeCommand } from "../apps/desktop/src/main/windows-local-volume-command.ts";
+import { windowsLocalVolumeMeasurementCommand } from "../apps/desktop/src/main/windows-local-volume-command.ts";
+import { parseWindowsVolumeMeasurement } from "../tests/support/windows-volume-measurement.ts";
 
 const windows = process.env.SystemRoot ?? process.env.WINDIR;
 if (process.platform !== "win32" || !windows)
@@ -39,7 +40,7 @@ for (const mode of ["automatic", "explicit"] as const) {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        windowsLocalVolumeCommand(root, mode),
+        windowsLocalVolumeMeasurementCommand(root, mode),
       ],
       { env, timeout: 100000, maxBuffer: 4096 },
     ));
@@ -48,12 +49,11 @@ for (const mode of ["automatic", "explicit"] as const) {
     throw new Error("Windows volume measurement failed");
   }
   const elapsed = Math.min(999999, Math.round(performance.now() - started));
-  const driveType = stdout.trim();
-  if (!/^[0-6]$/.test(driveType)) throw new Error("Windows volume measurement evidence invalid");
+  const { driveType, importMs, queryMs, scriptMs } = parseWindowsVolumeMeasurement(stdout);
   if (mode === "automatic") original = driveType;
   const matches = original === driveType;
   console.log(
-    `Native Windows volume classification: mode=${mode} drive_type=${driveType} matches=${matches} process_ms=${elapsed}`,
+    `Native Windows volume classification: mode=${mode} drive_type=${driveType} matches=${matches} import_ms=${importMs} query_ms=${queryMs} script_ms=${scriptMs} process_ms=${elapsed}`,
   );
   if (!matches) throw new Error("Windows volume classifiers disagree");
 }
