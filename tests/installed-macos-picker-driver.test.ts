@@ -281,7 +281,12 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
   expect(execute.mock.calls[1]?.[0]).toContain("macos-save-expand");
   expect(execute.mock.calls[1]?.[1]).toEqual(["42"]);
   expect(execute.mock.calls[2]?.[1]).toEqual(["42", "/private/directory"]);
-  expect(execute.mock.calls[3]?.[1]).toEqual(["42", "/private/directory", "directory_snapshot"]);
+  expect(execute.mock.calls[3]?.[1]).toEqual([
+    "42",
+    "/private/directory",
+    "directory_snapshot",
+    "json",
+  ]);
   expect(execute.mock.calls[4]?.[1]).toEqual(["42", "--collapse"]);
   expect(execute.mock.calls[5]?.[1]).toContain("cancel_save_restored");
   expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([

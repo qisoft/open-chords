@@ -124,7 +124,12 @@ export function installedMacPickerDriver(
         try {
           ({ stdout: output } = await executeNativeFile(
             join(process.cwd(), "build/test-support/macos-picker-ax-probe"),
-            [String(applicationPid), selectedPath, ...(requested === undefined ? [] : [requested])],
+            [
+              String(applicationPid),
+              selectedPath,
+              ...(requested === undefined ? [] : [requested]),
+              ...(requested === "directory_snapshot" ? [saveFormat ?? ""] : []),
+            ],
             { env: environment(), timeout: probeBudget, maxBuffer: 4096 },
           ));
         } catch (error) {
