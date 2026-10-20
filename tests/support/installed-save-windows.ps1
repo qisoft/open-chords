@@ -33,6 +33,9 @@ function Write-NativeSaveProbe([string]$Name) {
 }
 
 try {
+Write-NativeSaveProbe 'module_import'
+. ([IO.Path]::Combine($PSScriptRoot, 'import-windows-picker-modules.ps1'))
+Write-NativeSaveProbe 'modules_loaded'
 Write-NativeSaveProbe 'assemblies'
 Add-Type -AssemblyName UIAutomationClient
 Write-NativeSaveProbe 'uia_client_loaded'
@@ -235,7 +238,7 @@ throw 'deadline'
   # Only numeric discovery counters leave this process; UI names, paths and exceptions stay private.
   $failureCode = 'unknown'
   $failure = $_.Exception.Message
-  if ($failure -in @('filename_unavailable', 'filename_pattern_unavailable', 'filename_ambiguous', 'default_filename_invalid', 'filename_readonly', 'filename_not_set', 'action_ambiguous', 'target_missing', 'action_bounds', 'deadline', 'window_bound', 'element_bound', 'input_assembly_unavailable')) { $failureCode = $failure }
+  if ($failure -in @('filename_unavailable', 'filename_pattern_unavailable', 'filename_ambiguous', 'default_filename_invalid', 'filename_readonly', 'filename_not_set', 'action_ambiguous', 'target_missing', 'action_bounds', 'deadline', 'window_bound', 'element_bound', 'input_assembly_unavailable', 'input_modules_unavailable')) { $failureCode = $failure }
   if ($null -ne $_.Exception.InnerException) {
     switch ($_.Exception.InnerException.Message) {
       'Native Save filename dialog unavailable' { $failureCode = 'filename_dialog_unavailable' }

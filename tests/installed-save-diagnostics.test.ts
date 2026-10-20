@@ -357,3 +357,20 @@ it("preserves the missing prebuilt assembly code without private setup details",
   expect(diagnostic).not.toContain("private");
   expect(diagnostic).not.toContain("driver.dll");
 });
+
+it("preserves the fixed explicit-module initialization failure without paths", () => {
+  const code =
+    "native_save_failed code=input_modules_unavailable stage=setup windows=0 elements=0 filenames=0 actions=0 fallback_misses=0";
+  const diagnostic = installedSaveDriverDiagnostic(
+    {},
+    `${code}\n${code} C:\\private\\module.psd1`,
+    100,
+  );
+  expect(diagnostic).toContain(code);
+  expect(diagnostic).not.toContain("private");
+});
+it.each(["module_import", "modules_loaded"])("preserves bounded %s checkpoints", (stage) => {
+  const line = `Native Save driver probe: ${stage} duration_ms=500 windows=0 elements=0 filenames=0 actions=0`;
+  expect(installedSaveDriverDiagnostic({}, `${line}\n${line} private`, 500)).toContain(line);
+  expect(installedSaveDriverDiagnostic({}, `${line} private`, 500)).not.toContain(line);
+});

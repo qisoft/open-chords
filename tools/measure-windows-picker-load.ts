@@ -25,7 +25,7 @@ env.PATH = [
   windows,
 ].join(";");
 const execute = promisify(execFile);
-for (const mode of ["name", "path"] as const) {
+for (const mode of ["name", "path", "modules"] as const) {
   const started = performance.now();
   let stdout: string;
   try {

@@ -6,6 +6,7 @@ const evidence = {
   available: true,
   identityMatches: true,
   bytesMatch: true,
+  moduleMs: 100,
   runtimeMs: 1,
   pathMs: 22000,
   availabilityMs: 2,
@@ -16,7 +17,7 @@ const evidence = {
 };
 it("reports only bounded load timings and identity comparisons", () => {
   expect(windowsUiaLoadDiagnostic("name", JSON.stringify(evidence), 45000)).toBe(
-    "Native UIAutomation load: mode=name available=true identity_matches=true bytes_match=true client_ms=22000 types_ms=10 total_ms=22010 runtime_ms=1 path_ms=22000 availability_ms=2 verification_ms=10 process_ms=45000",
+    "Native UIAutomation load: mode=name available=true identity_matches=true bytes_match=true client_ms=22000 types_ms=10 total_ms=22010 module_ms=100 runtime_ms=1 path_ms=22000 availability_ms=2 verification_ms=10 process_ms=45000",
   );
 });
 it.each([
@@ -45,7 +46,7 @@ it.each([NaN, Infinity, -1, 1000000])("rejects invalid host process timing: %s",
     "Native UIAutomation load evidence invalid",
   );
 });
-it.each(["runtimeMs", "pathMs", "availabilityMs", "verificationMs"])(
+it.each(["moduleMs", "runtimeMs", "pathMs", "availabilityMs", "verificationMs"])(
   "bounds the %s phase",
   (key) => {
     expect(() =>
@@ -53,3 +54,12 @@ it.each(["runtimeMs", "pathMs", "availabilityMs", "verificationMs"])(
     ).toThrow("Native UIAutomation load evidence invalid");
   },
 );
+
+it("reports explicit module import cost separately from preparation and loading", () => {
+  expect(windowsUiaLoadDiagnostic("modules", JSON.stringify(evidence), 45000)).toContain(
+    "mode=modules",
+  );
+  expect(windowsUiaLoadDiagnostic("modules", JSON.stringify(evidence), 45000)).toContain(
+    "module_ms=100",
+  );
+});

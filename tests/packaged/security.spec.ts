@@ -39,6 +39,10 @@ import {
   installedSaveDriverDiagnostic,
   installedSaveDriverTiming,
 } from "../support/installed-save-diagnostics.ts";
+import {
+  WorkspacePlaybackProbeSchema,
+  workspacePlaybackDiagnostic,
+} from "../support/installed-workspace-playback-diagnostics.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
 test.skip(
@@ -317,6 +321,8 @@ test("installed shell exposes only named capabilities and manifest assets", asyn
         cause: error,
       });
     }
+    if (renderer.offlinePlayback.workspaceProbe !== null)
+      console.log(workspacePlaybackDiagnostic(renderer.offlinePlayback.workspaceProbe));
     expect(renderer).toMatchObject({
       apiKeys: [
         "alignment",
@@ -1472,6 +1478,7 @@ const EffectiveCspProbeSchema = z.object({
 });
 
 const OfflinePlaybackSchema = z.object({
+  workspaceProbe: WorkspacePlaybackProbeSchema.nullable(),
   offline: z.boolean(),
   body: z.string(),
   error: z.string().nullable(),
@@ -2001,6 +2008,7 @@ async function evaluatePackagedMedia(
     let playAligned = false;
     let seeked = false;
     let workspacePlayed = false;
+    let workspaceProbe = null;
     let timelineMoved = false;
     let offline = false;
     try {
@@ -2036,12 +2044,41 @@ async function evaluatePackagedMedia(
       const transformBeforePlay = track.style.transform;
       // Preserve transient playback evidence even if the short fixture ends between timer ticks.
       await new Promise((resolve, reject) => {
+        let mutations = 0;
+        let oldPauseSeen = false;
         const fail = (message) => {
           observer.disconnect();
+          try {
+            const audio = document.querySelector("audio");
+            const knownAudio = audio instanceof HTMLMediaElement;
+            workspaceProbe = {
+              stage: message === "workspace timeline did not move" ? "timeline" : "start",
+              visibility: ["visible", "hidden"].includes(document.visibilityState) ? document.visibilityState : "other",
+              ready: ["loading", "interactive", "complete"].includes(document.readyState) ? document.readyState : "other",
+              buttonConnected: playButton.isConnected,
+              buttonEnabled: !playButton.disabled,
+              label: playButton.getAttribute("aria-label") === "Play" ? "play" : playButton.getAttribute("aria-label") === "Pause" ? "pause" : "other",
+              trackConnected: track.isConnected,
+              timelineChanged: track.style.transform !== transformBeforePlay,
+              audioCount: Math.min(2, document.querySelectorAll("audio").length),
+              audioReady: knownAudio ? audio.readyState : -1,
+              audioNetwork: knownAudio ? audio.networkState : -1,
+              audioError: knownAudio ? audio.error?.code ?? 0 : 0,
+              audioPaused: knownAudio && audio.paused,
+              audioEnded: knownAudio && audio.ended,
+              audioPositionPositive: knownAudio && audio.currentTime > 0,
+              audioSourcePresent: knownAudio && audio.currentSrc.length > 0,
+              alertPresent: document.querySelector('[role="alert"]') !== null,
+              mutations,
+              oldPauseSeen,
+            };
+          } catch { /* A diagnostic read must not replace the original playback refusal. */ }
           reject(new Error(message));
         };
         let timeout;
-        const observer = new MutationObserver(() => {
+        const observer = new MutationObserver((records) => {
+          mutations = Math.min(256, mutations + records.length);
+          oldPauseSeen ||= records.some((record) => record.target === playButton && record.attributeName === "aria-label" && record.oldValue === "Pause");
           const previouslyPlaying = workspacePlayed;
           workspacePlayed ||= playButton.getAttribute("aria-label") === "Pause";
           timelineMoved ||= track.style.transform !== transformBeforePlay;
@@ -2055,7 +2092,7 @@ async function evaluatePackagedMedia(
           }
         });
         timeout = setTimeout(() => fail("workspace playback did not start"), 3000);
-        observer.observe(playButton, { attributes: true, attributeFilter: ["aria-label"] });
+        observer.observe(playButton, { attributes: true, attributeOldValue: true, attributeFilter: ["aria-label"] });
         observer.observe(track, { attributes: true, attributeFilter: ["style"] });
         playButton.click();
       });
@@ -2118,6 +2155,7 @@ async function evaluatePackagedMedia(
         : "",
       workspacePlayed,
       timelineMoved,
+      workspaceProbe,
     };
   })()`;
 
