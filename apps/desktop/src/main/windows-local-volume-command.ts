@@ -4,6 +4,10 @@ function volumeQuery(root: string) {
   return `$drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${root}'"; if ($null -eq $drive) { exit 2 }; [Console]::Out.Write($drive.DriveType)`;
 }
 
+function dependencyPreparation() {
+  return "foreach ($volumeModule in @('Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Management')) { Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules', $volumeModule, ($volumeModule + '.psd1'))) -ErrorAction Stop }; ";
+}
+
 function modulePreparation(mode: "explicit" | "automatic") {
   return mode === "automatic"
     ? ""
@@ -12,9 +16,13 @@ function modulePreparation(mode: "explicit" | "automatic") {
 
 export function windowsLocalVolumeCommand(
   root: string,
-  moduleImport: "explicit" | "automatic" = "explicit",
+  moduleImport: "explicit" | "automatic" | "dependencies" = "dependencies",
 ) {
-  return modulePreparation(moduleImport) + volumeQuery(root);
+  return (
+    (moduleImport === "dependencies" ? dependencyPreparation() : "") +
+    modulePreparation(moduleImport === "dependencies" ? "explicit" : moduleImport) +
+    volumeQuery(root)
+  );
 }
 
 // CI-only measurement keeps the classifier query and module preparation shared.
@@ -24,9 +32,7 @@ export function windowsLocalVolumeMeasurementCommand(
 ) {
   return (
     "$volumeScriptClock = [Diagnostics.Stopwatch]::StartNew(); " +
-    (moduleImport === "dependencies"
-      ? "foreach ($volumeModule in @('Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Management')) { Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules', $volumeModule, ($volumeModule + '.psd1'))) -ErrorAction Stop }; "
-      : "") +
+    (moduleImport === "dependencies" ? dependencyPreparation() : "") +
     "$volumeDependencyMs = $volumeScriptClock.ElapsedMilliseconds; " +
     modulePreparation(moduleImport === "dependencies" ? "explicit" : moduleImport) +
     "$volumeImportMs = $volumeScriptClock.ElapsedMilliseconds - $volumeDependencyMs; " +
