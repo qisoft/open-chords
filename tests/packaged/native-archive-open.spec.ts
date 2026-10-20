@@ -21,7 +21,10 @@ import { prepareArchiveProofFixture } from "../support/archive-proof-fixture.ts"
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
-import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
+import {
+  installedSaveDriverDiagnostic,
+  installedSaveDriverTiming,
+} from "../support/installed-save-diagnostics.ts";
 
 test.skip(!["win32", "darwin"].includes(process.platform), "Native Open dialog");
 
@@ -164,6 +167,7 @@ test("installed native archive Open preserves cancellation, rejects hostile inpu
               return;
             }
             try {
+              console.log(installedSaveDriverTiming(stderr, performance.now() - started));
               resolve(JSON.parse(stdout.trim()));
             } catch {
               reject(new Error("Installed native Open driver returned invalid evidence"));

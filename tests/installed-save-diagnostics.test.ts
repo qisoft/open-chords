@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { installedSaveDriverDiagnostic } from "./support/installed-save-diagnostics.ts";
+import {
+  installedSaveDriverDiagnostic,
+  installedSaveDriverTiming,
+} from "./support/installed-save-diagnostics.ts";
 
 describe("native Save driver failure redaction", () => {
   it("retains only bounded click-hit booleans without private UI content", () => {
@@ -319,4 +322,25 @@ it.each(["after_input", "dismissal"])("retains bounded native target identity at
   expect(diagnostic).not.toContain("private");
   expect(diagnostic).not.toContain("12345");
   expect(diagnostic).not.toContain("before_input");
+});
+
+it("reports preparation and total timings without UI content", () => {
+  expect(
+    installedSaveDriverTiming(
+      "private-path\nNative Save driver probe: root duration_ms=214 windows=0 elements=0 filenames=0 actions=0\nprivate-title",
+      1400.6,
+    ),
+  ).toBe("Native Windows picker timing: initialization_ms=214 total_ms=1401");
+});
+it.each([
+  "Native Save driver probe: root duration_ms=214 windows=0 elements=0 filenames=0 actions=0 /private",
+  "Native Save driver probe: root duration_ms=1234567 windows=0 elements=0 filenames=0 actions=0",
+  "Native Save driver probe: root duration_ms=private windows=0 elements=0 filenames=0 actions=0",
+])("refuses malformed preparation timing: %s", (stderr) => {
+  expect(installedSaveDriverTiming(stderr, NaN)).toBe(
+    "Native Windows picker timing: initialization_ms=unknown total_ms=unknown",
+  );
+});
+it("bounds total timing", () => {
+  expect(installedSaveDriverTiming("", 10000000)).toContain("total_ms=999999");
 });

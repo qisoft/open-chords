@@ -17,7 +17,10 @@ import { inspectPortableProjectArchive } from "../../apps/desktop/src/main/proje
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
-import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
+import {
+  installedSaveDriverDiagnostic,
+  installedSaveDriverTiming,
+} from "../support/installed-save-diagnostics.ts";
 
 test.skip(process.platform !== "win32", "Windows native Save dialog");
 
@@ -144,6 +147,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
                 return;
               }
               try {
+                console.log(installedSaveDriverTiming(stderr, performance.now() - started));
                 resolve(JSON.parse(stdout.trim()));
               } catch {
                 reject(new Error("Installed native Save driver returned invalid evidence"));

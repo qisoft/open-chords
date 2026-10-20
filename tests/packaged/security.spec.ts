@@ -35,7 +35,10 @@ import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagno
 import { installedEffectiveCspDiagnostic } from "../support/installed-effective-csp-diagnostics.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
-import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
+import {
+  installedSaveDriverDiagnostic,
+  installedSaveDriverTiming,
+} from "../support/installed-save-diagnostics.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
 test.skip(
@@ -1327,6 +1330,7 @@ function installedMediaPickerDriver(
             return;
           }
           try {
+            console.log(installedSaveDriverTiming(stderr, performance.now() - started));
             resolve(JSON.parse(stdout.trim()));
           } catch {
             reject(new Error("Installed native media picker driver returned invalid evidence"));

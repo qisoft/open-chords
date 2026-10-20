@@ -79,6 +79,10 @@ jobs:
         run: test "$(node -p process.arch)" = "${{ matrix.arch }}"
       - name: Install reviewed dependencies
         run: pnpm install --frozen-lockfile
+      - name: Build native Windows picker input driver once
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: tests/support/build-windows-save-driver.ps1
       - name: Build and check native macOS picker AX verifier
         if: runner.os == 'macOS'
         run: |
@@ -214,7 +218,7 @@ jobs:
             if ((Get-ItemPropertyValue -LiteralPath $key -Name HideFileExt -ErrorAction Stop) -ne 0) {
               throw 'Native Save extension preference verification failed'
             }
-            pnpm test:packaged --retries=0
+            pnpm test:packaged --retries=0 --reporter=list,github
             $packagedExit = $LASTEXITCODE
           } finally {
             if ($hadValue) {
