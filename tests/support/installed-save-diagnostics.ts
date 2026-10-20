@@ -19,7 +19,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const probes = output
     .split(/\r?\n/)
     .filter((line) =>
-      /^Native Save driver probe: (?:assemblies|uia_client_loaded|uia_types_loaded|compile|load_assembly|root|ready|windows_query|windows_read|window_properties|elements_query|controls_query|controls_read|pattern|value_read|value_set|native_input|action_clicked) duration_ms=[0-9]{1,9} windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9}$/.test(
+      /^Native Save driver probe: (?:module_import|modules_loaded|assemblies|uia_client_loaded|uia_types_loaded|compile|load_assembly|root|ready|windows_query|windows_read|window_properties|elements_query|controls_query|controls_read|pattern|value_read|value_set|native_input|action_clicked) duration_ms=[0-9]{1,9} windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9}$/.test(
         line,
       ),
     )
@@ -27,7 +27,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const counters = output
     .split(/\r?\n/)
     .find((line) =>
-      /^native_save_failed code=(?:unknown|input_assembly_unavailable|filename_unavailable|filename_pattern_unavailable|filename_ambiguous|default_filename_invalid|filename_readonly|filename_not_set|action_ambiguous|target_missing|action_bounds|deadline|window_bound|element_bound|filename_dialog_unavailable|filename_scan_ambiguous|input_refused|input_not_delivered|filename_target_changed|filename_read_unavailable|input_architecture_unsupported|filename_input_bound|filename_bounds_unavailable|filename_focus_refused|filename_input_not_delivered|input_target_unavailable|input_foreground_refused|input_point_refused|input_cursor_refused|dialog_not_dismissed) stage=(?:setup|discovery|default_filename|filename_set|native_input) windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9} fallback_misses=[0-9]{1,6}$/.test(
+      /^native_save_failed code=(?:unknown|input_assembly_unavailable|input_modules_unavailable|filename_unavailable|filename_pattern_unavailable|filename_ambiguous|default_filename_invalid|filename_readonly|filename_not_set|action_ambiguous|target_missing|action_bounds|deadline|window_bound|element_bound|filename_dialog_unavailable|filename_scan_ambiguous|input_refused|input_not_delivered|filename_target_changed|filename_read_unavailable|input_architecture_unsupported|filename_input_bound|filename_bounds_unavailable|filename_focus_refused|filename_input_not_delivered|input_target_unavailable|input_foreground_refused|input_point_refused|input_cursor_refused|dialog_not_dismissed) stage=(?:setup|discovery|default_filename|filename_set|native_input) windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9} fallback_misses=[0-9]{1,6}$/.test(
         line,
       ),
     );
