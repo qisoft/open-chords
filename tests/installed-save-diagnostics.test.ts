@@ -344,3 +344,16 @@ it.each([
 it("bounds total timing", () => {
   expect(installedSaveDriverTiming("", 10000000)).toContain("total_ms=999999");
 });
+
+it("preserves the missing prebuilt assembly code without private setup details", () => {
+  const code =
+    "native_save_failed code=input_assembly_unavailable stage=setup windows=0 elements=0 filenames=0 actions=0 fallback_misses=0";
+  const diagnostic = installedSaveDriverDiagnostic(
+    {},
+    `${code}\n${code} C:\\private\\driver.dll`,
+    20,
+  );
+  expect(diagnostic).toContain(code);
+  expect(diagnostic).not.toContain("private");
+  expect(diagnostic).not.toContain("driver.dll");
+});

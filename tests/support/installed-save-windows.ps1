@@ -38,7 +38,7 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Write-NativeSaveProbe 'load_assembly'
 $nativeAssembly = Join-Path $PSScriptRoot '../../build/test-support/windows-save-input.dll'
-if (!(Test-Path -LiteralPath $nativeAssembly -PathType Leaf)) { throw 'Native Save input assembly unavailable' }
+if (!(Test-Path -LiteralPath $nativeAssembly -PathType Leaf)) { throw 'input_assembly_unavailable' }
 Add-Type -Path $nativeAssembly
 
 [SaveNativeInput]::ConfigureFormat($Format, $isImport)
@@ -233,7 +233,7 @@ throw 'deadline'
   # Only numeric discovery counters leave this process; UI names, paths and exceptions stay private.
   $failureCode = 'unknown'
   $failure = $_.Exception.Message
-  if ($failure -in @('filename_unavailable', 'filename_pattern_unavailable', 'filename_ambiguous', 'default_filename_invalid', 'filename_readonly', 'filename_not_set', 'action_ambiguous', 'target_missing', 'action_bounds', 'deadline', 'window_bound', 'element_bound')) { $failureCode = $failure }
+  if ($failure -in @('filename_unavailable', 'filename_pattern_unavailable', 'filename_ambiguous', 'default_filename_invalid', 'filename_readonly', 'filename_not_set', 'action_ambiguous', 'target_missing', 'action_bounds', 'deadline', 'window_bound', 'element_bound', 'input_assembly_unavailable')) { $failureCode = $failure }
   if ($null -ne $_.Exception.InnerException) {
     switch ($_.Exception.InnerException.Message) {
       'Native Save filename dialog unavailable' { $failureCode = 'filename_dialog_unavailable' }
