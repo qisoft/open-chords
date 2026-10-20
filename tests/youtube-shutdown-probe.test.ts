@@ -96,6 +96,8 @@ it("observes window close/destroy without retrying or swallowing native failures
     return true;
   });
   try {
+    // The structural test double executes the probe callback without starting Electron.
+    // eslint-disable-next-line typescript/no-unsafe-type-assertion
     await installRendererShutdownProbe(application as unknown as ElectronApplication);
     window.close();
     window.destroy();
