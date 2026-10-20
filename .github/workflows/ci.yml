@@ -86,6 +86,9 @@ jobs:
       - name: Measure isolated Windows UIAutomation assembly loading
         if: runner.os == 'Windows'
         run: node tools/measure-windows-picker-load.ts
+      - name: Measure isolated Windows local-volume classification
+        if: runner.os == 'Windows'
+        run: node tools/measure-windows-volume-classifier.ts
       - name: Build and check native macOS picker AX verifier
         if: runner.os == 'macOS'
         run: |
