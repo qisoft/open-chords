@@ -830,3 +830,36 @@ it.each([
     ).toBe(false);
   },
 );
+
+const saveTargetObservation = {
+  status: "complete",
+  fields: 3,
+  valueMatches: 1,
+  enabledMatches: 1,
+  labelMatches: 1,
+  error: 0,
+  attribute: "none",
+};
+it("reports fixed Save candidate context without authorizing a native action", () => {
+  const output = JSON.stringify({ ...evidence, saveTargetContext: saveTargetObservation });
+  expect(installedMacAxProbeDiagnostic(output, null, 5)).toContain("save_target_valueMatches=1");
+  expect(installedMacAxActionSucceeded(output, "open")).toBe(false);
+  expect(installedMacSelectedDirectoryVerified(output)).toBe(false);
+});
+it.each([
+  { fields: 257 },
+  { valueMatches: 4 },
+  { enabledMatches: 2 },
+  { labelMatches: 2 },
+  { status: "/private/status" },
+  { attribute: "/private/attribute" },
+  { rawValue: "/private/filename" },
+])("refuses malformed or private Save context %j", (change) => {
+  const output = JSON.stringify({
+    ...evidence,
+    saveTargetContext: { ...saveTargetObservation, ...change },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 5)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});

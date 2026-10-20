@@ -120,6 +120,31 @@ const evidenceSchema = z.strictObject({
     attribute: z.enum(["none", "pid", "AXRole", "AXChildren"]),
     error: z.number().int().min(-32768).max(32767),
   }),
+  saveTargetContext: z
+    .strictObject({
+      status: z.enum(["not_checked", "complete", "deadline", "error"]),
+      fields: z.number().int().min(0).max(256),
+      valueMatches: z.number().int().min(0).max(256),
+      enabledMatches: z.number().int().min(0).max(256),
+      labelMatches: z.number().int().min(0).max(256),
+      error: z.number().int().min(-32768).max(32767),
+      attribute: z.enum(["none", "AXValue", "AXEnabled", "AXTitle"]),
+    })
+    .refine(
+      (value) =>
+        value.valueMatches <= value.fields &&
+        value.enabledMatches <= value.valueMatches &&
+        value.labelMatches <= value.valueMatches,
+    )
+    .default({
+      status: "not_checked",
+      fields: 0,
+      valueMatches: 0,
+      enabledMatches: 0,
+      labelMatches: 0,
+      error: 0,
+      attribute: "none",
+    }),
   selectedDirectory: z
     .strictObject({
       fields: z.number().int().min(0).max(256),
@@ -291,6 +316,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       firstOtherParentRole,
       firstExactURL,
       selectedDirectory,
+      saveTargetContext,
       staleSnapshot,
       invalidChildParent,
       parentChain,
@@ -326,6 +352,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       ...Object.entries(invalidChildParent).map(
         ([key, value]) => `invalid_child_parent_${key}=${value}`,
       ),
+      ...Object.entries(saveTargetContext).map(([key, value]) => `save_target_${key}=${value}`),
       ...Object.entries(selectedDirectory).map(
         ([key, value]) => `selected_directory_${key}=${value}`,
       ),

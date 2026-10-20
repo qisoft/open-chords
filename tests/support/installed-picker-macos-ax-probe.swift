@@ -159,7 +159,9 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
     print("Native macOS exact attribute checks passed: 10")
     exit(0)
 }
-let requested = arguments.count == 4 ? arguments[3] : "none"
+let requested = arguments.count >= 4 ? arguments[3] : "none"
+let saveNames = ["json": "Open Chords.json", "lrc": "Open Chords.lrc", "chordpro": "Open Chords.cho", "pdf": "Open Chords.pdf", "archive": "Open Chords.ocarchive"]
+let expectedSaveName = arguments.count == 5 && requested == "directory_snapshot" ? saveNames[arguments[4]] : nil
 var counts: [String: Int] = [
     "windows": 0, "sheets": 0, "visited": 0, "selectedRoots": 0,
     "selectedRows": 0, "selectedCells": 0, "selectedColumns": 0,
@@ -181,6 +183,7 @@ var staleChildContext = false
 var invalidRoleElement: AXUIElement? = nil
 var snapshotRefreshEligible = false
 var snapshotTraversalComplete = false
+var saveTargetContext: [String: Any] = ["status": "not_checked", "fields": 0, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "error": 0, "attribute": "none"]
 var directoryVerified = false
 var verified = false
 var pressed = false
@@ -330,7 +333,41 @@ func noReadFailures() -> Bool {
     counts["cannotComplete", default: 0] == 0 && counts["apiDisabled", default: 0] == 0 && counts["otherErrors", default: 0] == 0
 }
 
-if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open_existing", "directory_snapshot"].contains(requested),
+// Read-only candidate context, independent of directory proof and never action authorization.
+func observeSaveTarget(_ fields: [AXUIElement], expected: String) -> [String: Any] {
+    var result: [String: Any] = ["status": "complete", "fields": fields.count, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "error": 0, "attribute": "none"]
+    func observe(_ field: AXUIElement, _ name: String) -> CFTypeRef? {
+        if ProcessInfo.processInfo.systemUptime >= deadline {
+            if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
+            return nil
+        }
+        AXUIElementSetMessagingTimeout(field, 0.15)
+        var value: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(field, name as CFString, &value)
+        if status != .success {
+            if (result["status"] as? String) == "complete" { result["status"] = "error" }
+            if (result["error"] as? Int) == 0 { result["error"] = Int(status.rawValue); result["attribute"] = name }
+            return nil
+        }
+        return value
+    }
+    for field in fields {
+        if ProcessInfo.processInfo.systemUptime >= deadline {
+            if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
+            break
+        }
+        if (observe(field, "AXValue") as? String) == expected {
+            result["valueMatches"] = (result["valueMatches"] as? Int ?? 0) + 1
+            if (observe(field, "AXEnabled") as? Bool) == true { result["enabledMatches"] = (result["enabledMatches"] as? Int ?? 0) + 1 }
+            if let title = observe(field, "AXTitle") as? String, ["Save As:", "Save As"].contains(title) {
+                result["labelMatches"] = (result["labelMatches"] as? Int ?? 0) + 1
+            }
+        }
+    }
+    return result
+}
+
+if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && expectedSaveName != nil)), ["none", "open", "cancel_open_existing", "directory_snapshot"].contains(requested),
    let pid = Int32(arguments[1]), pid > 0, arguments[2].hasPrefix("/") {
     let target = URL(fileURLWithPath: arguments[2])
     let expected = target.absoluteString
@@ -365,6 +402,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     var buttons: [AXUIElement] = []
     var saveButtons: [AXUIElement] = []
     var directoryFields: [(URL, AXUIElement)] = []
+    var saveTextFields: [AXUIElement] = []
     var queue: [(AXUIElement, String, String, Bool, Int, Int, AXUIElement?)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none", false, 0, 0, nil) } : []
     seen = []
     stage = "selection"
@@ -383,6 +421,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         invalidRoleElement = nil
         let roleRead = readResult(element, "AXRole")
         let role = roleRead.value as? String ?? ""
+        if expectedSaveName != nil && role == "AXTextField" { saveTextFields.append(element) }
         if staleChildContext && roleRead.status == .invalidUIElement {
             invalidRoleElement = element
             vanishedChildCandidates += 1
@@ -588,7 +627,10 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
             if noReadFailures() { guardMask |= 64 }
             if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { guardMask |= 128 }
             directoryVerified = guardMask == 255 && ProcessInfo.processInfo.systemUptime < deadline
-            if directoryVerified { stage = "directory_complete" }
+            if directoryVerified {
+                stage = "directory_complete"
+                if let name = expectedSaveName { saveTargetContext = observeSaveTarget(saveTextFields, expected: name) }
+            }
         }
     }
     if ["open", "cancel_open_existing"].contains(requested) && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
@@ -675,7 +717,7 @@ let result: [String: Any] = [
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
-    "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
+    "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
     "action": ["requested": requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
