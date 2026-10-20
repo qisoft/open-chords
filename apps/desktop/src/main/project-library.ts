@@ -64,6 +64,7 @@ import {
   validateStoredPayload,
   type StoredProjectPayload,
 } from "./project-payload.ts";
+import { windowsLocalVolumeCommand } from "./windows-local-volume-command.ts";
 import {
   appendYouTubeObservation,
   readYouTubeSources,
@@ -3043,16 +3044,9 @@ async function isPlatformLocalVolume(path: string): Promise<boolean> {
   if (process.platform === "win32") {
     const root = parse(path).root.replace(/[\\/]$/, "");
     if (!/^[A-Za-z]:$/.test(root)) return false;
-    const escapedRoot = root.replace("'", "''");
     const { stdout } = await execFileAsync(
       "powershell.exe",
-      [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `$drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${escapedRoot}'"; if ($null -eq $drive) { exit 2 }; [Console]::Out.Write($drive.DriveType)`,
-      ],
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", windowsLocalVolumeCommand(root)],
       {
         encoding: "utf8",
       },
