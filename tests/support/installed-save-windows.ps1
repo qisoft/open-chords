@@ -35,7 +35,9 @@ function Write-NativeSaveProbe([string]$Name) {
 try {
 Write-NativeSaveProbe 'assemblies'
 Add-Type -AssemblyName UIAutomationClient
+Write-NativeSaveProbe 'uia_client_loaded'
 Add-Type -AssemblyName UIAutomationTypes
+Write-NativeSaveProbe 'uia_types_loaded'
 Write-NativeSaveProbe 'load_assembly'
 $nativeAssembly = Join-Path $PSScriptRoot '../../build/test-support/windows-save-input.dll'
 if (!(Test-Path -LiteralPath $nativeAssembly -PathType Leaf)) { throw 'input_assembly_unavailable' }

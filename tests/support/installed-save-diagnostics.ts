@@ -19,7 +19,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const probes = output
     .split(/\r?\n/)
     .filter((line) =>
-      /^Native Save driver probe: (?:assemblies|compile|load_assembly|root|ready|windows_query|windows_read|window_properties|elements_query|controls_query|controls_read|pattern|value_read|value_set|native_input|action_clicked) duration_ms=[0-9]{1,9} windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9}$/.test(
+      /^Native Save driver probe: (?:assemblies|uia_client_loaded|uia_types_loaded|compile|load_assembly|root|ready|windows_query|windows_read|window_properties|elements_query|controls_query|controls_read|pattern|value_read|value_set|native_input|action_clicked) duration_ms=[0-9]{1,9} windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9}$/.test(
         line,
       ),
     )

@@ -83,6 +83,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: tests/support/build-windows-save-driver.ps1
+      - name: Measure isolated Windows UIAutomation assembly loading
+        if: runner.os == 'Windows'
+        run: node tools/measure-windows-picker-load.ts
       - name: Build and check native macOS picker AX verifier
         if: runner.os == 'macOS'
         run: |
