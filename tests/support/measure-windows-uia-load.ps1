@@ -5,8 +5,9 @@ try {
   if ([IntPtr]::Size -ne 8 -or $PSVersionTable.PSEdition -ne 'Desktop') { throw 'runtime' }
   $moduleMs = 0
   if ($Mode -eq 'modules') {
+    $moduleTimer = [Diagnostics.Stopwatch]::StartNew()
     . ([IO.Path]::Combine($PSScriptRoot, 'import-windows-picker-modules.ps1'))
-    $moduleMs = [int]$whole.ElapsedMilliseconds
+    $moduleMs = [int]$moduleTimer.ElapsedMilliseconds
   }
   $framework = [Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
   $runtimeMs = [int]$whole.ElapsedMilliseconds - $moduleMs
