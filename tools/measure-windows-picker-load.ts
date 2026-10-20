@@ -26,6 +26,7 @@ env.PATH = [
 ].join(";");
 const execute = promisify(execFile);
 for (const mode of ["name", "path"] as const) {
+  const started = performance.now();
   let stdout: string;
   try {
     ({ stdout } = await execute(
@@ -44,5 +45,5 @@ for (const mode of ["name", "path"] as const) {
     // Native errors can embed command paths; preserve only a fixed failure.
     throw new Error("Native UIAutomation load measurement failed");
   }
-  console.log(windowsUiaLoadDiagnostic(mode, stdout));
+  console.log(windowsUiaLoadDiagnostic(mode, stdout, performance.now() - started));
 }
