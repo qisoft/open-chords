@@ -337,19 +337,25 @@ func noReadFailures() -> Bool {
 func observeSaveTarget(_ fields: [AXUIElement], expected: String) -> [String: Any] {
     var result: [String: Any] = ["status": "complete", "fields": fields.count, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "error": 0, "attribute": "none"]
     func observe(_ field: AXUIElement, _ name: String) -> CFTypeRef? {
-        if ProcessInfo.processInfo.systemUptime >= deadline { result["status"] = "deadline"; return nil }
+        if ProcessInfo.processInfo.systemUptime >= deadline {
+            if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
+            return nil
+        }
         AXUIElementSetMessagingTimeout(field, 0.15)
         var value: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(field, name as CFString, &value)
         if status != .success {
-            result["status"] = "error"
+            if (result["status"] as? String) == "complete" { result["status"] = "error" }
             if (result["error"] as? Int) == 0 { result["error"] = Int(status.rawValue); result["attribute"] = name }
             return nil
         }
         return value
     }
     for field in fields {
-        if ProcessInfo.processInfo.systemUptime >= deadline { result["status"] = "deadline"; break }
+        if ProcessInfo.processInfo.systemUptime >= deadline {
+            if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
+            break
+        }
         if (observe(field, "AXValue") as? String) == expected {
             result["valueMatches"] = (result["valueMatches"] as? Int ?? 0) + 1
             if (observe(field, "AXEnabled") as? Bool) == true { result["enabledMatches"] = (result["enabledMatches"] as? Int ?? 0) + 1 }
