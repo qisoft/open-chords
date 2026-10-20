@@ -19,7 +19,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const probes = output
     .split(/\r?\n/)
     .filter((line) =>
-      /^Native Save driver probe: (?:assemblies|compile|root|ready|windows_query|windows_read|window_properties|elements_query|controls_query|controls_read|pattern|value_read|value_set|native_input|action_clicked) duration_ms=[0-9]{1,9} windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9}$/.test(
+      /^Native Save driver probe: (?:assemblies|uia_client_loaded|uia_types_loaded|compile|load_assembly|root|ready|windows_query|windows_read|window_properties|elements_query|controls_query|controls_read|pattern|value_read|value_set|native_input|action_clicked) duration_ms=[0-9]{1,9} windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9}$/.test(
         line,
       ),
     )
@@ -27,7 +27,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
   const counters = output
     .split(/\r?\n/)
     .find((line) =>
-      /^native_save_failed code=(?:unknown|filename_unavailable|filename_pattern_unavailable|filename_ambiguous|default_filename_invalid|filename_readonly|filename_not_set|action_ambiguous|target_missing|action_bounds|deadline|window_bound|element_bound|filename_dialog_unavailable|filename_scan_ambiguous|input_refused|input_not_delivered|filename_target_changed|filename_read_unavailable|input_architecture_unsupported|filename_input_bound|filename_bounds_unavailable|filename_focus_refused|filename_input_not_delivered|input_target_unavailable|input_foreground_refused|input_point_refused|input_cursor_refused|dialog_not_dismissed) stage=(?:setup|discovery|default_filename|filename_set|native_input) windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9} fallback_misses=[0-9]{1,6}$/.test(
+      /^native_save_failed code=(?:unknown|input_assembly_unavailable|filename_unavailable|filename_pattern_unavailable|filename_ambiguous|default_filename_invalid|filename_readonly|filename_not_set|action_ambiguous|target_missing|action_bounds|deadline|window_bound|element_bound|filename_dialog_unavailable|filename_scan_ambiguous|input_refused|input_not_delivered|filename_target_changed|filename_read_unavailable|input_architecture_unsupported|filename_input_bound|filename_bounds_unavailable|filename_focus_refused|filename_input_not_delivered|input_target_unavailable|input_foreground_refused|input_point_refused|input_cursor_refused|dialog_not_dismissed) stage=(?:setup|discovery|default_filename|filename_set|native_input) windows=[0-9]{1,9} elements=[0-9]{1,9} filenames=[0-9]{1,9} actions=[0-9]{1,9} fallback_misses=[0-9]{1,6}$/.test(
         line,
       ),
     );
@@ -101,6 +101,22 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const inputTargets = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save input target probe: phase=(?:after_input|dismissal) class=(?:none|button|edit|other) id=(?:none|cancel|primary|filename|other) child=(?:true|false) owned=(?:true|false) thread_known=(?:true|false) active_dialog=(?:true|false|unknown) focus_control=(?:true|false|unknown) capture_control=(?:true|false|unknown)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
+  const filenameReads = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save filename read probe: completed=(?:true|false) length_bound=(?:true|false|unknown) duration_ms=[0-9]{1,6} dialog_exists=(?:true|false) field_exists=(?:true|false) field_child=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   const controlProbes = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -132,6 +148,8 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       "Native Save driver",
     ),
     `Native Save driver failure: started=${started} category=${category} spawn_code=${spawnCode}`,
+    ...(counters ? [counters] : []),
+    ...filenameReads,
     ...probes,
     ...windowProbes,
     ...dismissalProbes,
@@ -140,11 +158,28 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...activationProbes,
     ...pointerProbes,
     ...clickProbes,
+    ...inputTargets,
     ...controlProbes,
     ...candidates,
     ...children,
     ...(defaultProbe ? [defaultProbe] : []),
     ...(pointProbe ? [pointProbe] : []),
-    ...(counters ? [counters] : []),
   ].join("\n");
+}
+
+export function installedSaveDriverTiming(stderr: string, durationMs: number) {
+  const root = stderr
+    .slice(-65536)
+    .split(/\r?\n/)
+    .find((line) =>
+      /^Native Save driver probe: root duration_ms=[0-9]{1,6} windows=0 elements=0 filenames=0 actions=0$/.test(
+        line,
+      ),
+    );
+  const initialization = root?.match(/duration_ms=([0-9]+)/)?.[1] ?? "unknown";
+  const total =
+    Number.isFinite(durationMs) && durationMs >= 0
+      ? Math.min(999999, Math.round(durationMs))
+      : "unknown";
+  return `Native Windows picker timing: initialization_ms=${initialization} total_ms=${total}`;
 }

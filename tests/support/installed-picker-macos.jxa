@@ -47,9 +47,36 @@ function run(argv) {
       return null;
     }
   }
+  function reportFreshControls(freshSheets, phase) {
+    var status = 'complete', elements = 0, primary = 0, cancel = 0, osError = 'none';
+    try {
+      if (freshSheets.length > 16) status = 'bound';
+      else for (var s = 0; s < freshSheets.length && status === 'complete'; s++) {
+        if (Date.now() >= deadline) { status = 'deadline'; break; }
+        var current = freshSheets[s].entireContents();
+        if (current.length > 256 || elements + current.length > 256) { elements = 257; status = 'bound'; break; }
+        for (var e = 0; e < current.length; e++) {
+          if (Date.now() >= deadline) { status = 'deadline'; break; }
+          elements++;
+          if (current[e].role() !== 'AXButton') continue;
+          var name = current[e].name();
+          if ((name === primaryAction || name === 'Cancel') && current[e].enabled() === true) {
+            if (name === primaryAction) primary = Math.min(17, primary + 1);
+            if (name === 'Cancel') cancel = Math.min(17, cancel + 1);
+          }
+        }
+      }
+    } catch (error) {
+      status = 'error';
+      osError = error && Number.isInteger(error.errorNumber) && error.errorNumber >= -32768 && error.errorNumber <= 32767 ? error.errorNumber : 'unknown';
+    }
+    console.log('Native macOS picker fresh controls: phase=' + phase + ' status=' + status +
+      ' before_input=' + !nativeInputStarted + ' elements=' + elements + ' primary=' + primary +
+      ' cancel=' + cancel + ' os_error=' + osError);
+  }
   function reportGuardSnapshot(process, candidate, phase) {
     var status = 'complete', windows = 0, sheets = 0, osError = 'none';
-    var sheetExists = 'unknown', buttonExists = 'unknown';
+    var sheetExists = 'unknown', buttonExists = 'unknown', freshSheets = [];
     function existence(element) {
       try {
         var value = element.exists();
@@ -70,7 +97,9 @@ function run(argv) {
         if (windows > 16) { if (status === 'complete') status = 'bound'; }
         else for (var w = 0; w < currentWindows.length; w++) {
           if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; break; }
-          sheets = Math.min(17, sheets + currentWindows[w].sheets().length);
+          var currentSheets = currentWindows[w].sheets();
+          freshSheets = freshSheets.concat(currentSheets);
+          sheets = Math.min(17, sheets + currentSheets.length);
           if (sheets > 16) { if (status === 'complete') status = 'bound'; break; }
         }
       }
@@ -82,7 +111,10 @@ function run(argv) {
       ' age_ms=' + Math.max(0, Math.min(200000, Date.now() - candidate.capturedAt)) +
       ' sheet_exists=' + sheetExists + ' button_exists=' + buttonExists +
       ' windows=' + windows + ' sheets=' + sheets + ' os_error=' + osError);
-    return status === 'complete' && sheetExists === 'false' && buttonExists === 'false' && windows === 1 && sheets === 1;
+    var staleReferences = status === 'complete' && sheetExists === 'false' && buttonExists === 'false' && windows === 1 && sheets === 1;
+    // This diagnostic never changes the existing stale-reference eligibility result.
+    if (status === 'complete') reportFreshControls(freshSheets, phase);
+    return staleReferences;
   }
   function requireCancelTarget(process, candidate, phase, includePrimary) {
     guardReading = true;

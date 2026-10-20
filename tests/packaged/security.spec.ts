@@ -35,7 +35,10 @@ import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagno
 import { installedEffectiveCspDiagnostic } from "../support/installed-effective-csp-diagnostics.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
-import { installedSaveDriverDiagnostic } from "../support/installed-save-diagnostics.ts";
+import {
+  installedSaveDriverDiagnostic,
+  installedSaveDriverTiming,
+} from "../support/installed-save-diagnostics.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
 test.skip(
@@ -1327,6 +1330,7 @@ function installedMediaPickerDriver(
             return;
           }
           try {
+            console.log(installedSaveDriverTiming(stderr, performance.now() - started));
             resolve(JSON.parse(stdout.trim()));
           } catch {
             reject(new Error("Installed native media picker driver returned invalid evidence"));
@@ -1893,6 +1897,13 @@ async function evaluateRendererTarget(webSocketUrl: string) {
                       evalBlocked: evalBlocked && globalThis.__openChordsEvalCspProbe !== true,
                       inlineScriptBlocked: globalThis.__openChordsInlineCspProbe !== true,
                       documentUrl: location.href === "about:blank" ? "about_blank" : location.protocol === "open-chords:" && location.hostname === "app" ? location.pathname === "/index.html" ? "app_index" : "app_other" : "other",
+                      isTopFrame: window.top === window,
+                      topDocumentUrl: (() => {
+                        try {
+                          const topLocation = window.top.location;
+                          return topLocation.href === "about:blank" ? "about_blank" : topLocation.protocol === "open-chords:" && topLocation.hostname === "app" ? topLocation.pathname === "/index.html" ? "app_index" : "app_other" : "other";
+                        } catch { return "unavailable"; }
+                      })(),
                       readyState: document.readyState,
                       preloadPresent: typeof window.openChords === "object" && window.openChords !== null,
                       metaCount: Math.min(17, document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]').length),

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { installedExportExitDiagnostic } from "./installed-export-process.ts";
 
 export const MAC_AX_COUNT_FIELDS = [
+  "saveButtons",
   "windows",
   "sheets",
   "visited",
@@ -102,6 +103,23 @@ const AX_ORIGIN_KEYS = [
 ] as const;
 
 const evidenceSchema = z.strictObject({
+  staleSnapshot: z.strictObject({
+    eligible: z.boolean(),
+    traversalComplete: z.boolean(),
+    candidates: z.number().int().min(0).max(256),
+    allVanished: z.boolean(),
+    onlyInvalidChildErrors: z.boolean(),
+  }),
+  invalidChildParent: z.strictObject({
+    status: z.enum(["not_checked", "complete", "deadline", "error", "invalid_value", "bound"]),
+    role: z.enum(AX_ROLE_KEYS),
+    pidMatches: z.boolean(),
+    selectedReference: z.boolean(),
+    children: z.number().int().min(0).max(257),
+    containsFailedReference: z.enum(["true", "false", "unknown"]),
+    attribute: z.enum(["none", "pid", "AXRole", "AXChildren"]),
+    error: z.number().int().min(-32768).max(32767),
+  }),
   selectedDirectory: z
     .strictObject({
       fields: z.number().int().min(0).max(256),
@@ -220,6 +238,7 @@ const evidenceSchema = z.strictObject({
     "guard",
   ]),
   firstCannotCompleteDurationMs: z.number().int().min(0).max(999999),
+  directoryVerified: z.boolean(),
   verified: z.boolean(),
   foreground: z.boolean(),
   guardMask: z.number().int().min(0).max(255),
@@ -233,9 +252,10 @@ const evidenceSchema = z.strictObject({
     "press",
     "dismissal",
     "complete",
+    "directory_complete",
   ]),
   action: z.strictObject({
-    requested: z.enum(["none", "open", "cancel_open_existing"]),
+    requested: z.enum(["none", "open", "cancel_open_existing", "directory_snapshot"]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
   }),
@@ -271,10 +291,13 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       firstOtherParentRole,
       firstExactURL,
       selectedDirectory,
+      staleSnapshot,
+      invalidChildParent,
       parentChain,
       firstCannotCompleteAttribute,
       firstCannotCompleteStage,
       firstCannotCompleteDurationMs,
+      directoryVerified,
       verified,
       foreground,
       guardMask,
@@ -299,6 +322,10 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `other_visited=${firstOtherVisited}`,
       `other_origin=${firstOtherOrigin}`,
       `other_parent_role=${firstOtherParentRole}`,
+      ...Object.entries(staleSnapshot).map(([key, value]) => `stale_snapshot_${key}=${value}`),
+      ...Object.entries(invalidChildParent).map(
+        ([key, value]) => `invalid_child_parent_${key}=${value}`,
+      ),
       ...Object.entries(selectedDirectory).map(
         ([key, value]) => `selected_directory_${key}=${value}`,
       ),
@@ -312,6 +339,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `cannot_complete_attribute=${firstCannotCompleteAttribute}`,
       `cannot_complete_stage=${firstCannotCompleteStage}`,
       `cannot_complete_duration_ms=${firstCannotCompleteDurationMs}`,
+      `directory_verified=${directoryVerified}`,
       `verified=${verified}`,
       `foreground=${foreground}`,
       `guard_mask=${guardMask}`,
@@ -355,6 +383,118 @@ export function installedMacAxActionSucceeded(
       value.counts.otherErrors === 0 &&
       value.counts.cannotComplete === 0 &&
       value.counts.apiDisabled === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Read-only selected terminal directory proof; never an input/action authorization.
+export function installedMacSelectedDirectoryVerified(stdout: string) {
+  try {
+    if (stdout.length > 4096) return false;
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const value = parsed.data;
+    return (
+      value.trusted &&
+      value.complete &&
+      value.directoryVerified &&
+      value.foreground &&
+      value.guardMask === 255 &&
+      value.stage === "directory_complete" &&
+      value.action.requested === "directory_snapshot" &&
+      !value.action.pressed &&
+      !value.action.dismissed &&
+      value.firstOtherError === 0 &&
+      value.firstOtherAttribute === "none" &&
+      value.counts.otherErrors === 0 &&
+      value.counts.cannotComplete === 0 &&
+      value.counts.apiDisabled === 0 &&
+      value.counts.windows === 1 &&
+      value.counts.sheets === 1 &&
+      value.counts.buttons === 1 &&
+      value.counts.saveButtons === 1 &&
+      value.selectedDirectory.validShape &&
+      value.selectedDirectory.fields === value.counts.selectedRoots &&
+      value.selectedDirectory.uniqueUrls === value.counts.selectedRoots &&
+      value.selectedDirectory.fields > 0 &&
+      value.selectedDirectory.terminalUrls === 1 &&
+      value.selectedDirectory.terminalMatches === 1 &&
+      value.counts.exactUrls === 1 &&
+      value.counts.urlStrings === 0 &&
+      value.counts.urlObjects === value.selectedDirectory.fields &&
+      value.firstExactURL.role === "AXTextField" &&
+      value.firstExactURL.origin === "AXChildren" &&
+      value.firstExactURL.parentRole === "AXGroup" &&
+      value.firstExactURL.kind === "native" &&
+      value.firstExactURL.directory &&
+      value.parentChain.status === "captured_sheet" &&
+      value.parentChain.nodes[0]?.role === "AXGroup" &&
+      value.parentChain.nodes[0]?.selectedReference &&
+      value.parentChain.nodes.at(-1)?.role === "AXSheet"
+    );
+  } catch {
+    return false;
+  }
+}
+
+// A fresh complete snapshot may be taken once before any native action; this never accepts the failed snapshot.
+export function installedMacAxSnapshotRefreshAllowed(
+  stdout: string,
+  requested: "open" | "cancel_open_existing",
+) {
+  try {
+    if (stdout.length > 4096) return false;
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const value = parsed.data;
+    return (
+      value.trusted &&
+      !value.complete &&
+      !value.verified &&
+      !value.directoryVerified &&
+      value.stage === "verification" &&
+      value.guardMask === 0 &&
+      value.pressDurationMs === 0 &&
+      value.pressSheetState === "not_checked" &&
+      value.action.requested === requested &&
+      !value.action.pressed &&
+      !value.action.dismissed &&
+      value.staleSnapshot.eligible &&
+      value.staleSnapshot.traversalComplete &&
+      value.staleSnapshot.candidates > 0 &&
+      value.staleSnapshot.allVanished &&
+      value.staleSnapshot.onlyInvalidChildErrors &&
+      value.firstOtherError === -25202 &&
+      value.firstOtherAttribute === "AXRole" &&
+      value.firstOtherStage === "selection" &&
+      value.firstOtherOrigin === "AXChildren" &&
+      value.firstOtherParentRole === "AXScrollArea" &&
+      !value.firstOtherSelectedReference &&
+      !value.firstOtherSelectedBranch &&
+      value.invalidChildParent.status === "complete" &&
+      value.invalidChildParent.role === "AXScrollArea" &&
+      value.invalidChildParent.pidMatches &&
+      !value.invalidChildParent.selectedReference &&
+      value.invalidChildParent.containsFailedReference === "false" &&
+      value.invalidChildParent.attribute === "none" &&
+      value.invalidChildParent.error === 0 &&
+      value.firstOtherVisited > 0 &&
+      value.firstOtherVisited <= value.counts.visited &&
+      value.counts.visited <= 256 &&
+      value.staleSnapshot.candidates <= value.counts.visited &&
+      value.counts.selectedRoots > 0 &&
+      value.counts.selectedRoots <= 256 &&
+      value.counts.otherErrors >= value.staleSnapshot.candidates &&
+      value.counts.cannotComplete === 0 &&
+      value.counts.apiDisabled === 0 &&
+      value.counts.windows === 1 &&
+      value.counts.sheets === 1 &&
+      value.counts.buttons === 1 &&
+      value.counts.selectedLeaves === 1 &&
+      value.counts.leafMatches === 1 &&
+      value.counts.selectedExactUrls === 1
     );
   } catch {
     return false;

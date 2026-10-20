@@ -29,6 +29,14 @@ func selectedDirectoryObservation(_ input: [URL], expected: URL) -> [String: Any
             input.allSatisfy { $0.isFileURL && $0.hasDirectoryPath && $0.host == expected.host && $0.query == nil && $0.fragment == nil }]
 }
 
+func vanishedChildParent(_ observation: [String: Any]) -> Bool {
+    guard let children = observation["children"] as? Int, (0...256).contains(children) else { return false }
+    return (observation["status"] as? String) == "complete" && (observation["role"] as? String) == "AXScrollArea" &&
+        (observation["pidMatches"] as? Bool) == true && (observation["selectedReference"] as? Bool) == false &&
+        (observation["containsFailedReference"] as? String) == "false" && (observation["attribute"] as? String) == "none" &&
+        (observation["error"] as? Int) == 0
+}
+
 func exactTargetAttribute(_ value: CFTypeRef?, target: URL, path: String) -> Bool {
     guard let value = value else { return false }
     if let text = value as? String, text == path { return true }
@@ -130,6 +138,17 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
         if observed["terminalUrls"] as? Int != item.1 || observed["terminalMatches"] as? Int != item.2 || observed["validShape"] as? Bool != item.3 { exit(1) }
     }
     print("Native macOS selected directory observation checks passed: 9")
+    let vanishedParent: [String: Any] = ["status": "complete", "role": "AXScrollArea", "pidMatches": true, "selectedReference": false,
+        "children": 14, "containsFailedReference": "false", "attribute": "none", "error": 0]
+    if !vanishedChildParent(vanishedParent) { exit(1) }
+    let refusedParents: [[String: Any]] = [["status": "error"], ["role": "AXGroup"], ["pidMatches": false], ["selectedReference": true],
+        ["children": 257], ["containsFailedReference": "true"], ["containsFailedReference": "unknown"], ["attribute": "AXChildren"], ["error": -25202]]
+    for change in refusedParents {
+        var observation = vanishedParent
+        for (key, value) in change { observation[key] = value }
+        if vanishedChildParent(observation) { exit(1) }
+    }
+    print("Native macOS vanished-child parent checks passed: 10")
     let parentCases: [(AXError, String)] = [(.noValue, "missing_parent"), (.cannotComplete, "unreadable_parent"),
         (.invalidUIElement, "unreadable_parent"), (.attributeUnsupported, "unreadable_parent"), (.success, "unreadable_parent")]
     if !parentCases.allSatisfy({ absentParentStatus($0.0) == $0.1 }) { exit(1) }
@@ -147,7 +166,7 @@ var counts: [String: Int] = [
     "urlStrings": 0, "urlObjects": 0, "exactUrls": 0, "exactFilenames": 0,
     "basenameMatches": 0, "unsupported": 0, "cannotComplete": 0,
     "apiDisabled": 0, "otherErrors": 0, "lastError": 0,
-    "selectedUrls": 0, "selectedExactUrls": 0, "selectedLeaves": 0, "leafMatches": 0, "buttons": 0,
+    "saveButtons": 0, "selectedUrls": 0, "selectedExactUrls": 0, "selectedLeaves": 0, "leafMatches": 0, "buttons": 0,
     "valuePathMatches": 0, "filenamePathMatches": 0, "documentPathMatches": 0,
     "pathControls": 0, "popupControls": 0, "disclosures": 0,
     "expandedDisclosures": 0, "collapsedDisclosures": 0, "pathControlMatches": 0, "popupPathMatches": 0,
@@ -155,6 +174,14 @@ var counts: [String: Int] = [
     "unknownValueDisclosures": 0, "disclosureActions": 0, "pressableDisclosures": 0
 ]
 var complete = true
+var onlyInvalidChildErrors = true
+var vanishedChildCandidates = 0
+var allInvalidChildrenVanished = true
+var staleChildContext = false
+var invalidRoleElement: AXUIElement? = nil
+var snapshotRefreshEligible = false
+var snapshotTraversalComplete = false
+var directoryVerified = false
 var verified = false
 var pressed = false
 var dismissed = false
@@ -172,6 +199,7 @@ var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
 var selectedDirectory: [String: Any] = ["fields": 0, "uniqueUrls": 0, "terminalUrls": 0, "terminalMatches": 0, "validShape": false]
+var invalidChildParent: [String: Any] = ["status": "not_checked", "role": "none", "pidMatches": false, "selectedReference": false, "children": 0, "containsFailedReference": "unknown", "attribute": "none", "error": 0]
 var firstExactElement: AXUIElement? = nil
 var parentChain: [String: Any] = ["status": "not_checked", "visited": 0, "selected": 0, "unknownSelected": 0, "roleMask": 0, "nodes": [[String: Any]]()]
 var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none", "titleCategory": "unavailable", "valueCategory": "unavailable", "traversalRoleMask": 0, "traversalDepth": 0]
@@ -187,20 +215,22 @@ var firstCannotCompleteDurationMs = 0
 let trusted = AXIsProcessTrusted()
 let deadline = ProcessInfo.processInfo.systemUptime + 3
 
-func recordReadError(_ status: AXError, name: String, duration: TimeInterval) {
+func recordReadError(_ status: AXError, name: String, duration: TimeInterval, invalidChildRead: Bool = false) {
     if status == .success { return }
     counts["lastError"] = Int(status.rawValue)
     switch status {
     case .attributeUnsupported, .noValue: counts["unsupported", default: 0] += 1
     case .cannotComplete:
+        onlyInvalidChildErrors = false
         counts["cannotComplete", default: 0] += 1
         if firstCannotCompleteAttribute == "none" {
             firstCannotCompleteAttribute = name
             firstCannotCompleteStage = stage
             firstCannotCompleteDurationMs = min(999999, max(0, Int(duration * 1000)))
         }
-    case .apiDisabled: counts["apiDisabled", default: 0] += 1
+    case .apiDisabled: onlyInvalidChildErrors = false; counts["apiDisabled", default: 0] += 1
     default:
+        onlyInvalidChildErrors = onlyInvalidChildErrors && status == .invalidUIElement && invalidChildRead
         counts["otherErrors", default: 0] += 1
         if firstOtherError == 0 {
             firstOtherError = Int(status.rawValue); firstOtherAttribute = name
@@ -221,7 +251,9 @@ func readResult(_ element: AXUIElement, _ name: String) -> (status: AXError, val
     let readStarted = ProcessInfo.processInfo.systemUptime
     let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
     if status != .success {
-        recordReadError(status, name: name, duration: ProcessInfo.processInfo.systemUptime - readStarted)
+        let invalidChildRead = staleChildContext && !readSelectedReference && !readSelectedBranch &&
+            (name == "AXRole" || invalidRoleElement.map { same($0, element) } == true)
+        recordReadError(status, name: name, duration: ProcessInfo.processInfo.systemUptime - readStarted, invalidChildRead: invalidChildRead)
         return (status, nil)
     }
     return (status, value)
@@ -261,11 +293,44 @@ func diagnosticRole(_ role: String) -> String {
     return ["AXSheet", "AXBrowser", "AXScrollArea", "AXSplitGroup", "AXGroup", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell", "AXImage", "AXStaticText", "AXTextField", "AXButton", "AXPopUpButton", "AXDisclosureTriangle"].contains(role) ? role : "other"
 }
 
+// Failure-only diagnostic. It neither retries the failed child nor changes read-error accounting.
+func invalidChildParentObservation(_ parent: AXUIElement, child: AXUIElement, pid: pid_t, selectedReference: Bool) -> [String: Any] {
+    var result: [String: Any] = ["status": "complete", "role": "none", "pidMatches": false, "selectedReference": selectedReference,
+        "children": 0, "containsFailedReference": "unknown", "attribute": "pid", "error": 0]
+    if ProcessInfo.processInfo.systemUptime >= deadline { result["status"] = "deadline"; return result }
+    var actualPid: pid_t = 0
+    let pidStatus = AXUIElementGetPid(parent, &actualPid)
+    if pidStatus != .success { result["status"] = "error"; result["error"] = Int(pidStatus.rawValue); return result }
+    result["pidMatches"] = actualPid == pid
+    result["attribute"] = "AXRole"
+    var status = AXUIElementSetMessagingTimeout(parent, 0.5)
+    if status != .success { result["status"] = "error"; result["error"] = Int(status.rawValue); return result }
+    var value: CFTypeRef?
+    status = AXUIElementCopyAttributeValue(parent, "AXRole" as CFString, &value)
+    if status != .success { result["status"] = "error"; result["error"] = Int(status.rawValue); return result }
+    guard let role = value as? String else { result["status"] = "invalid_value"; return result }
+    result["role"] = diagnosticRole(role)
+    if ProcessInfo.processInfo.systemUptime >= deadline { result["status"] = "deadline"; return result }
+    result["attribute"] = "AXChildren"
+    status = AXUIElementSetMessagingTimeout(parent, 0.15)
+    if status != .success { result["status"] = "error"; result["error"] = Int(status.rawValue); return result }
+    value = nil
+    status = AXUIElementCopyAttributeValue(parent, "AXChildren" as CFString, &value)
+    if status != .success { result["status"] = "error"; result["error"] = Int(status.rawValue); return result }
+    guard let children = value as? [AXUIElement] else { result["status"] = "invalid_value"; return result }
+    result["children"] = min(children.count, 257)
+    if children.count > 256 { result["status"] = "bound"; return result }
+    result["containsFailedReference"] = children.contains(where: { same($0, child) }) ? "true" : "false"
+    result["attribute"] = "none"
+    if ProcessInfo.processInfo.systemUptime >= deadline { result["status"] = "deadline" }
+    return result
+}
+
 func noReadFailures() -> Bool {
     counts["cannotComplete", default: 0] == 0 && counts["apiDisabled", default: 0] == 0 && counts["otherErrors", default: 0] == 0
 }
 
-if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open_existing"].contains(requested),
+if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open_existing", "directory_snapshot"].contains(requested),
    let pid = Int32(arguments[1]), pid > 0, arguments[2].hasPrefix("/") {
     let target = URL(fileURLWithPath: arguments[2])
     let expected = target.absoluteString
@@ -298,6 +363,7 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     if sheets.count != 1 || parents.count != 1 { complete = false }
     var selected: [AXUIElement] = []
     var buttons: [AXUIElement] = []
+    var saveButtons: [AXUIElement] = []
     var directoryFields: [(URL, AXUIElement)] = []
     var queue: [(AXUIElement, String, String, Bool, Int, Int, AXUIElement?)] = sheets.count == 1 ? sheets.map { ($0, "sheet", "none", false, 0, 0, nil) } : []
     seen = []
@@ -312,7 +378,21 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
         counts["visited"] = seen.count
-        let role = string(element, "AXRole") ?? ""
+        staleChildContext = ["open", "cancel_open_existing"].contains(requested) && origin == "AXChildren" &&
+            parentRole == "AXScrollArea" && !readSelectedReference && !selectedBranch
+        invalidRoleElement = nil
+        let roleRead = readResult(element, "AXRole")
+        let role = roleRead.value as? String ?? ""
+        if staleChildContext && roleRead.status == .invalidUIElement {
+            invalidRoleElement = element
+            vanishedChildCandidates += 1
+            if let parent = directParent {
+                let observation = invalidChildParentObservation(parent, child: element, pid: pid,
+                    selectedReference: selected.contains(where: { same($0, parent) }))
+                if (invalidChildParent["status"] as? String) == "not_checked" { invalidChildParent = observation }
+                allInvalidChildrenVanished = allInvalidChildrenVanished && vanishedChildParent(observation)
+            } else { allInvalidChildrenVanished = false }
+        }
         let selectedFlag = read(element, "AXSelected") as? Bool
         if selectedFlag == true && !selected.contains(where: { same($0, element) }) { selected.append(element) }
         readSelectedReference = readSelectedReference || selectedFlag == true
@@ -354,16 +434,20 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
                 }
             }
         }
-        if role == "AXButton" && string(element, "AXTitle") == (requested == "open" ? "Open" : "Cancel") { buttons.append(element) }
+        if requested == "directory_snapshot", role == "AXButton" {
+            let title = string(element, "AXTitle")
+            if title == "Save" { saveButtons.append(element) }
+            if title == "Cancel" { buttons.append(element) }
+        } else if role == "AXButton" && string(element, "AXTitle") == (requested == "open" ? "Open" : "Cancel") { buttons.append(element) }
         if let value = read(element, "AXURL"), let url = nativeURL(value) {
-            if requested == "none", role == "AXTextField", origin == "AXChildren", parentRole == "AXGroup", let parent = directParent {
+            if ["none", "directory_snapshot"].contains(requested), role == "AXTextField", origin == "AXChildren", parentRole == "AXGroup", let parent = directParent {
                 directoryFields.append((url, parent))
             }
             if CFGetTypeID(value) == CFURLGetTypeID() { counts["urlObjects", default: 0] += 1 }
             else { counts["urlStrings", default: 0] += 1 }
             if url.absoluteString == expected {
                 counts["exactUrls", default: 0] += 1
-                if requested == "none" && (firstExactURL["origin"] as? String) == "none" {
+                if ["none", "directory_snapshot"].contains(requested) && (firstExactURL["origin"] as? String) == "none" {
                     firstExactElement = element
                     firstExactURL = ["role": diagnosticRole(role), "parentRole": parentRole, "origin": origin,
                         "selected": selectedFlag == true ? "true" : selectedFlag == false ? "false" : "unknown",
@@ -386,12 +470,14 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         if queue.count + next.count > 256 { complete = false; break }
         queue.append(contentsOf: next)
     }
-    if requested == "none" {
+    staleChildContext = false
+    invalidRoleElement = nil
+    if ["none", "directory_snapshot"].contains(requested) {
         let selectedFields = directoryFields.filter { item in selected.contains(where: { same($0, item.1) }) }.map { $0.0 }
         selectedDirectory = selectedDirectoryObservation(selectedFields, expected: target)
     }
     // Read-only actual-parent observations, independent of traversal provenance.
-    if requested == "none", let exactElement = firstExactElement, sheets.count == 1 {
+    if ["none", "directory_snapshot"].contains(requested), let exactElement = firstExactElement, sheets.count == 1 {
         stage = "parent_chain"
         readOrigin = "exact_url_parent_chain"
         readParentRole = "none"
@@ -459,9 +545,53 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
     let selection = selectedFileEvidence(selectedURLs, expected: target)
     counts["selectedLeaves"] = selection.leaves.count
     counts["leafMatches"] = selection.matches
+    snapshotTraversalComplete = complete
     if !noReadFailures() { complete = false }
+    snapshotRefreshEligible = ["open", "cancel_open_existing"].contains(requested) && trusted && selection.verified && snapshotTraversalComplete &&
+        onlyInvalidChildErrors && vanishedChildCandidates > 0 && allInvalidChildrenVanished &&
+        counts["otherErrors", default: 0] > 0 && counts["cannotComplete", default: 0] == 0 && counts["apiDisabled", default: 0] == 0 &&
+        counts["windows"] == 1 && sheets.count == 1 && parents.count == 1 && buttons.count == 1 && ProcessInfo.processInfo.systemUptime < deadline
     verified = trusted && complete && selection.verified
-    if requested != "none" && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
+    // Independent read-only verification: no AXValue/title inventory on browser content, no action.
+    if requested == "directory_snapshot" {
+        verified = false
+        counts["saveButtons"] = saveButtons.count
+        let selectedFields = directoryFields.filter { item in selected.contains(where: { same($0, item.1) }) }
+        let covered = !selected.isEmpty && selected.allSatisfy { root in selectedFields.filter { same($0.1, root) }.count == 1 }
+        let firstParent = (parentChain["nodes"] as? [[String: Any]])?.first
+        let directoryShape = (selectedDirectory["validShape"] as? Bool) == true &&
+            (selectedDirectory["uniqueUrls"] as? Int) == selected.count &&
+            (selectedDirectory["terminalUrls"] as? Int) == 1 && (selectedDirectory["terminalMatches"] as? Int) == 1
+        let exactField = (firstExactURL["role"] as? String) == "AXTextField" &&
+            (firstExactURL["origin"] as? String) == "AXChildren" && (firstExactURL["parentRole"] as? String) == "AXGroup" &&
+            (firstExactURL["kind"] as? String) == "native" && (firstExactURL["directory"] as? Bool) == true
+        let capturedSelection = (parentChain["status"] as? String) == "captured_sheet" &&
+            (firstParent?["role"] as? String) == "AXGroup" && (firstParent?["selectedReference"] as? Bool) == true
+        let candidate = trusted && complete && noReadFailures() && covered && directoryShape && exactField && capturedSelection &&
+            counts["windows"] == 1 && counts["exactUrls"] == 1 && counts["urlStrings"] == 0 && counts["urlObjects"] == selectedFields.count
+        if candidate && buttons.count == 1 && saveButtons.count == 1 && sheets.count == 1 && parents.count == 1 && ProcessInfo.processInfo.systemUptime < deadline {
+            stage = "guard"
+            readOrigin = "guard"
+            readSelectedReference = false
+            readSelectedBranch = false
+            readParentRole = "none"
+            let sheet = sheets[0], parent = parents[0], cancel = buttons[0], save = saveButtons[0]
+            var actualPid: pid_t = 0
+            foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+            if AXUIElementGetPid(app, &actualPid) == .success && actualPid == pid { guardMask |= 1 }
+            if foreground { guardMask |= 2 }
+            if elements(parent, "AXChildren").contains(where: { same($0, sheet) }) { guardMask |= 4 }
+            if string(sheet, "AXRole") == "AXSheet" { guardMask |= 8 }
+            if string(cancel, "AXRole") == "AXButton" && string(cancel, "AXTitle") == "Cancel" &&
+                string(save, "AXRole") == "AXButton" && string(save, "AXTitle") == "Save" { guardMask |= 16 }
+            if (read(cancel, "AXEnabled") as? Bool) == true && (read(save, "AXEnabled") as? Bool) == true { guardMask |= 32 }
+            if noReadFailures() { guardMask |= 64 }
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { guardMask |= 128 }
+            directoryVerified = guardMask == 255 && ProcessInfo.processInfo.systemUptime < deadline
+            if directoryVerified { stage = "directory_complete" }
+        }
+    }
+    if ["open", "cancel_open_existing"].contains(requested) && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
         stage = "guard"
         readOrigin = "guard"
         readSelectedReference = false
@@ -528,11 +658,14 @@ if (arguments.count == 3 || arguments.count == 4), ["none", "open", "cancel_open
         }
     }
 } else { complete = false }
-if !noReadFailures() { complete = false }
+if !noReadFailures() { complete = false; directoryVerified = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
 let result: [String: Any] = [
-    "counts": counts, "selectedDirectory": selectedDirectory, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "staleSnapshot": ["eligible": snapshotRefreshEligible, "traversalComplete": snapshotTraversalComplete, "candidates": vanishedChildCandidates,
+        "allVanished": vanishedChildCandidates > 0 && allInvalidChildrenVanished,
+        "onlyInvalidChildErrors": counts["otherErrors", default: 0] > 0 && onlyInvalidChildErrors],
+    "counts": counts, "invalidChildParent": invalidChildParent, "selectedDirectory": selectedDirectory, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
@@ -542,7 +675,7 @@ let result: [String: Any] = [
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
-    "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
+    "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
     "action": ["requested": requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
