@@ -20,16 +20,20 @@ export function windowsLocalVolumeCommand(
 // CI-only measurement keeps the classifier query and module preparation shared.
 export function windowsLocalVolumeMeasurementCommand(
   root: string,
-  moduleImport: "explicit" | "automatic",
+  moduleImport: "explicit" | "automatic" | "dependencies",
 ) {
   return (
     "$volumeScriptClock = [Diagnostics.Stopwatch]::StartNew(); " +
-    modulePreparation(moduleImport) +
-    "$volumeImportMs = $volumeScriptClock.ElapsedMilliseconds; " +
+    (moduleImport === "dependencies"
+      ? "foreach ($volumeModule in @('Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Management')) { Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules', $volumeModule, ($volumeModule + '.psd1'))) -ErrorAction Stop }; "
+      : "") +
+    "$volumeDependencyMs = $volumeScriptClock.ElapsedMilliseconds; " +
+    modulePreparation(moduleImport === "dependencies" ? "explicit" : moduleImport) +
+    "$volumeImportMs = $volumeScriptClock.ElapsedMilliseconds - $volumeDependencyMs; " +
     "$volumeQueryClock = [Diagnostics.Stopwatch]::StartNew(); " +
     volumeQuery(root) +
     "; $volumeQueryMs = $volumeQueryClock.ElapsedMilliseconds; " +
     "$volumeScriptMs = $volumeScriptClock.ElapsedMilliseconds; " +
-    '[Console]::Out.Write("|{0}|{1}|{2}", $volumeImportMs, $volumeQueryMs, $volumeScriptMs)'
+    '[Console]::Out.Write("|" + $volumeDependencyMs + "|" + $volumeImportMs + "|" + $volumeQueryMs + "|" + $volumeScriptMs)'
   );
 }

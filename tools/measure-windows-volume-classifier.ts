@@ -29,7 +29,7 @@ env.PATH = [
 const root = parse(tmpdir()).root.replace(/[\\/]$/, "");
 const execute = promisify(execFile);
 let original: string | undefined;
-for (const mode of ["automatic", "explicit"] as const) {
+for (const mode of ["automatic", "explicit", "dependencies"] as const) {
   const started = performance.now();
   let stdout: string;
   try {
@@ -49,11 +49,12 @@ for (const mode of ["automatic", "explicit"] as const) {
     throw new Error("Windows volume measurement failed");
   }
   const elapsed = Math.min(999999, Math.round(performance.now() - started));
-  const { driveType, importMs, queryMs, scriptMs } = parseWindowsVolumeMeasurement(stdout);
+  const { driveType, dependencyMs, importMs, queryMs, scriptMs } =
+    parseWindowsVolumeMeasurement(stdout);
   if (mode === "automatic") original = driveType;
   const matches = original === driveType;
   console.log(
-    `Native Windows volume classification: mode=${mode} drive_type=${driveType} matches=${matches} import_ms=${importMs} query_ms=${queryMs} script_ms=${scriptMs} process_ms=${elapsed}`,
+    `Native Windows volume classification: mode=${mode} drive_type=${driveType} matches=${matches} dependency_ms=${dependencyMs} import_ms=${importMs} query_ms=${queryMs} script_ms=${scriptMs} process_ms=${elapsed}`,
   );
   if (!matches) throw new Error("Windows volume classifiers disagree");
 }
