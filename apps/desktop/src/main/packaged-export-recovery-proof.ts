@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import { canonicalSerialize, captureJsonExport, serializeJsonExport } from "@open-chords/domain";
 
+import { withoutChromiumPreferences } from "./packaged-proof-tree-difference.ts";
 import { proofTreeHashes } from "./packaged-proof-tree.ts";
 import { openProjectExports } from "./project-exports.ts";
 import { ExportReceiptSchema } from "./project-library-records.ts";
@@ -19,7 +20,9 @@ export async function runPackagedExportRecoveryProof(source: ProjectLibrary, sta
     );
   stage("started");
   const projectId = "project_golden";
-  const sourceBaseline = canonicalSerialize(await proofTreeHashes(stateRoot));
+  const sourceBaseline = canonicalSerialize(
+    withoutChromiumPreferences(await proofTreeHashes(stateRoot)),
+  );
   const fixture = await source.readProject(projectId);
   const root = join(dirname(stateRoot), "packaged-export-recovery-state");
   const output = join(dirname(stateRoot), "packaged-export-recovery-output");
@@ -160,7 +163,8 @@ export async function runPackagedExportRecoveryProof(source: ProjectLibrary, sta
     replayCheck("target_tree", canonicalSerialize(await proofTreeHashes(output)) !== targets) ||
     replayCheck(
       "source_tree",
-      canonicalSerialize(await proofTreeHashes(stateRoot)) !== sourceBaseline,
+      canonicalSerialize(withoutChromiumPreferences(await proofTreeHashes(stateRoot))) !==
+        sourceBaseline,
     )
   ) {
     stage("replay_verification_refused");

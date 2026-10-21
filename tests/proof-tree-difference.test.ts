@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 
-import { proofTreeDifference } from "../apps/desktop/src/main/packaged-proof-tree-difference.ts";
+import {
+  proofTreeDifference,
+  withoutChromiumPreferences,
+} from "../apps/desktop/src/main/packaged-proof-tree-difference.ts";
 it("separates durable Library and browser changes without exposing paths or hashes", () => {
   const before = {
     "project-library/projects/private-id/HEAD": "private-hash",
@@ -33,4 +36,35 @@ it("bounds numeric diagnostics even for an oversized private tree", () => {
   );
   expect(proofTreeDifference({}, tree)).toContain("added=9999");
   expect(proofTreeDifference({}, tree)).toContain("other=9999");
+});
+
+it("allows only the two exact root preference files to change while preserving all durable entries", () => {
+  const baseline = {
+    "project-library/projects/id/HEAD": "head",
+    "project-library-location.json": "location",
+    "network-mode.json": "offline",
+    "export-pending/journal.json": "journal",
+    "unknown.json": "unknown",
+  };
+  const withPreferences = { ...baseline, Preferences: "new", "Local State": "new" };
+  expect(withoutChromiumPreferences(withPreferences)).toEqual(baseline);
+  expect(withPreferences).toHaveProperty("Preferences", "new");
+});
+it.each([
+  "project-library/Preferences",
+  "project-library/Local State",
+  "other/Preferences",
+  "Preferences/",
+  "preferences",
+  "local state",
+  "project-library-location.json",
+  "network-mode.json",
+  "export-pending/journal.json",
+  "unknown.json",
+])("never filters durable/nested or unknown path %s", (path) => {
+  const before = { [path]: "before" };
+  const after = { [path]: "after", Preferences: "new" };
+  expect(withoutChromiumPreferences(after)).not.toEqual(withoutChromiumPreferences(before));
+  expect(withoutChromiumPreferences(after)[path]).toBe("after");
+  expect(withoutChromiumPreferences({})).not.toEqual(withoutChromiumPreferences(before));
 });

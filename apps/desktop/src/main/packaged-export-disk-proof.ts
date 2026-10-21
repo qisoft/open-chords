@@ -6,7 +6,10 @@ import { basename, dirname, join } from "node:path";
 
 import { canonicalSerialize, captureJsonExport, serializeJsonExport } from "@open-chords/domain";
 
-import { proofTreeDifference } from "./packaged-proof-tree-difference.ts";
+import {
+  proofTreeDifference,
+  withoutChromiumPreferences,
+} from "./packaged-proof-tree-difference.ts";
 import { proofTreeHashes } from "./packaged-proof-tree.ts";
 import { openProjectExports } from "./project-exports.ts";
 import { openProjectLibrary, type ProjectLibrary } from "./project-library.ts";
@@ -55,7 +58,7 @@ async function runDiskProof(
   stage("started");
   const projectId = "project_golden";
   const sourceTree = await proofTreeHashes(stateRoot);
-  const sourceBaseline = canonicalSerialize(sourceTree);
+  const sourceBaseline = canonicalSerialize(withoutChromiumPreferences(sourceTree));
   const fixture = await source.readProject(projectId);
   const root = join(dirname(stateRoot), "packaged-export-disk-state");
   const output = join(dirname(stateRoot), "packaged-export-disk-output");
@@ -167,7 +170,7 @@ async function runDiskProof(
   const bytes = await readFile(target);
   const sourceTreeRefused = async () => {
     const actual = await proofTreeHashes(stateRoot);
-    const refused = canonicalSerialize(actual) !== sourceBaseline;
+    const refused = canonicalSerialize(withoutChromiumPreferences(actual)) !== sourceBaseline;
     if (refused) process.stderr.write(`${proofTreeDifference(sourceTree, actual)}\n`);
     return refused;
   };

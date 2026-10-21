@@ -56,3 +56,11 @@ export function proofTreeDifference(before: Record<string, string>, after: Recor
     .map(([key, value]) => `${key}=${Math.min(9999, value)}`)
     .join(" ")}`;
 }
+
+// Electron owns these exact root files and may create them asynchronously after ready.
+// Keep the complete Library, its configuration and every other profile entry in the invariant.
+export function withoutChromiumPreferences(tree: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(tree).filter(([path]) => path !== "Preferences" && path !== "Local State"),
+  );
+}
