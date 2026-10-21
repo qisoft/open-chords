@@ -86,7 +86,7 @@ export function installedMacPickerDriver(
           "JavaScript",
           join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
           String(applicationPid),
-          textSave
+          nativeSave
             ? "prepare_save_directory_retained"
             : expandedDirectory
               ? "prepare_save_directory_expanded"
@@ -208,7 +208,7 @@ export function installedMacPickerDriver(
         try {
           ({ stdout: expansion } = await executeNativeFile(
             join(process.cwd(), "build/test-support/macos-save-expand"),
-            [String(applicationPid), ...(textSave ? ["--ensure-expanded"] : [])],
+            [String(applicationPid), ...(nativeSave ? ["--ensure-expanded"] : [])],
             { env: environment(), timeout: Math.min(7000, remainingBudget()), maxBuffer: 4096 },
           ));
         } catch (error) {
@@ -224,7 +224,7 @@ export function installedMacPickerDriver(
           performance.now() - expansionStarted,
         );
         if (
-          !(textSave
+          !(nativeSave
             ? installedMacSaveExpandedReady(expansion)
             : installedMacSaveExpansionSucceeded(expansion))
         )

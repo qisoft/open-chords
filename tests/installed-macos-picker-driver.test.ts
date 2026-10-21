@@ -675,7 +675,7 @@ it("refuses non-JSON Save before starting any native process", async () => {
   expect(execute).not.toHaveBeenCalled();
 });
 
-it.each(["lrc", "chordpro"] as const)(
+it.each(["json", "lrc", "chordpro"] as const)(
   "publishes %s once from a guarded retained expanded panel without collapse or input",
   async (format) => {
     vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -707,7 +707,7 @@ it.each(["lrc", "chordpro"] as const)(
       "/private/directory",
       "directory_snapshot",
       format,
-      "--save-new-text",
+      format === "json" ? "--save-new-json" : "--save-new-text",
     ]);
     expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
       100000, 7000, 7000, 7000, 7000, 7000,
