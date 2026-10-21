@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { extractFile, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { ProjectEnvelopeSchema } from "@open-chords/contracts";
-import { canonicalSerialize } from "@open-chords/domain";
+import { canonicalSerialize, captureJsonExport, serializeJsonExport } from "@open-chords/domain";
 import { monoPcmWav } from "@open-chords/testkit/media";
 import { expect, test } from "@playwright/test";
 import extractZip from "extract-zip";
@@ -578,6 +578,108 @@ for (const scenario of [
     }
   });
 }
+
+test("installed macOS native JSON Save publishes exact bytes and one cold durable Receipt", async () => {
+  test.skip(process.platform !== "darwin", "macOS native JSON Save proof");
+  test.setTimeout(360_000);
+  const state = join(packageRoot, "macos-native-json-save");
+  const directory = realpathSync(mkdtempSync(join(packageRoot, "macos-json-output-")));
+  const target = join(directory, "Open Chords.json");
+  const external = join(packageRoot, "macos-json-preserved.bin");
+  const original = Buffer.from("private native JSON Save preservation fixture");
+  writeFileSync(external, original);
+  writeFileSync(join(directory, "preserved.txt"), original);
+  const directoryBefore = await proofTreeHashes(directory);
+  const library = await openProjectLibrary({ stateRoot: state });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+  );
+  envelope.payload = leadSheetProject();
+  await library.createProject({ envelope, records: goldenRecords() });
+  await (await openNetworkMode(state)).setOffline(true);
+  const before = await library.readProject("project_golden");
+  const action = {
+    type: "save_json",
+    projectId: "project_golden",
+    expectedProjectRevisionId: before.projectRevisionId,
+    presentation: "current",
+  };
+  const result = await inspectInstalled(
+    state,
+    `(async () => {
+    const response = await window.openChords.exports.perform(${JSON.stringify(action)});
+    const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+    return { response, offline };
+  })()`,
+    installedSystemEnvironment(),
+    installedMacPickerDriver("save_json", directory, installedSystemEnvironment, "json"),
+  );
+  z.object({
+    response: z.object({
+      type: z.literal("exports.result"),
+      projectId: z.literal("project_golden"),
+      state: z.literal("saved"),
+      busy: z.literal(false),
+      pendingRecovery: z.literal(0),
+      receipts: z.array(z.unknown()).length(1),
+    }),
+    offline: z.literal(true),
+  }).parse(result);
+  const snapshot = captureJsonExport(envelope.payload, { presentation: "current" });
+  const expected = serializeJsonExport(snapshot);
+  expect(readFileSync(target, "utf8")).toBe(expected);
+  const digest = createNativeSelectionHash("sha256").update(expected).digest("hex");
+  expect(await proofTreeHashes(directory)).toEqual({
+    ...directoryBefore,
+    "Open Chords.json": digest,
+  });
+  expect(readFileSync(external)).toEqual(original);
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
+  const after = await reopened.readProject("project_golden");
+  const receipts = reopened.listExportReceipts("project_golden");
+  expect(receipts).toHaveLength(1);
+  expect(receipts[0]).toMatchObject({
+    format: "open_chords_json",
+    outputLocation: target,
+    outputHash: `sha256:${digest}`,
+    profileVersion: "open_chords_json/1.0/current",
+    omissions: [...new Set(snapshot.omissions)].sort(),
+  });
+  expect(after.envelope).toEqual(before.envelope);
+  expect(after.compatibility).toBe(before.compatibility);
+  expect(after.records).toEqual({ ...before.records, exportReceipts: receipts });
+  expect(after.revisions).toHaveLength(before.revisions.length + 1);
+  expect(after.revisions.slice(0, before.revisions.length)).toEqual(before.revisions);
+  expect(after.revisions.at(-1)).toMatchObject({
+    reason: "edit_transaction",
+    projectRevisionId: after.projectRevisionId,
+  });
+  expect(after.projectRevisionId).not.toBe(before.projectRevisionId);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  const tree = await proofTreeHashes(reopened.activeRoot);
+  const second = await openProjectLibrary({ stateRoot: state });
+  expect(await second.readProject("project_golden")).toEqual(after);
+  expect(await proofTreeHashes(second.activeRoot)).toEqual(tree);
+  expect(await proofTreeHashes(directory)).toEqual({
+    ...directoryBefore,
+    "Open Chords.json": digest,
+  });
+  for (const privateValue of [
+    state,
+    directory,
+    target,
+    external,
+    original.toString(),
+    "/unavailable/golden-fixture.wav",
+  ]) {
+    const escaped = JSON.stringify(privateValue).slice(1, -1);
+    for (const representation of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+      expect(JSON.stringify(result).includes(representation)).toBe(false);
+      expect(expected.includes(representation)).toBe(false);
+    }
+  }
+});
 
 for (const firstOutcome of ["cancel", "refusal"] as const) {
   test(`installed Choose recording ${firstOutcome} preserves state before same-process recovery`, async () => {

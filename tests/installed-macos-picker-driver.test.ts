@@ -616,3 +616,61 @@ it.each([
     expect(execute).toHaveBeenCalledTimes(5);
   },
 );
+
+const jsonSaved = {
+  ...filenameSnapshot,
+  saveTargetAbsent: true,
+  stage: "complete",
+  action: { requested: "save_new_json", pressed: true, dismissed: true },
+};
+it("saves JSON once after independent proofs without collapse, filename input or Cancel", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [prepared, expanded, snapshot, directorySnapshot, filenameSnapshot, jsonSaved];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await installedMacPickerDriver(
+    "save_json",
+    "/private/directory",
+    () => ({ LANG: "en_US.UTF-8" }),
+    "json",
+  )(42);
+  expect(execute).toHaveBeenCalledTimes(6);
+  expect(execute.mock.calls[5]?.[1]).toEqual([
+    "42",
+    "/private/directory",
+    "directory_snapshot",
+    "json",
+    "--save-new-json",
+  ]);
+  for (const call of execute.mock.calls) expect(call[2].env).toEqual({ LANG: "en_US.UTF-8" });
+});
+it.each([
+  { saveTargetAbsent: false },
+  { action: { requested: "save_new_json", pressed: true, dismissed: false } },
+])("does not retry a refused JSON Save %j", async (change) => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    { ...jsonSaved, ...change },
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await expect(
+    installedMacPickerDriver("save_json", "/private/directory", () => ({}), "json")(42),
+  ).rejects.toThrow("Native macOS AX probe");
+  expect(execute).toHaveBeenCalledTimes(6);
+});
+it("refuses non-JSON Save before starting any native process", async () => {
+  await expect(
+    installedMacPickerDriver("save_json", "/private/directory", () => ({}), "pdf")(42),
+  ).rejects.toThrow("JSON Save target unavailable");
+  expect(execute).not.toHaveBeenCalled();
+});
