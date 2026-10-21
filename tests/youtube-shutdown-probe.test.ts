@@ -154,6 +154,83 @@ it("observes window close/destroy without retrying or swallowing native failures
     );
     expect(retained.join("\n")).not.toContain("private-test-value");
     expect(retained.join("\n")).not.toContain("native-close-failure");
+    await nativePromise;
+  } finally {
+    write.mockRestore();
+  }
+});
+
+it("observes cleanup promise settlement without replacing results or rejection reasons", async () => {
+  const failure = new Error("/private/native/session");
+  let complete: (() => void) | undefined;
+  let fail: ((reason: unknown) => void) | undefined;
+  const resolved = new Promise<void>((resolve) => {
+    complete = resolve;
+  });
+  const rejected = new Promise<void>((_resolve, reject) => {
+    fail = reject;
+  });
+  let calls = 0;
+  const session = {
+    closeAllConnections() {
+      calls++;
+      return resolved;
+    },
+    clearStorageData() {
+      calls++;
+      return rejected;
+    },
+    clearCache() {
+      calls++;
+      return Promise.resolve();
+    },
+  };
+  class Window extends EventEmitter {
+    webContents = Object.assign(new EventEmitter(), { session });
+    close() {}
+    destroy() {}
+    static getAllWindows() {
+      return [window];
+    }
+  }
+  const window = new Window();
+  const app = Object.assign(new EventEmitter(), { quit() {}, exit() {} });
+  const child = Object.assign(new EventEmitter(), { stderr: new EventEmitter() });
+  const application = Object.assign(new EventEmitter(), {
+    process: () => child,
+    evaluate: async (
+      callback: (context: { app: typeof app; BrowserWindow: typeof Window }) => unknown,
+    ) => callback({ app, BrowserWindow: Window }),
+  });
+  const output: string[] = [];
+  const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+    output.push(String(chunk));
+    return true;
+  });
+  try {
+    // Structural double only: no Electron process is started.
+    // eslint-disable-next-line typescript/no-unsafe-type-assertion
+    await installRendererShutdownProbe(application as unknown as ElectronApplication);
+    expect(session.closeAllConnections()).toBe(resolved);
+    expect(session.clearStorageData()).toBe(rejected);
+    const observedRejection = rejected.catch((error: unknown) => error);
+    expect(output.join("")).not.toMatch(/resolved|rejected/);
+    complete!();
+    fail!(failure);
+    await resolved;
+    expect(await observedRejection).toBe(failure);
+    expect(calls).toBe(2);
+    const retained: string[] = [];
+    rendererShutdownCollector((line) => retained.push(line))(output.join(""));
+    expect(retained).toEqual([
+      "YouTube shutdown event: event=session_connections_call kind=initial",
+      "YouTube shutdown event: event=session_connections_return kind=initial",
+      "YouTube shutdown event: event=session_storage_call kind=initial",
+      "YouTube shutdown event: event=session_storage_return kind=initial",
+      "YouTube shutdown event: event=session_connections_resolved kind=initial",
+      "YouTube shutdown event: event=session_storage_rejected kind=initial",
+    ]);
+    expect(retained.join("")).not.toContain("private");
   } finally {
     write.mockRestore();
   }
