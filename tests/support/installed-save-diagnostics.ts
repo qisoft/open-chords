@@ -109,6 +109,14 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const filenameErrors = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save filename error probe: error_code=[0-9]{1,6} dialog_pid_match=(?:true|false) field_pid_match=(?:true|false) field_id_match=(?:true|false) foreground_dialog=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   const filenameReads = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -150,6 +158,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     `Native Save driver failure: started=${started} category=${category} spawn_code=${spawnCode}`,
     ...(counters ? [counters] : []),
     ...filenameReads,
+    ...filenameErrors,
     ...probes,
     ...windowProbes,
     ...dismissalProbes,
