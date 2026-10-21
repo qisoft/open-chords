@@ -127,14 +127,28 @@ const evidenceSchema = z.strictObject({
       valueMatches: z.number().int().min(0).max(256),
       enabledMatches: z.number().int().min(0).max(256),
       labelMatches: z.number().int().min(0).max(256),
+      descriptionMatches: z.number().int().min(0).max(256),
+      linkedLabelMatches: z.number().int().min(0).max(256),
+      linkedLabelRole: z.enum(["none", "static_text", "other"]),
       error: z.number().int().min(-32768).max(32767),
-      attribute: z.enum(["none", "AXValue", "AXEnabled", "AXTitle"]),
+      attribute: z.enum([
+        "none",
+        "AXValue",
+        "AXEnabled",
+        "AXTitle",
+        "AXDescription",
+        "AXTitleUIElement",
+        "AXRole",
+        "pid",
+      ]),
     })
     .refine(
       (value) =>
         value.valueMatches <= value.fields &&
         value.enabledMatches <= value.valueMatches &&
-        value.labelMatches <= value.valueMatches,
+        value.labelMatches <= value.valueMatches &&
+        value.descriptionMatches <= value.valueMatches &&
+        value.linkedLabelMatches <= value.valueMatches,
     )
     .default({
       status: "not_checked",
@@ -142,6 +156,9 @@ const evidenceSchema = z.strictObject({
       valueMatches: 0,
       enabledMatches: 0,
       labelMatches: 0,
+      descriptionMatches: 0,
+      linkedLabelMatches: 0,
+      linkedLabelRole: "none",
       error: 0,
       attribute: "none",
     }),

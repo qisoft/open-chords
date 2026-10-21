@@ -163,13 +163,29 @@ async function runDiskProof(
   stage("retry_library_reopened");
   const receipts = reopened.listExportReceipts(projectId);
   const bytes = await readFile(target);
+  const retryCheck = (name: string, refused: boolean) => {
+    if (refused) stage(`retry_check_${name}_refused`);
+    return refused;
+  };
   if (
-    receipts.length !== 1 ||
-    receipts[0]?.outputHash !== `sha256:${createHash("sha256").update(bytes).digest("hex")}` ||
-    bytes.toString() !==
-      serializeJsonExport(captureJsonExport(snapshot.project, { presentation: "current" })) ||
-    (await reopened.getSnapshot(projectId))?.projectRevisionId === snapshot.projectRevisionId ||
-    canonicalSerialize(await proofTreeHashes(stateRoot)) !== sourceBaseline
+    retryCheck("receipt_count", receipts.length !== 1) ||
+    retryCheck(
+      "output_hash",
+      receipts[0]?.outputHash !== `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+    ) ||
+    retryCheck(
+      "output_bytes",
+      bytes.toString() !==
+        serializeJsonExport(captureJsonExport(snapshot.project, { presentation: "current" })),
+    ) ||
+    retryCheck(
+      "revision",
+      (await reopened.getSnapshot(projectId))?.projectRevisionId === snapshot.projectRevisionId,
+    ) ||
+    retryCheck(
+      "source_tree",
+      canonicalSerialize(await proofTreeHashes(stateRoot)) !== sourceBaseline,
+    )
   )
     throw new Error("export_disk_proof_retry_not_durable");
   stage("retry_output_verified");

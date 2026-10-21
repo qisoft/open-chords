@@ -837,6 +837,9 @@ const saveTargetObservation = {
   valueMatches: 1,
   enabledMatches: 1,
   labelMatches: 1,
+  descriptionMatches: 1,
+  linkedLabelMatches: 1,
+  linkedLabelRole: "static_text",
   error: 0,
   attribute: "none",
 };
@@ -851,6 +854,9 @@ it.each([
   { valueMatches: 4 },
   { enabledMatches: 2 },
   { labelMatches: 2 },
+  { descriptionMatches: 2 },
+  { linkedLabelMatches: 2 },
+  { linkedLabelRole: "/private/label" },
   { status: "/private/status" },
   { attribute: "/private/attribute" },
   { rawValue: "/private/filename" },
@@ -862,4 +868,20 @@ it.each([
   expect(installedMacAxProbeDiagnostic(output, null, 5)).toBe(
     "Native macOS AX probe: invalid_evidence",
   );
+});
+
+it("retains fixed linked-label PID failure evidence without a raw identifier", () => {
+  const output = JSON.stringify({
+    ...evidence,
+    saveTargetContext: {
+      ...saveTargetObservation,
+      status: "error",
+      error: -25202,
+      attribute: "pid",
+    },
+  });
+  const diagnostic = installedMacAxProbeDiagnostic(output, null, 5);
+  expect(diagnostic).toContain("save_target_attribute=pid");
+  expect(diagnostic).toContain("save_target_error=-25202");
+  expect(installedMacAxActionSucceeded(output, "open")).toBe(false);
 });

@@ -183,7 +183,7 @@ var staleChildContext = false
 var invalidRoleElement: AXUIElement? = nil
 var snapshotRefreshEligible = false
 var snapshotTraversalComplete = false
-var saveTargetContext: [String: Any] = ["status": "not_checked", "fields": 0, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "error": 0, "attribute": "none"]
+var saveTargetContext: [String: Any] = ["status": "not_checked", "fields": 0, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "descriptionMatches": 0, "linkedLabelMatches": 0, "linkedLabelRole": "none", "error": 0, "attribute": "none"]
 var directoryVerified = false
 var verified = false
 var pressed = false
@@ -334,8 +334,8 @@ func noReadFailures() -> Bool {
 }
 
 // Read-only candidate context, independent of directory proof and never action authorization.
-func observeSaveTarget(_ fields: [AXUIElement], expected: String) -> [String: Any] {
-    var result: [String: Any] = ["status": "complete", "fields": fields.count, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "error": 0, "attribute": "none"]
+func observeSaveTarget(_ fields: [AXUIElement], expected: String, pid: pid_t) -> [String: Any] {
+    var result: [String: Any] = ["status": "complete", "fields": fields.count, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "descriptionMatches": 0, "linkedLabelMatches": 0, "linkedLabelRole": "none", "error": 0, "attribute": "none"]
     func observe(_ field: AXUIElement, _ name: String) -> CFTypeRef? {
         if ProcessInfo.processInfo.systemUptime >= deadline {
             if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
@@ -361,6 +361,34 @@ func observeSaveTarget(_ fields: [AXUIElement], expected: String) -> [String: An
             if (observe(field, "AXEnabled") as? Bool) == true { result["enabledMatches"] = (result["enabledMatches"] as? Int ?? 0) + 1 }
             if let title = observe(field, "AXTitle") as? String, ["Save As:", "Save As"].contains(title) {
                 result["labelMatches"] = (result["labelMatches"] as? Int ?? 0) + 1
+            }
+            if let description = observe(field, "AXDescription") as? String, ["Save As:", "Save As"].contains(description) {
+                result["descriptionMatches"] = (result["descriptionMatches"] as? Int ?? 0) + 1
+            }
+            if let labelValue = observe(field, "AXTitleUIElement"), CFGetTypeID(labelValue) == AXUIElementGetTypeID() {
+                let label = unsafeBitCast(labelValue, to: AXUIElement.self)
+                var labelPid: pid_t = 0
+                if ProcessInfo.processInfo.systemUptime >= deadline {
+                    if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
+                    continue
+                }
+                let pidStatus = AXUIElementGetPid(label, &labelPid)
+                if pidStatus != .success {
+                    if (result["status"] as? String) == "complete" { result["status"] = "error" }
+                    if (result["error"] as? Int) == 0 { result["error"] = Int(pidStatus.rawValue); result["attribute"] = "pid" }
+                    continue
+                }
+                if ProcessInfo.processInfo.systemUptime >= deadline {
+                    if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
+                    continue
+                }
+                if labelPid == pid {
+                    let role = observe(label, "AXRole") as? String
+                    result["linkedLabelRole"] = role == "AXStaticText" ? "static_text" : "other"
+                    if role == "AXStaticText", let value = observe(label, "AXValue") as? String, ["Save As:", "Save As"].contains(value) {
+                        result["linkedLabelMatches"] = (result["linkedLabelMatches"] as? Int ?? 0) + 1
+                    }
+                }
             }
         }
     }
@@ -629,7 +657,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             directoryVerified = guardMask == 255 && ProcessInfo.processInfo.systemUptime < deadline
             if directoryVerified {
                 stage = "directory_complete"
-                if let name = expectedSaveName { saveTargetContext = observeSaveTarget(saveTextFields, expected: name) }
+                if let name = expectedSaveName { saveTargetContext = observeSaveTarget(saveTextFields, expected: name, pid: pid) }
             }
         }
     }

@@ -41,6 +41,13 @@ it("redacts the actual child-process rejection while retaining fixed proof stage
       process.stderr.write("Export recovery proof stage: published_pending duration_ms=456\\n");
       process.stderr.write("Export recovery proof stage: private-content duration_ms=456\\n");
       process.stderr.write("Export recovery proof stage: refused_changed_output duration_ms=789\\n");
+      process.stderr.write("Export recovery proof stage: replay_journal_written duration_ms=800\\n");
+      process.stderr.write("Export recovery proof stage: replay_verification_refused duration_ms=900\\n");
+      process.stderr.write("Export recovery proof stage: replay_private_path duration_ms=900\\n");
+      process.stderr.write("Export disk proof stage: retry_check_source_tree_refused duration_ms=910\\n");
+      process.stderr.write("Export disk proof failure: code=export_disk_proof_retry_not_durable duration_ms=911\\n");
+      process.stderr.write("Export disk proof failure: code=/private/error duration_ms=912\\n");
+      process.stderr.write("Export recovery proof stage: replay_check_receipt_refused duration_ms=913\\n");
       process.stdout.write("private stdout");
       process.exit(7);
     `,
@@ -56,12 +63,18 @@ it("redacts the actual child-process rejection while retaining fixed proof stage
   expect(failure.message).toContain("retry_saving duration_ms=123");
   expect(failure.message).toContain("published_pending duration_ms=456");
   expect(failure.message).toContain("refused_changed_output duration_ms=789");
+  expect(failure.message).toContain("replay_journal_written duration_ms=800");
+  expect(failure.message).toContain("replay_verification_refused duration_ms=900");
+  expect(failure.message).toContain("retry_check_source_tree_refused duration_ms=910");
+  expect(failure.message).toContain("code=export_disk_proof_retry_not_durable duration_ms=911");
+  expect(failure.message).toContain("replay_check_receipt_refused duration_ms=913");
   for (const forbidden of [
     process.execPath,
     "/private",
     "provider-token",
     "private-content",
     "private stdout",
+    "replay_private_path",
   ]) {
     expect(failure.message).not.toContain(forbidden);
   }
