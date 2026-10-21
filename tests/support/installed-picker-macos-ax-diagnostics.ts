@@ -120,6 +120,51 @@ const evidenceSchema = z.strictObject({
     attribute: z.enum(["none", "pid", "AXRole", "AXChildren"]),
     error: z.number().int().min(-32768).max(32767),
   }),
+  saveFilename: z
+    .strictObject({
+      status: z.enum([
+        "not_checked",
+        "complete",
+        "deadline",
+        "error",
+        "invalid_candidate",
+        "bound",
+      ]),
+      fields: z.number().int().min(0).max(256),
+      matches: z.number().int().min(0).max(256),
+      absentValues: z.number().int().min(0).max(256),
+      enabled: z.boolean(),
+      labelMatched: z.boolean(),
+      fieldAttached: z.boolean(),
+      labelAttached: z.boolean(),
+      visited: z.number().int().min(0).max(32),
+      verified: z.boolean(),
+      error: z.number().int().min(-32768).max(32767),
+      attribute: z.enum([
+        "none",
+        "AXValue",
+        "AXRole",
+        "AXEnabled",
+        "AXTitleUIElement",
+        "AXParent",
+        "pid",
+      ]),
+    })
+    .refine((value) => value.matches + value.absentValues <= value.fields)
+    .default({
+      status: "not_checked",
+      fields: 0,
+      matches: 0,
+      absentValues: 0,
+      enabled: false,
+      labelMatched: false,
+      fieldAttached: false,
+      labelAttached: false,
+      visited: 0,
+      verified: false,
+      error: 0,
+      attribute: "none",
+    }),
   saveTargetContext: z
     .strictObject({
       status: z.enum(["not_checked", "complete", "deadline", "error"]),
@@ -334,6 +379,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       firstExactURL,
       selectedDirectory,
       saveTargetContext,
+      saveFilename,
       staleSnapshot,
       invalidChildParent,
       parentChain,
@@ -369,6 +415,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       ...Object.entries(invalidChildParent).map(
         ([key, value]) => `invalid_child_parent_${key}=${value}`,
       ),
+      ...Object.entries(saveFilename).map(([key, value]) => `save_filename_${key}=${value}`),
       ...Object.entries(saveTargetContext).map(([key, value]) => `save_target_${key}=${value}`),
       ...Object.entries(selectedDirectory).map(
         ([key, value]) => `selected_directory_${key}=${value}`,
@@ -539,6 +586,31 @@ export function installedMacAxSnapshotRefreshAllowed(
       value.counts.selectedLeaves === 1 &&
       value.counts.leafMatches === 1 &&
       value.counts.selectedExactUrls === 1
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Read-only field/label binding to the captured sheet; does not authorize Save.
+export function installedMacSaveFilenameVerified(stdout: string) {
+  if (!installedMacSelectedDirectoryVerified(stdout)) return false;
+  try {
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const value = parsed.data.saveFilename;
+    return (
+      value.status === "complete" &&
+      value.verified &&
+      value.fields > 0 &&
+      value.matches === 1 &&
+      value.enabled &&
+      value.labelMatched &&
+      value.fieldAttached &&
+      value.labelAttached &&
+      value.visited > 0 &&
+      value.error === 0 &&
+      value.attribute === "none"
     );
   } catch {
     return false;

@@ -20,6 +20,7 @@ import {
   installedMacAxActionSucceeded,
   installedMacAxSnapshotRefreshAllowed,
   installedMacSelectedDirectoryVerified,
+  installedMacSaveFilenameVerified,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
 import {
@@ -111,6 +112,7 @@ export function installedMacPickerDriver(
 
     const readNativeAx = async (
       requested?: "open" | "cancel_open_existing" | "directory_snapshot",
+      verifyFilename = false,
     ) => {
       if (selectedPath === undefined) throw new Error("Native macOS picker target unavailable");
       const phaseStarted = performance.now();
@@ -129,6 +131,7 @@ export function installedMacPickerDriver(
               selectedPath,
               ...(requested === undefined ? [] : [requested]),
               ...(requested === "directory_snapshot" ? [saveFormat ?? ""] : []),
+              ...(verifyFilename ? ["--verify-filename"] : []),
             ],
             { env: environment(), timeout: probeBudget, maxBuffer: 4096 },
           ));
@@ -147,7 +150,9 @@ export function installedMacPickerDriver(
         const refused =
           diagnostic === "Native macOS AX probe: invalid_evidence" ||
           (requested === "directory_snapshot"
-            ? !installedMacSelectedDirectoryVerified(output)
+            ? !(verifyFilename
+                ? installedMacSaveFilenameVerified(output)
+                : installedMacSelectedDirectoryVerified(output))
             : requested !== undefined && !installedMacAxActionSucceeded(output, requested));
         if (!refused) return diagnostic;
         if (
@@ -200,6 +205,9 @@ export function installedMacPickerDriver(
       if (scenario === "cancel_save_directory_expanded") {
         process.stdout.write(
           `Native macOS selected directory verification: ${await readNativeAx("directory_snapshot")}\n`,
+        );
+        process.stdout.write(
+          `Native macOS Save filename verification: ${await readNativeAx("directory_snapshot", true)}\n`,
         );
         const collapseStarted = performance.now();
         let collapse: string;
