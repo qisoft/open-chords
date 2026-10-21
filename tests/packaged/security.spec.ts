@@ -35,6 +35,11 @@ import { proofTreeHashes } from "../../apps/desktop/src/main/packaged-proof-tree
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof-constants.ts";
 import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/packaged-sidecar-proof-evidence.ts";
 import { throwCombinedFailures } from "../../apps/desktop/src/main/packaged-sidecar-proof-failures.ts";
+import {
+  archivedProjectFor,
+  writePortableProjectArchive,
+} from "../../apps/desktop/src/main/project-archive-format.ts";
+import { inspectPortableProjectArchive } from "../../apps/desktop/src/main/project-archive-inspection.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
@@ -587,13 +592,13 @@ for (const scenario of [
   });
 }
 
-for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
+for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed macOS native ${format} Save publishes exact bytes and one cold durable Receipt`, async () => {
     test.skip(process.platform !== "darwin", "macOS native Save proof");
     test.setTimeout(360_000);
     const state = join(packageRoot, `macos-native-${format}-save`);
     const directory = realpathSync(mkdtempSync(join(packageRoot, `macos-${format}-output-`)));
-    const filename = `Open Chords.${format === "chordpro" ? "cho" : format}`;
+    const filename = `Open Chords.${format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format}`;
     const target = join(directory, filename);
     const external = join(packageRoot, `macos-${format}-preserved.bin`);
     const original = Buffer.from("private native Save preservation fixture");
@@ -608,11 +613,20 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
     await library.createProject({ envelope, records: goldenRecords() });
     await (await openNetworkMode(state)).setOffline(true);
     const before = await library.readProject("project_golden");
+    const archiveProjection = format === "archive" ? archivedProjectFor(before) : undefined;
+    const expectedArchive =
+      archiveProjection === undefined
+        ? undefined
+        : writePortableProjectArchive({ document: archiveProjection.document });
     const action = {
       type: `save_${format}`,
       projectId: "project_golden",
       expectedProjectRevisionId: before.projectRevisionId,
-      ...(format === "lrc" ? {} : { presentation: "current" }),
+      ...(format === "archive"
+        ? { includeMedia: false }
+        : format === "lrc"
+          ? {}
+          : { presentation: "current" }),
     };
     const result = await inspectInstalled(
       state,
@@ -664,11 +678,21 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
           ? "lrc/1.0"
           : format === "chordpro"
             ? "chordpro/1.0/current"
-            : "pdf/1.0/a4/current";
+            : format === "pdf"
+              ? "pdf/1.0/a4/current"
+              : "project_archive/1.0/no_media";
     const output = readFileSync(target);
     if (expected !== undefined) expect(output).toEqual(Buffer.from(expected));
     const digest = createNativeSelectionHash("sha256").update(output).digest("hex");
     if (format === "pdf") expect(digest).toBe(PDF_GOLDEN_SHA256);
+    let archiveDocument: string | undefined;
+    if (expectedArchive !== undefined && archiveProjection !== undefined) {
+      expect(output).toEqual(expectedArchive.archive);
+      const inspected = inspectPortableProjectArchive(output);
+      archiveDocument = canonicalSerialize(inspected.document);
+      expect(archiveDocument).toBe(canonicalSerialize(archiveProjection.document));
+      expect(inspected.media).toBeUndefined();
+    }
     expect(await proofTreeHashes(directory)).toEqual({
       ...directoryBefore,
       [filename]: digest,
@@ -680,13 +704,16 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
     const receipts = reopened.listExportReceipts("project_golden");
     expect(receipts).toHaveLength(1);
     expect(receipts[0]).toMatchObject({
-      format: format === "json" ? "open_chords_json" : format,
+      format:
+        format === "json" ? "open_chords_json" : format === "archive" ? "project_archive" : format,
+      ...(expectedArchive === undefined ? {} : { activeViewHash: expectedArchive.projectHash }),
       outputLocation: target,
       outputHash: `sha256:${digest}`,
       profileVersion,
-      omissions: [...new Set([...snapshot.omissions, ...losses])].sort((a, b) =>
-        a.localeCompare(b),
-      ),
+      omissions:
+        archiveProjection === undefined
+          ? [...new Set([...snapshot.omissions, ...losses])].sort((a, b) => a.localeCompare(b))
+          : archiveProjection.omissions,
     });
     expect(after.envelope).toEqual(before.envelope);
     expect(after.compatibility).toBe(before.compatibility);
@@ -719,6 +746,8 @@ for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
       for (const representation of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
         expect(JSON.stringify(result).includes(representation)).toBe(false);
         expect(output.includes(Buffer.from(representation))).toBe(false);
+        if (archiveDocument !== undefined)
+          expect(archiveDocument.includes(representation)).toBe(false);
       }
     }
   });

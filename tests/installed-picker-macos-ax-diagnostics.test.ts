@@ -9,6 +9,7 @@ import {
   installedMacJsonSaveSucceeded,
   installedMacTextSaveSucceeded,
   installedMacPdfSaveSucceeded,
+  installedMacArchiveSaveSucceeded,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -1029,4 +1030,36 @@ it.each([
   { saveFilename: { ...filenameProof, matches: 2 } },
 ])("refuses incomplete PDF Save evidence %j", (change) => {
   expect(installedMacPdfSaveSucceeded(JSON.stringify({ ...pdfSave, ...change }))).toBe(false);
+});
+
+const archiveSave = {
+  ...jsonSave,
+  action: { requested: "save_new_archive", pressed: true, dismissed: true },
+};
+it("accepts archive Save only with all independent native proofs", () => {
+  const output = JSON.stringify(archiveSave);
+  expect(installedMacArchiveSaveSucceeded(output)).toBe(true);
+  expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  expect(installedMacPdfSaveSucceeded(output)).toBe(false);
+  expect(installedMacTextSaveSucceeded(output, "lrc")).toBe(false);
+  expect(installedMacAxActionSucceeded(output, "open")).toBe(false);
+  expect(installedMacArchiveSaveSucceeded(JSON.stringify(pdfSave))).toBe(false);
+});
+it.each([
+  { saveTargetAbsent: false },
+  { guardMask: 254 },
+  { directoryVerified: false },
+  { foreground: false },
+  { complete: false },
+  { lastError: -25204 },
+  { stage: "press" },
+  { action: { requested: "save_new_archive", pressed: false, dismissed: true } },
+  { action: { requested: "save_new_archive", pressed: true, dismissed: false } },
+  { saveFilename: { ...filenameProof, labelAttached: false } },
+  { saveFilename: { ...filenameProof, fieldAttached: false } },
+  { saveFilename: { ...filenameProof, matches: 2 } },
+])("refuses incomplete archive Save evidence %j", (change) => {
+  expect(installedMacArchiveSaveSucceeded(JSON.stringify({ ...archiveSave, ...change }))).toBe(
+    false,
+  );
 });

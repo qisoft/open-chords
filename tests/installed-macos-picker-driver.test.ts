@@ -675,7 +675,7 @@ it("refuses non-JSON Save before starting any native process", async () => {
   expect(execute).not.toHaveBeenCalled();
 });
 
-it.each(["json", "lrc", "chordpro", "pdf"] as const)(
+it.each(["json", "lrc", "chordpro", "pdf", "archive"] as const)(
   "publishes %s once from a guarded retained expanded panel without collapse or input",
   async (format) => {
     vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -711,7 +711,9 @@ it.each(["json", "lrc", "chordpro", "pdf"] as const)(
         ? "--save-new-json"
         : format === "pdf"
           ? "--save-new-pdf"
-          : "--save-new-text",
+          : format === "archive"
+            ? "--save-new-archive"
+            : "--save-new-text",
     ]);
     expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
       100000, 7000, 7000, 7000, 7000, 7000,
@@ -766,6 +768,50 @@ it.each([
   }));
   await expect(
     installedMacPickerDriver("save_pdf", "/private/directory", () => ({}), "pdf")(42),
+  ).rejects.toThrow("Native macOS AX probe");
+  expect(execute).toHaveBeenCalledTimes(6);
+});
+
+it.each(["json", "lrc", "chordpro", "pdf", undefined] as const)(
+  "refuses mismatched archive format %s before any native process",
+  async (format) => {
+    await expect(
+      installedMacPickerDriver("save_archive", "/private/directory", () => ({}), format)(42),
+    ).rejects.toThrow("archive Save target unavailable");
+    expect(execute).not.toHaveBeenCalled();
+  },
+);
+it("refuses a missing archive directory before any native process", async () => {
+  await expect(
+    installedMacPickerDriver("save_archive", undefined, () => ({}), "archive")(42),
+  ).rejects.toThrow("archive Save target unavailable");
+  expect(execute).not.toHaveBeenCalled();
+});
+it.each([
+  { saveTargetAbsent: false },
+  { action: { requested: "save_new_json", pressed: true, dismissed: true } },
+  { action: { requested: "save_new_archive", pressed: true, dismissed: false } },
+  { saveFilename: { ...filenameSnapshot.saveFilename, verified: false } },
+])("does not retry a refused archive Save %j", async (change) => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    { ...prepared, saveFieldProbe: { ...probe, format: "archive" } },
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    {
+      ...jsonSaved,
+      action: { requested: "save_new_archive", pressed: true, dismissed: true },
+      ...change,
+    },
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await expect(
+    installedMacPickerDriver("save_archive", "/private/directory", () => ({}), "archive")(42),
   ).rejects.toThrow("Native macOS AX probe");
   expect(execute).toHaveBeenCalledTimes(6);
 });
