@@ -387,6 +387,16 @@ public static class SaveNativeInput {
     while (IsWindow(window) && elapsed.ElapsedMilliseconds < 2000)
       System.Threading.Thread.Sleep(20);
     if (IsWindow(window)) {
+      uint dialogPid, controlPid, foregroundPid;
+      GetWindowThreadProcessId(window, out dialogPid);
+      GetWindowThreadProcessId(control, out controlPid);
+      GetWindowThreadProcessId(GetForegroundWindow(), out foregroundPid);
+      var dialogClass = new StringBuilder(64);
+      GetClassName(window, dialogClass, dialogClass.Capacity);
+      Console.Error.WriteLine("Native Save dismissal identity probe: dialog_pid_match=" + (dialogPid == expectedProcessId).ToString().ToLowerInvariant() +
+        " class_dialog=" + (dialogClass.ToString() == "#32770").ToString().ToLowerInvariant() +
+        " control_pid_match=" + (controlPid == expectedProcessId).ToString().ToLowerInvariant() +
+        " foreground_application=" + (foregroundPid == expectedProcessId).ToString().ToLowerInvariant());
       Console.Error.WriteLine("Native Save dismissal probe: exists=true visible=" + IsWindowVisible(window).ToString().ToLowerInvariant() +
         " enabled=" + IsWindowEnabled(window).ToString().ToLowerInvariant() + " owned=" + OwnedByApplication(window, expectedProcessId).ToString().ToLowerInvariant());
       ProbeDismissalResponse(window, control, expectedProcessId);

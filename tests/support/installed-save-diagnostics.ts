@@ -109,6 +109,14 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const dismissalIdentities = output
+    .split(/\r?\n/)
+    .filter((line) =>
+      /^Native Save dismissal identity probe: dialog_pid_match=(?:true|false) class_dialog=(?:true|false) control_pid_match=(?:true|false) foreground_application=(?:true|false)$/.test(
+        line,
+      ),
+    )
+    .slice(-3);
   const filenameErrors = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -162,6 +170,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...probes,
     ...windowProbes,
     ...dismissalProbes,
+    ...dismissalIdentities,
     ...responseProbes,
     ...foregroundProbes,
     ...activationProbes,

@@ -396,3 +396,22 @@ it.each([0, 5, 1460, 999999])("retains only bounded filename Win32 error evidenc
   expect(diagnostic).not.toContain("error_code=-1");
   expect(diagnostic).not.toContain("error_code=1000000");
 });
+
+it("keeps bounded dismissal identity booleans without native identifiers", () => {
+  const probe =
+    "Native Save dismissal identity probe: dialog_pid_match=true class_dialog=true control_pid_match=true foreground_application=true";
+  const output = installedSaveDriverDiagnostic(
+    {},
+    [
+      probe,
+      probe,
+      probe,
+      probe,
+      `${probe} /private/path`,
+      probe.replace("class_dialog=true", "class_dialog=private"),
+    ].join("\n"),
+    1,
+  );
+  expect(output.split(probe)).toHaveLength(4);
+  expect(output).not.toContain("private");
+});
