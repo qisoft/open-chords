@@ -71,6 +71,11 @@ function installedExportProofStages(error: unknown): string[] {
     "retry_library_reopened",
     "retry_output_verified",
     "retry_recovery_verified",
+    "retry_check_receipt_count_refused",
+    "retry_check_output_hash_refused",
+    "retry_check_output_bytes_refused",
+    "retry_check_revision_refused",
+    "retry_check_source_tree_refused",
   ]);
   return error.stderr
     .slice(0, 16384)
@@ -78,7 +83,13 @@ function installedExportProofStages(error: unknown): string[] {
     .flatMap((line) => {
       const match = /^Export disk proof stage: ([a-z_]+) duration_ms=([0-9]{1,9})$/.exec(line);
       if (match && names.has(match[1]!)) return [line];
-      return /^Export recovery proof stage: (started|published_pending|refused_changed_output|refused_missing_output|recovered|replay_journal_writing|replay_journal_written|replay_recovered_once|replay_recovered_twice|replay_library_opened|replay_service_opened|replay_verification_refused|idempotent) duration_ms=[0-9]{1,9}$/.test(
+      if (
+        /^Export disk proof failure: code=(export_disk_proof_(fixture_invalid|content_invalid|preservation_failed|retry_failed|retry_not_durable|retry_not_recovered)|ENOSPC|ENOENT|EACCES|EPERM|EIO|EBUSY|unknown) duration_ms=[0-9]{1,9}$/.test(
+          line,
+        )
+      )
+        return [line];
+      return /^Export recovery proof stage: (started|published_pending|refused_changed_output|refused_missing_output|recovered|replay_journal_writing|replay_journal_written|replay_recovered_once|replay_recovered_twice|replay_library_opened|replay_service_opened|replay_verification_refused|replay_check_(busy|pending|head|receipt|library_tree|target_tree|source_tree)_refused|idempotent) duration_ms=[0-9]{1,9}$/.test(
         line,
       )
         ? [line]

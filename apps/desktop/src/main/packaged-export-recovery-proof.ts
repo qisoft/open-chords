@@ -144,14 +144,24 @@ export async function runPackagedExportRecoveryProof(source: ProjectLibrary, sta
     pickTarget: async () => null,
   });
   stage("replay_service_opened");
+  const replayCheck = (name: string, refused: boolean) => {
+    if (refused) stage(`replay_check_${name}_refused`);
+    return refused;
+  };
   if (
-    final.busy ||
-    final.pendingRecovery !== 0 ||
-    (await durable.getSnapshot(projectId))?.projectRevisionId !== head ||
-    canonicalSerialize(durable.listExportReceipts(projectId)) !== canonicalSerialize([receipt]) ||
-    canonicalSerialize(await proofTreeHashes(root)) !== baseline ||
-    canonicalSerialize(await proofTreeHashes(output)) !== targets ||
-    canonicalSerialize(await proofTreeHashes(stateRoot)) !== sourceBaseline
+    replayCheck("busy", final.busy) ||
+    replayCheck("pending", final.pendingRecovery !== 0) ||
+    replayCheck("head", (await durable.getSnapshot(projectId))?.projectRevisionId !== head) ||
+    replayCheck(
+      "receipt",
+      canonicalSerialize(durable.listExportReceipts(projectId)) !== canonicalSerialize([receipt]),
+    ) ||
+    replayCheck("library_tree", canonicalSerialize(await proofTreeHashes(root)) !== baseline) ||
+    replayCheck("target_tree", canonicalSerialize(await proofTreeHashes(output)) !== targets) ||
+    replayCheck(
+      "source_tree",
+      canonicalSerialize(await proofTreeHashes(stateRoot)) !== sourceBaseline,
+    )
   ) {
     stage("replay_verification_refused");
     throw new Error("export_recovery_proof_not_idempotent");
