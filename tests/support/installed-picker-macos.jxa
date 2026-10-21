@@ -200,27 +200,61 @@ function run(argv) {
         attribute(candidate.open, 'name') !== primaryAction) throw new Error('prepared target changed');
   }
 
+  function reportControlFailure(element, sheet, phase, code, traversalStarted) {
+    var status = 'complete', windows = 0, sheets = 0;
+    function existence(reference) {
+      if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; return 'unknown'; }
+      try { var value = reference.exists(); return value === true ? 'true' : value === false ? 'false' : 'unknown'; }
+      catch (_) { if (status === 'complete') status = 'error'; return 'unknown'; }
+    }
+    var elementExists = existence(element), sheetExists = existence(sheet);
+    try {
+      if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; }
+      else {
+        var freshWindows = process.windows();
+        windows = Math.min(17, freshWindows.length);
+        if (windows > 16) { if (status === 'complete') status = 'bound'; }
+        else for (var w = 0; w < freshWindows.length; w++) {
+          if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; break; }
+          sheets = Math.min(17, sheets + freshWindows[w].sheets().length);
+          if (sheets > 16) { if (status === 'complete') status = 'bound'; break; }
+        }
+      }
+    } catch (_) { if (status === 'complete') status = 'error'; }
+    if (!Number.isInteger(code) || code < -32768 || code > 32767) code = 'unknown';
+    console.log('Native macOS picker control failure: phase=' + phase + ' before_input=' + !nativeInputStarted +
+      ' reference_exists=' + elementExists + ' sheet_exists=' + sheetExists + ' fresh_status=' + status +
+      ' fresh_windows=' + windows + ' fresh_sheets=' + sheets + ' os_error=' + code +
+      ' duration_ms=' + Math.max(0, Math.min(200000, Date.now() - traversalStarted)));
+  }
   function expandedSaveControls(sheet) {
     var queue = [sheet], elements = [], skipped = 0, complete = false;
+    var failedElement = sheet, failurePhase = 'role', failureCode = null, traversalStarted = Date.now();
     try {
       while (queue.length > 0) {
-        if (Date.now() >= deadline) throw new Error('deadline');
-        if (elements.length >= 256 || queue.length > 256) throw new Error('element bound');
+        if (Date.now() >= deadline) { failurePhase = 'deadline'; throw new Error('deadline'); }
+        if (elements.length >= 256 || queue.length > 256) { failurePhase = 'bound'; throw new Error('element bound'); }
         var element = queue.shift();
         elements.push(element);
+        failedElement = element;
+        failurePhase = 'role';
         var role = attribute(element, 'role');
-        if (role === null) throw new Error('save control role unavailable');
+        if (role === null) { failureCode = lastAttributeError; throw new Error('save control role unavailable'); }
         // File-browser descendants are not dialog action or Save As controls.
         if (['AXBrowser', 'AXList', 'AXOutline', 'AXTable', 'AXColumn', 'AXRow', 'AXCell', 'AXWebArea'].indexOf(role) !== -1) {
           skipped++;
           continue;
         }
+        failurePhase = 'children';
         var children = element.uiElements();
-        if (children.length > 256 || queue.length + children.length > 256) throw new Error('element bound');
+        if (children.length > 256 || queue.length + children.length > 256) { failurePhase = 'bound'; throw new Error('element bound'); }
         queue = queue.concat(children);
       }
       complete = true;
       return elements;
+    } catch (error) {
+      reportControlFailure(failedElement, sheet, failurePhase, failureCode === null ? error && error.errorNumber : failureCode, traversalStarted);
+      throw error;
     } finally {
       console.log('Native macOS Save controls probe: elements=' + Math.min(elements.length, 256) +
         ' skipped_content=' + Math.min(skipped, 256) + ' complete=' + complete);

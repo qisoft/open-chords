@@ -4,6 +4,7 @@ import {
   installedMacPickerDiagnostic,
   installedMacPickerRefreshDiagnostic,
   installedMacSaveControlsDiagnostic,
+  installedMacPickerControlFailure,
 } from "./support/installed-picker-macos-diagnostics.ts";
 
 it("retains only three fixed attribute failures and one allowlisted refusal", () => {
@@ -274,4 +275,24 @@ it("retains only bounded fixed fresh-control evidence after a guard refusal", ()
   expect(output).not.toContain("private");
   expect(output).not.toContain("elements=258");
   expect(output).not.toContain("primary=18");
+});
+
+const controlFailure =
+  "Native macOS picker control failure: phase=role before_input=true reference_exists=false sheet_exists=false fresh_status=complete fresh_windows=1 fresh_sheets=1 os_error=-1728 duration_ms=900";
+it("retains one bounded failed-reference snapshot without authorizing recovery", () => {
+  expect(
+    installedMacPickerControlFailure(`/private/path\n${controlFailure}\n${controlFailure}`),
+  ).toEqual([controlFailure]);
+  expect(installedMacPickerDiagnostic({ code: 1 }, controlFailure, 900)).toContain(controlFailure);
+});
+it.each([
+  controlFailure + " /private/path",
+  controlFailure.replace("phase=role", "phase=/private/path"),
+  controlFailure.replace("reference_exists=false", "reference_exists=/private/ref"),
+  controlFailure.replace("fresh_windows=1", "fresh_windows=18"),
+  controlFailure.replace("fresh_sheets=1", "fresh_sheets=18"),
+  controlFailure.replace("os_error=-1728", "os_error=-32769"),
+  controlFailure.replace("duration_ms=900", "duration_ms=200001"),
+])("rejects malformed/private control failure evidence %s", (line) => {
+  expect(installedMacPickerControlFailure(line)).toEqual([]);
 });
