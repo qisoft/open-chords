@@ -129,15 +129,21 @@ export async function runPackagedExportRecoveryProof(source: ProjectLibrary, sta
   const baseline = canonicalSerialize(await proofTreeHashes(root));
   const targets = canonicalSerialize(await proofTreeHashes(output));
   // Replay the same durable intent, as if interruption occurred before journal removal.
+  stage("replay_journal_writing");
   await writeFile(join(journalRoot, names[0]), canonicalSerialize(journal), { flag: "wx" });
+  stage("replay_journal_written");
   await recovered.recover();
+  stage("replay_recovered_once");
   await recovered.recover();
+  stage("replay_recovered_twice");
   const durable = await openProjectLibrary({ stateRoot: root });
+  stage("replay_library_opened");
   const final = await openProjectExports({
     library: durable,
     stateRoot: root,
     pickTarget: async () => null,
   });
+  stage("replay_service_opened");
   if (
     final.busy ||
     final.pendingRecovery !== 0 ||
@@ -146,8 +152,10 @@ export async function runPackagedExportRecoveryProof(source: ProjectLibrary, sta
     canonicalSerialize(await proofTreeHashes(root)) !== baseline ||
     canonicalSerialize(await proofTreeHashes(output)) !== targets ||
     canonicalSerialize(await proofTreeHashes(stateRoot)) !== sourceBaseline
-  )
+  ) {
+    stage("replay_verification_refused");
     throw new Error("export_recovery_proof_not_idempotent");
+  }
   stage("idempotent");
   return {
     publishedReceiptPending: true,
