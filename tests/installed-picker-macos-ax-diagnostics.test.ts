@@ -5,6 +5,7 @@ import {
   installedMacAxActionSucceeded,
   installedMacAxSnapshotRefreshAllowed,
   installedMacSelectedDirectoryVerified,
+  installedMacSaveFilenameVerified,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -884,4 +885,54 @@ it("retains fixed linked-label PID failure evidence without a raw identifier", (
   expect(diagnostic).toContain("save_target_attribute=pid");
   expect(diagnostic).toContain("save_target_error=-25202");
   expect(installedMacAxActionSucceeded(output, "open")).toBe(false);
+});
+
+const filenameProof = {
+  status: "complete",
+  fields: 11,
+  matches: 1,
+  enabled: true,
+  labelMatched: true,
+  fieldAttached: true,
+  labelAttached: true,
+  visited: 4,
+  verified: true,
+  error: 0,
+  attribute: "none",
+};
+it("requires independent filename/linked-label attachment evidence without authorizing Open", () => {
+  const output = JSON.stringify({ ...directorySnapshot, saveFilename: filenameProof });
+  expect(installedMacSaveFilenameVerified(output)).toBe(true);
+  expect(installedMacAxActionSucceeded(output, "open")).toBe(false);
+  expect(installedMacSaveFilenameVerified(JSON.stringify(directorySnapshot))).toBe(false);
+});
+it.each([
+  { status: "deadline" },
+  { status: "error" },
+  { fields: 0 },
+  { matches: 0 },
+  { matches: 2 },
+  { enabled: false },
+  { labelMatched: false },
+  { fieldAttached: false },
+  { labelAttached: false },
+  { visited: 0 },
+  { visited: 33 },
+  { verified: false },
+  { error: -25202 },
+  { attribute: "pid" },
+  { path: "/private/value" },
+])("rejects incomplete, ambiguous or private filename proof %j", (change) => {
+  const output = JSON.stringify({
+    ...directorySnapshot,
+    saveFilename: { ...filenameProof, ...change },
+  });
+  expect(installedMacSaveFilenameVerified(output)).toBe(false);
+});
+it("rejects filename proof when the selected-directory guard is absent", () => {
+  expect(
+    installedMacSaveFilenameVerified(
+      JSON.stringify({ ...directorySnapshot, guardMask: 254, saveFilename: filenameProof }),
+    ),
+  ).toBe(false);
 });

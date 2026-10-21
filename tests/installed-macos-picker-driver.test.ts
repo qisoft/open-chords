@@ -155,6 +155,23 @@ const directorySnapshot = {
   },
 };
 
+const filenameSnapshot = {
+  ...directorySnapshot,
+  saveFilename: {
+    status: "complete",
+    fields: 11,
+    matches: 1,
+    enabled: true,
+    labelMatched: true,
+    fieldAttached: true,
+    labelAttached: true,
+    visited: 4,
+    verified: true,
+    error: 0,
+    attribute: "none",
+  },
+};
+
 const cancelled = {
   action: "cancel_save_edited",
   nativePress: true,
@@ -263,6 +280,7 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     expanded,
     snapshot,
     directorySnapshot,
+    filenameSnapshot,
     { ...expanded, expanded: false, initialValue: 1, finalValue: 0 },
     { ...cancelled, action: "cancel_save_restored" },
   ];
@@ -276,7 +294,7 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     () => ({ LANG: "en_US.UTF-8" }),
     "json",
   )(42);
-  expect(execute).toHaveBeenCalledTimes(6);
+  expect(execute).toHaveBeenCalledTimes(7);
   expect(execute.mock.calls[0]?.[1]).toContain("prepare_save_directory_expanded");
   expect(execute.mock.calls[1]?.[0]).toContain("macos-save-expand");
   expect(execute.mock.calls[1]?.[1]).toEqual(["42"]);
@@ -287,10 +305,17 @@ it("expands only in the isolated expanded journey before a fresh read-only snaps
     "directory_snapshot",
     "json",
   ]);
-  expect(execute.mock.calls[4]?.[1]).toEqual(["42", "--collapse"]);
-  expect(execute.mock.calls[5]?.[1]).toContain("cancel_save_restored");
+  expect(execute.mock.calls[4]?.[1]).toEqual([
+    "42",
+    "/private/directory",
+    "directory_snapshot",
+    "json",
+    "--verify-filename",
+  ]);
+  expect(execute.mock.calls[5]?.[1]).toEqual(["42", "--collapse"]);
+  expect(execute.mock.calls[6]?.[1]).toContain("cancel_save_restored");
   expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
-    100000, 7000, 7000, 7000, 7000, 98500,
+    100000, 7000, 7000, 7000, 7000, 7000, 98200,
   ]);
   for (const call of execute.mock.calls) expect(call[2].env).toEqual({ LANG: "en_US.UTF-8" });
   expect(output.mock.calls.flat().join("")).not.toContain("private");
@@ -345,6 +370,7 @@ it("stops before filename input when restoration cannot prove native collapse", 
     .mockResolvedValueOnce({ stdout: JSON.stringify(expanded), stderr: "" })
     .mockResolvedValueOnce({ stdout: JSON.stringify(snapshot), stderr: "" })
     .mockResolvedValueOnce({ stdout: JSON.stringify(directorySnapshot), stderr: "" })
+    .mockResolvedValueOnce({ stdout: JSON.stringify(filenameSnapshot), stderr: "" })
     .mockResolvedValueOnce({
       stdout: JSON.stringify({ ...expanded, initialValue: 1, finalValue: 1 }),
       stderr: "",
@@ -358,7 +384,7 @@ it("stops before filename input when restoration cannot prove native collapse", 
       "json",
     )(42),
   ).rejects.toThrow("Native macOS Save expansion");
-  expect(execute).toHaveBeenCalledTimes(5);
+  expect(execute).toHaveBeenCalledTimes(6);
 });
 
 it("stops before restoration or filename input when selected-directory proof fails", async () => {
@@ -555,5 +581,37 @@ it.each([6999.6, 7001])(
       installedMacPickerDriver("open", "/private/fixture.wav", () => ({}))(42),
     ).rejects.toThrow("AX probe deadline exceeded");
     expect(execute).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each([
+  { verified: false },
+  { labelAttached: false },
+  { fieldAttached: false },
+  { error: -25202, status: "error", attribute: "pid" },
+])(
+  "stops before collapse or filename input after rejected native filename proof %j",
+  async (change) => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const responses = [
+      prepared,
+      expanded,
+      snapshot,
+      directorySnapshot,
+      { ...filenameSnapshot, saveFilename: { ...filenameSnapshot.saveFilename, ...change } },
+    ];
+    execute.mockImplementation(async () => ({
+      stdout: JSON.stringify(responses.shift()),
+      stderr: "",
+    }));
+    await expect(
+      installedMacPickerDriver(
+        "cancel_save_directory_expanded",
+        "/private/directory",
+        () => ({}),
+        "json",
+      )(42),
+    ).rejects.toThrow("Native macOS AX probe:");
+    expect(execute).toHaveBeenCalledTimes(5);
   },
 );

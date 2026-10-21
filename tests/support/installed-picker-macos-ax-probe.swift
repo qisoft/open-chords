@@ -161,7 +161,7 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
 }
 let requested = arguments.count >= 4 ? arguments[3] : "none"
 let saveNames = ["json": "Open Chords.json", "lrc": "Open Chords.lrc", "chordpro": "Open Chords.cho", "pdf": "Open Chords.pdf", "archive": "Open Chords.ocarchive"]
-let expectedSaveName = arguments.count == 5 && requested == "directory_snapshot" ? saveNames[arguments[4]] : nil
+let expectedSaveName = arguments.count >= 5 && requested == "directory_snapshot" ? saveNames[arguments[4]] : nil
 var counts: [String: Int] = [
     "windows": 0, "sheets": 0, "visited": 0, "selectedRoots": 0,
     "selectedRows": 0, "selectedCells": 0, "selectedColumns": 0,
@@ -183,6 +183,8 @@ var staleChildContext = false
 var invalidRoleElement: AXUIElement? = nil
 var snapshotRefreshEligible = false
 var snapshotTraversalComplete = false
+let verifiesFilename = arguments.count == 6 && arguments[5] == "--verify-filename"
+var saveFilename: [String: Any] = ["status": "not_checked", "fields": 0, "matches": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
 var saveTargetContext: [String: Any] = ["status": "not_checked", "fields": 0, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "descriptionMatches": 0, "linkedLabelMatches": 0, "linkedLabelRole": "none", "error": 0, "attribute": "none"]
 var directoryVerified = false
 var verified = false
@@ -395,7 +397,74 @@ func observeSaveTarget(_ fields: [AXUIElement], expected: String, pid: pid_t) ->
     return result
 }
 
-if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && expectedSaveName != nil)), ["none", "open", "cancel_open_existing", "directory_snapshot"].contains(requested),
+// Independent required-attribute proof. It never presses Save or changes directory guards.
+func verifySaveFilename(_ fields: [AXUIElement], expected: String, pid: pid_t, sheet: AXUIElement) -> [String: Any] {
+    var result: [String: Any] = ["status": "complete", "fields": fields.count, "matches": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
+    func refuse(_ status: String, _ attribute: String = "none", _ error: Int = 0) {
+        if (result["status"] as? String) == "complete" { result["status"] = status; result["attribute"] = attribute; result["error"] = error }
+    }
+    func withinBudget() -> Bool {
+        if ProcessInfo.processInfo.systemUptime >= deadline { refuse("deadline"); return false }
+        return true
+    }
+    func required(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        guard withinBudget() else { return nil }
+        AXUIElementSetMessagingTimeout(element, 0.15)
+        var value: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+        if status != .success { refuse("error", name, Int(status.rawValue)); return nil }
+        guard withinBudget(), let value = value else { refuse("invalid_candidate", name); return nil }
+        return value
+    }
+    func samePid(_ element: AXUIElement) -> Bool {
+        guard withinBudget() else { return false }
+        var actual: pid_t = 0
+        let status = AXUIElementGetPid(element, &actual)
+        if status != .success { refuse("error", "pid", Int(status.rawValue)); return false }
+        guard withinBudget(), actual == pid else { refuse("invalid_candidate", "pid"); return false }
+        return true
+    }
+    func attached(_ element: AXUIElement) -> Bool {
+        var current = element
+        var seen: [AXUIElement] = []
+        for _ in 0..<16 {
+            guard withinBudget(), samePid(current) else { return false }
+            if same(current, sheet) { return true }
+            if seen.contains(where: { same($0, current) }) { refuse("invalid_candidate", "AXParent"); return false }
+            seen.append(current)
+            result["visited"] = (result["visited"] as? Int ?? 0) + 1
+            guard let parent = required(current, "AXParent"), CFGetTypeID(parent) == AXUIElementGetTypeID() else { refuse("invalid_candidate", "AXParent"); return false }
+            current = unsafeBitCast(parent, to: AXUIElement.self)
+        }
+        refuse("bound", "AXParent"); return false
+    }
+    var matches: [AXUIElement] = []
+    for field in fields {
+        guard let value = required(field, "AXValue") else { continue }
+        if (value as? String) == expected { matches.append(field) }
+    }
+    result["matches"] = matches.count
+    guard (result["status"] as? String) == "complete" else { return result }
+    guard matches.count == 1 else { refuse("invalid_candidate", "AXValue"); return result }
+    let field = matches[0]
+    guard samePid(field), (required(field, "AXRole") as? String) == "AXTextField" else { refuse("invalid_candidate", "AXRole"); return result }
+    guard (required(field, "AXEnabled") as? Bool) == true else { refuse("invalid_candidate", "AXEnabled"); return result }
+    result["enabled"] = true
+    guard let labelValue = required(field, "AXTitleUIElement"), CFGetTypeID(labelValue) == AXUIElementGetTypeID() else { refuse("invalid_candidate", "AXTitleUIElement"); return result }
+    let label = unsafeBitCast(labelValue, to: AXUIElement.self)
+    guard samePid(label), (required(label, "AXRole") as? String) == "AXStaticText",
+          let labelText = required(label, "AXValue") as? String, ["Save As:", "Save As"].contains(labelText) else { refuse("invalid_candidate", "AXTitleUIElement"); return result }
+    result["labelMatched"] = true
+    guard attached(field) else { return result }
+    result["fieldAttached"] = true
+    guard attached(label) else { return result }
+    result["labelAttached"] = true
+    guard withinBudget(), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { refuse("invalid_candidate", "pid"); return result }
+    result["verified"] = (result["status"] as? String) == "complete"
+    return result
+}
+
+if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && expectedSaveName != nil) || (verifiesFilename && expectedSaveName != nil)), ["none", "open", "cancel_open_existing", "directory_snapshot"].contains(requested),
    let pid = Int32(arguments[1]), pid > 0, arguments[2].hasPrefix("/") {
     let target = URL(fileURLWithPath: arguments[2])
     let expected = target.absoluteString
@@ -657,7 +726,10 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             directoryVerified = guardMask == 255 && ProcessInfo.processInfo.systemUptime < deadline
             if directoryVerified {
                 stage = "directory_complete"
-                if let name = expectedSaveName { saveTargetContext = observeSaveTarget(saveTextFields, expected: name, pid: pid) }
+                if let name = expectedSaveName {
+                    if verifiesFilename { saveFilename = verifySaveFilename(saveTextFields, expected: name, pid: pid, sheet: sheet) }
+                    else { saveTargetContext = observeSaveTarget(saveTextFields, expected: name, pid: pid) }
+                }
             }
         }
     }
@@ -745,7 +817,7 @@ let result: [String: Any] = [
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
-    "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
+    "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
     "action": ["requested": requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
