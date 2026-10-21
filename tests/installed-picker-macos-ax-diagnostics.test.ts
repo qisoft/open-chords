@@ -869,3 +869,19 @@ it.each([
     "Native macOS AX probe: invalid_evidence",
   );
 });
+
+it("retains fixed linked-label PID failure evidence without a raw identifier", () => {
+  const output = JSON.stringify({
+    ...evidence,
+    saveTargetContext: {
+      ...saveTargetObservation,
+      status: "error",
+      error: -25202,
+      attribute: "pid",
+    },
+  });
+  const diagnostic = installedMacAxProbeDiagnostic(output, null, 5);
+  expect(diagnostic).toContain("save_target_attribute=pid");
+  expect(diagnostic).toContain("save_target_error=-25202");
+  expect(installedMacAxActionSucceeded(output, "open")).toBe(false);
+});

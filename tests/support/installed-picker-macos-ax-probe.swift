@@ -368,7 +368,21 @@ func observeSaveTarget(_ fields: [AXUIElement], expected: String, pid: pid_t) ->
             if let labelValue = observe(field, "AXTitleUIElement"), CFGetTypeID(labelValue) == AXUIElementGetTypeID() {
                 let label = unsafeBitCast(labelValue, to: AXUIElement.self)
                 var labelPid: pid_t = 0
-                if ProcessInfo.processInfo.systemUptime < deadline && AXUIElementGetPid(label, &labelPid) == .success && labelPid == pid {
+                if ProcessInfo.processInfo.systemUptime >= deadline {
+                    if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
+                    continue
+                }
+                let pidStatus = AXUIElementGetPid(label, &labelPid)
+                if pidStatus != .success {
+                    if (result["status"] as? String) == "complete" { result["status"] = "error" }
+                    if (result["error"] as? Int) == 0 { result["error"] = Int(pidStatus.rawValue); result["attribute"] = "pid" }
+                    continue
+                }
+                if ProcessInfo.processInfo.systemUptime >= deadline {
+                    if (result["status"] as? String) == "complete" { result["status"] = "deadline" }
+                    continue
+                }
+                if labelPid == pid {
                     let role = observe(label, "AXRole") as? String
                     result["linkedLabelRole"] = role == "AXStaticText" ? "static_text" : "other"
                     if role == "AXStaticText", let value = observe(label, "AXValue") as? String, ["Save As:", "Save As"].contains(value) {

@@ -139,6 +139,7 @@ const evidenceSchema = z.strictObject({
         "AXDescription",
         "AXTitleUIElement",
         "AXRole",
+        "pid",
       ]),
     })
     .refine(
