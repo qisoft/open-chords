@@ -675,7 +675,7 @@ it("refuses non-JSON Save before starting any native process", async () => {
   expect(execute).not.toHaveBeenCalled();
 });
 
-it.each(["json", "lrc", "chordpro"] as const)(
+it.each(["json", "lrc", "chordpro", "pdf"] as const)(
   "publishes %s once from a guarded retained expanded panel without collapse or input",
   async (format) => {
     vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -707,7 +707,11 @@ it.each(["json", "lrc", "chordpro"] as const)(
       "/private/directory",
       "directory_snapshot",
       format,
-      format === "json" ? "--save-new-json" : "--save-new-text",
+      format === "json"
+        ? "--save-new-json"
+        : format === "pdf"
+          ? "--save-new-pdf"
+          : "--save-new-text",
     ]);
     expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
       100000, 7000, 7000, 7000, 7000, 7000,
@@ -720,4 +724,48 @@ it("refuses mismatched text format before any native process", async () => {
     installedMacPickerDriver("save_lrc", "/private/directory", () => ({}), "chordpro")(42),
   ).rejects.toThrow("text Save target unavailable");
   expect(execute).not.toHaveBeenCalled();
+});
+
+it.each(["json", "lrc", "chordpro", "archive", undefined] as const)(
+  "refuses mismatched PDF format %s before starting a native process",
+  async (format) => {
+    await expect(
+      installedMacPickerDriver("save_pdf", "/private/directory", () => ({}), format)(42),
+    ).rejects.toThrow("PDF Save target unavailable");
+    expect(execute).not.toHaveBeenCalled();
+  },
+);
+it("refuses a missing PDF directory before starting a native process", async () => {
+  await expect(
+    installedMacPickerDriver("save_pdf", undefined, () => ({}), "pdf")(42),
+  ).rejects.toThrow("PDF Save target unavailable");
+  expect(execute).not.toHaveBeenCalled();
+});
+it.each([
+  { saveTargetAbsent: false },
+  { action: { requested: "save_new_json", pressed: true, dismissed: true } },
+  { action: { requested: "save_new_pdf", pressed: true, dismissed: false } },
+  { saveFilename: { ...filenameSnapshot.saveFilename, verified: false } },
+])("does not retry a refused PDF Save %j", async (change) => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    { ...prepared, saveFieldProbe: { ...probe, format: "pdf" } },
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    {
+      ...jsonSaved,
+      action: { requested: "save_new_pdf", pressed: true, dismissed: true },
+      ...change,
+    },
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await expect(
+    installedMacPickerDriver("save_pdf", "/private/directory", () => ({}), "pdf")(42),
+  ).rejects.toThrow("Native macOS AX probe");
+  expect(execute).toHaveBeenCalledTimes(6);
 });

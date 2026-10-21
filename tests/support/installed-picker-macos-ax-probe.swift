@@ -185,7 +185,8 @@ var snapshotRefreshEligible = false
 var snapshotTraversalComplete = false
 let savesNewJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--save-new-json"
 let savesNewText = arguments.count == 6 && arguments[3] == "directory_snapshot" && ["lrc", "chordpro"].contains(arguments[4]) && arguments[5] == "--save-new-text"
-let savesNewExport = savesNewJson || savesNewText
+let savesNewPdf = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "pdf" && arguments[5] == "--save-new-pdf"
+let savesNewExport = savesNewJson || savesNewText || savesNewPdf
 let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewExport
 var saveTargetAbsent = false
 var saveFilename: [String: Any] = ["status": "not_checked", "fields": 0, "matches": 0, "absentValues": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]

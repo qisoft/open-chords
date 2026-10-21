@@ -8,6 +8,7 @@ import {
   installedMacSaveFilenameVerified,
   installedMacJsonSaveSucceeded,
   installedMacTextSaveSucceeded,
+  installedMacPdfSaveSucceeded,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -1000,3 +1001,32 @@ it.each(["lrc", "chordpro"] as const)(
     ).toBe(false);
   },
 );
+
+const pdfSave = {
+  ...jsonSave,
+  action: { requested: "save_new_pdf", pressed: true, dismissed: true },
+};
+it("accepts PDF Save only with the same directory, filename, guard and absent-target proofs", () => {
+  const output = JSON.stringify(pdfSave);
+  expect(installedMacPdfSaveSucceeded(output)).toBe(true);
+  expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  expect(installedMacTextSaveSucceeded(output, "lrc")).toBe(false);
+  expect(installedMacAxActionSucceeded(output, "open")).toBe(false);
+  expect(installedMacPdfSaveSucceeded(JSON.stringify(jsonSave))).toBe(false);
+});
+it.each([
+  { saveTargetAbsent: false },
+  { guardMask: 254 },
+  { directoryVerified: false },
+  { foreground: false },
+  { complete: false },
+  { lastError: -25204 },
+  { stage: "press" },
+  { action: { requested: "save_new_pdf", pressed: false, dismissed: true } },
+  { action: { requested: "save_new_pdf", pressed: true, dismissed: false } },
+  { saveFilename: { ...filenameProof, labelAttached: false } },
+  { saveFilename: { ...filenameProof, fieldAttached: false } },
+  { saveFilename: { ...filenameProof, matches: 2 } },
+])("refuses incomplete PDF Save evidence %j", (change) => {
+  expect(installedMacPdfSaveSucceeded(JSON.stringify({ ...pdfSave, ...change }))).toBe(false);
+});
