@@ -84,6 +84,12 @@ function installedExportProofStages(error: unknown): string[] {
       const match = /^Export disk proof stage: ([a-z_]+) duration_ms=([0-9]{1,9})$/.exec(line);
       if (match && names.has(match[1]!)) return [line];
       if (
+        /^Export disk proof source delta: added=[0-9]{1,4} removed=[0-9]{1,4} changed=[0-9]{1,4} library=[0-9]{1,4} location=[0-9]{1,4} network=[0-9]{1,4} export_pending=[0-9]{1,4} chromium_preferences=[0-9]{1,4} chromium_storage=[0-9]{1,4} chromium_cache=[0-9]{1,4} other=[0-9]{1,4}$/.test(
+          line,
+        )
+      )
+        return [line];
+      if (
         /^Export disk proof failure: code=(export_disk_proof_(fixture_invalid|content_invalid|preservation_failed|retry_failed|retry_not_durable|retry_not_recovered)|ENOSPC|ENOENT|EACCES|EPERM|EIO|EBUSY|unknown) duration_ms=[0-9]{1,9}$/.test(
           line,
         )

@@ -120,7 +120,9 @@ export function installedMacPickerRefreshDiagnostic(stderr: string) {
         line ===
           "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true" ||
         line ===
-          "Native macOS picker refresh: reason=stale_filename_references attempt=1 before_input=true",
+          "Native macOS picker refresh: reason=stale_filename_references attempt=1 before_input=true" ||
+        line ===
+          "Native macOS picker refresh: reason=stale_control_discovery attempt=1 before_input=true",
     );
 }
 

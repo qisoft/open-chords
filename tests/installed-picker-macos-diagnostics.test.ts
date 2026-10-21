@@ -296,3 +296,16 @@ it.each([
 ])("rejects malformed/private control failure evidence %s", (line) => {
   expect(installedMacPickerControlFailure(line)).toEqual([]);
 });
+
+it("accepts only one fixed pre-input control rediscovery checkpoint", () => {
+  const line =
+    "Native macOS picker refresh: reason=stale_control_discovery attempt=1 before_input=true";
+  expect(installedMacPickerRefreshDiagnostic(line)).toBe(line);
+  expect(
+    installedMacPickerRefreshDiagnostic(line.replace("attempt=1", "attempt=2")),
+  ).toBeUndefined();
+  expect(
+    installedMacPickerRefreshDiagnostic(line.replace("before_input=true", "before_input=false")),
+  ).toBeUndefined();
+  expect(installedMacPickerRefreshDiagnostic(line + " /private/path")).toBeUndefined();
+});

@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 
 import { canonicalSerialize, captureJsonExport, serializeJsonExport } from "@open-chords/domain";
 
+import { proofTreeDifference } from "./packaged-proof-tree-difference.ts";
 import { proofTreeHashes } from "./packaged-proof-tree.ts";
 import { openProjectExports } from "./project-exports.ts";
 import { openProjectLibrary, type ProjectLibrary } from "./project-library.ts";
@@ -53,7 +54,8 @@ async function runDiskProof(
 ) {
   stage("started");
   const projectId = "project_golden";
-  const sourceBaseline = canonicalSerialize(await proofTreeHashes(stateRoot));
+  const sourceTree = await proofTreeHashes(stateRoot);
+  const sourceBaseline = canonicalSerialize(sourceTree);
   const fixture = await source.readProject(projectId);
   const root = join(dirname(stateRoot), "packaged-export-disk-state");
   const output = join(dirname(stateRoot), "packaged-export-disk-output");
@@ -163,6 +165,12 @@ async function runDiskProof(
   stage("retry_library_reopened");
   const receipts = reopened.listExportReceipts(projectId);
   const bytes = await readFile(target);
+  const sourceTreeRefused = async () => {
+    const actual = await proofTreeHashes(stateRoot);
+    const refused = canonicalSerialize(actual) !== sourceBaseline;
+    if (refused) process.stderr.write(`${proofTreeDifference(sourceTree, actual)}\n`);
+    return refused;
+  };
   const retryCheck = (name: string, refused: boolean) => {
     if (refused) stage(`retry_check_${name}_refused`);
     return refused;
@@ -182,10 +190,7 @@ async function runDiskProof(
       "revision",
       (await reopened.getSnapshot(projectId))?.projectRevisionId === snapshot.projectRevisionId,
     ) ||
-    retryCheck(
-      "source_tree",
-      canonicalSerialize(await proofTreeHashes(stateRoot)) !== sourceBaseline,
-    )
+    retryCheck("source_tree", await sourceTreeRefused())
   )
     throw new Error("export_disk_proof_retry_not_durable");
   stage("retry_output_verified");

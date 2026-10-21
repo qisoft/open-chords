@@ -226,6 +226,7 @@ function run(argv) {
       ' reference_exists=' + elementExists + ' sheet_exists=' + sheetExists + ' fresh_status=' + status +
       ' fresh_windows=' + windows + ' fresh_sheets=' + sheets + ' os_error=' + code +
       ' duration_ms=' + Math.max(0, Math.min(200000, Date.now() - traversalStarted)));
+    return { status: status, windows: windows, sheets: sheets, elementExists: elementExists, sheetExists: sheetExists };
   }
   function expandedSaveControls(sheet) {
     var queue = [sheet], elements = [], skipped = 0, complete = false;
@@ -253,7 +254,15 @@ function run(argv) {
       complete = true;
       return elements;
     } catch (error) {
-      reportControlFailure(failedElement, sheet, failurePhase, failureCode === null ? error && error.errorNumber : failureCode, traversalStarted);
+      var code = failureCode === null ? error && error.errorNumber : failureCode;
+      var snapshot = reportControlFailure(failedElement, sheet, failurePhase, code, traversalStarted);
+      if (retainedDirectory && stage === 'elements' && !nativeInputStarted && referenceRefreshes === 0 &&
+          (failurePhase === 'role' || failurePhase === 'children') && code === -1728 &&
+          snapshot.status === 'complete' && snapshot.elementExists === 'false' && snapshot.sheetExists === 'false' &&
+          snapshot.windows === 1 && snapshot.sheets === 1 && Date.now() < deadline &&
+          attribute(process, 'unixId') === applicationPid && attribute(process, 'frontmost') === true) {
+        throw new Error('stale control discovery before input');
+      }
       throw error;
     } finally {
       console.log('Native macOS Save controls probe: elements=' + Math.min(elements.length, 256) +
@@ -451,6 +460,11 @@ function run(argv) {
       }
       throw new Error('not dismissed');
       } catch (error) {
+        if (error && error.message === 'stale control discovery before input' && retainedDirectory && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
+          referenceRefreshes++;
+          console.log('Native macOS picker refresh: reason=stale_control_discovery attempt=1 before_input=true');
+          continue discovery;
+        }
         if (error && error.message === 'stale filename before input' && restoredControls && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
           requireCancelTarget(process, candidate, 'before_input', true);
           referenceRefreshes++;
