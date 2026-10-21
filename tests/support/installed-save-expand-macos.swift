@@ -18,6 +18,7 @@ if args.count == 2 && args[1] == "--self-test" {
     exit(0)
 }
 let collapse = args.count == 3 && args[2] == "--collapse"
+let ensureExpanded = args.count == 3 && args[2] == "--ensure-expanded"
 let trusted = AXIsProcessTrusted()
 let deadline = ProcessInfo.processInfo.systemUptime + 3
 var complete = true, foreground = false, pressed = false, expanded = false
@@ -60,7 +61,7 @@ func pressAvailable(_ element: AXUIElement) -> Bool {
     guard let actions = names as? [String], actions.count <= 16 else { complete = false; return false }
     return actions.contains("AXPress")
 }
-if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
+if (args.count == 2 || collapse || ensureExpanded), let pid = Int32(args[1]), pid > 0, trusted {
     let app = AXUIElementCreateApplication(pid)
     stage = "discovery"
     let windows = children(app, "AXWindows")
@@ -117,14 +118,23 @@ if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
         if attached(parent, sheet) { guardMask |= 4 }
         if read(sheet, "AXRole") as? String == "AXSheet" { guardMask |= 8 }
         initialValue = binaryValue(read(disclosure, "AXValue")) ?? -1
-        if read(disclosure, "AXRole") as? String == "AXDisclosureTriangle" && initialValue == (collapse ? 1 : 0) &&
+        if read(disclosure, "AXRole") as? String == "AXDisclosureTriangle" && (initialValue == (collapse ? 1 : 0) || (ensureExpanded && initialValue == 1)) &&
            read(saves[0], "AXRole") as? String == "AXButton" && read(saves[0], "AXTitle") as? String == "Save" &&
            read(cancels[0], "AXRole") as? String == "AXButton" && read(cancels[0], "AXTitle") as? String == "Cancel" { guardMask |= 16 }
         if (read(disclosure, "AXEnabled") as? Bool) == true &&
            (read(saves[0], "AXEnabled") as? Bool) == true && (read(cancels[0], "AXEnabled") as? Bool) == true { guardMask |= 32 }
         if pressAvailable(disclosure) && complete && lastError == 0 { guardMask |= 64 }
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid && ProcessInfo.processInfo.systemUptime < deadline { guardMask |= 128 }
-        if complete && guardMask == 255 {
+        if complete && guardMask == 255 && ensureExpanded && initialValue == 1 {
+            // A previous successful Save can retain the expanded panel. Observe it; never toggle twice.
+            if attached(parent, sheet) && NSWorkspace.shared.frontmostApplication?.processIdentifier == pid {
+                finalValue = binaryValue(read(disclosure, "AXValue")) ?? -1
+                if complete && finalValue == 1 && ProcessInfo.processInfo.systemUptime < deadline {
+                    expanded = true
+                    stage = "complete"
+                }
+            }
+        } else if complete && guardMask == 255 {
             stage = "press"
             let timeout = AXUIElementSetMessagingTimeout(disclosure, 1)
             let status = timeout == .success ? AXUIElementPerformAction(disclosure, "AXPress" as CFString) : timeout

@@ -349,6 +349,8 @@ const evidenceSchema = z.strictObject({
       "cancel_open_existing",
       "directory_snapshot",
       "save_new_json",
+      "save_new_lrc",
+      "save_new_chordpro",
     ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
@@ -636,6 +638,12 @@ function filenameEvidenceVerified(value: z.infer<typeof evidenceSchema>["saveFil
   );
 }
 export function installedMacJsonSaveSucceeded(stdout: string) {
+  return nativeSaveSucceeded(stdout, "json");
+}
+export function installedMacTextSaveSucceeded(stdout: string, format: "lrc" | "chordpro") {
+  return nativeSaveSucceeded(stdout, format);
+}
+function nativeSaveSucceeded(stdout: string, format: "json" | "lrc" | "chordpro") {
   if (stdout.length > 4096) return false;
   try {
     const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
@@ -647,7 +655,7 @@ export function installedMacJsonSaveSucceeded(stdout: string) {
       value.saveTargetAbsent &&
       value.lastError === 0 &&
       value.stage === "complete" &&
-      value.action.requested === "save_new_json" &&
+      value.action.requested === `save_new_${format}` &&
       value.action.pressed &&
       value.action.dismissed
     );

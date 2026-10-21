@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   installedMacSaveExpansionDiagnostic,
   installedMacSaveExpansionSucceeded,
+  installedMacSaveExpandedReady,
   installedMacSaveCollapseSucceeded,
 } from "./support/installed-macos-save-expansion.ts";
 
@@ -117,4 +118,27 @@ it("bounds native read timing and never forwards private duration text", () => {
       "Native macOS Save expansion: invalid_evidence",
     );
   }
+});
+
+it("accepts guarded retained expansion without toggling and keeps original transition strict", () => {
+  const output = JSON.stringify({ ...evidence, pressed: false, initialValue: 1, finalValue: 1 });
+  expect(installedMacSaveExpandedReady(output)).toBe(true);
+  expect(installedMacSaveExpansionSucceeded(output)).toBe(false);
+  expect(installedMacSaveExpandedReady(JSON.stringify(evidence))).toBe(true);
+});
+it.each([
+  { guardMask: 254 },
+  { initialValue: -1 },
+  { finalValue: 0 },
+  { pressed: true },
+  { complete: false },
+  { foreground: false },
+  { lastError: -25204 },
+  { disclosures: 2 },
+])("rejects ambiguous or incomplete retained expansion %j", (change) => {
+  expect(
+    installedMacSaveExpandedReady(
+      JSON.stringify({ ...evidence, pressed: false, initialValue: 1, finalValue: 1, ...change }),
+    ),
+  ).toBe(false);
 });

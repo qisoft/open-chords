@@ -1,9 +1,10 @@
 function run(argv) {
   var applicationPid = Number(argv[0]);
   var scenario = argv[1] || 'cancel';
-  var expandedControls = scenario === 'cancel_save_edited_expanded';
+  var retainedDirectory = scenario === 'prepare_save_directory_retained';
+  var expandedControls = scenario === 'cancel_save_edited_expanded' || retainedDirectory;
   var restoredControls = scenario === 'cancel_save_restored';
-  var preparesExpandedDirectory = scenario === 'prepare_save_directory_expanded';
+  var preparesExpandedDirectory = scenario === 'prepare_save_directory_expanded' || retainedDirectory;
   var preparesDirectory = scenario === 'prepare_save_directory' || preparesExpandedDirectory;
   var directoryScenario = scenario === 'cancel_save_directory' || preparesDirectory;
   var selectedPath = directoryScenario ? argv[3] : argv[2];
@@ -14,7 +15,7 @@ function run(argv) {
   var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
   var saveFormat = saves ? argv[2] : null;
   if (saves && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
-  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_restored', 'cancel_save_directory', 'prepare_save_directory', 'prepare_save_directory_expanded', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_restored', 'cancel_save_directory', 'prepare_save_directory', 'prepare_save_directory_expanded', 'prepare_save_directory_retained', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
       ((selectsFile || directoryScenario) && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
@@ -373,7 +374,7 @@ function run(argv) {
         if (directoryScenario) {
           prepareNavigation(process, candidate, selectedPath);
           stage = 'action';
-          var refreshedSaveElements = candidate.sheet.entireContents();
+          var refreshedSaveElements = retainedDirectory ? expandedSaveControls(candidate.sheet) : candidate.sheet.entireContents();
           if (refreshedSaveElements.length > 256) throw new Error('element bound');
           verifiedSave = verifyDefaultFilename(saveFormat, refreshedSaveElements);
           filenameField = verifiedSave.field;

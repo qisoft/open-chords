@@ -7,6 +7,7 @@ import {
   installedMacSelectedDirectoryVerified,
   installedMacSaveFilenameVerified,
   installedMacJsonSaveSucceeded,
+  installedMacTextSaveSucceeded,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -974,3 +975,28 @@ it.each([
 ])("refuses incomplete native JSON Save evidence %j", (change) => {
   expect(installedMacJsonSaveSucceeded(JSON.stringify({ ...jsonSave, ...change }))).toBe(false);
 });
+
+it.each(["lrc", "chordpro"] as const)(
+  "accepts only the requested text Save format %s with all original proof requirements",
+  (format) => {
+    const output = JSON.stringify({
+      ...jsonSave,
+      action: { requested: `save_new_${format}`, pressed: true, dismissed: true },
+    });
+    expect(installedMacTextSaveSucceeded(output, format)).toBe(true);
+    expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+    expect(installedMacTextSaveSucceeded(output, format === "lrc" ? "chordpro" : "lrc")).toBe(
+      false,
+    );
+    expect(
+      installedMacTextSaveSucceeded(
+        JSON.stringify({
+          ...jsonSave,
+          saveTargetAbsent: false,
+          action: { requested: `save_new_${format}`, pressed: true, dismissed: true },
+        }),
+        format,
+      ),
+    ).toBe(false);
+  },
+);
