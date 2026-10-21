@@ -1,7 +1,7 @@
 import type { ElectronApplication } from "@playwright/test";
 
 const shutdownLine =
-  /^YouTube shutdown event: event=(?:before_quit|quit_call|quit_return|exit_call|exit_return|quit_prevented|quit_allowed|quit_loop_100ms|quit_loop_1s|quit_loop_5s|will_quit|quit|session_connections_call|session_connections_return|session_storage_call|session_storage_return|session_cache_call|session_cache_return|window_close_call|window_close_return|window_destroy_call|window_destroy_return|window_close|window_closed|window_unresponsive|contents_destroyed|render_gone|process_exit|process_closed|application_closed) kind=(?:app|initial|created|process)$/;
+  /^YouTube shutdown event: event=(?:before_quit|quit_call|quit_return|exit_call|exit_return|quit_prevented|quit_allowed|quit_loop_100ms|quit_loop_1s|quit_loop_5s|will_quit|quit|session_connections_call|session_connections_return|session_connections_resolved|session_connections_rejected|session_storage_call|session_storage_return|session_storage_resolved|session_storage_rejected|session_cache_call|session_cache_return|session_cache_resolved|session_cache_rejected|window_close_call|window_close_return|window_destroy_call|window_destroy_return|window_close|window_closed|window_unresponsive|contents_destroyed|render_gone|process_exit|process_closed|application_closed) kind=(?:app|initial|created|process)$/;
 
 export function rendererShutdownCollector(report: (line: string) => void) {
   let pending = "";
@@ -87,7 +87,13 @@ export async function installRendererShutdownProbe(application: ElectronApplicat
       (...args: Args): Result => {
         report(`${phase}_call`, kind);
         try {
-          return call(...args);
+          const result = call(...args);
+          if (result instanceof Promise)
+            void result.then(
+              () => report(`${phase}_resolved`, kind),
+              () => report(`${phase}_rejected`, kind),
+            );
+          return result;
         } finally {
           report(`${phase}_return`, kind);
         }

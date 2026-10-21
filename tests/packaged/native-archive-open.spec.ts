@@ -20,6 +20,7 @@ import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.
 import { prepareArchiveProofFixture } from "../support/archive-proof-fixture.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
+import { installedArchiveCancelDiagnostic } from "../support/installed-archive-cancel-diagnostic.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import {
   installedSaveDriverDiagnostic,
@@ -211,7 +212,27 @@ test("installed native archive Open preserves cancellation, rejects hostile inpu
         await expect(page.getByTestId("archives.import.adopt-media")).not.toBeChecked();
         const baseline = await proofTreeHashes(library.activeRoot);
         await importButton.click();
-        expect(await drive("cancel_open")).toEqual({
+        const cancellation = await drive("cancel_open").catch(async (error: unknown) => {
+          if (process.platform !== "win32") throw error;
+          const diagnostic = await installedArchiveCancelDiagnostic(() =>
+            page.evaluate(() => {
+              const importStatus = document.querySelector('[data-testid="archives.import.status"]');
+              const button = document.querySelector('[data-testid="archives.import.button"]');
+              return {
+                cancelled:
+                  importStatus === null
+                    ? "unknown"
+                    : importStatus.textContent?.trim() === "Import cancelled",
+                buttonEnabled: button instanceof HTMLButtonElement ? !button.disabled : "unknown",
+              };
+            }),
+          );
+          // The driver error is already redacted. The observation cannot turn failure into success.
+          throw new Error(
+            `${error instanceof Error ? error.message : "Native archive Cancel failed"}\n${diagnostic}`,
+          );
+        });
+        expect(cancellation).toEqual({
           action: "cancel_open",
           filenameSet: false,
           ...nativeActionEvidence,

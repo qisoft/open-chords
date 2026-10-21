@@ -12,6 +12,7 @@ import {
   leadSheetProject,
   originalTimeline,
 } from "./support/export-fixture.ts";
+import { PDF_GOLDEN_SHA256, PDF_GOLDEN_LOSSES } from "./support/pdf-golden.ts";
 import { inspectPdf } from "./support/pdf-inspection.ts";
 
 const render = (project: ProjectContract) =>
@@ -27,21 +28,8 @@ it("renders byte-identical PDF bytes pinned to a golden hash", async () => {
   const second = await render(leadSheetProject());
   expect(first.bytes.equals(second.bytes)).toBe(true);
   expect(first.bytes.toString("latin1")).not.toContain("/FlateDecode");
-  expect(sha256(first.bytes)).toBe(
-    "3c834d61c9f05666fac4090bb5287fa676eaef34d94c463565c076f77a86cefa",
-  );
-  expect(first.losses).toEqual([
-    "abstained_chord_marked_unknown",
-    "analysis_provenance_not_represented",
-    "chord_diagram_unavailable:Gm9add9add11/D",
-    "chord_symbol_not_portable:Gm9add9add11/D",
-    "confidence_not_represented",
-    "edit_history_not_represented",
-    "lyrics_mismatch_not_represented",
-    "sample_timing_not_represented",
-    "stable_identity_not_represented",
-    "unmetered_seconds_not_represented",
-  ]);
+  expect(sha256(first.bytes)).toBe(PDF_GOLDEN_SHA256);
+  expect(first.losses).toEqual(PDF_GOLDEN_LOSSES);
 });
 
 it("is tagged, language-declared and embeds every font without a PDF/A or PDF/UA claim", async () => {

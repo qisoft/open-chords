@@ -50,6 +50,7 @@ import {
   WorkspacePlaybackProbeSchema,
   workspacePlaybackDiagnostic,
 } from "../support/installed-workspace-playback-diagnostics.ts";
+import { PDF_GOLDEN_SHA256, PDF_GOLDEN_LOSSES } from "../support/pdf-golden.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
 
 test.skip(
@@ -586,7 +587,7 @@ for (const scenario of [
   });
 }
 
-for (const format of ["json", "lrc", "chordpro"] as const) {
+for (const format of ["json", "lrc", "chordpro", "pdf"] as const) {
   test(`installed macOS native ${format} Save publishes exact bytes and one cold durable Receipt`, async () => {
     test.skip(process.platform !== "darwin", "macOS native Save proof");
     test.setTimeout(360_000);
@@ -643,23 +644,31 @@ for (const format of ["json", "lrc", "chordpro"] as const) {
         ? serializeJsonExport(snapshot)
         : format === "lrc"
           ? "[ti:project_golden]\n[00:00.41]home go\n"
-          : readFileSync("tests/fixtures/chordpro-golden.cho", "utf8");
+          : format === "chordpro"
+            ? readFileSync("tests/fixtures/chordpro-golden.cho", "utf8")
+            : undefined;
     const losses =
       format === "json"
         ? []
         : format === "chordpro"
           ? chordpro.losses
-          : lrc.kind === "lrc"
-            ? lrc.losses
-            : [];
+          : format === "pdf"
+            ? PDF_GOLDEN_LOSSES
+            : lrc.kind === "lrc"
+              ? lrc.losses
+              : [];
     const profileVersion =
       format === "json"
         ? "open_chords_json/1.0/current"
         : format === "lrc"
           ? "lrc/1.0"
-          : "chordpro/1.0/current";
-    expect(readFileSync(target, "utf8")).toBe(expected);
-    const digest = createNativeSelectionHash("sha256").update(expected).digest("hex");
+          : format === "chordpro"
+            ? "chordpro/1.0/current"
+            : "pdf/1.0/a4/current";
+    const output = readFileSync(target);
+    if (expected !== undefined) expect(output).toEqual(Buffer.from(expected));
+    const digest = createNativeSelectionHash("sha256").update(output).digest("hex");
+    if (format === "pdf") expect(digest).toBe(PDF_GOLDEN_SHA256);
     expect(await proofTreeHashes(directory)).toEqual({
       ...directoryBefore,
       [filename]: digest,
@@ -709,7 +718,7 @@ for (const format of ["json", "lrc", "chordpro"] as const) {
       const escaped = JSON.stringify(privateValue).slice(1, -1);
       for (const representation of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
         expect(JSON.stringify(result).includes(representation)).toBe(false);
-        expect(expected.includes(representation)).toBe(false);
+        expect(output.includes(Buffer.from(representation))).toBe(false);
       }
     }
   });

@@ -374,3 +374,44 @@ it.each(["module_import", "modules_loaded"])("preserves bounded %s checkpoints",
   expect(installedSaveDriverDiagnostic({}, `${line}\n${line} private`, 500)).toContain(line);
   expect(installedSaveDriverDiagnostic({}, `${line} private`, 500)).not.toContain(line);
 });
+
+it.each([0, 5, 1460, 999999])("retains only bounded filename Win32 error evidence %s", (code) => {
+  const probe = `Native Save filename error probe: error_code=${code} dialog_pid_match=true field_pid_match=true field_id_match=true foreground_dialog=false`;
+  const diagnostic = installedSaveDriverDiagnostic(
+    {},
+    [
+      probe,
+      probe,
+      probe,
+      probe,
+      `${probe} /private/file`,
+      probe.replace(`error_code=${code}`, "error_code=-1"),
+      probe.replace(`error_code=${code}`, "error_code=1000000"),
+      probe.replace("field_pid_match=true", "field_pid_match=private"),
+    ].join("\n"),
+    100,
+  );
+  expect(diagnostic.split(probe)).toHaveLength(4);
+  expect(diagnostic).not.toContain("private");
+  expect(diagnostic).not.toContain("error_code=-1");
+  expect(diagnostic).not.toContain("error_code=1000000");
+});
+
+it("keeps bounded dismissal identity booleans without native identifiers", () => {
+  const probe =
+    "Native Save dismissal identity probe: dialog_pid_match=true class_dialog=true control_pid_match=true foreground_application=true";
+  const output = installedSaveDriverDiagnostic(
+    {},
+    [
+      probe,
+      probe,
+      probe,
+      probe,
+      `${probe} /private/path`,
+      probe.replace("class_dialog=true", "class_dialog=private"),
+    ].join("\n"),
+    1,
+  );
+  expect(output.split(probe)).toHaveLength(4);
+  expect(output).not.toContain("private");
+});

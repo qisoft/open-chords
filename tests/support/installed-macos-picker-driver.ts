@@ -24,6 +24,7 @@ import {
   installedMacSaveFilenameVerified,
   installedMacJsonSaveSucceeded,
   installedMacTextSaveSucceeded,
+  installedMacPdfSaveSucceeded,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
 import {
@@ -46,6 +47,7 @@ export function installedMacPickerDriver(
     | "save_json"
     | "save_lrc"
     | "save_chordpro"
+    | "save_pdf"
     | "open"
     | "cancel_open_existing",
   selectedPath: string | undefined,
@@ -63,12 +65,15 @@ export function installedMacPickerDriver(
       return remaining;
     };
     const textSave = scenario === "save_lrc" || scenario === "save_chordpro";
-    const nativeSave = scenario === "save_json" || textSave;
+    const pdfSave = scenario === "save_pdf";
+    const nativeSave = scenario === "save_json" || textSave || pdfSave;
     const expandedDirectory = scenario === "cancel_save_directory_expanded" || nativeSave;
     if (textSave && (saveFormat !== scenario.slice(5) || selectedPath === undefined))
       throw new Error("Native macOS text Save target unavailable");
     if (scenario === "save_json" && (saveFormat !== "json" || selectedPath === undefined))
       throw new Error("Native macOS JSON Save target unavailable");
+    if (pdfSave && (saveFormat !== "pdf" || selectedPath === undefined))
+      throw new Error("Native macOS PDF Save target unavailable");
     const directoryScenario = scenario === "cancel_save_directory" || expandedDirectory;
     const saves =
       scenario === "cancel_save" ||
@@ -127,7 +132,7 @@ export function installedMacPickerDriver(
     const readNativeAx = async (
       requested?: "open" | "cancel_open_existing" | "directory_snapshot",
       verifyFilename = false,
-      saveJson = false,
+      saveExport = false,
     ) => {
       if (selectedPath === undefined) throw new Error("Native macOS picker target unavailable");
       const phaseStarted = performance.now();
@@ -146,8 +151,8 @@ export function installedMacPickerDriver(
               selectedPath,
               ...(requested === undefined ? [] : [requested]),
               ...(requested === "directory_snapshot" ? [saveFormat ?? ""] : []),
-              ...(saveJson
-                ? [textSave ? "--save-new-text" : "--save-new-json"]
+              ...(saveExport
+                ? [pdfSave ? "--save-new-pdf" : textSave ? "--save-new-text" : "--save-new-json"]
                 : verifyFilename
                   ? ["--verify-filename"]
                   : []),
@@ -168,13 +173,15 @@ export function installedMacPickerDriver(
         );
         const refused =
           diagnostic === "Native macOS AX probe: invalid_evidence" ||
-          (saveJson
+          (saveExport
             ? !(textSave
                 ? installedMacTextSaveSucceeded(
                     output,
                     scenario === "save_lrc" ? "lrc" : "chordpro",
                   )
-                : installedMacJsonSaveSucceeded(output))
+                : pdfSave
+                  ? installedMacPdfSaveSucceeded(output)
+                  : installedMacJsonSaveSucceeded(output))
             : requested === "directory_snapshot"
               ? !(verifyFilename
                   ? installedMacSaveFilenameVerified(output)

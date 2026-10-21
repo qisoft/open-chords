@@ -169,16 +169,33 @@ public static class SaveNativeInput {
     if (field == IntPtr.Zero || FindFilename(dialog, processId) != field)
       throw new InvalidOperationException("Native Save filename target changed");
   }
+  [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", ExactSpelling = true, CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern IntPtr ReadFilenameText(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
+  [DllImport("kernel32.dll", EntryPoint = "SetLastError", ExactSpelling = true)]
+  private static extern void ClearFilenameReadError(uint code);
   public static string ReadFilename(IntPtr dialog, IntPtr field, uint processId) {
     RequireFilename(dialog, field, processId);
     var text = new StringBuilder(4096);
     UIntPtr result;
     var readStarted = System.Diagnostics.Stopwatch.StartNew();
-    bool completed = SendMessageTimeout(field, 0x000D, (UIntPtr)(uint)text.Capacity, text, 2, 250, out result) != IntPtr.Zero;
+    // SendMessageTimeout may return zero without setting an error. Clear it first,
+    // then capture the P/Invoke error immediately, before any diagnostic reads.
+    ClearFilenameReadError(0);
+    bool completed = ReadFilenameText(field, 0x000D, (UIntPtr)(uint)text.Capacity, text, 2, 250, out result) != IntPtr.Zero;
+    int readError = Marshal.GetLastWin32Error();
+    long readDurationMs = readStarted.ElapsedMilliseconds;
     if (!completed || result.ToUInt64() >= 4095) {
+      uint dialogPid, fieldPid;
+      GetWindowThreadProcessId(dialog, out dialogPid);
+      GetWindowThreadProcessId(field, out fieldPid);
+      Console.Error.WriteLine("Native Save filename error probe: error_code=" + Math.Min(999999, Math.Max(0, readError)) +
+        " dialog_pid_match=" + (dialogPid == processId).ToString().ToLowerInvariant() +
+        " field_pid_match=" + (fieldPid == processId).ToString().ToLowerInvariant() +
+        " field_id_match=" + (GetDlgCtrlID(field) == ExpectedFilenameId).ToString().ToLowerInvariant() +
+        " foreground_dialog=" + (GetForegroundWindow() == dialog).ToString().ToLowerInvariant());
       Console.Error.WriteLine("Native Save filename read probe: completed=" + completed.ToString().ToLowerInvariant() +
         " length_bound=" + (completed ? (result.ToUInt64() >= 4095).ToString().ToLowerInvariant() : "unknown") +
-        " duration_ms=" + Math.Min(999999, readStarted.ElapsedMilliseconds) +
+        " duration_ms=" + Math.Min(999999, readDurationMs) +
         " dialog_exists=" + IsWindow(dialog).ToString().ToLowerInvariant() +
         " field_exists=" + IsWindow(field).ToString().ToLowerInvariant() +
         " field_child=" + IsChild(dialog, field).ToString().ToLowerInvariant());
@@ -370,6 +387,16 @@ public static class SaveNativeInput {
     while (IsWindow(window) && elapsed.ElapsedMilliseconds < 2000)
       System.Threading.Thread.Sleep(20);
     if (IsWindow(window)) {
+      uint dialogPid, controlPid, foregroundPid;
+      GetWindowThreadProcessId(window, out dialogPid);
+      GetWindowThreadProcessId(control, out controlPid);
+      GetWindowThreadProcessId(GetForegroundWindow(), out foregroundPid);
+      var dialogClass = new StringBuilder(64);
+      GetClassName(window, dialogClass, dialogClass.Capacity);
+      Console.Error.WriteLine("Native Save dismissal identity probe: dialog_pid_match=" + (dialogPid == expectedProcessId).ToString().ToLowerInvariant() +
+        " class_dialog=" + (dialogClass.ToString() == "#32770").ToString().ToLowerInvariant() +
+        " control_pid_match=" + (controlPid == expectedProcessId).ToString().ToLowerInvariant() +
+        " foreground_application=" + (foregroundPid == expectedProcessId).ToString().ToLowerInvariant());
       Console.Error.WriteLine("Native Save dismissal probe: exists=true visible=" + IsWindowVisible(window).ToString().ToLowerInvariant() +
         " enabled=" + IsWindowEnabled(window).ToString().ToLowerInvariant() + " owned=" + OwnedByApplication(window, expectedProcessId).ToString().ToLowerInvariant());
       ProbeDismissalResponse(window, control, expectedProcessId);

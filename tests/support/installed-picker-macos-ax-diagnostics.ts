@@ -351,6 +351,7 @@ const evidenceSchema = z.strictObject({
       "save_new_json",
       "save_new_lrc",
       "save_new_chordpro",
+      "save_new_pdf",
     ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
@@ -643,7 +644,10 @@ export function installedMacJsonSaveSucceeded(stdout: string) {
 export function installedMacTextSaveSucceeded(stdout: string, format: "lrc" | "chordpro") {
   return nativeSaveSucceeded(stdout, format);
 }
-function nativeSaveSucceeded(stdout: string, format: "json" | "lrc" | "chordpro") {
+export function installedMacPdfSaveSucceeded(stdout: string) {
+  return nativeSaveSucceeded(stdout, "pdf");
+}
+function nativeSaveSucceeded(stdout: string, format: "json" | "lrc" | "chordpro" | "pdf") {
   if (stdout.length > 4096) return false;
   try {
     const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
