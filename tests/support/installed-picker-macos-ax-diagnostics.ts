@@ -120,6 +120,7 @@ const evidenceSchema = z.strictObject({
     attribute: z.enum(["none", "pid", "AXRole", "AXChildren"]),
     error: z.number().int().min(-32768).max(32767),
   }),
+  saveTargetAbsent: z.boolean().default(false),
   saveFilename: z
     .strictObject({
       status: z.enum([
@@ -342,7 +343,13 @@ const evidenceSchema = z.strictObject({
     "directory_complete",
   ]),
   action: z.strictObject({
-    requested: z.enum(["none", "open", "cancel_open_existing", "directory_snapshot"]),
+    requested: z.enum([
+      "none",
+      "open",
+      "cancel_open_existing",
+      "directory_snapshot",
+      "save_new_json",
+    ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
   }),
@@ -380,6 +387,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       selectedDirectory,
       saveTargetContext,
       saveFilename,
+      saveTargetAbsent,
       staleSnapshot,
       invalidChildParent,
       parentChain,
@@ -415,6 +423,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       ...Object.entries(invalidChildParent).map(
         ([key, value]) => `invalid_child_parent_${key}=${value}`,
       ),
+      `save_target_absent=${saveTargetAbsent}`,
       ...Object.entries(saveFilename).map(([key, value]) => `save_filename_${key}=${value}`),
       ...Object.entries(saveTargetContext).map(([key, value]) => `save_target_${key}=${value}`),
       ...Object.entries(selectedDirectory).map(
@@ -488,46 +497,52 @@ export function installedMacSelectedDirectoryVerified(stdout: string) {
     if (!parsed.success) return false;
     const value = parsed.data;
     return (
-      value.trusted &&
-      value.complete &&
-      value.directoryVerified &&
-      value.foreground &&
-      value.guardMask === 255 &&
+      directoryEvidenceVerified(value) &&
       value.stage === "directory_complete" &&
       value.action.requested === "directory_snapshot" &&
       !value.action.pressed &&
-      !value.action.dismissed &&
-      value.firstOtherError === 0 &&
-      value.firstOtherAttribute === "none" &&
-      value.counts.otherErrors === 0 &&
-      value.counts.cannotComplete === 0 &&
-      value.counts.apiDisabled === 0 &&
-      value.counts.windows === 1 &&
-      value.counts.sheets === 1 &&
-      value.counts.buttons === 1 &&
-      value.counts.saveButtons === 1 &&
-      value.selectedDirectory.validShape &&
-      value.selectedDirectory.fields === value.counts.selectedRoots &&
-      value.selectedDirectory.uniqueUrls === value.counts.selectedRoots &&
-      value.selectedDirectory.fields > 0 &&
-      value.selectedDirectory.terminalUrls === 1 &&
-      value.selectedDirectory.terminalMatches === 1 &&
-      value.counts.exactUrls === 1 &&
-      value.counts.urlStrings === 0 &&
-      value.counts.urlObjects === value.selectedDirectory.fields &&
-      value.firstExactURL.role === "AXTextField" &&
-      value.firstExactURL.origin === "AXChildren" &&
-      value.firstExactURL.parentRole === "AXGroup" &&
-      value.firstExactURL.kind === "native" &&
-      value.firstExactURL.directory &&
-      value.parentChain.status === "captured_sheet" &&
-      value.parentChain.nodes[0]?.role === "AXGroup" &&
-      value.parentChain.nodes[0]?.selectedReference &&
-      value.parentChain.nodes.at(-1)?.role === "AXSheet"
+      !value.action.dismissed
     );
   } catch {
     return false;
   }
+}
+
+function directoryEvidenceVerified(value: z.infer<typeof evidenceSchema>) {
+  return (
+    value.trusted &&
+    value.complete &&
+    value.directoryVerified &&
+    value.foreground &&
+    value.guardMask === 255 &&
+    value.firstOtherError === 0 &&
+    value.firstOtherAttribute === "none" &&
+    value.counts.otherErrors === 0 &&
+    value.counts.cannotComplete === 0 &&
+    value.counts.apiDisabled === 0 &&
+    value.counts.windows === 1 &&
+    value.counts.sheets === 1 &&
+    value.counts.buttons === 1 &&
+    value.counts.saveButtons === 1 &&
+    value.selectedDirectory.validShape &&
+    value.selectedDirectory.fields === value.counts.selectedRoots &&
+    value.selectedDirectory.uniqueUrls === value.counts.selectedRoots &&
+    value.selectedDirectory.fields > 0 &&
+    value.selectedDirectory.terminalUrls === 1 &&
+    value.selectedDirectory.terminalMatches === 1 &&
+    value.counts.exactUrls === 1 &&
+    value.counts.urlStrings === 0 &&
+    value.counts.urlObjects === value.selectedDirectory.fields &&
+    value.firstExactURL.role === "AXTextField" &&
+    value.firstExactURL.origin === "AXChildren" &&
+    value.firstExactURL.parentRole === "AXGroup" &&
+    value.firstExactURL.kind === "native" &&
+    value.firstExactURL.directory &&
+    value.parentChain.status === "captured_sheet" &&
+    value.parentChain.nodes[0]?.role === "AXGroup" &&
+    value.parentChain.nodes[0]?.selectedReference &&
+    value.parentChain.nodes.at(-1)?.role === "AXSheet"
+  );
 }
 
 // A fresh complete snapshot may be taken once before any native action; this never accepts the failed snapshot.
@@ -599,18 +614,42 @@ export function installedMacSaveFilenameVerified(stdout: string) {
     const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
     if (!parsed.success) return false;
     const value = parsed.data.saveFilename;
+    return filenameEvidenceVerified(value);
+  } catch {
+    return false;
+  }
+}
+
+function filenameEvidenceVerified(value: z.infer<typeof evidenceSchema>["saveFilename"]) {
+  return (
+    value.status === "complete" &&
+    value.verified &&
+    value.fields > 0 &&
+    value.matches === 1 &&
+    value.enabled &&
+    value.labelMatched &&
+    value.fieldAttached &&
+    value.labelAttached &&
+    value.visited > 0 &&
+    value.error === 0 &&
+    value.attribute === "none"
+  );
+}
+export function installedMacJsonSaveSucceeded(stdout: string) {
+  if (stdout.length > 4096) return false;
+  try {
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const value = parsed.data;
     return (
-      value.status === "complete" &&
-      value.verified &&
-      value.fields > 0 &&
-      value.matches === 1 &&
-      value.enabled &&
-      value.labelMatched &&
-      value.fieldAttached &&
-      value.labelAttached &&
-      value.visited > 0 &&
-      value.error === 0 &&
-      value.attribute === "none"
+      directoryEvidenceVerified(value) &&
+      filenameEvidenceVerified(value.saveFilename) &&
+      value.saveTargetAbsent &&
+      value.lastError === 0 &&
+      value.stage === "complete" &&
+      value.action.requested === "save_new_json" &&
+      value.action.pressed &&
+      value.action.dismissed
     );
   } catch {
     return false;

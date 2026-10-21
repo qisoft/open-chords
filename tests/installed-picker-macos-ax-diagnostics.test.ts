@@ -6,6 +6,7 @@ import {
   installedMacAxSnapshotRefreshAllowed,
   installedMacSelectedDirectoryVerified,
   installedMacSaveFilenameVerified,
+  installedMacJsonSaveSucceeded,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -938,4 +939,38 @@ it("rejects filename proof when the selected-directory guard is absent", () => {
       JSON.stringify({ ...directorySnapshot, guardMask: 254, saveFilename: filenameProof }),
     ),
   ).toBe(false);
+});
+
+const jsonSave = {
+  ...directorySnapshot,
+  lastError: 0,
+  saveFilename: filenameProof,
+  saveTargetAbsent: true,
+  stage: "complete",
+  action: { requested: "save_new_json", pressed: true, dismissed: true },
+};
+it("requires fresh directory, filename, absent-target and completed native Save evidence", () => {
+  expect(installedMacJsonSaveSucceeded(JSON.stringify(jsonSave))).toBe(true);
+  expect(installedMacSelectedDirectoryVerified(JSON.stringify(jsonSave))).toBe(false);
+  expect(installedMacAxActionSucceeded(JSON.stringify(jsonSave), "open")).toBe(false);
+  expect(
+    installedMacJsonSaveSucceeded(
+      JSON.stringify({ ...directorySnapshot, saveFilename: filenameProof }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  { saveTargetAbsent: false },
+  { guardMask: 254 },
+  { directoryVerified: false },
+  { foreground: false },
+  { complete: false },
+  { lastError: -25204 },
+  { stage: "press" },
+  { action: { requested: "save_new_json", pressed: false, dismissed: true } },
+  { action: { requested: "save_new_json", pressed: true, dismissed: false } },
+  { saveFilename: { ...filenameProof, labelAttached: false } },
+  { saveFilename: { ...filenameProof, matches: 2 } },
+])("refuses incomplete native JSON Save evidence %j", (change) => {
+  expect(installedMacJsonSaveSucceeded(JSON.stringify({ ...jsonSave, ...change }))).toBe(false);
 });

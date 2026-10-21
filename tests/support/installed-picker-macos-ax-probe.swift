@@ -3,7 +3,7 @@ import ApplicationServices
 import Foundation
 import Darwin
 
-// CI-only native AX verification; an action is allowed only after exact selected-file proof.
+// CI-only native AX verification; actions require exact file or directory/filename proof.
 func selectedFileEvidence(_ input: [URL], expected: URL) -> (leaves: [URL], matches: Int, verified: Bool) {
     var urls: [URL] = []
     for url in input where !urls.contains(where: { $0.absoluteString == url.absoluteString }) { urls.append(url) }
@@ -183,7 +183,9 @@ var staleChildContext = false
 var invalidRoleElement: AXUIElement? = nil
 var snapshotRefreshEligible = false
 var snapshotTraversalComplete = false
-let verifiesFilename = arguments.count == 6 && arguments[5] == "--verify-filename"
+let savesNewJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--save-new-json"
+let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewJson
+var saveTargetAbsent = false
 var saveFilename: [String: Any] = ["status": "not_checked", "fields": 0, "matches": 0, "absentValues": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
 var saveTargetContext: [String: Any] = ["status": "not_checked", "fields": 0, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "descriptionMatches": 0, "linkedLabelMatches": 0, "linkedLabelRole": "none", "error": 0, "attribute": "none"]
 var directoryVerified = false
@@ -739,7 +741,9 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             }
         }
     }
-    if ["open", "cancel_open_existing"].contains(requested) && verified && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
+    let saveReady = savesNewJson && directoryVerified && (saveFilename["verified"] as? Bool) == true && saveButtons.count == 1
+    if ((["open", "cancel_open_existing"].contains(requested) && verified) || saveReady) && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
+        guardMask = 0
         stage = "guard"
         readOrigin = "guard"
         readSelectedReference = false
@@ -747,18 +751,23 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
         readParentRole = "none"
         let sheet = sheets[0]
         let parent = parents[0]
-        let button = buttons[0]
+        let button = saveReady ? saveButtons[0] : buttons[0]
         var actualPid: pid_t = 0
         foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
         if AXUIElementGetPid(app, &actualPid) == .success && actualPid == pid { guardMask |= 1 }
         if foreground { guardMask |= 2 }
         if elements(parent, "AXChildren").contains(where: { same($0, sheet) }) { guardMask |= 4 }
         if string(sheet, "AXRole") == "AXSheet" { guardMask |= 8 }
-        if string(button, "AXRole") == "AXButton" && string(button, "AXTitle") == (requested == "open" ? "Open" : "Cancel") { guardMask |= 16 }
+        if string(button, "AXRole") == "AXButton" && string(button, "AXTitle") == (saveReady ? "Save" : (requested == "open" ? "Open" : "Cancel")) { guardMask |= 16 }
         if (read(button, "AXEnabled") as? Bool) == true { guardMask |= 32 }
         if noReadFailures() { guardMask |= 64 }
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { guardMask |= 128 }
-        if guardMask == 255 {
+        if saveReady {
+            var existing = stat()
+            let destination = target.appendingPathComponent("Open Chords.json").path
+            saveTargetAbsent = lstat(destination, &existing) != 0 && errno == ENOENT
+        }
+        if guardMask == 255 && (!saveReady || (saveTargetAbsent && ProcessInfo.processInfo.systemUptime < deadline)) {
             stage = "press"
             let pressStarted = ProcessInfo.processInfo.systemUptime
             // Action callbacks can outlast the 150 ms attribute-read timeout.
@@ -823,8 +832,8 @@ let result: [String: Any] = [
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
-    "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
-    "action": ["requested": requested, "pressed": pressed, "dismissed": dismissed]
+    "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
+    "action": ["requested": savesNewJson ? "save_new_json" : requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
    let output = String(data: data, encoding: .utf8) { print(output) }
