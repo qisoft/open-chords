@@ -161,6 +161,7 @@ const filenameSnapshot = {
     status: "complete",
     fields: 11,
     matches: 1,
+    absentValues: 1,
     enabled: true,
     labelMatched: true,
     fieldAttached: true,

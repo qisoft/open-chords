@@ -184,7 +184,7 @@ var invalidRoleElement: AXUIElement? = nil
 var snapshotRefreshEligible = false
 var snapshotTraversalComplete = false
 let verifiesFilename = arguments.count == 6 && arguments[5] == "--verify-filename"
-var saveFilename: [String: Any] = ["status": "not_checked", "fields": 0, "matches": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
+var saveFilename: [String: Any] = ["status": "not_checked", "fields": 0, "matches": 0, "absentValues": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
 var saveTargetContext: [String: Any] = ["status": "not_checked", "fields": 0, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "descriptionMatches": 0, "linkedLabelMatches": 0, "linkedLabelRole": "none", "error": 0, "attribute": "none"]
 var directoryVerified = false
 var verified = false
@@ -399,7 +399,7 @@ func observeSaveTarget(_ fields: [AXUIElement], expected: String, pid: pid_t) ->
 
 // Independent required-attribute proof. It never presses Save or changes directory guards.
 func verifySaveFilename(_ fields: [AXUIElement], expected: String, pid: pid_t, sheet: AXUIElement) -> [String: Any] {
-    var result: [String: Any] = ["status": "complete", "fields": fields.count, "matches": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
+    var result: [String: Any] = ["status": "complete", "fields": fields.count, "matches": 0, "absentValues": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
     func refuse(_ status: String, _ attribute: String = "none", _ error: Int = 0) {
         if (result["status"] as? String) == "complete" { result["status"] = status; result["attribute"] = attribute; result["error"] = error }
     }
@@ -407,11 +407,17 @@ func verifySaveFilename(_ fields: [AXUIElement], expected: String, pid: pid_t, s
         if ProcessInfo.processInfo.systemUptime >= deadline { refuse("deadline"); return false }
         return true
     }
-    func required(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    func required(_ element: AXUIElement, _ name: String, inventoryValue: Bool = false) -> CFTypeRef? {
         guard withinBudget() else { return nil }
         AXUIElementSetMessagingTimeout(element, 0.15)
         var value: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+        // noValue positively establishes absence only during candidate inventory.
+        if inventoryValue && name == "AXValue" && status == .noValue {
+            guard withinBudget() else { return nil }
+            result["absentValues"] = (result["absentValues"] as? Int ?? 0) + 1
+            return nil
+        }
         if status != .success { refuse("error", name, Int(status.rawValue)); return nil }
         guard withinBudget(), let value = value else { refuse("invalid_candidate", name); return nil }
         return value
@@ -440,7 +446,7 @@ func verifySaveFilename(_ fields: [AXUIElement], expected: String, pid: pid_t, s
     }
     var matches: [AXUIElement] = []
     for field in fields {
-        guard let value = required(field, "AXValue") else { continue }
+        guard let value = required(field, "AXValue", inventoryValue: true) else { continue }
         if (value as? String) == expected { matches.append(field) }
     }
     result["matches"] = matches.count

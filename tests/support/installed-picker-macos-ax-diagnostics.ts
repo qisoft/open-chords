@@ -132,6 +132,7 @@ const evidenceSchema = z.strictObject({
       ]),
       fields: z.number().int().min(0).max(256),
       matches: z.number().int().min(0).max(256),
+      absentValues: z.number().int().min(0).max(256),
       enabled: z.boolean(),
       labelMatched: z.boolean(),
       fieldAttached: z.boolean(),
@@ -149,11 +150,12 @@ const evidenceSchema = z.strictObject({
         "pid",
       ]),
     })
-    .refine((value) => value.matches <= value.fields)
+    .refine((value) => value.matches + value.absentValues <= value.fields)
     .default({
       status: "not_checked",
       fields: 0,
       matches: 0,
+      absentValues: 0,
       enabled: false,
       labelMatched: false,
       fieldAttached: false,
