@@ -1,7 +1,7 @@
 import type { ElectronApplication } from "@playwright/test";
 
 const shutdownLine =
-  /^YouTube shutdown event: event=(?:before_quit|quit_call|quit_return|exit_call|exit_return|quit_prevented|quit_allowed|quit_loop_100ms|quit_loop_1s|quit_loop_5s|will_quit|quit|window_close_call|window_close_return|window_destroy_call|window_destroy_return|window_close|window_closed|window_unresponsive|contents_destroyed|render_gone|process_exit|process_closed|application_closed) kind=(?:app|initial|created|process)$/;
+  /^YouTube shutdown event: event=(?:before_quit|quit_call|quit_return|exit_call|exit_return|quit_prevented|quit_allowed|quit_loop_100ms|quit_loop_1s|quit_loop_5s|will_quit|quit|session_connections_call|session_connections_return|session_storage_call|session_storage_return|session_cache_call|session_cache_return|window_close_call|window_close_return|window_destroy_call|window_destroy_return|window_close|window_closed|window_unresponsive|contents_destroyed|render_gone|process_exit|process_closed|application_closed) kind=(?:app|initial|created|process)$/;
 
 export function rendererShutdownCollector(report: (line: string) => void) {
   let pending = "";
@@ -77,10 +77,44 @@ export async function installRendererShutdownProbe(application: ElectronApplicat
     });
     app.on("will-quit", () => report("will_quit", "app"));
     app.on("quit", () => report("quit", "app"));
+    const observedSessions = new WeakSet();
+    const observeCall =
+      <Args extends unknown[], Result>(
+        call: (...args: Args) => Result,
+        phase: "session_connections" | "session_storage" | "session_cache",
+        kind: "initial" | "created",
+      ) =>
+      (...args: Args): Result => {
+        report(`${phase}_call`, kind);
+        try {
+          return call(...args);
+        } finally {
+          report(`${phase}_return`, kind);
+        }
+      };
     const observed = new WeakSet();
     const watch = (window: InstanceType<typeof BrowserWindow>, kind: "initial" | "created") => {
       if (observed.has(window)) return;
       observed.add(window);
+      const isolated = window.webContents.session;
+      if (!observedSessions.has(isolated)) {
+        observedSessions.add(isolated);
+        isolated.closeAllConnections = observeCall(
+          isolated.closeAllConnections.bind(isolated),
+          "session_connections",
+          kind,
+        );
+        isolated.clearStorageData = observeCall(
+          isolated.clearStorageData.bind(isolated),
+          "session_storage",
+          kind,
+        );
+        isolated.clearCache = observeCall(
+          isolated.clearCache.bind(isolated),
+          "session_cache",
+          kind,
+        );
+      }
       const originalClose = window.close.bind(window);
       window.close = () => {
         report("window_close_call", kind);
