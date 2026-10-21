@@ -70,7 +70,8 @@ if (args.count == 2 || collapse || ensureExpanded), let pid = Int32(args[1]), pi
     var queue: [(AXUIElement, AXUIElement?)] = complete ? windows.map { ($0, nil) } : []
     var seen: [AXUIElement] = [], sheets: [AXUIElement] = [], parents: [AXUIElement] = []
     while !queue.isEmpty && complete {
-        if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
+        if seen.count >= 256 { stage = "discovery_bound"; complete = false; break }
+        if ProcessInfo.processInfo.systemUptime >= deadline { stage = "discovery_deadline"; complete = false; break }
         let (element, parent) = queue.removeFirst()
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
@@ -80,9 +81,9 @@ if (args.count == 2 || collapse || ensureExpanded), let pid = Int32(args[1]), pi
             if let parent = parent { parents.append(parent) }
             continue
         }
-        if role == "AXWebArea" || (collapse && ["AXBrowser", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell"].contains(role ?? "")) { continue }
+        if role == "AXWebArea" || ((collapse || ensureExpanded) && ["AXBrowser", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell"].contains(role ?? "")) { continue }
         let next = children(element, "AXChildren")
-        if queue.count + next.count > 256 { complete = false; break }
+        if queue.count + next.count > 256 { stage = "discovery_bound"; complete = false; break }
         queue.append(contentsOf: next.map { ($0, element) })
     }
     sheetsCount = min(sheets.count, 17)
@@ -90,7 +91,8 @@ if (args.count == 2 || collapse || ensureExpanded), let pid = Int32(args[1]), pi
     queue = complete ? [(sheets[0], parents[0])] : []
     seen = []
     while !queue.isEmpty && complete {
-        if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
+        if seen.count >= 256 { stage = "discovery_bound"; complete = false; break }
+        if ProcessInfo.processInfo.systemUptime >= deadline { stage = "discovery_deadline"; complete = false; break }
         let (element, _) = queue.removeFirst()
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
@@ -103,9 +105,9 @@ if (args.count == 2 || collapse || ensureExpanded), let pid = Int32(args[1]), pi
             if title == "Save" { saves.append(element) }
             if title == "Cancel" { cancels.append(element) }
         }
-        if role == "AXWebArea" || (collapse && ["AXBrowser", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell"].contains(role ?? "")) { continue }
+        if role == "AXWebArea" || ((collapse || ensureExpanded) && ["AXBrowser", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell"].contains(role ?? "")) { continue }
         let next = children(element, "AXChildren")
-        if queue.count + next.count > 256 { complete = false; break }
+        if queue.count + next.count > 256 { stage = "discovery_bound"; complete = false; break }
         queue.append(contentsOf: next.map { ($0, element) })
     }
     if complete && disclosures.count == 1 && saves.count == 1 && cancels.count == 1 {

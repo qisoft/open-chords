@@ -142,3 +142,22 @@ it.each([
     ),
   ).toBe(false);
 });
+
+it.each(["discovery_bound", "discovery_deadline"])(
+  "reports fixed %s without accepting incomplete retained expansion",
+  (stage) => {
+    const output = JSON.stringify({
+      ...evidence,
+      complete: false,
+      stage,
+      guardMask: 0,
+      pressed: false,
+      initialValue: -1,
+      finalValue: -1,
+    });
+    expect(installedMacSaveExpansionDiagnostic(output, null, 3000)).toContain(`stage=${stage}`);
+    expect(installedMacSaveExpandedReady(output)).toBe(false);
+    expect(installedMacSaveExpansionSucceeded(output)).toBe(false);
+    expect(installedMacSaveCollapseSucceeded(output)).toBe(false);
+  },
+);
