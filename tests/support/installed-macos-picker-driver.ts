@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   installedMacSaveExpansionDiagnostic,
   installedMacSaveExpansionSucceeded,
+  installedMacSaveExpandedReady,
   installedMacSaveCollapseSucceeded,
 } from "./installed-macos-save-expansion.ts";
 import {
@@ -22,6 +23,7 @@ import {
   installedMacSelectedDirectoryVerified,
   installedMacSaveFilenameVerified,
   installedMacJsonSaveSucceeded,
+  installedMacTextSaveSucceeded,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
 import {
@@ -42,6 +44,8 @@ export function installedMacPickerDriver(
     | "cancel_save_directory"
     | "cancel_save_directory_expanded"
     | "save_json"
+    | "save_lrc"
+    | "save_chordpro"
     | "open"
     | "cancel_open_existing",
   selectedPath: string | undefined,
@@ -58,8 +62,11 @@ export function installedMacPickerDriver(
       if (remaining <= 0) throw new Error("Native macOS picker driver deadline exceeded");
       return remaining;
     };
-    const expandedDirectory =
-      scenario === "cancel_save_directory_expanded" || scenario === "save_json";
+    const textSave = scenario === "save_lrc" || scenario === "save_chordpro";
+    const nativeSave = scenario === "save_json" || textSave;
+    const expandedDirectory = scenario === "cancel_save_directory_expanded" || nativeSave;
+    if (textSave && (saveFormat !== scenario.slice(5) || selectedPath === undefined))
+      throw new Error("Native macOS text Save target unavailable");
     if (scenario === "save_json" && (saveFormat !== "json" || selectedPath === undefined))
       throw new Error("Native macOS JSON Save target unavailable");
     const directoryScenario = scenario === "cancel_save_directory" || expandedDirectory;
@@ -79,11 +86,13 @@ export function installedMacPickerDriver(
           "JavaScript",
           join(process.cwd(), "tests/support/installed-picker-macos.jxa"),
           String(applicationPid),
-          expandedDirectory
-            ? "prepare_save_directory_expanded"
-            : directoryScenario
-              ? "prepare_save_directory"
-              : scenario,
+          nativeSave
+            ? "prepare_save_directory_retained"
+            : expandedDirectory
+              ? "prepare_save_directory_expanded"
+              : directoryScenario
+                ? "prepare_save_directory"
+                : scenario,
           ...(saves
             ? [saveFormat ?? "", ...(directoryScenario ? [selectedPath ?? ""] : [])]
             : selectedPath === undefined
@@ -137,7 +146,11 @@ export function installedMacPickerDriver(
               selectedPath,
               ...(requested === undefined ? [] : [requested]),
               ...(requested === "directory_snapshot" ? [saveFormat ?? ""] : []),
-              ...(saveJson ? ["--save-new-json"] : verifyFilename ? ["--verify-filename"] : []),
+              ...(saveJson
+                ? [textSave ? "--save-new-text" : "--save-new-json"]
+                : verifyFilename
+                  ? ["--verify-filename"]
+                  : []),
             ],
             { env: environment(), timeout: probeBudget, maxBuffer: 4096 },
           ));
@@ -156,7 +169,12 @@ export function installedMacPickerDriver(
         const refused =
           diagnostic === "Native macOS AX probe: invalid_evidence" ||
           (saveJson
-            ? !installedMacJsonSaveSucceeded(output)
+            ? !(textSave
+                ? installedMacTextSaveSucceeded(
+                    output,
+                    scenario === "save_lrc" ? "lrc" : "chordpro",
+                  )
+                : installedMacJsonSaveSucceeded(output))
             : requested === "directory_snapshot"
               ? !(verifyFilename
                   ? installedMacSaveFilenameVerified(output)
@@ -190,7 +208,7 @@ export function installedMacPickerDriver(
         try {
           ({ stdout: expansion } = await executeNativeFile(
             join(process.cwd(), "build/test-support/macos-save-expand"),
-            [String(applicationPid)],
+            [String(applicationPid), ...(nativeSave ? ["--ensure-expanded"] : [])],
             { env: environment(), timeout: Math.min(7000, remainingBudget()), maxBuffer: 4096 },
           ));
         } catch (error) {
@@ -205,7 +223,12 @@ export function installedMacPickerDriver(
           null,
           performance.now() - expansionStarted,
         );
-        if (!installedMacSaveExpansionSucceeded(expansion)) throw new Error(diagnostic);
+        if (
+          !(nativeSave
+            ? installedMacSaveExpandedReady(expansion)
+            : installedMacSaveExpansionSucceeded(expansion))
+        )
+          throw new Error(diagnostic);
         process.stdout.write(`${diagnostic}\n`);
       }
       // Read-only observations do not authorize Save or imply a verified directory.
@@ -217,9 +240,9 @@ export function installedMacPickerDriver(
         process.stdout.write(
           `Native macOS Save filename verification: ${await readNativeAx("directory_snapshot", true)}\n`,
         );
-        if (scenario === "save_json") {
+        if (nativeSave) {
           process.stdout.write(
-            `Native macOS JSON Save: ${await readNativeAx("directory_snapshot", false, true)}\n`,
+            `Native macOS ${saveFormat} Save: ${await readNativeAx("directory_snapshot", false, true)}\n`,
           );
         } else {
           const collapseStarted = performance.now();
@@ -246,7 +269,7 @@ export function installedMacPickerDriver(
           process.stdout.write(`${diagnostic}\n`);
         }
       }
-      if (scenario !== "save_json")
+      if (!nativeSave)
         await installedMacPickerDriver(
           expandedDirectory ? "cancel_save_restored" : "cancel_save_edited",
           undefined,

@@ -184,7 +184,9 @@ var invalidRoleElement: AXUIElement? = nil
 var snapshotRefreshEligible = false
 var snapshotTraversalComplete = false
 let savesNewJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--save-new-json"
-let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewJson
+let savesNewText = arguments.count == 6 && arguments[3] == "directory_snapshot" && ["lrc", "chordpro"].contains(arguments[4]) && arguments[5] == "--save-new-text"
+let savesNewExport = savesNewJson || savesNewText
+let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewExport
 var saveTargetAbsent = false
 var saveFilename: [String: Any] = ["status": "not_checked", "fields": 0, "matches": 0, "absentValues": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
 var saveTargetContext: [String: Any] = ["status": "not_checked", "fields": 0, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "descriptionMatches": 0, "linkedLabelMatches": 0, "linkedLabelRole": "none", "error": 0, "attribute": "none"]
@@ -741,7 +743,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             }
         }
     }
-    let saveReady = savesNewJson && directoryVerified && (saveFilename["verified"] as? Bool) == true && saveButtons.count == 1
+    let saveReady = savesNewExport && directoryVerified && (saveFilename["verified"] as? Bool) == true && saveButtons.count == 1
     if ((["open", "cancel_open_existing"].contains(requested) && verified) || saveReady) && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
         guardMask = 0
         stage = "guard"
@@ -762,9 +764,9 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
         if (read(button, "AXEnabled") as? Bool) == true { guardMask |= 32 }
         if noReadFailures() { guardMask |= 64 }
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { guardMask |= 128 }
-        if saveReady {
+        if saveReady, let saveName = expectedSaveName {
             var existing = stat()
-            let destination = target.appendingPathComponent("Open Chords.json").path
+            let destination = target.appendingPathComponent(saveName).path
             saveTargetAbsent = lstat(destination, &existing) != 0 && errno == ENOENT
         }
         if guardMask == 255 && (!saveReady || (saveTargetAbsent && ProcessInfo.processInfo.systemUptime < deadline)) {
@@ -833,7 +835,7 @@ let result: [String: Any] = [
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
     "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
-    "action": ["requested": savesNewJson ? "save_new_json" : requested, "pressed": pressed, "dismissed": dismissed]
+    "action": ["requested": savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
    let output = String(data: data, encoding: .utf8) { print(output) }

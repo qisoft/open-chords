@@ -65,8 +65,24 @@ it("accepts only fixed quit prevention and event-loop checkpoints", () => {
 
 it("observes window close/destroy without retrying or swallowing native failures", async () => {
   const nativeFailure = new Error("native-close-failure");
+  const nativePromise = Promise.resolve();
   class Window extends EventEmitter {
-    webContents = new EventEmitter();
+    session = {
+      calls: 0,
+      closeAllConnections() {
+        this.calls++;
+        return nativePromise;
+      },
+      clearStorageData(options?: { storages: string[] }) {
+        this.calls++;
+        return options;
+      },
+      clearCache() {
+        this.calls++;
+        throw nativeFailure;
+      },
+    };
+    webContents = Object.assign(new EventEmitter(), { session: this.session });
     closes = 0;
     destroys = 0;
     failClose = false;
@@ -119,6 +135,24 @@ it("observes window close/destroy without retrying or swallowing native failures
     const collect = rendererShutdownCollector((line) => retained.push(line));
     collect(output.join(""));
     expect(retained).toHaveLength(6);
+    const connections = window.session.closeAllConnections();
+    expect(connections).toBe(nativePromise);
+    const options = { storages: ["private-test-value"] };
+    expect(window.session.clearStorageData(options)).toBe(options);
+    expect(() => window.session.clearCache()).toThrow(nativeFailure);
+    expect(window.session.calls).toBe(3);
+    collect(output.slice(6).join(""));
+    expect(retained.slice(6)).toEqual(
+      [
+        "session_connections_call",
+        "session_connections_return",
+        "session_storage_call",
+        "session_storage_return",
+        "session_cache_call",
+        "session_cache_return",
+      ].map((event) => `YouTube shutdown event: event=${event} kind=initial`),
+    );
+    expect(retained.join("\n")).not.toContain("private-test-value");
     expect(retained.join("\n")).not.toContain("native-close-failure");
   } finally {
     write.mockRestore();

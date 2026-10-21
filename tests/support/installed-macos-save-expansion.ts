@@ -20,7 +20,16 @@ const schema = z.strictObject({
     "AXActions",
     "AXPress",
   ]),
-  stage: z.enum(["arguments", "discovery", "guard", "press", "expansion", "complete"]),
+  stage: z.enum([
+    "arguments",
+    "discovery",
+    "discovery_bound",
+    "discovery_deadline",
+    "guard",
+    "press",
+    "expansion",
+    "complete",
+  ]),
   pressed: z.boolean(),
   expanded: z.boolean(),
   initialValue: z.number().int().min(-1).max(1),
@@ -47,7 +56,10 @@ export function installedMacSaveExpansionSucceeded(stdout: string) {
 export function installedMacSaveCollapseSucceeded(stdout: string) {
   return disclosureTransitionSucceeded(stdout, true);
 }
-function disclosureTransitionSucceeded(stdout: string, collapse: boolean) {
+export function installedMacSaveExpandedReady(stdout: string) {
+  return disclosureTransitionSucceeded(stdout, false, true);
+}
+function disclosureTransitionSucceeded(stdout: string, collapse: boolean, ensureExpanded = false) {
   const parsed = parse(stdout);
   if (!parsed?.success) return false;
   const value = parsed.data;
@@ -59,9 +71,10 @@ function disclosureTransitionSucceeded(stdout: string, collapse: boolean) {
     value.lastError === 0 &&
     value.firstErrorAttribute === "none" &&
     value.stage === "complete" &&
-    value.pressed &&
+    (value.pressed || (ensureExpanded && value.initialValue === 1)) &&
     value.expanded === !collapse &&
-    value.initialValue === (collapse ? 1 : 0) &&
+    (value.initialValue === (collapse ? 1 : 0) ||
+      (ensureExpanded && !value.pressed && value.initialValue === 1)) &&
     value.finalValue === (collapse ? 0 : 1) &&
     value.visited >= 4 &&
     value.windows === 1 &&

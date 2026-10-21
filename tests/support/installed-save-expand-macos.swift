@@ -18,6 +18,7 @@ if args.count == 2 && args[1] == "--self-test" {
     exit(0)
 }
 let collapse = args.count == 3 && args[2] == "--collapse"
+let ensureExpanded = args.count == 3 && args[2] == "--ensure-expanded"
 let trusted = AXIsProcessTrusted()
 let deadline = ProcessInfo.processInfo.systemUptime + 3
 var complete = true, foreground = false, pressed = false, expanded = false
@@ -60,7 +61,7 @@ func pressAvailable(_ element: AXUIElement) -> Bool {
     guard let actions = names as? [String], actions.count <= 16 else { complete = false; return false }
     return actions.contains("AXPress")
 }
-if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
+if (args.count == 2 || collapse || ensureExpanded), let pid = Int32(args[1]), pid > 0, trusted {
     let app = AXUIElementCreateApplication(pid)
     stage = "discovery"
     let windows = children(app, "AXWindows")
@@ -69,7 +70,8 @@ if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
     var queue: [(AXUIElement, AXUIElement?)] = complete ? windows.map { ($0, nil) } : []
     var seen: [AXUIElement] = [], sheets: [AXUIElement] = [], parents: [AXUIElement] = []
     while !queue.isEmpty && complete {
-        if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
+        if seen.count >= 256 { stage = "discovery_bound"; complete = false; break }
+        if ProcessInfo.processInfo.systemUptime >= deadline { stage = "discovery_deadline"; complete = false; break }
         let (element, parent) = queue.removeFirst()
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
@@ -79,9 +81,9 @@ if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
             if let parent = parent { parents.append(parent) }
             continue
         }
-        if role == "AXWebArea" || (collapse && ["AXBrowser", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell"].contains(role ?? "")) { continue }
+        if role == "AXWebArea" || ((collapse || ensureExpanded) && ["AXBrowser", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell"].contains(role ?? "")) { continue }
         let next = children(element, "AXChildren")
-        if queue.count + next.count > 256 { complete = false; break }
+        if queue.count + next.count > 256 { stage = "discovery_bound"; complete = false; break }
         queue.append(contentsOf: next.map { ($0, element) })
     }
     sheetsCount = min(sheets.count, 17)
@@ -89,7 +91,8 @@ if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
     queue = complete ? [(sheets[0], parents[0])] : []
     seen = []
     while !queue.isEmpty && complete {
-        if seen.count >= 256 || ProcessInfo.processInfo.systemUptime >= deadline { complete = false; break }
+        if seen.count >= 256 { stage = "discovery_bound"; complete = false; break }
+        if ProcessInfo.processInfo.systemUptime >= deadline { stage = "discovery_deadline"; complete = false; break }
         let (element, _) = queue.removeFirst()
         if seen.contains(where: { same($0, element) }) { continue }
         seen.append(element)
@@ -102,9 +105,9 @@ if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
             if title == "Save" { saves.append(element) }
             if title == "Cancel" { cancels.append(element) }
         }
-        if role == "AXWebArea" || (collapse && ["AXBrowser", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell"].contains(role ?? "")) { continue }
+        if role == "AXWebArea" || ((collapse || ensureExpanded) && ["AXBrowser", "AXList", "AXOutline", "AXTable", "AXColumn", "AXRow", "AXCell"].contains(role ?? "")) { continue }
         let next = children(element, "AXChildren")
-        if queue.count + next.count > 256 { complete = false; break }
+        if queue.count + next.count > 256 { stage = "discovery_bound"; complete = false; break }
         queue.append(contentsOf: next.map { ($0, element) })
     }
     if complete && disclosures.count == 1 && saves.count == 1 && cancels.count == 1 {
@@ -117,14 +120,23 @@ if (args.count == 2 || collapse), let pid = Int32(args[1]), pid > 0, trusted {
         if attached(parent, sheet) { guardMask |= 4 }
         if read(sheet, "AXRole") as? String == "AXSheet" { guardMask |= 8 }
         initialValue = binaryValue(read(disclosure, "AXValue")) ?? -1
-        if read(disclosure, "AXRole") as? String == "AXDisclosureTriangle" && initialValue == (collapse ? 1 : 0) &&
+        if read(disclosure, "AXRole") as? String == "AXDisclosureTriangle" && (initialValue == (collapse ? 1 : 0) || (ensureExpanded && initialValue == 1)) &&
            read(saves[0], "AXRole") as? String == "AXButton" && read(saves[0], "AXTitle") as? String == "Save" &&
            read(cancels[0], "AXRole") as? String == "AXButton" && read(cancels[0], "AXTitle") as? String == "Cancel" { guardMask |= 16 }
         if (read(disclosure, "AXEnabled") as? Bool) == true &&
            (read(saves[0], "AXEnabled") as? Bool) == true && (read(cancels[0], "AXEnabled") as? Bool) == true { guardMask |= 32 }
         if pressAvailable(disclosure) && complete && lastError == 0 { guardMask |= 64 }
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid && ProcessInfo.processInfo.systemUptime < deadline { guardMask |= 128 }
-        if complete && guardMask == 255 {
+        if complete && guardMask == 255 && ensureExpanded && initialValue == 1 {
+            // A previous successful Save can retain the expanded panel. Observe it; never toggle twice.
+            if attached(parent, sheet) && NSWorkspace.shared.frontmostApplication?.processIdentifier == pid {
+                finalValue = binaryValue(read(disclosure, "AXValue")) ?? -1
+                if complete && finalValue == 1 && ProcessInfo.processInfo.systemUptime < deadline {
+                    expanded = true
+                    stage = "complete"
+                }
+            }
+        } else if complete && guardMask == 255 {
             stage = "press"
             let timeout = AXUIElementSetMessagingTimeout(disclosure, 1)
             let status = timeout == .success ? AXUIElementPerformAction(disclosure, "AXPress" as CFString) : timeout

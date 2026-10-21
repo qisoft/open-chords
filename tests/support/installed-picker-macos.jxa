@@ -1,9 +1,10 @@
 function run(argv) {
   var applicationPid = Number(argv[0]);
   var scenario = argv[1] || 'cancel';
-  var expandedControls = scenario === 'cancel_save_edited_expanded';
+  var retainedDirectory = scenario === 'prepare_save_directory_retained';
+  var expandedControls = scenario === 'cancel_save_edited_expanded' || retainedDirectory;
   var restoredControls = scenario === 'cancel_save_restored';
-  var preparesExpandedDirectory = scenario === 'prepare_save_directory_expanded';
+  var preparesExpandedDirectory = scenario === 'prepare_save_directory_expanded' || retainedDirectory;
   var preparesDirectory = scenario === 'prepare_save_directory' || preparesExpandedDirectory;
   var directoryScenario = scenario === 'cancel_save_directory' || preparesDirectory;
   var selectedPath = directoryScenario ? argv[3] : argv[2];
@@ -14,7 +15,7 @@ function run(argv) {
   var saveDefaults = { json: 'Open Chords.json', lrc: 'Open Chords.lrc', chordpro: 'Open Chords.cho', pdf: 'Open Chords.pdf', archive: 'Open Chords.ocarchive' };
   var saveFormat = saves ? argv[2] : null;
   if (saves && !Object.prototype.hasOwnProperty.call(saveDefaults, saveFormat)) throw new Error('Invalid native picker driver arguments');
-  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_restored', 'cancel_save_directory', 'prepare_save_directory', 'prepare_save_directory_expanded', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
+  if (['cancel', 'cancel_save', 'cancel_save_edited', 'cancel_save_edited_expanded', 'cancel_save_restored', 'cancel_save_directory', 'prepare_save_directory', 'prepare_save_directory_expanded', 'prepare_save_directory_retained', 'open', 'cancel_open_existing'].indexOf(scenario) === -1 ||
       ((selectsFile || directoryScenario) && (typeof selectedPath !== 'string' || selectedPath[0] !== '/' || selectedPath.indexOf('\n') !== -1 || selectedPath.indexOf('\r') !== -1))) {
     throw new Error('Invalid native picker driver arguments');
   }
@@ -199,27 +200,70 @@ function run(argv) {
         attribute(candidate.open, 'name') !== primaryAction) throw new Error('prepared target changed');
   }
 
+  function reportControlFailure(element, sheet, phase, code, traversalStarted) {
+    var status = 'complete', windows = 0, sheets = 0;
+    function existence(reference) {
+      if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; return 'unknown'; }
+      try { var value = reference.exists(); return value === true ? 'true' : value === false ? 'false' : 'unknown'; }
+      catch (_) { if (status === 'complete') status = 'error'; return 'unknown'; }
+    }
+    var elementExists = existence(element), sheetExists = existence(sheet);
+    try {
+      if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; }
+      else {
+        var freshWindows = process.windows();
+        windows = Math.min(17, freshWindows.length);
+        if (windows > 16) { if (status === 'complete') status = 'bound'; }
+        else for (var w = 0; w < freshWindows.length; w++) {
+          if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; break; }
+          sheets = Math.min(17, sheets + freshWindows[w].sheets().length);
+          if (sheets > 16) { if (status === 'complete') status = 'bound'; break; }
+        }
+      }
+    } catch (_) { if (status === 'complete') status = 'error'; }
+    if (!Number.isInteger(code) || code < -32768 || code > 32767) code = 'unknown';
+    console.log('Native macOS picker control failure: phase=' + phase + ' before_input=' + !nativeInputStarted +
+      ' reference_exists=' + elementExists + ' sheet_exists=' + sheetExists + ' fresh_status=' + status +
+      ' fresh_windows=' + windows + ' fresh_sheets=' + sheets + ' os_error=' + code +
+      ' duration_ms=' + Math.max(0, Math.min(200000, Date.now() - traversalStarted)));
+    return { status: status, windows: windows, sheets: sheets, elementExists: elementExists, sheetExists: sheetExists };
+  }
   function expandedSaveControls(sheet) {
     var queue = [sheet], elements = [], skipped = 0, complete = false;
+    var failedElement = sheet, failurePhase = 'role', failureCode = null, traversalStarted = Date.now();
     try {
       while (queue.length > 0) {
-        if (Date.now() >= deadline) throw new Error('deadline');
-        if (elements.length >= 256 || queue.length > 256) throw new Error('element bound');
+        if (Date.now() >= deadline) { failurePhase = 'deadline'; throw new Error('deadline'); }
+        if (elements.length >= 256 || queue.length > 256) { failurePhase = 'bound'; throw new Error('element bound'); }
         var element = queue.shift();
         elements.push(element);
+        failedElement = element;
+        failurePhase = 'role';
         var role = attribute(element, 'role');
-        if (role === null) throw new Error('save control role unavailable');
+        if (role === null) { failureCode = lastAttributeError; throw new Error('save control role unavailable'); }
         // File-browser descendants are not dialog action or Save As controls.
         if (['AXBrowser', 'AXList', 'AXOutline', 'AXTable', 'AXColumn', 'AXRow', 'AXCell', 'AXWebArea'].indexOf(role) !== -1) {
           skipped++;
           continue;
         }
+        failurePhase = 'children';
         var children = element.uiElements();
-        if (children.length > 256 || queue.length + children.length > 256) throw new Error('element bound');
+        if (children.length > 256 || queue.length + children.length > 256) { failurePhase = 'bound'; throw new Error('element bound'); }
         queue = queue.concat(children);
       }
       complete = true;
       return elements;
+    } catch (error) {
+      var code = failureCode === null ? error && error.errorNumber : failureCode;
+      var snapshot = reportControlFailure(failedElement, sheet, failurePhase, code, traversalStarted);
+      if (retainedDirectory && stage === 'elements' && !nativeInputStarted && referenceRefreshes === 0 &&
+          (failurePhase === 'role' || failurePhase === 'children') && code === -1728 &&
+          snapshot.status === 'complete' && snapshot.elementExists === 'false' && snapshot.sheetExists === 'false' &&
+          snapshot.windows === 1 && snapshot.sheets === 1 && Date.now() < deadline &&
+          attribute(process, 'unixId') === applicationPid && attribute(process, 'frontmost') === true) {
+        throw new Error('stale control discovery before input');
+      }
+      throw error;
     } finally {
       console.log('Native macOS Save controls probe: elements=' + Math.min(elements.length, 256) +
         ' skipped_content=' + Math.min(skipped, 256) + ' complete=' + complete);
@@ -316,7 +360,8 @@ function run(argv) {
         for (var s = 0; s < sheets.length; s++) {
           if (attribute(sheets[s], 'role') !== 'AXSheet') continue;
           stage = 'elements';
-          var elements = expandedControls ? expandedSaveControls(sheets[s]) : sheets[s].entireContents();
+          // Action controls are outside the file browser. Native Swift still verifies the full selected-file tree.
+          var elements = (expandedControls || !saves) ? expandedSaveControls(sheets[s]) : sheets[s].entireContents();
           counts.elements = Math.min(elements.length, 257);
           if (elements.length > 256) {
             if (preparesExpandedDirectory) {
@@ -373,7 +418,7 @@ function run(argv) {
         if (directoryScenario) {
           prepareNavigation(process, candidate, selectedPath);
           stage = 'action';
-          var refreshedSaveElements = candidate.sheet.entireContents();
+          var refreshedSaveElements = retainedDirectory ? expandedSaveControls(candidate.sheet) : candidate.sheet.entireContents();
           if (refreshedSaveElements.length > 256) throw new Error('element bound');
           verifiedSave = verifyDefaultFilename(saveFormat, refreshedSaveElements);
           filenameField = verifiedSave.field;
@@ -415,6 +460,11 @@ function run(argv) {
       }
       throw new Error('not dismissed');
       } catch (error) {
+        if (error && error.message === 'stale control discovery before input' && retainedDirectory && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
+          referenceRefreshes++;
+          console.log('Native macOS picker refresh: reason=stale_control_discovery attempt=1 before_input=true');
+          continue discovery;
+        }
         if (error && error.message === 'stale filename before input' && restoredControls && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
           requireCancelTarget(process, candidate, 'before_input', true);
           referenceRefreshes++;

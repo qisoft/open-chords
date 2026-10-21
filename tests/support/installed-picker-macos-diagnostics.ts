@@ -96,6 +96,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...guards,
     ...guardSnapshots,
     ...freshControls,
+    ...installedMacPickerControlFailure(stderr),
     ...(installedMacSaveControlsDiagnostic(stderr)
       ? [installedMacSaveControlsDiagnostic(stderr)]
       : []),
@@ -119,7 +120,9 @@ export function installedMacPickerRefreshDiagnostic(stderr: string) {
         line ===
           "Native macOS picker refresh: reason=stale_reference attempt=1 before_input=true" ||
         line ===
-          "Native macOS picker refresh: reason=stale_filename_references attempt=1 before_input=true",
+          "Native macOS picker refresh: reason=stale_filename_references attempt=1 before_input=true" ||
+        line ===
+          "Native macOS picker refresh: reason=stale_control_discovery attempt=1 before_input=true",
     );
 }
 
@@ -197,6 +200,26 @@ export function installedMacSaveUnreadableReferences(stderr: string): string[] {
         match !== null &&
         Number(match[1]) <= 256 &&
         Number(match[2]) + Number(match[3]) + Number(match[4]) === Number(match[1])
+      );
+    })
+    .slice(-1);
+}
+
+export function installedMacPickerControlFailure(stderr: string): string[] {
+  return stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match =
+        /^Native macOS picker control failure: phase=(?:role|children|bound|deadline) before_input=(?:true|false) reference_exists=(?:true|false|unknown) sheet_exists=(?:true|false|unknown) fresh_status=(?:complete|error|bound|deadline) fresh_windows=([0-9]{1,2}) fresh_sheets=([0-9]{1,2}) os_error=(unknown|-?[0-9]{1,5}) duration_ms=([0-9]{1,6})$/u.exec(
+          line,
+        );
+      return (
+        match !== null &&
+        Number(match[1]) <= 17 &&
+        Number(match[2]) <= 17 &&
+        (match[3] === "unknown" || (Number(match[3]) >= -32768 && Number(match[3]) <= 32767)) &&
+        Number(match[4]) <= 200000
       );
     })
     .slice(-1);

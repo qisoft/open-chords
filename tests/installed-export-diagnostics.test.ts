@@ -36,6 +36,9 @@ it("redacts the actual child-process rejection while retaining fixed proof stage
         "-e",
         `
       process.stderr.write("/private/provider-token\\n");
+      process.stderr.write("Export disk proof source delta: added=1 removed=0 changed=2 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=1 other=0\\n");
+      process.stderr.write("Export disk proof source delta: added=1 removed=0 changed=2 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=1 other=0 /private/delta\\n");
+      process.stderr.write("Export disk proof source delta: added=10000 removed=0 changed=2 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=1 other=0\\n");
       process.stderr.write("Export disk proof stage: retry_saving duration_ms=123\\n");
       process.stderr.write("Export disk proof stage: private-content duration_ms=123\\n");
       process.stderr.write("Export recovery proof stage: published_pending duration_ms=456\\n");
@@ -65,6 +68,11 @@ it("redacts the actual child-process rejection while retaining fixed proof stage
   expect(failure.message).toContain("refused_changed_output duration_ms=789");
   expect(failure.message).toContain("replay_journal_written duration_ms=800");
   expect(failure.message).toContain("replay_verification_refused duration_ms=900");
+  expect(failure.message).toContain(
+    "Export disk proof source delta: added=1 removed=0 changed=2 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=1 other=0",
+  );
+  expect(failure.message).not.toContain("/private/delta");
+  expect(failure.message).not.toContain("added=10000");
   expect(failure.message).toContain("retry_check_source_tree_refused duration_ms=910");
   expect(failure.message).toContain("code=export_disk_proof_retry_not_durable duration_ms=911");
   expect(failure.message).toContain("replay_check_receipt_refused duration_ms=913");

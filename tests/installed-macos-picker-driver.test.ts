@@ -674,3 +674,50 @@ it("refuses non-JSON Save before starting any native process", async () => {
   ).rejects.toThrow("JSON Save target unavailable");
   expect(execute).not.toHaveBeenCalled();
 });
+
+it.each(["json", "lrc", "chordpro"] as const)(
+  "publishes %s once from a guarded retained expanded panel without collapse or input",
+  async (format) => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const responses = [
+      { ...prepared, saveFieldProbe: { ...probe, format } },
+      { ...expanded, pressed: false, initialValue: 1, finalValue: 1 },
+      snapshot,
+      directorySnapshot,
+      filenameSnapshot,
+      { ...jsonSaved, action: { requested: `save_new_${format}`, pressed: true, dismissed: true } },
+    ];
+    execute.mockImplementation(async () => {
+      now += 300;
+      return { stdout: JSON.stringify(responses.shift()), stderr: "" };
+    });
+    await installedMacPickerDriver(
+      `save_${format}`,
+      "/private/directory",
+      () => ({ LANG: "en_US.UTF-8" }),
+      format,
+    )(42);
+    expect(execute).toHaveBeenCalledTimes(6);
+    expect(execute.mock.calls[0]?.[1]).toContain("prepare_save_directory_retained");
+    expect(execute.mock.calls[1]?.[1]).toEqual(["42", "--ensure-expanded"]);
+    expect(execute.mock.calls[5]?.[1]).toEqual([
+      "42",
+      "/private/directory",
+      "directory_snapshot",
+      format,
+      format === "json" ? "--save-new-json" : "--save-new-text",
+    ]);
+    expect(execute.mock.calls.map((call) => call[2].timeout)).toEqual([
+      100000, 7000, 7000, 7000, 7000, 7000,
+    ]);
+    for (const call of execute.mock.calls) expect(call[2].env).toEqual({ LANG: "en_US.UTF-8" });
+  },
+);
+it("refuses mismatched text format before any native process", async () => {
+  await expect(
+    installedMacPickerDriver("save_lrc", "/private/directory", () => ({}), "chordpro")(42),
+  ).rejects.toThrow("text Save target unavailable");
+  expect(execute).not.toHaveBeenCalled();
+});

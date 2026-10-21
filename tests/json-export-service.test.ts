@@ -25,11 +25,40 @@ const envelope = () =>
   );
 
 it("publishes the captured view after later edits and retains a matching Receipt", async () => {
+  const started = performance.now();
+  const probe = (
+    stage:
+      | "start"
+      | "root_ready"
+      | "library_opened"
+      | "project_created"
+      | "service_opened"
+      | "snapshot_captured"
+      | "save_requested"
+      | "picker_entered"
+      | "picker_observed"
+      | "edit_committed"
+      | "target_selected"
+      | "saved"
+      | "output_verified"
+      | "receipt_verified"
+      | "snapshot_verified"
+      | "cleanup_started"
+      | "cleanup_finished",
+  ) => {
+    process.stdout.write(
+      `JSON export capture probe: stage=${stage} duration_ms=${Math.max(0, Math.min(200000, Math.floor(performance.now() - started)))}\n`,
+    );
+  };
+  probe("start");
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-export-save-")));
+  probe("root_ready");
   try {
     const stateRoot = join(root, "state");
     const library = await openProjectLibrary({ stateRoot });
+    probe("library_opened");
     await library.createProject({ envelope: envelope(), records: goldenRecords() });
+    probe("project_created");
     let choose!: (value: string | null) => void;
     let entered!: () => void;
     const picking = new Promise<void>((resolve) => {
@@ -39,19 +68,24 @@ it("publishes the captured view after later edits and retains a matching Receipt
       library,
       stateRoot,
       pickTarget: async () => {
+        probe("picker_entered");
         entered();
         return new Promise<string | null>((resolve) => {
           choose = resolve;
         });
       },
     });
+    probe("service_opened");
     const before = (await library.getSnapshot("project_golden"))!;
+    probe("snapshot_captured");
+    probe("save_requested");
     const saving = service.saveJson({
       projectId: "project_golden",
       expectedProjectRevisionId: before.projectRevisionId,
       presentation: "current",
     });
     await picking;
+    probe("picker_observed");
     await library.commitEditTransaction({
       projectId: "project_golden",
       expectedProjectRevisionId: before.projectRevisionId,
@@ -63,17 +97,25 @@ it("publishes the captured view after later edits and retains a matching Receipt
         ],
       },
     });
+    probe("edit_committed");
     choose(join(root, "export.json"));
+    probe("target_selected");
     expect((await saving).state).toBe("saved");
+    probe("saved");
     expect(await readFile(join(root, "export.json"), "utf8")).toBe(
       readFileSync("tests/fixtures/json-export-golden.json", "utf8"),
     );
+    probe("output_verified");
     expect(library.listExportReceipts("project_golden")).toHaveLength(1);
+    probe("receipt_verified");
     expect(
       (await library.getSnapshot("project_golden"))!.project.activeView!.editHistoryPosition,
     ).toBe(2);
+    probe("snapshot_verified");
   } finally {
+    probe("cleanup_started");
     await rm(root, { recursive: true, force: true });
+    probe("cleanup_finished");
   }
 });
 
