@@ -734,8 +734,57 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
       ...directoryBefore,
       [filename]: digest,
     });
+    let freshImport: unknown;
+    const freshState = join(packageRoot, "macos-native-saved-archive-import");
+    if (archiveProjection !== undefined) {
+      const empty = await openProjectLibrary({ stateRoot: freshState });
+      expect(empty.listProjects()).toEqual([]);
+      await (await openNetworkMode(freshState)).setOffline(true);
+      freshImport = await inspectInstalled(
+        freshState,
+        `(async () => {
+          const response = await window.openChords.archives.import({ adoptOfflineMedia: false });
+          const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+          return { response, offline };
+        })()`,
+        installedSystemEnvironment(),
+        installedMacPickerDriver("open", target, installedSystemEnvironment),
+      );
+      z.object({
+        response: z.object({
+          type: z.literal("archives.import_result"),
+          result: z.object({
+            state: z.literal("imported"),
+            projectId: z.literal("project_golden"),
+            importedCopy: z.literal(false),
+            offlineMedia: z.object({ state: z.literal("not_included") }),
+          }),
+        }),
+        offline: z.literal(true),
+      }).parse(freshImport);
+      const imported = await openProjectLibrary({ stateRoot: freshState });
+      expect(imported.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
+      const importedProject = await imported.readProject("project_golden");
+      expect(importedProject.envelope).toEqual(archiveProjection.document.envelope);
+      expect(importedProject.records).toEqual(archiveProjection.document.records);
+      expect(imported.listExportReceipts("project_golden")).toEqual([]);
+      expect(canonicalSerialize(archivedProjectFor(importedProject).document)).toBe(
+        archiveDocument,
+      );
+      expect((await openNetworkMode(freshState)).offline).toBe(true);
+      const importedTree = await proofTreeHashes(imported.activeRoot);
+      const secondImport = await openProjectLibrary({ stateRoot: freshState });
+      expect(await secondImport.readProject("project_golden")).toEqual(importedProject);
+      expect(await proofTreeHashes(secondImport.activeRoot)).toEqual(importedTree);
+      expect(await proofTreeHashes(second.activeRoot)).toEqual(tree);
+      expect(await second.readProject("project_golden")).toEqual(after);
+      expect(await proofTreeHashes(directory)).toEqual({ ...directoryBefore, [filename]: digest });
+      expect(readFileSync(target)).toEqual(output);
+      expect(readFileSync(external)).toEqual(original);
+    }
     for (const privateValue of [
       state,
+      freshState,
       directory,
       target,
       external,
@@ -745,6 +794,8 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
       const escaped = JSON.stringify(privateValue).slice(1, -1);
       for (const representation of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
         expect(JSON.stringify(result).includes(representation)).toBe(false);
+        if (freshImport !== undefined)
+          expect(JSON.stringify(freshImport).includes(representation)).toBe(false);
         expect(output.includes(Buffer.from(representation))).toBe(false);
         if (archiveDocument !== undefined)
           expect(archiveDocument.includes(representation)).toBe(false);
