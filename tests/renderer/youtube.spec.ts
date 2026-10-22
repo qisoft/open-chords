@@ -6,6 +6,7 @@ import { _electron as electron, expect, test } from "@playwright/test";
 
 import { installRendererShutdownProbe } from "../support/renderer-shutdown-probe.ts";
 import { installYouTubeProviderFixture } from "../support/youtube-provider-fixture.ts";
+import { observeSlowYouTubeClose } from "../support/youtube-shutdown-sample.ts";
 
 for (const [code, error] of [
   [2, "invalid_video"],
@@ -67,7 +68,12 @@ for (const [code, error] of [
       }
     } finally {
       probe("close");
-      await test.step("Close Electron and its isolated player", () => application.close());
+      const stopObservation = observeSlowYouTubeClose(application.process().pid);
+      try {
+        await test.step("Close Electron and its isolated player", () => application.close());
+      } finally {
+        stopObservation();
+      }
       probe("closed");
       rmSync(root, { recursive: true, force: true });
     }
