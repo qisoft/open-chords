@@ -44,6 +44,7 @@ import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.
 import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
+import { installedCspFrameTreeDiagnostic } from "../support/installed-csp-frame-diagnostic.ts";
 import { installedEffectiveCspDiagnostic } from "../support/installed-effective-csp-diagnostics.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
@@ -2045,10 +2046,17 @@ async function evaluateRendererTarget(webSocketUrl: string) {
     const socket = new WebSocket(webSocketUrl);
     let contentSecurityPolicy: string | undefined;
     let effectiveCsp: z.infer<typeof EffectiveCspProbeSchema> | undefined;
+    let refusedCsp: { observation: unknown } | undefined;
     let undeclaredAssetStatus: number | undefined;
     const timeout = setTimeout(() => {
       socket.close();
-      reject(new Error("Renderer CDP evaluation timed out"));
+      reject(
+        new Error(
+          refusedCsp === undefined
+            ? "Renderer CDP evaluation timed out"
+            : `${installedEffectiveCspDiagnostic(refusedCsp.observation)}\nInstalled CSP frame tree: unavailable`,
+        ),
+      );
     }, 5_000);
     socket.addEventListener("error", () => {
       clearTimeout(timeout);
@@ -2166,7 +2174,11 @@ async function evaluateRendererTarget(webSocketUrl: string) {
           }
           const observed = response.result.result.value;
           const verifiedCsp = EffectiveCspProbeSchema.safeParse(observed);
-          if (!verifiedCsp.success) throw new Error(installedEffectiveCspDiagnostic(observed));
+          if (!verifiedCsp.success) {
+            refusedCsp = { observation: observed };
+            socket.send(JSON.stringify({ id: 5, method: "Page.getFrameTree" }));
+            return;
+          }
           effectiveCsp = verifiedCsp.data;
           socket.send(
             JSON.stringify({
@@ -2174,6 +2186,22 @@ async function evaluateRendererTarget(webSocketUrl: string) {
               method: "Page.setBypassCSP",
               params: { enabled: true },
             }),
+          );
+          return;
+        }
+        if (
+          z.object({ id: z.literal(5) }).safeParse(rawResponse).success &&
+          refusedCsp !== undefined
+        ) {
+          const tree = z
+            .object({ result: z.object({ frameTree: z.unknown() }) })
+            .safeParse(rawResponse);
+          clearTimeout(timeout);
+          socket.close();
+          reject(
+            new Error(
+              `${installedEffectiveCspDiagnostic(refusedCsp.observation)}\n${installedCspFrameTreeDiagnostic(tree.success ? tree.data.result.frameTree : undefined)}`,
+            ),
           );
           return;
         }
