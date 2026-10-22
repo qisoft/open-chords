@@ -25,6 +25,7 @@ import {
   installedMacJsonSaveSucceeded,
   installedMacTextSaveSucceeded,
   installedMacPdfSaveSucceeded,
+  installedMacArchiveSaveSucceeded,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
 import {
@@ -48,6 +49,7 @@ export function installedMacPickerDriver(
     | "save_lrc"
     | "save_chordpro"
     | "save_pdf"
+    | "save_archive"
     | "open"
     | "cancel_open_existing",
   selectedPath: string | undefined,
@@ -66,7 +68,8 @@ export function installedMacPickerDriver(
     };
     const textSave = scenario === "save_lrc" || scenario === "save_chordpro";
     const pdfSave = scenario === "save_pdf";
-    const nativeSave = scenario === "save_json" || textSave || pdfSave;
+    const archiveSave = scenario === "save_archive";
+    const nativeSave = scenario === "save_json" || textSave || pdfSave || archiveSave;
     const expandedDirectory = scenario === "cancel_save_directory_expanded" || nativeSave;
     if (textSave && (saveFormat !== scenario.slice(5) || selectedPath === undefined))
       throw new Error("Native macOS text Save target unavailable");
@@ -74,6 +77,8 @@ export function installedMacPickerDriver(
       throw new Error("Native macOS JSON Save target unavailable");
     if (pdfSave && (saveFormat !== "pdf" || selectedPath === undefined))
       throw new Error("Native macOS PDF Save target unavailable");
+    if (archiveSave && (saveFormat !== "archive" || selectedPath === undefined))
+      throw new Error("Native macOS archive Save target unavailable");
     const directoryScenario = scenario === "cancel_save_directory" || expandedDirectory;
     const saves =
       scenario === "cancel_save" ||
@@ -152,7 +157,15 @@ export function installedMacPickerDriver(
               ...(requested === undefined ? [] : [requested]),
               ...(requested === "directory_snapshot" ? [saveFormat ?? ""] : []),
               ...(saveExport
-                ? [pdfSave ? "--save-new-pdf" : textSave ? "--save-new-text" : "--save-new-json"]
+                ? [
+                    archiveSave
+                      ? "--save-new-archive"
+                      : pdfSave
+                        ? "--save-new-pdf"
+                        : textSave
+                          ? "--save-new-text"
+                          : "--save-new-json",
+                  ]
                 : verifyFilename
                   ? ["--verify-filename"]
                   : []),
@@ -181,7 +194,9 @@ export function installedMacPickerDriver(
                   )
                 : pdfSave
                   ? installedMacPdfSaveSucceeded(output)
-                  : installedMacJsonSaveSucceeded(output))
+                  : archiveSave
+                    ? installedMacArchiveSaveSucceeded(output)
+                    : installedMacJsonSaveSucceeded(output))
             : requested === "directory_snapshot"
               ? !(verifyFilename
                   ? installedMacSaveFilenameVerified(output)
