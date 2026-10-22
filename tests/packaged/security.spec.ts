@@ -45,7 +45,10 @@ import { goldenRecords } from "../support/editor-fixture.ts";
 import { leadSheetProject } from "../support/export-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
 import { installedCspFrameTreeDiagnostic } from "../support/installed-csp-frame-diagnostic.ts";
-import { installedEffectiveCspDiagnostic } from "../support/installed-effective-csp-diagnostics.ts";
+import {
+  installedEffectiveCspDiagnostic,
+  installedCspInterruptionDiagnostic,
+} from "../support/installed-effective-csp-diagnostics.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import {
@@ -2050,21 +2053,15 @@ async function evaluateRendererTarget(webSocketUrl: string) {
     let undeclaredAssetStatus: number | undefined;
     const timeout = setTimeout(() => {
       socket.close();
-      reject(
-        new Error(
-          refusedCsp === undefined
-            ? "Renderer CDP evaluation timed out"
-            : `${installedEffectiveCspDiagnostic(refusedCsp.observation)}\nInstalled CSP frame tree: unavailable`,
-        ),
-      );
+      reject(new Error(installedCspInterruptionDiagnostic("timeout", refusedCsp)));
     }, 5_000);
     socket.addEventListener("error", () => {
       clearTimeout(timeout);
-      reject(new Error("Renderer CDP connection failed"));
+      reject(new Error(installedCspInterruptionDiagnostic("error", refusedCsp)));
     });
     socket.addEventListener("close", () => {
       clearTimeout(timeout);
-      reject(new Error("Renderer CDP connection closed before evaluation completed"));
+      reject(new Error(installedCspInterruptionDiagnostic("close", refusedCsp)));
     });
     socket.addEventListener("open", () => {
       socket.send(
