@@ -201,6 +201,7 @@ var pressDurationMs = 0
 var pressSheetState = "not_checked"
 var pressFollowupError = 0
 var foreground = false
+var guardEnabledState = "not_checked"
 var guardMask = 0
 var stage = "arguments"
 var firstOtherError = 0
@@ -763,7 +764,9 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
         if elements(parent, "AXChildren").contains(where: { same($0, sheet) }) { guardMask |= 4 }
         if string(sheet, "AXRole") == "AXSheet" { guardMask |= 8 }
         if string(button, "AXRole") == "AXButton" && string(button, "AXTitle") == (saveReady ? "Save" : (requested == "open" ? "Open" : "Cancel")) { guardMask |= 16 }
-        if (read(button, "AXEnabled") as? Bool) == true { guardMask |= 32 }
+        let enabled = read(button, "AXEnabled") as? Bool
+        guardEnabledState = enabled.map { $0 ? "true" : "false" } ?? "unavailable"
+        if enabled == true { guardMask |= 32 }
         if noReadFailures() { guardMask |= 64 }
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { guardMask |= 128 }
         if saveReady, let saveName = expectedSaveName {
@@ -836,7 +839,7 @@ let result: [String: Any] = [
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
-    "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask,
+    "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask, "guardEnabledState": guardEnabledState,
     "action": ["requested": savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),

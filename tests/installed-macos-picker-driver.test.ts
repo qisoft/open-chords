@@ -17,7 +17,10 @@ vi.mock("node:child_process", () => ({
 vi.mock("@playwright/test", () => ({ expect }));
 
 import { installedMacPickerDriver } from "./support/installed-macos-picker-driver.ts";
-import { MAC_AX_COUNT_FIELDS } from "./support/installed-picker-macos-ax-diagnostics.ts";
+import {
+  installedMacAxProbeDiagnostic,
+  MAC_AX_COUNT_FIELDS,
+} from "./support/installed-picker-macos-ax-diagnostics.ts";
 
 const probe = {
   format: "json",
@@ -814,4 +817,26 @@ it.each([
     installedMacPickerDriver("save_archive", "/private/directory", () => ({}), "archive")(42),
   ).rejects.toThrow("Native macOS AX probe");
   expect(execute).toHaveBeenCalledTimes(6);
+});
+
+it.each(["not_checked", "true", "false", "unavailable"])(
+  "reports the fixed guard enabled state %s without changing refusal",
+  (guardEnabledState) => {
+    const result = installedMacAxProbeDiagnostic(
+      JSON.stringify({ ...snapshot, guardEnabledState, guardMask: 223 }),
+      undefined,
+      0,
+    );
+    expect(result).toContain(`guard_enabled=${guardEnabledState}`);
+    expect(result).toContain("guard_mask=223");
+  },
+);
+it("redacts unexpected guard enabled evidence", () => {
+  const result = installedMacAxProbeDiagnostic(
+    JSON.stringify({ ...snapshot, guardEnabledState: "/private/fixture" }),
+    undefined,
+    0,
+  );
+  expect(result).not.toContain("/private/fixture");
+  expect(result).not.toContain("guard_enabled=");
 });

@@ -309,3 +309,22 @@ it("accepts only one fixed pre-input control rediscovery checkpoint", () => {
   ).toBeUndefined();
   expect(installedMacPickerRefreshDiagnostic(line + " /private/path")).toBeUndefined();
 });
+
+it.each(["true", "false", "unknown"])(
+  "retains fixed invalid filename reference existence %s",
+  (exists) => {
+    const line = `Native macOS Save invalid filename reference: status=complete exists=${exists} before_input=true`;
+    expect(installedMacPickerDiagnostic({}, line, 1)).toContain(line);
+    expect(installedMacPickerDiagnostic({}, `${line}\n${line}`, 1).split(line)).toHaveLength(2);
+  },
+);
+it.each([
+  "status=/private/path exists=false before_input=true",
+  "status=complete exists=/private/ref before_input=true",
+  "status=complete exists=false before_input=/private/value",
+  "status=complete exists=false before_input=true /private/path",
+])("redacts invalid filename reference evidence %s", (fields) => {
+  expect(
+    installedMacPickerDiagnostic({}, `Native macOS Save invalid filename reference: ${fields}`, 1),
+  ).not.toContain("invalid filename reference:");
+});

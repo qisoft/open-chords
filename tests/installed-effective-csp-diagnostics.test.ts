@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 
-import { installedEffectiveCspDiagnostic } from "./support/installed-effective-csp-diagnostics.ts";
+import {
+  installedEffectiveCspDiagnostic,
+  installedCspInterruptionDiagnostic,
+} from "./support/installed-effective-csp-diagnostics.ts";
 
 const observation = {
   evalBlocked: false,
@@ -49,4 +52,28 @@ it("distinguishes blank top-level and child contexts without raw URLs", () => {
       topDocumentUrl: "about_blank",
     }),
   ).toContain("document_url=about_blank top_frame=true top_document_url=about_blank");
+});
+
+it.each([
+  ["timeout", "Renderer CDP evaluation timed out"],
+  ["error", "Renderer CDP connection failed"],
+  ["close", "Renderer CDP connection closed before evaluation completed"],
+] as const)(
+  "preserves the original CSP refusal on %s while the frame query is pending",
+  (reason, message) => {
+    expect(installedCspInterruptionDiagnostic(reason, { observation })).toBe(
+      `${installedEffectiveCspDiagnostic(observation)}\nInstalled CSP frame tree: unavailable\n${message}`,
+    );
+    const invalid = { ...observation, documentUrl: "/private/document" };
+    expect(installedCspInterruptionDiagnostic(reason, { observation: invalid })).toBe(
+      `Installed effective CSP: invalid_evidence\nInstalled CSP frame tree: unavailable\n${message}`,
+    );
+  },
+);
+it.each([
+  ["timeout", "Renderer CDP evaluation timed out"],
+  ["error", "Renderer CDP connection failed"],
+  ["close", "Renderer CDP connection closed before evaluation completed"],
+] as const)("retains the ordinary %s failure before a CSP refusal", (reason, message) => {
+  expect(installedCspInterruptionDiagnostic(reason)).toBe(message);
 });

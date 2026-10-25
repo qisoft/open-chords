@@ -11,6 +11,15 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       ),
     )
     .slice(-3);
+  const invalidFilenameReference = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS Save invalid filename reference: status=(?:complete|deadline|error) exists=(?:true|false|unknown) before_input=(?:true|false)$/u.test(
+        line,
+      ),
+    )
+    .slice(-1);
   const refusal = stderr
     .slice(-65536)
     .split(/\r?\n/u)
@@ -105,6 +114,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       : []),
     ...reads,
     ...refusal,
+    ...invalidFilenameReference,
     ...installedMacSaveUnreadableReferences(stderr),
     ...installedMacSaveInitialDisclosure(stderr),
     ...installedMacSaveFailureFields(stderr),

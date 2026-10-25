@@ -330,6 +330,7 @@ const evidenceSchema = z.strictObject({
   verified: z.boolean(),
   foreground: z.boolean(),
   guardMask: z.number().int().min(0).max(255),
+  guardEnabledState: z.enum(["not_checked", "true", "false", "unavailable"]).default("not_checked"),
   stage: z.enum([
     "arguments",
     "discovery",
@@ -402,6 +403,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       verified,
       foreground,
       guardMask,
+      guardEnabledState,
       stage,
       action,
     } = evidence.data;
@@ -447,6 +449,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `verified=${verified}`,
       `foreground=${foreground}`,
       `guard_mask=${guardMask}`,
+      `guard_enabled=${guardEnabledState}`,
       `stage=${stage}`,
       `action=${action.requested}`,
       `pressed=${action.pressed}`,
