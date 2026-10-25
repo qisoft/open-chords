@@ -325,7 +325,19 @@ function run(argv) {
     var filenameName = attribute(filenameField, 'name');
     if (attribute(filenameField, 'role') !== 'AXTextField' ||
         (filenameName !== 'Save As:' && filenameName !== 'Save As') ||
-        attribute(filenameField, 'enabled') !== true || attribute(filenameField, 'value') !== expectedFilename) throw new Error('default filename invalid');
+        attribute(filenameField, 'enabled') !== true || attribute(filenameField, 'value') !== expectedFilename) {
+      var fieldExists = 'unknown', existenceStatus = 'deadline';
+      if (Date.now() < deadline) {
+        existenceStatus = 'complete';
+        try {
+          var exists = filenameField.exists();
+          fieldExists = exists === true ? 'true' : exists === false ? 'false' : 'unknown';
+        } catch (_) { existenceStatus = 'error'; }
+      }
+      console.log('Native macOS Save invalid filename reference: status=' + existenceStatus +
+        ' exists=' + fieldExists + ' before_input=' + (!nativeInputStarted));
+      throw new Error('default filename invalid');
+    }
     return { probe: saveProbe, field: filenameField };
   }
 
