@@ -54,15 +54,19 @@ it("distinguishes blank top-level and child contexts without raw URLs", () => {
   ).toContain("document_url=about_blank top_frame=true top_document_url=about_blank");
 });
 
-it.each(["timeout", "error", "close"] as const)(
+it.each([
+  ["timeout", "Renderer CDP evaluation timed out"],
+  ["error", "Renderer CDP connection failed"],
+  ["close", "Renderer CDP connection closed before evaluation completed"],
+] as const)(
   "preserves the original CSP refusal on %s while the frame query is pending",
-  (reason) => {
+  (reason, message) => {
     expect(installedCspInterruptionDiagnostic(reason, { observation })).toBe(
-      `${installedEffectiveCspDiagnostic(observation)}\nInstalled CSP frame tree: unavailable`,
+      `${installedEffectiveCspDiagnostic(observation)}\nInstalled CSP frame tree: unavailable\n${message}`,
     );
     const invalid = { ...observation, documentUrl: "/private/document" };
     expect(installedCspInterruptionDiagnostic(reason, { observation: invalid })).toBe(
-      "Installed effective CSP: invalid_evidence\nInstalled CSP frame tree: unavailable",
+      `Installed effective CSP: invalid_evidence\nInstalled CSP frame tree: unavailable\n${message}`,
     );
   },
 );

@@ -23,11 +23,12 @@ export function installedCspInterruptionDiagnostic(
   reason: "timeout" | "error" | "close",
   refused?: { observation: unknown },
 ) {
-  if (refused !== undefined)
-    return `${installedEffectiveCspDiagnostic(refused.observation)}\nInstalled CSP frame tree: unavailable`;
-  return {
+  const message = {
     timeout: "Renderer CDP evaluation timed out",
     error: "Renderer CDP connection failed",
     close: "Renderer CDP connection closed before evaluation completed",
   }[reason];
+  if (refused !== undefined)
+    return `${installedEffectiveCspDiagnostic(refused.observation)}\nInstalled CSP frame tree: unavailable\n${message}`;
+  return message;
 }
