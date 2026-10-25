@@ -11,11 +11,13 @@ it("distinguishes the app root and blank child without leaking URLs", () => {
         node("file:///private/frame"),
       ]),
     ),
-  ).toBe("Installed CSP frame tree: root=app_index frames=3 app=1 blank=1 other=1 truncated=false");
+  ).toBe(
+    "Installed CSP frame tree: root=app_index root_protocol=open_chords frames=3 app=1 blank=1 other=1 truncated=false",
+  );
 });
 it("distinguishes a blank top-level document", () => {
   expect(installedCspFrameTreeDiagnostic(node("about:blank"))).toBe(
-    "Installed CSP frame tree: root=about_blank frames=1 app=0 blank=1 other=0 truncated=false",
+    "Installed CSP frame tree: root=about_blank root_protocol=about frames=1 app=0 blank=1 other=0 truncated=false",
   );
 });
 it.each([undefined, null, {}, node("about:blank", [null]), { frame: { url: 42 } }])(
@@ -32,7 +34,7 @@ it("bounds wide and deep trees", () => {
     Array.from({ length: 1000 }, () => node("about:blank")),
   );
   expect(installedCspFrameTreeDiagnostic(wide)).toBe(
-    "Installed CSP frame tree: root=app_index frames=64 app=1 blank=63 other=0 truncated=true",
+    "Installed CSP frame tree: root=app_index root_protocol=open_chords frames=64 app=1 blank=63 other=0 truncated=true",
   );
   const deep = node("about:blank");
   let current = deep;
@@ -54,3 +56,20 @@ it.each(["open-chords://app/other?secret", "https://private.example/frame", "/pr
     expect(result).not.toContain(url);
   },
 );
+
+it.each([
+  ["https://private.example/frame", "https"],
+  ["http://private.example/frame", "http"],
+  ["file:///private/frame", "file"],
+  ["devtools://private/frame", "devtools"],
+  ["chrome-error://private/frame", "chrome_error"],
+  ["data:text/plain,private", "data"],
+  ["about:private", "about"],
+  ["secret://private/frame", "other"],
+  ["/private/frame", "invalid"],
+])("categorizes root protocol without the URL %s", (url, protocol) => {
+  const result = installedCspFrameTreeDiagnostic(node(url));
+  expect(result).toContain(`root_protocol=${protocol} `);
+  expect(result).not.toContain("private");
+  expect(result).not.toContain(url);
+});
