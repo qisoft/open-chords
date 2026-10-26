@@ -31,6 +31,7 @@ import { z } from "zod";
 
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
 import { openNetworkMode } from "../../apps/desktop/src/main/network-mode.ts";
+import { openOfflineMediaCache } from "../../apps/desktop/src/main/offline-media-cache.ts";
 import { proofTreeHashes } from "../../apps/desktop/src/main/packaged-proof-tree.ts";
 import { PACKAGED_SIDECAR_PROOF_ARGUMENT } from "../../apps/desktop/src/main/packaged-sidecar-proof-constants.ts";
 import { CONTAINMENT_EVIDENCE_LINE_PREFIX } from "../../apps/desktop/src/main/packaged-sidecar-proof-evidence.ts";
@@ -803,6 +804,141 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
         expect(output.includes(Buffer.from(representation))).toBe(false);
         if (archiveDocument !== undefined)
           expect(archiveDocument.includes(representation)).toBe(false);
+      }
+    }
+  });
+}
+
+for (const adoptOfflineMedia of [false, true]) {
+  test(`installed macOS archive media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
+    test.skip(process.platform !== "darwin", "macOS native archive media import proof");
+    test.setTimeout(360_000);
+    const root = realpathSync(mkdtempSync(join(packageRoot, "macos-archive-media-")));
+    const originState = join(root, "origin");
+    const state = join(root, "destination");
+    const sourcePath = join(root, "private-recording.wav");
+    const sourceBytes = monoPcmWav([10, 20, 30, 40, 50, 60]);
+    writeFileSync(sourcePath, sourceBytes);
+    const origin = await openProjectLibrary({ stateRoot: originState });
+    const media = new LocalMediaService({ library: origin, pickFile: async () => sourcePath });
+    media.activateGeneration("generation_fixture");
+    const selected = await media.pickLocalFile("generation_fixture");
+    if (selected.kind !== "selected") throw new Error("Archive media fixture selection failed");
+    const created = await media.createProject({
+      capabilityId: selected.capabilityId,
+      generationId: "generation_fixture",
+      startSourceSample: 2,
+      endSourceSample: 5,
+    });
+    await media.dispose();
+    const before = await origin.readProject(created.projectId);
+    const projection = archivedProjectFor(before);
+    const rangeBytes = Buffer.alloc(6);
+    [30, 40, 50].forEach((sample, index) => rangeBytes.writeInt16LE(sample, index * 2));
+    const source = projection.document.records.sources[0]!;
+    const snapshot = source.snapshots[0]!;
+    const archive = writePortableProjectArchive({
+      document: projection.document,
+      media: {
+        bytes: rangeBytes,
+        channels: 1,
+        encoding: "pcm_s16le",
+        sampleRate: selected.sampleRate,
+        sourceId: source.id,
+        sourceSnapshotId: snapshot.id,
+        startSourceSample: 2,
+        endSourceSample: 5,
+      },
+    });
+    const target = join(root, "media.ocarchive");
+    writeFileSync(target, archive.archive);
+    const inspected = inspectPortableProjectArchive(archive.archive);
+    expect(inspected.media?.bytes).toEqual(rangeBytes);
+    const externalBefore = await proofTreeHashes(root);
+    const originTree = await proofTreeHashes(origin.activeRoot);
+    const destination = await openProjectLibrary({ stateRoot: state });
+    expect(destination.listProjects()).toEqual([]);
+    await (await openNetworkMode(state)).setOffline(true);
+    const result = await inspectInstalled(
+      state,
+      `(async () => {
+        const response = await window.openChords.archives.import({ adoptOfflineMedia: ${String(adoptOfflineMedia)} });
+        const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+        return { response, offline };
+      })()`,
+      installedSystemEnvironment(),
+      installedMacPickerDriver("open", target, installedSystemEnvironment),
+    );
+    expect(result).toMatchObject({
+      response: {
+        type: "archives.import_result",
+        result: {
+          state: "imported",
+          projectId: created.projectId,
+          importedCopy: false,
+          offlineMedia: adoptOfflineMedia
+            ? { state: "cached", verification: "archive_attested" }
+            : { state: "declined" },
+        },
+      },
+      offline: true,
+    });
+    const reopened = await openProjectLibrary({ stateRoot: state });
+    expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual([created.projectId]);
+    const imported = await reopened.readProject(created.projectId);
+    expect(imported.envelope).toEqual(projection.document.envelope);
+    expect(imported.records).toEqual(projection.document.records);
+    expect(reopened.listExportReceipts(created.projectId)).toEqual([]);
+    expect(imported.records.sources[0]?.locators).toEqual([]);
+    const cache = await openOfflineMediaCache({ stateRoot: state });
+    const entries = await cache.list();
+    expect(entries).toHaveLength(adoptOfflineMedia ? 1 : 0);
+    const hash = `sha256:${createNativeSelectionHash("sha256").update(rangeBytes).digest("hex")}`;
+    if (adoptOfflineMedia) {
+      expect(entries[0]).toMatchObject({
+        byteSize: 6,
+        sha256: hash,
+        verification: "archive_attested",
+        origin: { kind: "portable_project_archive", archiveManifestHash: archive.manifestHash },
+        range: {
+          sourceId: source.id,
+          sourceSnapshotId: snapshot.id,
+          canonicalAudioFingerprint: snapshot.canonicalAudioFingerprint,
+          sampleRate: selected.sampleRate,
+          startSourceSample: 2,
+          endSourceSample: 5,
+        },
+      });
+      expect(await cache.read(entries[0]!.id)).toEqual(rangeBytes);
+    }
+    const tree = await proofTreeHashes(reopened.activeRoot);
+    const cacheTree = await proofTreeHashes(join(state, "offline-media-cache"));
+    const cold = await openProjectLibrary({ stateRoot: state });
+    expect(await cold.readProject(created.projectId)).toEqual(imported);
+    expect(await proofTreeHashes(cold.activeRoot)).toEqual(tree);
+    const coldCache = await openOfflineMediaCache({ stateRoot: state });
+    expect(await coldCache.list()).toEqual(entries);
+    expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual(cacheTree);
+    if (adoptOfflineMedia) expect(await coldCache.read(entries[0]!.id)).toEqual(rangeBytes);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    expect(await origin.readProject(created.projectId)).toEqual(before);
+    expect(await proofTreeHashes(origin.activeRoot)).toEqual(originTree);
+    expect(readFileSync(sourcePath)).toEqual(sourceBytes);
+    expect(readFileSync(target)).toEqual(archive.archive);
+    // Every pre-existing file outside the destination remains byte-identical.
+    const externalAfter = await proofTreeHashes(root);
+    expect(
+      Object.fromEntries(
+        Object.entries(externalAfter).filter(([path]) => !path.startsWith("destination/")),
+      ),
+    ).toEqual(externalBefore);
+    const document = canonicalSerialize(inspected.document);
+    for (const privateValue of [originState, state, sourcePath, root, target]) {
+      const escaped = JSON.stringify(privateValue).slice(1, -1);
+      for (const value of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+        expect(JSON.stringify(result).includes(value)).toBe(false);
+        expect(document.includes(value)).toBe(false);
+        expect(archive.archive.includes(Buffer.from(value))).toBe(false);
       }
     }
   });
