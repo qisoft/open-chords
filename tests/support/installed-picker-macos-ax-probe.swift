@@ -157,6 +157,21 @@ if arguments.count == 2 && arguments[1] == "--self-test" {
     print("Native macOS disclosure value checks passed: 7")
     print("Native macOS selected-file checks passed: 9")
     print("Native macOS exact attribute checks passed: 10")
+    do {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = root.appendingPathComponent("fixture.json")
+        try Data("private existing native export target fixture".utf8).write(to: fixture)
+        if !isExistingReplacementFixture(fixture.path) { exit(1) }
+        let link = root.appendingPathComponent("link.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: fixture)
+        if isExistingReplacementFixture(link.path) || isExistingReplacementFixture(root.path) ||
+            isExistingReplacementFixture(root.appendingPathComponent("absent.json").path) { exit(1) }
+        try Data(repeating: 0, count: Data("private existing native export target fixture".utf8).count).write(to: fixture)
+        if isExistingReplacementFixture(fixture.path) { exit(1) }
+        print("Native macOS existing replacement fixture checks passed: 5")
+    } catch { exit(1) }
     exit(0)
 }
 let requested = arguments.count >= 4 ? arguments[3] : "none"
@@ -188,7 +203,10 @@ let savesNewText = arguments.count == 6 && arguments[3] == "directory_snapshot" 
 let savesNewPdf = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "pdf" && arguments[5] == "--save-new-pdf"
 let savesNewArchive = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "archive" && arguments[5] == "--save-new-archive"
 let savesNewExport = savesNewJson || savesNewText || savesNewPdf || savesNewArchive
-let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewExport
+let observesReplaceJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--observe-replace-json"
+let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewExport || observesReplaceJson
+var saveTargetExistingFixture = false
+var replaceContext: [String: Any] = ["status": "not_checked", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
 var saveTargetAbsent = false
 var saveFilename: [String: Any] = ["status": "not_checked", "fields": 0, "matches": 0, "absentValues": 0, "enabled": false, "labelMatched": false, "fieldAttached": false, "labelAttached": false, "visited": 0, "verified": false, "error": 0, "attribute": "none"]
 var saveTargetContext: [String: Any] = ["status": "not_checked", "fields": 0, "valueMatches": 0, "enabledMatches": 0, "labelMatches": 0, "descriptionMatches": 0, "linkedLabelMatches": 0, "linkedLabelRole": "none", "error": 0, "attribute": "none"]
@@ -484,6 +502,78 @@ func verifySaveFilename(_ fields: [AXUIElement], expected: String, pid: pid_t, s
     return result
 }
 
+// The observation action is restricted to a fixed regular fixture, never arbitrary existing data.
+func isExistingReplacementFixture(_ path: String) -> Bool {
+    let expected = Data("private existing native export target fixture".utf8)
+    var original = stat()
+    guard lstat(path, &original) == 0, (original.st_mode & S_IFMT) == S_IFREG,
+          original.st_size == expected.count else { return false }
+    let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+    guard descriptor >= 0 else { return false }
+    defer { close(descriptor) }
+    var current = stat()
+    guard fstat(descriptor, &current) == 0, current.st_dev == original.st_dev,
+          current.st_ino == original.st_ino, current.st_size == expected.count,
+          (current.st_mode & S_IFMT) == S_IFREG else { return false }
+    let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+    return (try? file.read(upToCount: expected.count + 1)) == expected
+}
+
+// Fresh read-only context after one guarded Save. No confirmation control is pressed.
+func observeReplacementContext(_ app: AXUIElement, pid: pid_t) -> [String: Any] {
+    var result: [String: Any] = ["status": "complete", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
+    func refuse(_ status: String, _ error: AXError = .success) {
+        if (result["status"] as? String) == "complete" { result["status"] = status; result["error"] = Int(error.rawValue) }
+    }
+    func attribute(_ element: AXUIElement, _ name: String, optional: Bool = false) -> CFTypeRef? {
+        guard ProcessInfo.processInfo.systemUptime < deadline else { refuse("deadline"); return nil }
+        let timeout = AXUIElementSetMessagingTimeout(element, 0.15)
+        guard timeout == .success else { refuse("error", timeout); return nil }
+        var value: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+        if optional && (status == .noValue || status == .attributeUnsupported) { return nil }
+        guard status == .success else { refuse("error", status); return nil }
+        return value
+    }
+    guard let windows = attribute(app, "AXWindows") as? [AXUIElement] else {
+        if (result["status"] as? String) == "complete" { refuse("invalid_value") }; return result
+    }
+    result["windows"] = min(17, windows.count)
+    guard !windows.isEmpty, windows.count <= 16 else { refuse(windows.isEmpty ? "invalid_value" : "bound"); return result }
+    var queue = windows
+    var seen: [AXUIElement] = []
+    while !queue.isEmpty && (result["status"] as? String) == "complete" {
+        if seen.count >= 256 { refuse("bound"); break }
+        let element = queue.removeFirst()
+        if seen.contains(where: { CFEqual($0, element) }) { continue }
+        seen.append(element); result["visited"] = seen.count
+        var actualPid: pid_t = 0
+        let pidStatus = AXUIElementGetPid(element, &actualPid)
+        guard pidStatus == .success, actualPid == pid else { refuse("error", pidStatus == .success ? .illegalArgument : pidStatus); break }
+        guard let role = attribute(element, "AXRole") as? String else {
+            if (result["status"] as? String) == "complete" { refuse("invalid_value") }; break
+        }
+        let key = role == "AXSheet" ? "sheets" : role == "AXDialog" ? "dialogs" : role == "AXButton" ? "buttons" : "other"
+        result[key] = (result[key] as? Int ?? 0) + 1
+        if role == "AXButton" {
+            let title = attribute(element, "AXTitle", optional: true) as? String
+            if let title = title, ["Cancel", "Replace", "Save"].contains(title) {
+                let key = title.lowercased(); result[key] = (result[key] as? Int ?? 0) + 1
+            }
+        }
+        if role == "AXWebArea" { continue }
+        let raw = attribute(element, "AXChildren", optional: true)
+        if let raw = raw {
+            guard let children = raw as? [AXUIElement] else { refuse("invalid_value"); break }
+            if queue.count + children.count + seen.count > 256 { refuse("bound"); break }
+            queue.append(contentsOf: children)
+        }
+    }
+    result["foreground"] = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    if ProcessInfo.processInfo.systemUptime >= deadline { refuse("deadline") }
+    return result
+}
+
 if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && expectedSaveName != nil) || (verifiesFilename && expectedSaveName != nil)), ["none", "open", "cancel_open_existing", "directory_snapshot"].contains(requested),
    let pid = Int32(arguments[1]), pid > 0, arguments[2].hasPrefix("/") {
     let target = URL(fileURLWithPath: arguments[2])
@@ -755,7 +845,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             }
         }
     }
-    let saveReady = savesNewExport && directoryVerified && (saveFilename["verified"] as? Bool) == true && saveButtons.count == 1
+    let saveReady = (savesNewExport || observesReplaceJson) && directoryVerified && (saveFilename["verified"] as? Bool) == true && saveButtons.count == 1
     if ((["open", "cancel_open_existing"].contains(requested) && verified) || saveReady) && buttons.count == 1 && sheets.count == 1 && parents.count == 1 {
         guardMask = 0
         stage = "guard"
@@ -782,8 +872,9 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             var existing = stat()
             let destination = target.appendingPathComponent(saveName).path
             saveTargetAbsent = lstat(destination, &existing) != 0 && errno == ENOENT
+            if observesReplaceJson { saveTargetExistingFixture = isExistingReplacementFixture(destination) }
         }
-        if guardMask == 255 && (!saveReady || (saveTargetAbsent && ProcessInfo.processInfo.systemUptime < deadline)) {
+        if guardMask == 255 && (!saveReady || ((observesReplaceJson ? saveTargetExistingFixture : saveTargetAbsent) && ProcessInfo.processInfo.systemUptime < deadline)) {
             stage = "press"
             let pressStarted = ProcessInfo.processInfo.systemUptime
             // Action callbacks can outlast the 150 ms attribute-read timeout.
@@ -809,7 +900,11 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
                     }
                 }
             }
-            if pressed {
+            if pressed && observesReplaceJson {
+                replaceContext = observeReplacementContext(app, pid: pid)
+                stage = "replace_observed"
+            }
+            if pressed && !observesReplaceJson {
                 stage = "dismissal"
                 let dismissDeadline = ProcessInfo.processInfo.systemUptime + 2
                 while ProcessInfo.processInfo.systemUptime < dismissDeadline {
@@ -848,8 +943,8 @@ let result: [String: Any] = [
     "firstCannotCompleteAttribute": firstCannotCompleteAttribute,
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
-    "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask, "guardEnabledState": guardEnabledState,
-    "action": ["requested": savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
+    "saveTargetExistingFixture": saveTargetExistingFixture, "replaceContext": replaceContext, "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask, "guardEnabledState": guardEnabledState,
+    "action": ["requested": observesReplaceJson ? "observe_replace_json" : savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
    let output = String(data: data, encoding: .utf8) { print(output) }

@@ -124,6 +124,23 @@ const evidenceSchema = z.strictObject({
   invalidChildParent: parentObservationSchema,
   firstFailureParent: parentObservationSchema.optional(),
   saveTargetAbsent: z.boolean().default(false),
+  saveTargetExistingFixture: z.boolean().default(false),
+  replaceContext: z
+    .strictObject({
+      status: z.enum(["not_checked", "complete", "deadline", "error", "invalid_value", "bound"]),
+      visited: z.number().int().min(0).max(256),
+      windows: z.number().int().min(0).max(17),
+      sheets: z.number().int().min(0).max(256),
+      dialogs: z.number().int().min(0).max(256),
+      buttons: z.number().int().min(0).max(256),
+      cancel: z.number().int().min(0).max(256),
+      replace: z.number().int().min(0).max(256),
+      save: z.number().int().min(0).max(256),
+      other: z.number().int().min(0).max(256),
+      foreground: z.boolean(),
+      error: z.number().int().min(-32768).max(32767),
+    })
+    .optional(),
   saveFilename: z
     .strictObject({
       status: z.enum([
@@ -345,6 +362,7 @@ const evidenceSchema = z.strictObject({
     "dismissal",
     "complete",
     "directory_complete",
+    "replace_observed",
   ]),
   action: z.strictObject({
     requested: z.enum([
@@ -357,6 +375,7 @@ const evidenceSchema = z.strictObject({
       "save_new_chordpro",
       "save_new_pdf",
       "save_new_archive",
+      "observe_replace_json",
     ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
@@ -396,6 +415,8 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       saveTargetContext,
       saveFilename,
       saveTargetAbsent,
+      saveTargetExistingFixture,
+      replaceContext,
       staleSnapshot,
       invalidChildParent,
       firstFailureParent,
@@ -437,6 +458,10 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
         ([key, value]) => `first_failure_parent_${key}=${value}`,
       ),
       `save_target_absent=${saveTargetAbsent}`,
+      `save_target_existing_fixture=${saveTargetExistingFixture}`,
+      ...Object.entries(replaceContext ?? {}).map(
+        ([key, value]) => `replace_context_${key}=${value}`,
+      ),
       ...Object.entries(saveFilename).map(([key, value]) => `save_filename_${key}=${value}`),
       ...Object.entries(saveTargetContext).map(([key, value]) => `save_target_${key}=${value}`),
       ...Object.entries(selectedDirectory).map(
@@ -679,6 +704,35 @@ function nativeSaveSucceeded(
       value.action.requested === `save_new_${format}` &&
       value.action.pressed &&
       value.action.dismissed
+    );
+  } catch {
+    return false;
+  }
+}
+
+// This proves bounded observation only, never confirmation dismissal or replacement.
+export function installedMacReplaceContextObserved(stdout: string) {
+  if (stdout.length > 4096) return false;
+  try {
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const value = parsed.data;
+    return (
+      directoryEvidenceVerified(value) &&
+      filenameEvidenceVerified(value.saveFilename) &&
+      value.saveTargetExistingFixture &&
+      !value.saveTargetAbsent &&
+      value.lastError === 0 &&
+      value.stage === "replace_observed" &&
+      value.action.requested === "observe_replace_json" &&
+      value.action.pressed &&
+      !value.action.dismissed &&
+      value.replaceContext?.status === "complete" &&
+      value.replaceContext.error === 0 &&
+      value.replaceContext.windows > 0 &&
+      value.replaceContext.windows <= 16 &&
+      value.replaceContext.visited > 0 &&
+      value.replaceContext.foreground
     );
   } catch {
     return false;

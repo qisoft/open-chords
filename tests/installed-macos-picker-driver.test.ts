@@ -878,3 +878,90 @@ it("redacts private or unbounded first-failure parent evidence", () => {
     expect(result).toBe("Native macOS AX probe: invalid_evidence");
   }
 });
+
+const replaceObserved = {
+  ...filenameSnapshot,
+  saveTargetExistingFixture: true,
+  saveTargetAbsent: false,
+  stage: "replace_observed",
+  action: { requested: "observe_replace_json", pressed: true, dismissed: false },
+  replaceContext: {
+    status: "complete",
+    visited: 20,
+    windows: 1,
+    sheets: 2,
+    dialogs: 0,
+    buttons: 4,
+    cancel: 2,
+    replace: 1,
+    save: 1,
+    other: 14,
+    foreground: true,
+    error: 0,
+  },
+};
+it("observes replacement with one guarded Save and no confirmation or Cancel action", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    replaceObserved,
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await installedMacPickerDriver(
+    "observe_replace_json",
+    "/private/directory",
+    () => ({}),
+    "json",
+  )(42);
+  expect(execute).toHaveBeenCalledTimes(6);
+  expect(execute.mock.calls[5]?.[1]).toEqual([
+    "42",
+    "/private/directory",
+    "directory_snapshot",
+    "json",
+    "--observe-replace-json",
+  ]);
+});
+it.each([
+  { saveTargetExistingFixture: false },
+  { guardMask: 254 },
+  { replaceContext: { ...replaceObserved.replaceContext, status: "error", error: -25202 } },
+])("does not retry a refused replacement observation %j", async (change) => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    { ...replaceObserved, ...change },
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await expect(
+    installedMacPickerDriver("observe_replace_json", "/private/directory", () => ({}), "json")(42),
+  ).rejects.toThrow("Native macOS AX probe:");
+  expect(execute).toHaveBeenCalledTimes(6);
+});
+
+it.each([
+  { target: undefined, format: "json" as const },
+  { target: "/private/directory", format: "lrc" as const },
+])(
+  "refuses replacement observation before native execution without a JSON target %j",
+  async ({ target, format }) => {
+    await expect(
+      installedMacPickerDriver("observe_replace_json", target, () => ({}), format)(42),
+    ).rejects.toThrow("Native macOS JSON Save target unavailable");
+    expect(execute).not.toHaveBeenCalled();
+  },
+);

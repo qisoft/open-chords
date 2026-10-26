@@ -10,6 +10,7 @@ import {
   installedMacTextSaveSucceeded,
   installedMacPdfSaveSucceeded,
   installedMacArchiveSaveSucceeded,
+  installedMacReplaceContextObserved,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -1062,4 +1063,72 @@ it.each([
   expect(installedMacArchiveSaveSucceeded(JSON.stringify({ ...archiveSave, ...change }))).toBe(
     false,
   );
+});
+
+const replacementObservation = {
+  ...directorySnapshot,
+  lastError: 0,
+  saveFilename: filenameProof,
+  saveTargetExistingFixture: true,
+  saveTargetAbsent: false,
+  stage: "replace_observed",
+  action: { requested: "observe_replace_json", pressed: true, dismissed: false },
+  replaceContext: {
+    status: "complete",
+    visited: 20,
+    windows: 1,
+    sheets: 2,
+    dialogs: 0,
+    buttons: 4,
+    cancel: 2,
+    replace: 1,
+    save: 1,
+    other: 14,
+    foreground: true,
+    error: 0,
+  },
+};
+it("accepts only bounded replacement observation and never reports a completed Save", () => {
+  const output = JSON.stringify(replacementObservation);
+  expect(installedMacReplaceContextObserved(output)).toBe(true);
+  expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain("replace_context_replace=1");
+});
+it.each([
+  { saveTargetExistingFixture: false },
+  { saveTargetAbsent: true },
+  { guardMask: 254 },
+  { directoryVerified: false },
+  { saveFilename: { ...filenameProof, labelAttached: false } },
+  { action: { requested: "observe_replace_json", pressed: false, dismissed: false } },
+  { action: { requested: "observe_replace_json", pressed: true, dismissed: true } },
+  { replaceContext: { ...replacementObservation.replaceContext, status: "deadline" } },
+  { replaceContext: { ...replacementObservation.replaceContext, foreground: false } },
+  { replaceContext: { ...replacementObservation.replaceContext, windows: 0 } },
+  { replaceContext: { ...replacementObservation.replaceContext, visited: 257 } },
+  { replaceContext: { ...replacementObservation.replaceContext, error: -25202 } },
+  {
+    replaceContext: {
+      ...replacementObservation.replaceContext,
+      title: "private existing native export target fixture",
+    },
+  },
+  { replaceContext: { ...replacementObservation.replaceContext, status: "/private/path" } },
+])("refuses incomplete or private replacement context %j", (change) => {
+  const output = JSON.stringify({ ...replacementObservation, ...change });
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+});
+
+it.each([
+  { ...replacementObservation.replaceContext, title: "private fixture" },
+  { ...replacementObservation.replaceContext, status: "/private/path" },
+  { ...replacementObservation.replaceContext, url: "https://private.invalid/token" },
+])("redacts invalid private replacement observations", (replaceContext) => {
+  expect(
+    installedMacAxProbeDiagnostic(
+      JSON.stringify({ ...replacementObservation, replaceContext }),
+      null,
+      1,
+    ),
+  ).toBe("Native macOS AX probe: invalid_evidence");
 });
