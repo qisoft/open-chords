@@ -1011,6 +1011,49 @@ for (const { adoptOfflineMedia, wholeSource } of [
     const finalLibrary = await openProjectLibrary({ stateRoot: state });
     expect(await finalLibrary.readProject(created.projectId)).toEqual(imported);
     expect(await proofTreeHashes(finalLibrary.activeRoot)).toEqual(tree);
+    const verifiedCacheReplays: unknown[] = [];
+    if (wholeSource) {
+      for (const adoptVerifiedMedia of [true, false]) {
+        const replay = await inspectInstalled(
+          state,
+          `(async () => {
+            const response = await window.openChords.archives.import({ adoptOfflineMedia: ${String(adoptVerifiedMedia)} });
+            const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+            return { response, offline };
+          })()`,
+          installedSystemEnvironment(),
+          installedMacPickerDriver("open", target, installedSystemEnvironment),
+        );
+        verifiedCacheReplays.push(replay);
+        expect(replay).toMatchObject({
+          response: {
+            type: "archives.import_result",
+            result: {
+              state: "already_present",
+              projectId: created.projectId,
+              importedCopy: false,
+              offlineMedia: adoptVerifiedMedia
+                ? { state: "already_cached", verification: "snapshot_fingerprint" }
+                : { state: "declined" },
+            },
+          },
+          offline: true,
+        });
+        const replayLibrary = await openProjectLibrary({ stateRoot: state });
+        expect(replayLibrary.listProjects().map(({ projectId }) => projectId)).toEqual([
+          created.projectId,
+        ]);
+        expect(await replayLibrary.readProject(created.projectId)).toEqual(imported);
+        expect(replayLibrary.listExportReceipts(created.projectId)).toEqual([]);
+        expect(await proofTreeHashes(replayLibrary.activeRoot)).toEqual(tree);
+        const replayCache = await openOfflineMediaCache({ stateRoot: state });
+        expect(await replayCache.list()).toEqual(repeatedEntries);
+        expect(await replayCache.read(repeatedEntries[0]!.id)).toEqual(rangeBytes);
+        expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual(
+          repeatedCacheTree,
+        );
+      }
+    }
     expect((await openNetworkMode(state)).offline).toBe(true);
     expect(await origin.readProject(created.projectId)).toEqual(before);
     expect(await proofTreeHashes(origin.activeRoot)).toEqual(originTree);
@@ -1029,6 +1072,7 @@ for (const { adoptOfflineMedia, wholeSource } of [
       for (const value of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
         expect(JSON.stringify(result).includes(value)).toBe(false);
         expect(JSON.stringify(repeated).includes(value)).toBe(false);
+        expect(JSON.stringify(verifiedCacheReplays).includes(value)).toBe(false);
         expect(document.includes(value)).toBe(false);
         expect(archive.archive.includes(Buffer.from(value))).toBe(false);
       }
