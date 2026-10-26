@@ -433,3 +433,27 @@ it("preserves only fixed filename read failure thread evidence", () => {
     expect(result).not.toContain("filename thread probe");
   }
 });
+
+it("retains fixed failure responsiveness and bounded dismissal visibility timing", () => {
+  const lines = [
+    "Native Save filename response probe: dialog_responsive=false field_responsive=true",
+    "Native Save dismissal visibility probe: first_hidden_ms=24 changes=1",
+  ];
+  const output = installedSaveDriverDiagnostic({}, lines.join("\n"), 1);
+  for (const line of lines) expect(output).toContain(line);
+  expect(installedSaveDriverDiagnostic({}, lines[1]!.replace("=24", "=unknown"), 1)).toContain(
+    "first_hidden_ms=unknown",
+  );
+  for (const bad of [
+    lines[0] + " /private/path",
+    lines[0]!.replace("=false", "=/private/response"),
+    lines[1]!.replace("changes=1", "changes=257"),
+    lines[1]!.replace("=24", "=-1"),
+    lines[1] + " /private/window",
+  ]) {
+    const result = installedSaveDriverDiagnostic({}, bad, 1);
+    expect(result).not.toContain("private");
+    expect(result).not.toContain("filename response probe");
+    expect(result).not.toContain("dismissal visibility probe");
+  }
+});

@@ -119,6 +119,22 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
       ),
     )
     .slice(-3);
+  const failureTimings = output
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (
+        /^Native Save filename response probe: dialog_responsive=(?:true|false) field_responsive=(?:true|false)$/.test(
+          line,
+        )
+      )
+        return true;
+      const visibility =
+        /^Native Save dismissal visibility probe: first_hidden_ms=(?:unknown|[0-9]{1,6}) changes=([0-9]{1,3})$/.exec(
+          line,
+        );
+      return visibility !== null && Number(visibility[1]) <= 256;
+    })
+    .slice(-2);
   const filenameErrors = output
     .split(/\r?\n/)
     .filter((line) =>
@@ -169,6 +185,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ...(counters ? [counters] : []),
     ...filenameReads,
     ...filenameErrors,
+    ...failureTimings,
     ...probes,
     ...windowProbes,
     ...dismissalProbes,

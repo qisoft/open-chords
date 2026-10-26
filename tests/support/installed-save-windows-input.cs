@@ -199,7 +199,11 @@ public static class SaveNativeInput {
         " dialog_exists=" + IsWindow(dialog).ToString().ToLowerInvariant() +
         " field_exists=" + IsWindow(field).ToString().ToLowerInvariant() +
         " field_child=" + IsChild(dialog, field).ToString().ToLowerInvariant());
-      try { ProbeInputTarget(dialog, field, processId, "filename_read_failure"); }
+      try {
+        ProbeInputTarget(dialog, field, processId, "filename_read_failure");
+        Console.Error.WriteLine("Native Save filename response probe: dialog_responsive=" + Responsive(dialog) +
+          " field_responsive=" + Responsive(field));
+      }
       catch { Console.Error.WriteLine("Native Save filename thread probe: unavailable"); }
       throw new InvalidOperationException("Native Save filename read unavailable");
     }
@@ -386,9 +390,20 @@ public static class SaveNativeInput {
   }
   public static void WaitForDismissal(IntPtr window, IntPtr control, uint expectedProcessId) {
     var elapsed = System.Diagnostics.Stopwatch.StartNew();
-    while (IsWindow(window) && elapsed.ElapsedMilliseconds < 2000)
+    long firstHiddenMs = -1;
+    int visibilityChanges = 0;
+    bool? previousVisible = null;
+    while (IsWindow(window) && elapsed.ElapsedMilliseconds < 2000) {
+      bool visible = IsWindowVisible(window);
+      if (!visible && firstHiddenMs < 0) firstHiddenMs = elapsed.ElapsedMilliseconds;
+      if (previousVisible.HasValue && previousVisible.Value != visible) visibilityChanges = Math.Min(256, visibilityChanges + 1);
+      previousVisible = visible;
       System.Threading.Thread.Sleep(20);
+    }
     if (IsWindow(window)) {
+      Console.Error.WriteLine("Native Save dismissal visibility probe: first_hidden_ms=" +
+        (firstHiddenMs < 0 ? "unknown" : Math.Min(999999, firstHiddenMs).ToString()) +
+        " changes=" + visibilityChanges);
       uint dialogPid, controlPid, foregroundPid;
       GetWindowThreadProcessId(window, out dialogPid);
       GetWindowThreadProcessId(control, out controlPid);
