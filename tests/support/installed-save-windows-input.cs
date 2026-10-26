@@ -199,6 +199,8 @@ public static class SaveNativeInput {
         " dialog_exists=" + IsWindow(dialog).ToString().ToLowerInvariant() +
         " field_exists=" + IsWindow(field).ToString().ToLowerInvariant() +
         " field_child=" + IsChild(dialog, field).ToString().ToLowerInvariant());
+      try { ProbeInputTarget(dialog, field, processId, "filename_read_failure"); }
+      catch { Console.Error.WriteLine("Native Save filename thread probe: unavailable"); }
       throw new InvalidOperationException("Native Save filename read unavailable");
     }
     return text.ToString();

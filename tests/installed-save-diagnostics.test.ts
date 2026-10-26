@@ -415,3 +415,21 @@ it("keeps bounded dismissal identity booleans without native identifiers", () =>
   expect(output.split(probe)).toHaveLength(4);
   expect(output).not.toContain("private");
 });
+
+it("preserves only fixed filename read failure thread evidence", () => {
+  const line =
+    "Native Save input target probe: phase=filename_read_failure class=edit id=filename child=true owned=true thread_known=true active_dialog=true focus_control=true capture_control=false";
+  const unavailable = "Native Save filename thread probe: unavailable";
+  expect(installedSaveDriverDiagnostic({}, `${line}\n${unavailable}`, 1)).toContain(line);
+  expect(installedSaveDriverDiagnostic({}, unavailable, 1)).toContain(unavailable);
+  for (const invalid of [
+    line + " /private/path",
+    line.replace("focus_control=true", "focus_control=/private/field"),
+    unavailable + " /private/error",
+  ]) {
+    const result = installedSaveDriverDiagnostic({}, invalid, 1);
+    expect(result).not.toContain("private");
+    expect(result).not.toContain("filename_read_failure");
+    expect(result).not.toContain("filename thread probe");
+  }
+});
