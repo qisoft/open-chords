@@ -900,9 +900,10 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
                     }
                 }
             }
-            if pressed && observesReplaceJson {
+            if observesReplaceJson {
+                // Capture the actual context even when AXPress refuses; retain the original fatal result.
                 replaceContext = observeReplacementContext(app, pid: pid)
-                stage = "replace_observed"
+                if pressed { stage = "replace_observed" }
             }
             if pressed && !observesReplaceJson {
                 stage = "dismissal"

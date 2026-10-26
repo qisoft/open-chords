@@ -1132,3 +1132,20 @@ it.each([
     ),
   ).toBe("Native macOS AX probe: invalid_evidence");
 });
+
+it("retains failed Save refusal even when replacement context was observed", () => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    lastError: -25205,
+    stage: "press",
+    pressDurationMs: 90,
+    pressSheetState: "attached_sheet",
+    action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+  });
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+  const diagnostic = installedMacAxProbeDiagnostic(output, null, 100);
+  expect(diagnostic).toContain("last_error=-25205");
+  expect(diagnostic).toContain("replace_context_status=complete");
+  expect(diagnostic).toContain("replace_context_replace=1");
+  expect(diagnostic).toContain("pressed=false");
+});

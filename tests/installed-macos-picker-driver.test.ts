@@ -965,3 +965,30 @@ it.each([
     expect(execute).not.toHaveBeenCalled();
   },
 );
+
+it("never retries failed Save despite a complete post-failure replacement snapshot", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    {
+      ...replaceObserved,
+      lastError: -25205,
+      stage: "press",
+      pressDurationMs: 90,
+      pressSheetState: "attached_sheet",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+    },
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await expect(
+    installedMacPickerDriver("observe_replace_json", "/private/directory", () => ({}), "json")(42),
+  ).rejects.toThrow("last_error=-25205");
+  expect(execute).toHaveBeenCalledTimes(6);
+});
