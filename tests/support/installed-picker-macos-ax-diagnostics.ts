@@ -137,6 +137,19 @@ const evidenceSchema = z.strictObject({
       replace: z.number().int().min(0).max(256),
       save: z.number().int().min(0).max(256),
       other: z.number().int().min(0).max(256),
+      attribute: z
+        .enum(["none", "pid", "AXWindows", "AXRole", "AXTitle", "AXChildren", "AXActions"])
+        .optional(),
+      role: z
+        .enum(["unknown", "window", "sheet", "dialog", "button", "web_area", "other"])
+        .optional(),
+      parentRole: z
+        .enum(["none", "window", "sheet", "dialog", "button", "web_area", "other"])
+        .optional(),
+      pidState: z.enum(["not_checked", "same", "foreign", "unknown"]).optional(),
+      saveActionStatus: z.enum(["success", "deadline", "error", "invalid_value"]).optional(),
+      savePressAction: z.enum(["unknown", "present", "absent"]).optional(),
+      saveActionError: z.number().int().min(-32768).max(32767).optional(),
       foreground: z.boolean(),
       error: z.number().int().min(-32768).max(32767),
     })

@@ -520,12 +520,29 @@ func isExistingReplacementFixture(_ path: String) -> Bool {
 }
 
 // Fresh read-only context after one guarded Save. No confirmation control is pressed.
-func observeReplacementContext(_ app: AXUIElement, pid: pid_t) -> [String: Any] {
+func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement) -> [String: Any] {
     var result: [String: Any] = ["status": "complete", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
+    var currentAttribute = "none", currentRole = "unknown", currentParentRole = "none", currentPidState = "not_checked"
+    result["attribute"] = "none"; result["role"] = "unknown"; result["parentRole"] = "none"; result["pidState"] = "not_checked"
+    func roleCategory(_ role: String) -> String {
+        switch role {
+        case "AXWindow": return "window"
+        case "AXSheet": return "sheet"
+        case "AXDialog": return "dialog"
+        case "AXButton": return "button"
+        case "AXWebArea": return "web_area"
+        default: return "other"
+        }
+    }
     func refuse(_ status: String, _ error: AXError = .success) {
-        if (result["status"] as? String) == "complete" { result["status"] = status; result["error"] = Int(error.rawValue) }
+        if (result["status"] as? String) == "complete" {
+            result["status"] = status; result["error"] = Int(error.rawValue)
+            result["attribute"] = currentAttribute; result["role"] = currentRole
+            result["parentRole"] = currentParentRole; result["pidState"] = currentPidState
+        }
     }
     func attribute(_ element: AXUIElement, _ name: String, optional: Bool = false) -> CFTypeRef? {
+        currentAttribute = name
         guard ProcessInfo.processInfo.systemUptime < deadline else { refuse("deadline"); return nil }
         let timeout = AXUIElementSetMessagingTimeout(element, 0.15)
         guard timeout == .success else { refuse("error", timeout); return nil }
@@ -540,19 +557,23 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t) -> [String: Any] 
     }
     result["windows"] = min(17, windows.count)
     guard !windows.isEmpty, windows.count <= 16 else { refuse(windows.isEmpty ? "invalid_value" : "bound"); return result }
-    var queue = windows
+    var queue = windows.map { ($0, "none") }
     var seen: [AXUIElement] = []
     while !queue.isEmpty && (result["status"] as? String) == "complete" {
         if seen.count >= 256 { refuse("bound"); break }
-        let element = queue.removeFirst()
+        let (element, parentRole) = queue.removeFirst()
+        currentRole = "unknown"; currentParentRole = parentRole; currentPidState = "not_checked"
         if seen.contains(where: { CFEqual($0, element) }) { continue }
         seen.append(element); result["visited"] = seen.count
         var actualPid: pid_t = 0
+        currentAttribute = "pid"
         let pidStatus = AXUIElementGetPid(element, &actualPid)
+        currentPidState = pidStatus != .success ? "unknown" : actualPid == pid ? "same" : "foreign"
         guard pidStatus == .success, actualPid == pid else { refuse("error", pidStatus == .success ? .illegalArgument : pidStatus); break }
         guard let role = attribute(element, "AXRole") as? String else {
             if (result["status"] as? String) == "complete" { refuse("invalid_value") }; break
         }
+        currentRole = roleCategory(role)
         let key = role == "AXSheet" ? "sheets" : role == "AXDialog" ? "dialogs" : role == "AXButton" ? "buttons" : "other"
         result[key] = (result[key] as? Int ?? 0) + 1
         if role == "AXButton" {
@@ -566,8 +587,20 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t) -> [String: Any] 
         if let raw = raw {
             guard let children = raw as? [AXUIElement] else { refuse("invalid_value"); break }
             if queue.count + children.count + seen.count > 256 { refuse("bound"); break }
-            queue.append(contentsOf: children)
+            queue.append(contentsOf: children.map { ($0, currentRole) })
         }
+    }
+    currentAttribute = "AXActions"; currentRole = "button"; currentParentRole = "none"; currentPidState = "not_checked"
+    result["saveActionStatus"] = "deadline"; result["savePressAction"] = "unknown"; result["saveActionError"] = 0
+    if ProcessInfo.processInfo.systemUptime < deadline {
+        let timeout = AXUIElementSetMessagingTimeout(save, 0.15)
+        var actions: CFArray?
+        let status = timeout == .success ? AXUIElementCopyActionNames(save, &actions) : timeout
+        result["saveActionError"] = Int(status.rawValue)
+        if status == .success, let names = actions as? [String], names.count <= 16 {
+            result["saveActionStatus"] = "success"
+            result["savePressAction"] = names.contains("AXPress") ? "present" : "absent"
+        } else { result["saveActionStatus"] = status == .success ? "invalid_value" : "error" }
     }
     result["foreground"] = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
     if ProcessInfo.processInfo.systemUptime >= deadline { refuse("deadline") }
@@ -902,7 +935,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             }
             if observesReplaceJson {
                 // Capture the actual context even when AXPress refuses; retain the original fatal result.
-                replaceContext = observeReplacementContext(app, pid: pid)
+                replaceContext = observeReplacementContext(app, pid: pid, save: button)
                 if pressed { stage = "replace_observed" }
             }
             if pressed && !observesReplaceJson {

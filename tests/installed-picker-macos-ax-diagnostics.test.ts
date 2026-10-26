@@ -1149,3 +1149,53 @@ it("retains failed Save refusal even when replacement context was observed", () 
   expect(diagnostic).toContain("replace_context_replace=1");
   expect(diagnostic).toContain("pressed=false");
 });
+
+it.each([
+  { attribute: "pid", role: "unknown", parentRole: "sheet", pidState: "foreign" },
+  { attribute: "AXTitle", role: "button", parentRole: "other", pidState: "same" },
+])(
+  "distinguishes first replacement read failure categories without accepting the failed action %j",
+  (firstFailure) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        ...firstFailure,
+        saveActionStatus: "success",
+        savePressAction: "present",
+        saveActionError: 0,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 100);
+    expect(diagnostic).toContain(`replace_context_attribute=${firstFailure.attribute}`);
+    expect(diagnostic).toContain(`replace_context_role=${firstFailure.role}`);
+    expect(diagnostic).toContain(`replace_context_parentRole=${firstFailure.parentRole}`);
+    expect(diagnostic).toContain(`replace_context_pidState=${firstFailure.pidState}`);
+    expect(diagnostic).toContain("replace_context_savePressAction=present");
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { attribute: "/private/path" },
+  { role: "private title" },
+  { parentRole: "https://private.invalid/token" },
+  { pidState: "42" },
+  { saveActionStatus: "private" },
+  { savePressAction: "private" },
+  { saveActionError: 32768 },
+])("redacts unbounded or private replacement failure detail %j", (change) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...change },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 100)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+});
