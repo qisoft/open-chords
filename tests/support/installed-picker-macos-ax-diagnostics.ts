@@ -102,6 +102,17 @@ const AX_ORIGIN_KEYS = [
   "guard",
 ] as const;
 
+const parentObservationSchema = z.strictObject({
+  status: z.enum(["not_checked", "complete", "deadline", "error", "invalid_value", "bound"]),
+  role: z.enum(AX_ROLE_KEYS),
+  pidMatches: z.boolean(),
+  selectedReference: z.boolean(),
+  children: z.number().int().min(0).max(257),
+  containsFailedReference: z.enum(["true", "false", "unknown"]),
+  attribute: z.enum(["none", "pid", "AXRole", "AXChildren"]),
+  error: z.number().int().min(-32768).max(32767),
+});
+
 const evidenceSchema = z.strictObject({
   staleSnapshot: z.strictObject({
     eligible: z.boolean(),
@@ -110,16 +121,8 @@ const evidenceSchema = z.strictObject({
     allVanished: z.boolean(),
     onlyInvalidChildErrors: z.boolean(),
   }),
-  invalidChildParent: z.strictObject({
-    status: z.enum(["not_checked", "complete", "deadline", "error", "invalid_value", "bound"]),
-    role: z.enum(AX_ROLE_KEYS),
-    pidMatches: z.boolean(),
-    selectedReference: z.boolean(),
-    children: z.number().int().min(0).max(257),
-    containsFailedReference: z.enum(["true", "false", "unknown"]),
-    attribute: z.enum(["none", "pid", "AXRole", "AXChildren"]),
-    error: z.number().int().min(-32768).max(32767),
-  }),
+  invalidChildParent: parentObservationSchema,
+  firstFailureParent: parentObservationSchema.optional(),
   saveTargetAbsent: z.boolean().default(false),
   saveFilename: z
     .strictObject({
@@ -395,6 +398,7 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       saveTargetAbsent,
       staleSnapshot,
       invalidChildParent,
+      firstFailureParent,
       parentChain,
       firstCannotCompleteAttribute,
       firstCannotCompleteStage,
@@ -428,6 +432,9 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       ...Object.entries(staleSnapshot).map(([key, value]) => `stale_snapshot_${key}=${value}`),
       ...Object.entries(invalidChildParent).map(
         ([key, value]) => `invalid_child_parent_${key}=${value}`,
+      ),
+      ...Object.entries(firstFailureParent ?? {}).map(
+        ([key, value]) => `first_failure_parent_${key}=${value}`,
       ),
       `save_target_absent=${saveTargetAbsent}`,
       ...Object.entries(saveFilename).map(([key, value]) => `save_filename_${key}=${value}`),

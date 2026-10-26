@@ -212,6 +212,8 @@ var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
 var selectedDirectory: [String: Any] = ["fields": 0, "uniqueUrls": 0, "terminalUrls": 0, "terminalMatches": 0, "validShape": false]
 var invalidChildParent: [String: Any] = ["status": "not_checked", "role": "none", "pidMatches": false, "selectedReference": false, "children": 0, "containsFailedReference": "unknown", "attribute": "none", "error": 0]
+var firstFailureParent = invalidChildParent
+var currentDirectParent: (AXUIElement, pid_t, Bool)? = nil
 var firstExactElement: AXUIElement? = nil
 var parentChain: [String: Any] = ["status": "not_checked", "visited": 0, "selected": 0, "unknownSelected": 0, "roleMask": 0, "nodes": [[String: Any]]()]
 var firstExactURL: [String: Any] = ["role": "none", "parentRole": "none", "origin": "none", "selected": "unknown", "directory": false, "kind": "none", "titleCategory": "unavailable", "valueCategory": "unavailable", "traversalRoleMask": 0, "traversalDepth": 0]
@@ -265,7 +267,12 @@ func readResult(_ element: AXUIElement, _ name: String) -> (status: AXError, val
     if status != .success {
         let invalidChildRead = staleChildContext && !readSelectedReference && !readSelectedBranch &&
             (name == "AXRole" || invalidRoleElement.map { same($0, element) } == true)
+        let firstFailure = firstOtherError == 0
         recordReadError(status, name: name, duration: ProcessInfo.processInfo.systemUptime - readStarted, invalidChildRead: invalidChildRead)
+        if firstFailure && status == .invalidUIElement && staleChildContext && !readSelectedReference && !readSelectedBranch,
+           let (parent, pid, parentSelected) = currentDirectParent {
+            firstFailureParent = invalidChildParentObservation(parent, child: element, pid: pid, selectedReference: parentSelected)
+        }
         return (status, nil)
     }
     return (status, value)
@@ -528,6 +535,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
         counts["visited"] = seen.count
         staleChildContext = ["open", "cancel_open_existing"].contains(requested) && origin == "AXChildren" &&
             parentRole == "AXScrollArea" && !readSelectedReference && !selectedBranch
+        currentDirectParent = directParent.map { parent in (parent, pid, selected.contains(where: { same($0, parent) })) }
         invalidRoleElement = nil
         let roleRead = readResult(element, "AXRole")
         let role = roleRead.value as? String ?? ""
@@ -620,6 +628,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
         queue.append(contentsOf: next)
     }
     staleChildContext = false
+    currentDirectParent = nil
     invalidRoleElement = nil
     if ["none", "directory_snapshot"].contains(requested) {
         let selectedFields = directoryFields.filter { item in selected.contains(where: { same($0, item.1) }) }.map { $0.0 }
@@ -829,7 +838,7 @@ let result: [String: Any] = [
     "staleSnapshot": ["eligible": snapshotRefreshEligible, "traversalComplete": snapshotTraversalComplete, "candidates": vanishedChildCandidates,
         "allVanished": vanishedChildCandidates > 0 && allInvalidChildrenVanished,
         "onlyInvalidChildErrors": counts["otherErrors", default: 0] > 0 && onlyInvalidChildErrors],
-    "counts": counts, "invalidChildParent": invalidChildParent, "selectedDirectory": selectedDirectory, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
+    "counts": counts, "invalidChildParent": invalidChildParent, "firstFailureParent": firstFailureParent, "selectedDirectory": selectedDirectory, "firstExactURL": firstExactURL, "parentChain": parentChain, "lastError": lastError, "dismissalLastError": dismissalLastError,
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
