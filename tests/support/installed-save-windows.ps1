@@ -208,6 +208,18 @@ while ([DateTime]::UtcNow -lt $deadline) {
         [SaveNativeInput]::TypeFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid, $TargetPath)
         $inputDeadline = [DateTime]::UtcNow.AddSeconds(2)
         do {
+          $readinessStarted = [DateTime]::UtcNow
+          $filenameReady = $false
+          do {
+            $remainingMs = [int][Math]::Floor(($inputDeadline - [DateTime]::UtcNow).TotalMilliseconds)
+            if ($remainingMs -le 250) { break }
+            $filenameReady = [SaveNativeInput]::FilenameReady([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid, [Math]::Min(50, $remainingMs - 250))
+            if ($filenameReady) { break }
+            Start-Sleep -Milliseconds ([Math]::Min(20, [Math]::Max(0, $remainingMs - 300)))
+          } while ([DateTime]::UtcNow -lt $inputDeadline)
+          $readinessMs = [Math]::Min(999999, [Math]::Max(0, [int]([DateTime]::UtcNow - $readinessStarted).TotalMilliseconds))
+          [Console]::Error.WriteLine("Native Save filename readiness probe: ready=$($filenameReady.ToString().ToLowerInvariant()) duration_ms=$readinessMs")
+          if (!$filenameReady -or ($inputDeadline - [DateTime]::UtcNow).TotalMilliseconds -lt 250) { throw 'filename_readiness_unavailable' }
           $actualFilename = [SaveNativeInput]::ReadFilename([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid)
           if ($actualFilename -ceq $TargetPath) { break }
           Start-Sleep -Milliseconds 20
@@ -238,7 +250,7 @@ throw 'deadline'
   # Only numeric discovery counters leave this process; UI names, paths and exceptions stay private.
   $failureCode = 'unknown'
   $failure = $_.Exception.Message
-  if ($failure -in @('filename_unavailable', 'filename_pattern_unavailable', 'filename_ambiguous', 'default_filename_invalid', 'filename_readonly', 'filename_not_set', 'action_ambiguous', 'target_missing', 'action_bounds', 'deadline', 'window_bound', 'element_bound', 'input_assembly_unavailable', 'input_modules_unavailable')) { $failureCode = $failure }
+  if ($failure -in @('filename_unavailable', 'filename_pattern_unavailable', 'filename_ambiguous', 'default_filename_invalid', 'filename_readonly', 'filename_not_set', 'action_ambiguous', 'target_missing', 'action_bounds', 'deadline', 'window_bound', 'element_bound', 'input_assembly_unavailable', 'input_modules_unavailable', 'filename_readiness_unavailable')) { $failureCode = $failure }
   if ($null -ne $_.Exception.InnerException) {
     switch ($_.Exception.InnerException.Message) {
       'Native Save filename dialog unavailable' { $failureCode = 'filename_dialog_unavailable' }
@@ -251,6 +263,7 @@ throw 'deadline'
       'Native Save cursor move refused' { $failureCode = 'input_cursor_refused' }
       'Native Save click was not delivered' { $failureCode = 'input_not_delivered' }
       'Native Save filename target changed' { $failureCode = 'filename_target_changed' }
+      'Native Save filename readiness unavailable' { $failureCode = 'filename_readiness_unavailable' }
       'Native Save filename read unavailable' { $failureCode = 'filename_read_unavailable' }
       'Native Save input architecture unsupported' { $failureCode = 'input_architecture_unsupported' }
       'Native Save filename input bound' { $failureCode = 'filename_input_bound' }
