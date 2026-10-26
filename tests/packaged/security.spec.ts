@@ -920,6 +920,39 @@ for (const adoptOfflineMedia of [false, true]) {
     expect(await coldCache.list()).toEqual(entries);
     expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual(cacheTree);
     if (adoptOfflineMedia) expect(await coldCache.read(entries[0]!.id)).toEqual(rangeBytes);
+    const repeated = await inspectInstalled(
+      state,
+      `(async () => {
+        const response = await window.openChords.archives.import({ adoptOfflineMedia: true });
+        const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+        return { response, offline };
+      })()`,
+      installedSystemEnvironment(),
+      installedMacPickerDriver("open", target, installedSystemEnvironment),
+    );
+    expect(repeated).toMatchObject({
+      response: {
+        type: "archives.import_result",
+        result: {
+          state: "already_present",
+          projectId: created.projectId,
+          importedCopy: false,
+          offlineMedia: { state: "blocked", reason: "unverifiable_for_known_source" },
+        },
+      },
+      offline: true,
+    });
+    const afterRepeat = await openProjectLibrary({ stateRoot: state });
+    expect(afterRepeat.listProjects().map(({ projectId }) => projectId)).toEqual([
+      created.projectId,
+    ]);
+    expect(await afterRepeat.readProject(created.projectId)).toEqual(imported);
+    expect(afterRepeat.listExportReceipts(created.projectId)).toEqual([]);
+    expect(await proofTreeHashes(afterRepeat.activeRoot)).toEqual(tree);
+    const afterRepeatCache = await openOfflineMediaCache({ stateRoot: state });
+    expect(await afterRepeatCache.list()).toEqual(entries);
+    expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual(cacheTree);
+    if (adoptOfflineMedia) expect(await afterRepeatCache.read(entries[0]!.id)).toEqual(rangeBytes);
     expect((await openNetworkMode(state)).offline).toBe(true);
     expect(await origin.readProject(created.projectId)).toEqual(before);
     expect(await proofTreeHashes(origin.activeRoot)).toEqual(originTree);
@@ -937,6 +970,7 @@ for (const adoptOfflineMedia of [false, true]) {
       const escaped = JSON.stringify(privateValue).slice(1, -1);
       for (const value of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
         expect(JSON.stringify(result).includes(value)).toBe(false);
+        expect(JSON.stringify(repeated).includes(value)).toBe(false);
         expect(document.includes(value)).toBe(false);
         expect(archive.archive.includes(Buffer.from(value))).toBe(false);
       }
