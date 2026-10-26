@@ -491,21 +491,29 @@ test("installed macOS native Open Cancel preserves an empty Offline Library", as
   expect(readFileSync(path)).toEqual(original);
 });
 
-for (const scenario of [
+for (const mode of [
   "cancel_save",
   "cancel_save_edited",
   "cancel_save_directory",
   "cancel_save_directory_expanded",
+  "cancel_save_existing_target",
 ] as const) {
-  test(`installed macOS native Save ${scenario} verifies filenames and preserves Project and external files`, async () => {
+  const scenario = mode === "cancel_save_existing_target" ? "cancel_save_directory_expanded" : mode;
+  test(`installed macOS native Save ${mode} verifies filenames and preserves Project and external files`, async () => {
     test.skip(process.platform !== "darwin", "macOS native Save cancellation proof");
     test.setTimeout(360_000);
-    const state = join(packageRoot, `macos-native-save-${scenario}`);
-    const external = join(packageRoot, `macos-native-save-preserved-${scenario}.json`);
+    const state = join(packageRoot, `macos-native-save-${mode}`);
+    const external = join(packageRoot, `macos-native-save-preserved-${mode}.json`);
     const original = Buffer.from("preserved external Save cancellation fixture");
     writeFileSync(external, original);
     const directory = mkdtempSync(join(packageRoot, "macos-save-directory-"));
     writeFileSync(join(directory, "preserved.txt"), original);
+    const existingTargetBytes = Buffer.from("private existing native export target fixture");
+    if (mode === "cancel_save_existing_target") {
+      for (const extension of ["json", "lrc", "cho", "pdf", "ocarchive"]) {
+        writeFileSync(join(directory, `Open Chords.${extension}`), existingTargetBytes);
+      }
+    }
     const directoryBaseline = canonicalSerialize(await proofTreeHashes(directory));
     const library = await openProjectLibrary({ stateRoot: state });
     const envelope = ProjectEnvelopeSchema.parse(
@@ -582,6 +590,7 @@ for (const scenario of [
             expect(JSON.stringify(result).includes(representation)).toBe(false);
         }
         expect(JSON.stringify(result).includes(original.toString())).toBe(false);
+        expect(JSON.stringify(result).includes(existingTargetBytes.toString())).toBe(false);
         const reopened = await openProjectLibrary({ stateRoot: state });
         expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual([
           "project_golden",

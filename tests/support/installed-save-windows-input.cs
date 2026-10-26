@@ -173,6 +173,18 @@ public static class SaveNativeInput {
   private static extern IntPtr ReadFilenameText(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
   [DllImport("kernel32.dll", EntryPoint = "SetLastError", ExactSpelling = true)]
   private static extern void ClearFilenameReadError(uint code);
+  public static bool FilenameReady(IntPtr dialog, IntPtr field, uint processId, int budgetMs) {
+    if (budgetMs < 1 || budgetMs > 50) throw new InvalidOperationException("Native Save filename readiness unavailable");
+    RequireFilename(dialog, field, processId);
+    uint owner;
+    uint thread = GetWindowThreadProcessId(field, out owner);
+    var info = new GuiInfo { size = (uint)Marshal.SizeOf(typeof(GuiInfo)) };
+    if (owner != processId || thread == 0 || GetForegroundWindow() != dialog ||
+        !GetGUIThreadInfo(thread, ref info) || info.active != dialog || info.focus != field)
+      throw new InvalidOperationException("Native Save filename readiness unavailable");
+    UIntPtr result;
+    return SendMessageTimeout(field, 0, UIntPtr.Zero, IntPtr.Zero, 2, (uint)budgetMs, out result) != IntPtr.Zero;
+  }
   public static string ReadFilename(IntPtr dialog, IntPtr field, uint processId) {
     RequireFilename(dialog, field, processId);
     var text = new StringBuilder(4096);

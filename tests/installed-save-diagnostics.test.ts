@@ -457,3 +457,20 @@ it("retains fixed failure responsiveness and bounded dismissal visibility timing
     expect(result).not.toContain("dismissal visibility probe");
   }
 });
+
+it("retains only bounded filename readiness evidence and its fixed refusal", () => {
+  const code =
+    "native_save_failed code=filename_readiness_unavailable stage=filename_set windows=1 elements=50 filenames=1 actions=1 fallback_misses=0";
+  const line = "Native Save filename readiness probe: ready=false duration_ms=1750";
+  const result = installedSaveDriverDiagnostic({}, `${code}\n${line}`, 1);
+  expect(result).toContain(code);
+  expect(result).toContain(line);
+  for (const bad of [
+    line + " /private/path",
+    line.replace("=false", "=/private/field"),
+    line.replace("=1750", "=1000000"),
+    line.replace("=1750", "=-1"),
+  ]) {
+    expect(installedSaveDriverDiagnostic({}, bad, 1)).not.toContain("filename readiness probe");
+  }
+});
