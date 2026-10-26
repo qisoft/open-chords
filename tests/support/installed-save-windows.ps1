@@ -215,7 +215,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
             if ($remainingMs -le 250) { break }
             $filenameReady = [SaveNativeInput]::FilenameReady([IntPtr]$window.Current.NativeWindowHandle, $nativeFilenameHandle, [uint32]$ApplicationPid, [Math]::Min(50, $remainingMs - 250))
             if ($filenameReady) { break }
-            Start-Sleep -Milliseconds ([Math]::Min(20, [Math]::Max(0, $remainingMs - 300)))
+            $remainingAfterProbeMs = [int][Math]::Floor(($inputDeadline - [DateTime]::UtcNow).TotalMilliseconds)
+            Start-Sleep -Milliseconds ([Math]::Min(20, [Math]::Max(0, $remainingAfterProbeMs - 300)))
           } while ([DateTime]::UtcNow -lt $inputDeadline)
           $readinessMs = [Math]::Min(999999, [Math]::Max(0, [int]([DateTime]::UtcNow - $readinessStarted).TotalMilliseconds))
           [Console]::Error.WriteLine("Native Save filename readiness probe: ready=$($filenameReady.ToString().ToLowerInvariant()) duration_ms=$readinessMs")
