@@ -256,7 +256,7 @@ function run(argv) {
     } catch (error) {
       var code = failureCode === null ? error && error.errorNumber : failureCode;
       var snapshot = reportControlFailure(failedElement, sheet, failurePhase, code, traversalStarted);
-      if (retainedDirectory && stage === 'elements' && !nativeInputStarted && referenceRefreshes === 0 &&
+      if ((retainedDirectory || selectsFile) && stage === 'elements' && !nativeInputStarted && referenceRefreshes === 0 &&
           (failurePhase === 'role' || failurePhase === 'children') && code === -1728 &&
           snapshot.status === 'complete' && snapshot.elementExists === 'false' && snapshot.sheetExists === 'false' &&
           snapshot.windows === 1 && snapshot.sheets === 1 && Date.now() < deadline &&
@@ -472,7 +472,7 @@ function run(argv) {
       }
       throw new Error('not dismissed');
       } catch (error) {
-        if (error && error.message === 'stale control discovery before input' && retainedDirectory && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
+        if (error && error.message === 'stale control discovery before input' && (retainedDirectory || selectsFile) && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
           referenceRefreshes++;
           console.log('Native macOS picker refresh: reason=stale_control_discovery attempt=1 before_input=true');
           continue discovery;
