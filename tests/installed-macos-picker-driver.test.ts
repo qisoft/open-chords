@@ -840,3 +840,41 @@ it("redacts unexpected guard enabled evidence", () => {
   expect(result).not.toContain("/private/fixture");
   expect(result).not.toContain("guard_enabled=");
 });
+
+it("reports a first failure parent independently from a later invalid-role candidate", () => {
+  const result = installedMacAxProbeDiagnostic(
+    JSON.stringify({
+      ...snapshot,
+      firstFailureParent: {
+        ...snapshot.invalidChildParent,
+        status: "complete",
+        role: "AXScrollArea",
+        pidMatches: true,
+        children: 14,
+        containsFailedReference: "false",
+      },
+    }),
+    undefined,
+    0,
+  );
+  expect(result).toContain("first_failure_parent_status=complete");
+  expect(result).toContain("first_failure_parent_containsFailedReference=false");
+  expect(result).toContain("invalid_child_parent_status=not_checked");
+});
+it("redacts private or unbounded first-failure parent evidence", () => {
+  for (const bad of [
+    { role: "/private/role" },
+    { children: 258 },
+    { containsFailedReference: "/private/ref" },
+  ]) {
+    const result = installedMacAxProbeDiagnostic(
+      JSON.stringify({
+        ...snapshot,
+        firstFailureParent: { ...snapshot.invalidChildParent, ...bad },
+      }),
+      undefined,
+      0,
+    );
+    expect(result).toBe("Native macOS AX probe: invalid_evidence");
+  }
+});
