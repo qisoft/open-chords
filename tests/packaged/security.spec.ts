@@ -809,15 +809,23 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   });
 }
 
-for (const adoptOfflineMedia of [false, true]) {
-  test(`installed macOS archive media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
+for (const { adoptOfflineMedia, wholeSource } of [
+  { adoptOfflineMedia: false, wholeSource: false },
+  { adoptOfflineMedia: true, wholeSource: false },
+  { adoptOfflineMedia: false, wholeSource: true },
+  { adoptOfflineMedia: true, wholeSource: true },
+]) {
+  test(`installed macOS archive ${wholeSource ? "full Source" : "partial range"} media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
     test.skip(process.platform !== "darwin", "macOS native archive media import proof");
     test.setTimeout(360_000);
     const root = realpathSync(mkdtempSync(join(packageRoot, "macos-archive-media-")));
     const originState = join(root, "origin");
     const state = join(root, "destination");
     const sourcePath = join(root, "private-recording.wav");
-    const sourceBytes = monoPcmWav([10, 20, 30, 40, 50, 60]);
+    const sourceSamples = [10, 20, 30, 40, 50, 60];
+    const startSourceSample = wholeSource ? 0 : 2;
+    const endSourceSample = wholeSource ? sourceSamples.length : 5;
+    const sourceBytes = monoPcmWav(sourceSamples);
     writeFileSync(sourcePath, sourceBytes);
     const origin = await openProjectLibrary({ stateRoot: originState });
     const media = new LocalMediaService({ library: origin, pickFile: async () => sourcePath });
@@ -827,16 +835,23 @@ for (const adoptOfflineMedia of [false, true]) {
     const created = await media.createProject({
       capabilityId: selected.capabilityId,
       generationId: "generation_fixture",
-      startSourceSample: 2,
-      endSourceSample: 5,
+      startSourceSample,
+      endSourceSample,
     });
     await media.dispose();
     const before = await origin.readProject(created.projectId);
     const projection = archivedProjectFor(before);
-    const rangeBytes = Buffer.alloc(6);
-    [30, 40, 50].forEach((sample, index) => rangeBytes.writeInt16LE(sample, index * 2));
+    const rangeSamples = sourceSamples.slice(startSourceSample, endSourceSample);
+    const rangeBytes = Buffer.alloc(rangeSamples.length * 2);
+    rangeSamples.forEach((sample, index) => rangeBytes.writeInt16LE(sample, index * 2));
     const source = projection.document.records.sources[0]!;
     const snapshot = source.snapshots[0]!;
+    if (wholeSource) {
+      expect(snapshot.durationSamples).toBe(sourceSamples.length);
+      expect(`sha256:${createNativeSelectionHash("sha256").update(rangeBytes).digest("hex")}`).toBe(
+        snapshot.canonicalAudioFingerprint,
+      );
+    }
     const archive = writePortableProjectArchive({
       document: projection.document,
       media: {
@@ -846,8 +861,8 @@ for (const adoptOfflineMedia of [false, true]) {
         sampleRate: selected.sampleRate,
         sourceId: source.id,
         sourceSnapshotId: snapshot.id,
-        startSourceSample: 2,
-        endSourceSample: 5,
+        startSourceSample,
+        endSourceSample,
       },
     });
     const target = join(root, "media.ocarchive");
@@ -896,7 +911,7 @@ for (const adoptOfflineMedia of [false, true]) {
     const hash = `sha256:${createNativeSelectionHash("sha256").update(rangeBytes).digest("hex")}`;
     if (adoptOfflineMedia) {
       expect(entries[0]).toMatchObject({
-        byteSize: 6,
+        byteSize: rangeBytes.length,
         sha256: hash,
         verification: "archive_attested",
         origin: { kind: "portable_project_archive", archiveManifestHash: archive.manifestHash },
@@ -905,8 +920,8 @@ for (const adoptOfflineMedia of [false, true]) {
           sourceSnapshotId: snapshot.id,
           canonicalAudioFingerprint: snapshot.canonicalAudioFingerprint,
           sampleRate: selected.sampleRate,
-          startSourceSample: 2,
-          endSourceSample: 5,
+          startSourceSample,
+          endSourceSample,
         },
       });
       expect(await cache.read(entries[0]!.id)).toEqual(rangeBytes);
@@ -937,7 +952,9 @@ for (const adoptOfflineMedia of [false, true]) {
           state: "already_present",
           projectId: created.projectId,
           importedCopy: false,
-          offlineMedia: { state: "blocked", reason: "unverifiable_for_known_source" },
+          offlineMedia: wholeSource
+            ? { state: "cached", verification: "snapshot_fingerprint" }
+            : { state: "blocked", reason: "unverifiable_for_known_source" },
         },
       },
       offline: true,
@@ -950,9 +967,50 @@ for (const adoptOfflineMedia of [false, true]) {
     expect(afterRepeat.listExportReceipts(created.projectId)).toEqual([]);
     expect(await proofTreeHashes(afterRepeat.activeRoot)).toEqual(tree);
     const afterRepeatCache = await openOfflineMediaCache({ stateRoot: state });
-    expect(await afterRepeatCache.list()).toEqual(entries);
-    expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual(cacheTree);
-    if (adoptOfflineMedia) expect(await afterRepeatCache.read(entries[0]!.id)).toEqual(rangeBytes);
+    const repeatedEntries = await afterRepeatCache.list();
+    if (wholeSource) {
+      expect(repeatedEntries).toHaveLength(1);
+      const entry = repeatedEntries[0]!;
+      expect(entry).toMatchObject({
+        byteSize: rangeBytes.length,
+        sha256: hash,
+        verification: "snapshot_fingerprint",
+        origin: { kind: "portable_project_archive", archiveManifestHash: archive.manifestHash },
+        range: {
+          sourceId: source.id,
+          sourceSnapshotId: snapshot.id,
+          canonicalAudioFingerprint: snapshot.canonicalAudioFingerprint,
+          sampleRate: selected.sampleRate,
+          startSourceSample,
+          endSourceSample,
+        },
+      });
+      if (adoptOfflineMedia)
+        expect(entry).toEqual({
+          ...entries[0],
+          createdAt: entry.createdAt,
+          verification: "snapshot_fingerprint",
+        });
+      expect(await afterRepeatCache.read(entry.id)).toEqual(rangeBytes);
+      expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual({
+        [`${entry.id}.pcm`]: hash.slice("sha256:".length),
+        [`${entry.id}.json`]: createNativeSelectionHash("sha256")
+          .update(canonicalSerialize(entry))
+          .digest("hex"),
+      });
+    } else {
+      expect(repeatedEntries).toEqual(entries);
+      expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual(cacheTree);
+      if (adoptOfflineMedia)
+        expect(await afterRepeatCache.read(entries[0]!.id)).toEqual(rangeBytes);
+    }
+    const repeatedCacheTree = await proofTreeHashes(join(state, "offline-media-cache"));
+    const finalCache = await openOfflineMediaCache({ stateRoot: state });
+    expect(await finalCache.list()).toEqual(repeatedEntries);
+    expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual(repeatedCacheTree);
+    const finalLibrary = await openProjectLibrary({ stateRoot: state });
+    expect(await finalLibrary.readProject(created.projectId)).toEqual(imported);
+    expect(await proofTreeHashes(finalLibrary.activeRoot)).toEqual(tree);
     expect((await openNetworkMode(state)).offline).toBe(true);
     expect(await origin.readProject(created.projectId)).toEqual(before);
     expect(await proofTreeHashes(origin.activeRoot)).toEqual(originTree);
