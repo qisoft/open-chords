@@ -512,6 +512,8 @@ const evidenceSchema = z.strictObject({
       "observe_replace_json",
       "cancel_replace_json",
       "replace_json",
+      "replace_lrc",
+      "replace_chordpro",
     ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
@@ -531,9 +533,13 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
     if (!evidence.success) return "Native macOS AX probe: invalid_evidence";
     if (
       stdout.length > 4096 &&
-      !["observe_replace_json", "cancel_replace_json", "replace_json"].includes(
-        evidence.data.action.requested,
-      )
+      ![
+        "observe_replace_json",
+        "cancel_replace_json",
+        "replace_json",
+        "replace_lrc",
+        "replace_chordpro",
+      ].includes(evidence.data.action.requested)
     )
       return "Native macOS AX probe: invalid_evidence";
     const {
@@ -864,7 +870,12 @@ export function installedMacReplaceContextObserved(stdout: string) {
 
 function replacementContextObserved(
   stdout: string,
-  expectedAction: "observe_replace_json" | "cancel_replace_json" | "replace_json",
+  expectedAction:
+    | "observe_replace_json"
+    | "cancel_replace_json"
+    | "replace_json"
+    | "replace_lrc"
+    | "replace_chordpro",
 ) {
   if (stdout.length > 8192) return false;
   try {
@@ -927,7 +938,7 @@ function replacementContextObserved(
       context.modalStatus === "complete" &&
       context.modalError === 0 &&
       context.modalAttribute === "none" &&
-      (expectedAction === "replace_json"
+      (["replace_json", "replace_lrc", "replace_chordpro"].includes(expectedAction)
         ? context.saveActionStatus === "not_checked" &&
           context.savePressAction === "unknown" &&
           context.saveActionError === 0
@@ -992,7 +1003,19 @@ export function installedMacReplacementCancelled(stdout: string) {
 
 // Confirms guarded native dismissal only; the installed journey must verify publication and Receipt.
 export function installedMacJsonReplacementConfirmed(stdout: string) {
-  if (!replacementContextObserved(stdout, "replace_json")) return false;
+  return replacementConfirmed(stdout, "replace_json");
+}
+
+export function installedMacTextReplacementConfirmed(stdout: string, format: "lrc" | "chordpro") {
+  if (format !== "lrc" && format !== "chordpro") return false;
+  return replacementConfirmed(stdout, `replace_${format}`);
+}
+
+function replacementConfirmed(
+  stdout: string,
+  action: "replace_json" | "replace_lrc" | "replace_chordpro",
+) {
+  if (!replacementContextObserved(stdout, action)) return false;
   try {
     const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
     if (!parsed.success) return false;
