@@ -11,6 +11,7 @@ import {
   installedMacPdfSaveSucceeded,
   installedMacArchiveSaveSucceeded,
   installedMacReplaceContextObserved,
+  installedMacReplacementCancelled,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -1846,3 +1847,131 @@ it.each([
     ),
   ).toBe(false);
 });
+
+const replacementCancelled = {
+  ...boundModalObservation,
+  action: { requested: "cancel_replace_json", pressed: false, dismissed: false },
+  replaceContext: {
+    ...boundModalObservation.replaceContext,
+    cancelStatus: "complete",
+    cancelGuardMask: 255,
+    cancelPressed: true,
+    cancelDismissed: true,
+    cancelSheetRetained: true,
+    cancelTargetUnchanged: true,
+    cancelError: 0,
+    cancelChainVisited: 3,
+  },
+};
+it("requires independently bound confirmation Cancel without claiming a completed Save", () => {
+  const output = JSON.stringify(replacementCancelled);
+  expect(installedMacReplacementCancelled(output)).toBe(true);
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+  expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+  expect(diagnostic).toContain("replace_context_cancelGuardMask=255");
+  expect(diagnostic).toContain("replace_context_cancelSheetRetained=true");
+  expect(diagnostic).toContain("last_error=-25205");
+});
+it.each([
+  { cancelStatus: "refused" },
+  { cancelStatus: "press_error" },
+  { cancelStatus: "not_dismissed" },
+  { cancelStatus: "target_changed" },
+  { cancelGuardMask: 254 },
+  { cancelPressed: false },
+  { cancelDismissed: false },
+  { cancelSheetRetained: false },
+  { cancelTargetUnchanged: false },
+  { cancelError: -25205 },
+  { cancelChainVisited: 1 },
+  { modalBindingForeground: false },
+  { modalBindingParent: "other" },
+  { modalReplace: 0 },
+  { modalCandidates: 2 },
+])("refuses incomplete or unsafe confirmation Cancel evidence %j", (change) => {
+  expect(
+    installedMacReplacementCancelled(
+      JSON.stringify({
+        ...replacementCancelled,
+        replaceContext: { ...replacementCancelled.replaceContext, ...change },
+      }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  "cancelStatus",
+  "cancelGuardMask",
+  "cancelPressed",
+  "cancelDismissed",
+  "cancelSheetRetained",
+  "cancelTargetUnchanged",
+  "cancelError",
+  "cancelChainVisited",
+])("refuses absent confirmation Cancel proof field %s", (field) => {
+  expect(
+    installedMacReplacementCancelled(
+      JSON.stringify({
+        ...replacementCancelled,
+        replaceContext: { ...replacementCancelled.replaceContext, [field]: undefined },
+      }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  { cancelStatus: "/private/path" },
+  { cancelGuardMask: 256 },
+  { cancelError: 32768 },
+  { cancelChainVisited: 17 },
+  { cancelSheetRetained: "private" },
+  { cancelTargetUnchanged: "private" },
+  { cancelTitle: "private content" },
+])("redacts private or unbounded Cancel evidence %j", (change) => {
+  const output = JSON.stringify({
+    ...replacementCancelled,
+    replaceContext: { ...replacementCancelled.replaceContext, ...change },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+  expect(installedMacReplacementCancelled(output)).toBe(false);
+});
+it("does not treat an observation-only request as confirmation cancellation", () => {
+  expect(installedMacReplacementCancelled(JSON.stringify(boundModalObservation))).toBe(false);
+  expect(
+    installedMacReplacementCancelled(
+      JSON.stringify({
+        ...replacementCancelled,
+        action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      }),
+    ),
+  ).toBe(false);
+});
+it("bounds explicit Cancel output at 8KiB without expanding ordinary AX limits", () => {
+  const output = JSON.stringify(replacementCancelled);
+  expect(installedMacReplacementCancelled(output.padEnd(8192, " "))).toBe(true);
+  expect(installedMacReplacementCancelled(output.padEnd(8193, " "))).toBe(false);
+  expect(installedMacAxProbeDiagnostic(output.padEnd(8193, " "), null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
+
+it.each([0, 1, 3, 7, 15, 31, 63, 127])(
+  "retains partial Cancel guard mask %i without accepting the action",
+  (cancelGuardMask) => {
+    const output = JSON.stringify({
+      ...replacementCancelled,
+      replaceContext: {
+        ...replacementCancelled.replaceContext,
+        cancelStatus: "refused",
+        cancelGuardMask,
+        cancelPressed: false,
+        cancelDismissed: false,
+      },
+    });
+    expect(installedMacReplacementCancelled(output)).toBe(false);
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain(
+      `replace_context_cancelGuardMask=${cancelGuardMask}`,
+    );
+  },
+);

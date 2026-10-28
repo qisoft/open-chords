@@ -27,6 +27,7 @@ import {
   installedMacPdfSaveSucceeded,
   installedMacArchiveSaveSucceeded,
   installedMacReplaceContextObserved,
+  installedMacReplacementCancelled,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
 import {
@@ -47,6 +48,7 @@ export function installedMacPickerDriver(
     | "cancel_save_directory"
     | "cancel_save_directory_expanded"
     | "observe_replace_json"
+    | "cancel_replace_json"
     | "save_json"
     | "save_lrc"
     | "save_chordpro"
@@ -71,7 +73,8 @@ export function installedMacPickerDriver(
     const textSave = scenario === "save_lrc" || scenario === "save_chordpro";
     const pdfSave = scenario === "save_pdf";
     const archiveSave = scenario === "save_archive";
-    const observeReplace = scenario === "observe_replace_json";
+    const cancelReplace = scenario === "cancel_replace_json";
+    const observeReplace = scenario === "observe_replace_json" || cancelReplace;
     const nativeSave =
       scenario === "save_json" || textSave || pdfSave || archiveSave || observeReplace;
     const expandedDirectory = scenario === "cancel_save_directory_expanded" || nativeSave;
@@ -165,15 +168,17 @@ export function installedMacPickerDriver(
               ...(requested === "directory_snapshot" ? [saveFormat ?? ""] : []),
               ...(saveExport
                 ? [
-                    observeReplace
-                      ? "--observe-replace-json"
-                      : archiveSave
-                        ? "--save-new-archive"
-                        : pdfSave
-                          ? "--save-new-pdf"
-                          : textSave
-                            ? "--save-new-text"
-                            : "--save-new-json",
+                    cancelReplace
+                      ? "--cancel-replace-json"
+                      : observeReplace
+                        ? "--observe-replace-json"
+                        : archiveSave
+                          ? "--save-new-archive"
+                          : pdfSave
+                            ? "--save-new-pdf"
+                            : textSave
+                              ? "--save-new-text"
+                              : "--save-new-json",
                   ]
                 : verifyFilename
                   ? ["--verify-filename"]
@@ -200,18 +205,20 @@ export function installedMacPickerDriver(
         const refused =
           diagnostic === "Native macOS AX probe: invalid_evidence" ||
           (saveExport
-            ? !(observeReplace
-                ? installedMacReplaceContextObserved(output)
-                : textSave
-                  ? installedMacTextSaveSucceeded(
-                      output,
-                      scenario === "save_lrc" ? "lrc" : "chordpro",
-                    )
-                  : pdfSave
-                    ? installedMacPdfSaveSucceeded(output)
-                    : archiveSave
-                      ? installedMacArchiveSaveSucceeded(output)
-                      : installedMacJsonSaveSucceeded(output))
+            ? !(cancelReplace
+                ? installedMacReplacementCancelled(output)
+                : observeReplace
+                  ? installedMacReplaceContextObserved(output)
+                  : textSave
+                    ? installedMacTextSaveSucceeded(
+                        output,
+                        scenario === "save_lrc" ? "lrc" : "chordpro",
+                      )
+                    : pdfSave
+                      ? installedMacPdfSaveSucceeded(output)
+                      : archiveSave
+                        ? installedMacArchiveSaveSucceeded(output)
+                        : installedMacJsonSaveSucceeded(output))
             : requested === "directory_snapshot"
               ? !(verifyFilename
                   ? installedMacSaveFilenameVerified(output)
@@ -279,7 +286,7 @@ export function installedMacPickerDriver(
         );
         if (nativeSave) {
           process.stdout.write(
-            `Native macOS ${saveFormat} ${observeReplace ? "replacement context" : "Save"}: ${await readNativeAx("directory_snapshot", false, true)}\n`,
+            `Native macOS ${saveFormat} ${cancelReplace ? "replacement Cancel" : observeReplace ? "replacement context" : "Save"}: ${await readNativeAx("directory_snapshot", false, true)}\n`,
           );
         } else {
           const collapseStarted = performance.now();
@@ -316,6 +323,13 @@ export function installedMacPickerDriver(
         )(applicationPid);
       evidence = { action: scenario, nativePress: true, dialogDismissed: !observeReplace };
     } else if (saves) {
+      if (
+        scenario !== "cancel_save" &&
+        scenario !== "cancel_save_edited" &&
+        scenario !== "cancel_save_edited_expanded" &&
+        scenario !== "cancel_save_restored"
+      )
+        throw new Error("Native macOS Save preparation scenario unavailable");
       if (
         saveFormat === undefined ||
         !installedMacSaveResultVerified(prepared, saveFormat, scenario)

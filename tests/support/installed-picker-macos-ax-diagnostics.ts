@@ -218,6 +218,16 @@ const evidenceSchema = z.strictObject({
         .enum(["none", "pid", "AXRole", "AXTitle", "AXEnabled", "AXChildren"])
         .optional(),
       modalRole: z.enum(replacementRoleKeys).optional(),
+      cancelStatus: z
+        .enum(["refused", "press_error", "not_dismissed", "target_changed", "complete"])
+        .optional(),
+      cancelGuardMask: z.number().int().min(0).max(255).optional(),
+      cancelPressed: z.boolean().optional(),
+      cancelDismissed: z.boolean().optional(),
+      cancelSheetRetained: z.boolean().optional(),
+      cancelTargetUnchanged: z.boolean().optional(),
+      cancelError: z.number().int().min(-32768).max(32767).optional(),
+      cancelChainVisited: z.number().int().min(0).max(16).optional(),
       modalBindingStatus: z
         .enum(["complete", "deadline", "error", "bound", "invalid_candidate", "invalid_value"])
         .optional(),
@@ -490,6 +500,7 @@ const evidenceSchema = z.strictObject({
       "save_new_pdf",
       "save_new_archive",
       "observe_replace_json",
+      "cancel_replace_json",
     ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
@@ -507,7 +518,10 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
     if (stdout.length > 8192) return "Native macOS AX probe: invalid_evidence";
     const evidence = evidenceSchema.safeParse(JSON.parse(stdout));
     if (!evidence.success) return "Native macOS AX probe: invalid_evidence";
-    if (stdout.length > 4096 && evidence.data.action.requested !== "observe_replace_json")
+    if (
+      stdout.length > 4096 &&
+      !["observe_replace_json", "cancel_replace_json"].includes(evidence.data.action.requested)
+    )
       return "Native macOS AX probe: invalid_evidence";
     const {
       trusted,
@@ -832,6 +846,13 @@ function nativeSaveSucceeded(
 
 // This proves bounded observation only, never confirmation dismissal or replacement.
 export function installedMacReplaceContextObserved(stdout: string) {
+  return replacementContextObserved(stdout, "observe_replace_json");
+}
+
+function replacementContextObserved(
+  stdout: string,
+  expectedAction: "observe_replace_json" | "cancel_replace_json",
+) {
   if (stdout.length > 8192) return false;
   try {
     const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
@@ -915,7 +936,7 @@ export function installedMacReplaceContextObserved(stdout: string) {
       filenameEvidenceVerified(value.saveFilename) &&
       value.saveTargetExistingFixture &&
       !value.saveTargetAbsent &&
-      value.action.requested === "observe_replace_json" &&
+      value.action.requested === expectedAction &&
       !value.action.dismissed &&
       context !== undefined &&
       context.windows > 0 &&
@@ -923,6 +944,29 @@ export function installedMacReplaceContextObserved(stdout: string) {
       context.visited > 0 &&
       context.foreground &&
       (originalObservation || boundModalObservation)
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Only the replacement confirmation is dismissed; the original Save sheet stays open.
+export function installedMacReplacementCancelled(stdout: string) {
+  if (!replacementContextObserved(stdout, "cancel_replace_json")) return false;
+  try {
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const context = parsed.data.replaceContext;
+    return (
+      context?.cancelStatus === "complete" &&
+      context.cancelGuardMask === 255 &&
+      context.cancelPressed === true &&
+      context.cancelDismissed === true &&
+      context.cancelSheetRetained === true &&
+      context.cancelTargetUnchanged === true &&
+      context.cancelError === 0 &&
+      context.cancelChainVisited !== undefined &&
+      context.cancelChainVisited > 1
     );
   } catch {
     return false;

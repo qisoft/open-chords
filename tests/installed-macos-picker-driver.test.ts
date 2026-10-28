@@ -1044,3 +1044,91 @@ it("allows larger replacement evidence only for the final explicit observation p
     65536, 4096, 4096, 4096, 4096, 8192,
   ]);
 });
+
+const cancelledReplacement = {
+  ...replaceObserved,
+  action: { requested: "cancel_replace_json", pressed: true, dismissed: false },
+  replaceContext: {
+    ...replaceObserved.replaceContext,
+    cancelStatus: "complete",
+    cancelGuardMask: 255,
+    cancelPressed: true,
+    cancelDismissed: true,
+    cancelSheetRetained: true,
+    cancelTargetUnchanged: true,
+    cancelError: 0,
+    cancelChainVisited: 3,
+  },
+};
+it("uses the JSON-only replacement Cancel flag after fresh directory and filename proof", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    cancelledReplacement,
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await installedMacPickerDriver(
+    "cancel_replace_json",
+    "/private/directory",
+    () => ({}),
+    "json",
+  )(42);
+  expect(execute).toHaveBeenCalledTimes(6);
+  expect(execute.mock.calls[5]?.[1]).toEqual([
+    "42",
+    "/private/directory",
+    "directory_snapshot",
+    "json",
+    "--cancel-replace-json",
+  ]);
+  expect(execute.mock.calls.map((call) => call[2].maxBuffer)).toEqual([
+    65536, 4096, 4096, 4096, 4096, 8192,
+  ]);
+});
+it.each([
+  { cancelPressed: false },
+  { cancelDismissed: false },
+  { cancelSheetRetained: false },
+  { cancelTargetUnchanged: false },
+  { cancelGuardMask: 254 },
+  { cancelError: -25205 },
+])("does not retry failed replacement confirmation Cancel %j", async (change) => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    {
+      ...cancelledReplacement,
+      replaceContext: { ...cancelledReplacement.replaceContext, ...change },
+    },
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await expect(
+    installedMacPickerDriver("cancel_replace_json", "/private/directory", () => ({}), "json")(42),
+  ).rejects.toThrow("Native macOS AX probe:");
+  expect(execute).toHaveBeenCalledTimes(6);
+});
+it("rejects non-JSON replacement Cancel before any native process", async () => {
+  await expect(
+    installedMacPickerDriver(
+      "cancel_replace_json",
+      "/private/directory",
+      () => ({}),
+      "archive",
+    )(42),
+  ).rejects.toThrow("JSON Save target unavailable");
+  expect(execute).not.toHaveBeenCalled();
+});
