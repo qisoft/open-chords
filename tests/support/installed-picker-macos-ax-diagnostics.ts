@@ -228,6 +228,14 @@ const evidenceSchema = z.strictObject({
       cancelTargetUnchanged: z.boolean().optional(),
       cancelError: z.number().int().min(-32768).max(32767).optional(),
       cancelChainVisited: z.number().int().min(0).max(16).optional(),
+      replaceStatus: z.enum(["refused", "press_error", "not_dismissed", "complete"]).optional(),
+      replaceGuardMask: z.number().int().min(0).max(255).optional(),
+      replacePressed: z.boolean().optional(),
+      replaceDismissed: z.boolean().optional(),
+      replaceSaveDismissed: z.boolean().optional(),
+      replaceTargetFixtureVerified: z.boolean().optional(),
+      replaceError: z.number().int().min(-32768).max(32767).optional(),
+      replaceChainVisited: z.number().int().min(0).max(16).optional(),
       modalBindingStatus: z
         .enum(["complete", "deadline", "error", "bound", "invalid_candidate", "invalid_value"])
         .optional(),
@@ -258,7 +266,9 @@ const evidenceSchema = z.strictObject({
       attachmentAttribute: z.enum(["none", "pid", "foreground", "AXRole", "AXChildren"]).optional(),
       attachmentSource: z.enum(["none", "parent", "sheet"]).optional(),
       capturedSheetAttached: z.boolean().optional(),
-      saveActionStatus: z.enum(["success", "deadline", "error", "invalid_value"]).optional(),
+      saveActionStatus: z
+        .enum(["not_checked", "success", "deadline", "error", "invalid_value"])
+        .optional(),
       savePressAction: z.enum(["unknown", "present", "absent"]).optional(),
       saveActionError: z.number().int().min(-32768).max(32767).optional(),
       foreground: z.boolean(),
@@ -501,6 +511,7 @@ const evidenceSchema = z.strictObject({
       "save_new_archive",
       "observe_replace_json",
       "cancel_replace_json",
+      "replace_json",
     ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
@@ -520,7 +531,9 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
     if (!evidence.success) return "Native macOS AX probe: invalid_evidence";
     if (
       stdout.length > 4096 &&
-      !["observe_replace_json", "cancel_replace_json"].includes(evidence.data.action.requested)
+      !["observe_replace_json", "cancel_replace_json", "replace_json"].includes(
+        evidence.data.action.requested,
+      )
     )
       return "Native macOS AX probe: invalid_evidence";
     const {
@@ -851,7 +864,7 @@ export function installedMacReplaceContextObserved(stdout: string) {
 
 function replacementContextObserved(
   stdout: string,
-  expectedAction: "observe_replace_json" | "cancel_replace_json",
+  expectedAction: "observe_replace_json" | "cancel_replace_json" | "replace_json",
 ) {
   if (stdout.length > 8192) return false;
   try {
@@ -914,9 +927,13 @@ function replacementContextObserved(
       context.modalStatus === "complete" &&
       context.modalError === 0 &&
       context.modalAttribute === "none" &&
-      context.saveActionStatus === "success" &&
-      context.savePressAction === "present" &&
-      context.saveActionError === 0 &&
+      (expectedAction === "replace_json"
+        ? context.saveActionStatus === "not_checked" &&
+          context.savePressAction === "unknown" &&
+          context.saveActionError === 0
+        : context.saveActionStatus === "success" &&
+          context.savePressAction === "present" &&
+          context.saveActionError === 0) &&
       context.modalVisited !== undefined &&
       context.modalVisited > 0 &&
       context.modalButtons === 2 &&
@@ -967,6 +984,31 @@ export function installedMacReplacementCancelled(stdout: string) {
       context.cancelError === 0 &&
       context.cancelChainVisited !== undefined &&
       context.cancelChainVisited > 1
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Confirms guarded native dismissal only; the installed journey must verify publication and Receipt.
+export function installedMacJsonReplacementConfirmed(stdout: string) {
+  if (!replacementContextObserved(stdout, "replace_json")) return false;
+  try {
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const context = parsed.data.replaceContext;
+    return (
+      context?.replaceStatus === "complete" &&
+      context.windows === 1 &&
+      context.modalBindingParent === "sheet" &&
+      context.replaceGuardMask === 255 &&
+      context.replacePressed === true &&
+      context.replaceDismissed === true &&
+      context.replaceSaveDismissed === true &&
+      context.replaceTargetFixtureVerified === true &&
+      context.replaceError === 0 &&
+      context.replaceChainVisited !== undefined &&
+      context.replaceChainVisited > 1
     );
   } catch {
     return false;

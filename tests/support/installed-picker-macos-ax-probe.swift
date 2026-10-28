@@ -204,7 +204,8 @@ let savesNewPdf = arguments.count == 6 && arguments[3] == "directory_snapshot" &
 let savesNewArchive = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "archive" && arguments[5] == "--save-new-archive"
 let savesNewExport = savesNewJson || savesNewText || savesNewPdf || savesNewArchive
 let cancelsReplaceJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--cancel-replace-json"
-let observesReplaceJson = cancelsReplaceJson || (arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--observe-replace-json")
+let replacesJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--replace-json"
+let observesReplaceJson = replacesJson || cancelsReplaceJson || (arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--observe-replace-json")
 let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewExport || observesReplaceJson
 var saveTargetExistingFixture = false
 var replaceContext: [String: Any] = ["status": "not_checked", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
@@ -522,8 +523,8 @@ func isExistingReplacementFixture(_ path: String) -> Bool {
     return (try? file.read(upToCount: expected.count + 1)) == expected
 }
 
-// Fresh context after one guarded Save. Confirmation Cancel is opt-in and separately guarded.
-func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement, sheet: AXUIElement, parent: AXUIElement, cancelConfirmation: Bool = false) -> [String: Any] {
+// Fresh context after one guarded Save. Confirmation actions are opt-in and separately guarded.
+func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement, sheet: AXUIElement, parent: AXUIElement, cancelConfirmation: Bool = false, replaceConfirmation: Bool = false) -> [String: Any] {
     var result: [String: Any] = ["status": "complete", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
     var currentAttribute = "none", currentRole = "unknown", currentParentRole = "none", currentPidState = "not_checked"
     var currentSheetBranch = false
@@ -591,7 +592,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
             if ProcessInfo.processInfo.systemUptime >= deadline { fail("deadline", name); return nil }
             return output
         }
-        var cancelButtons: [AXUIElement] = []
+        var cancelButtons: [AXUIElement] = [], replaceButtons: [AXUIElement] = []
         var queue = [root], visited: [AXUIElement] = []
         while !queue.isEmpty && (modal["modalStatus"] as? String) == "complete" {
             if visited.count >= 64 { fail("bound", "AXChildren"); break }
@@ -609,6 +610,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                 let title = value(element, "AXTitle", optional: true) as? String
                 if title == "Cancel" || title == "Replace" {
                     if title == "Cancel" { cancelButtons.append(element) }
+                    if title == "Replace" { replaceButtons.append(element) }
                     let key = title == "Cancel" ? "modalCancel" : "modalReplace"
                     modal[key] = (modal[key] as? Int ?? 0) + 1
                     guard let enabled = value(element, "AXEnabled") as? Bool else { fail("invalid_value", "AXEnabled"); break }
@@ -763,6 +765,98 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                     }
                 }
                 cancel()
+            }
+            if replaceConfirmation {
+                modal["replaceStatus"] = "refused"; modal["replaceGuardMask"] = 0
+                modal["replacePressed"] = false; modal["replaceDismissed"] = false
+                modal["replaceSaveDismissed"] = false; modal["replaceTargetFixtureVerified"] = false; modal["replaceError"] = 0; modal["replaceChainVisited"] = 0
+                let broadComplete = (result["status"] as? String) == "complete"
+                let knownSplitterRefusal = (result["status"] as? String) == "error" &&
+                    (result["error"] as? Int) == -25201 && (result["attribute"] as? String) == "pid" &&
+                    (result["pidState"] as? String) == "foreign" && (result["parentRole"] as? String) == "split_group" &&
+                    (result["sheetBranch"] as? Bool) == true && (result["foreignRole"] as? String) == "splitter" &&
+                    (result["foreignRoleError"] as? Int) == 0 && (result["foreignChildrenStatus"] as? String) == "absent" &&
+                    (result["foreignChildrenError"] as? Int) == -25212
+                func replace() {
+                    guard broadComplete || knownSplitterRefusal,
+                          (result["windows"] as? Int) == 1,
+                          (modal["modalBindingStatus"] as? String) == "complete",
+                          (modal["modalBindingParent"] as? String) == "sheet",
+                          (modal["modalButtons"] as? Int) == 2,
+                          (modal["modalCancel"] as? Int) == 1, (modal["modalReplace"] as? Int) == 1,
+                          (modal["modalEnabledCancel"] as? Int) == 1, (modal["modalEnabledReplace"] as? Int) == 1,
+                          replaceButtons.count == 1 else { return }
+                    var mask = 1
+                    modal["replaceGuardMask"] = mask
+                    let button = replaceButtons[0]
+                    guard bindingPid(root), bindingPid(button), bindingPid(sheet), bindingPid(parent),
+                          (bindingRead(root, "AXRole") as? String) == "AXSheet" else { return }
+                    mask |= 2; modal["replaceGuardMask"] = mask
+                    guard let rawParent = bindingRead(root, "AXParent"), CFGetTypeID(rawParent) == AXUIElementGetTypeID(),
+                          CFEqual(unsafeBitCast(rawParent, to: AXUIElement.self), sheet) else { return }
+                    mask |= 4; modal["replaceGuardMask"] = mask
+                    guard let children = bindingRead(sheet, "AXChildren") as? [AXUIElement], children.count <= 64,
+                          children.filter({ CFEqual($0, root) }).count == 1,
+                          let parentChildren = bindingRead(parent, "AXChildren") as? [AXUIElement], parentChildren.count <= 64,
+                          parentChildren.filter({ CFEqual($0, sheet) }).count == 1 else { return }
+                    mask |= 8; modal["replaceGuardMask"] = mask
+                    guard (bindingRead(button, "AXRole") as? String) == "AXButton",
+                          (bindingRead(button, "AXTitle") as? String) == "Replace",
+                          (bindingRead(button, "AXEnabled") as? Bool) == true else { return }
+                    mask |= 16; modal["replaceGuardMask"] = mask
+                    var node = button, seen: [AXUIElement] = []
+                    var attached = false
+                    for _ in 0..<16 {
+                        guard !seen.contains(where: { CFEqual($0, node) }), bindingPid(node) else { return }
+                        seen.append(node); modal["replaceChainVisited"] = seen.count
+                        if CFEqual(node, root) { attached = true; break }
+                        guard let raw = bindingRead(node, "AXParent"), CFGetTypeID(raw) == AXUIElementGetTypeID() else { return }
+                        node = unsafeBitCast(raw, to: AXUIElement.self)
+                    }
+                    guard attached else { return }
+                    mask |= 32; modal["replaceGuardMask"] = mask
+                    guard ProcessInfo.processInfo.systemUptime < deadline,
+                          AXUIElementSetMessagingTimeout(button, 0.15) == .success else { return }
+                    var actions: CFArray?
+                    guard AXUIElementCopyActionNames(button, &actions) == .success,
+                          let names = actions as? [String], names.count <= 16, names.contains("AXPress"),
+                          isExistingReplacementFixture(URL(fileURLWithPath: arguments[2]).appendingPathComponent("Open Chords.json").path) else { return }
+                    modal["replaceTargetFixtureVerified"] = true
+                    mask |= 64; modal["replaceGuardMask"] = mask
+                    guard (modal["modalBindingStatus"] as? String) == "complete",
+                          NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                          ProcessInfo.processInfo.systemUptime < deadline else { return }
+                    mask |= 128; modal["replaceGuardMask"] = mask
+                    let timeout = AXUIElementSetMessagingTimeout(button, 1)
+                    let status = timeout == .success ? AXUIElementPerformAction(button, "AXPress" as CFString) : timeout
+                    modal["replaceError"] = Int(status.rawValue)
+                    guard status == .success else { modal["replaceStatus"] = "press_error"; return }
+                    modal["replacePressed"] = true; modal["replaceStatus"] = "not_dismissed"
+                    let dismissDeadline = min(deadline, ProcessInfo.processInfo.systemUptime + 2)
+                    var modalGone = false
+                    while ProcessInfo.processInfo.systemUptime < dismissDeadline {
+                        guard ProcessInfo.processInfo.systemUptime < deadline else { return }
+                        if !modalGone {
+                            let timeout = AXUIElementSetMessagingTimeout(root, 0.5)
+                            var role: CFTypeRef?
+                            let roleStatus = timeout == .success ? AXUIElementCopyAttributeValue(root, "AXRole" as CFString, &role) : timeout
+                            guard roleStatus == .success || roleStatus == .invalidUIElement else {
+                                modal["replaceError"] = Int(roleStatus.rawValue); return
+                            }
+                            // This is positive dismissal evidence for the captured modal, not a read retry.
+                            modalGone = roleStatus == .invalidUIElement
+                        }
+                        guard let current = bindingRead(parent, "AXChildren") as? [AXUIElement], current.count <= 64 else { return }
+                        if modalGone && !current.contains(where: { CFEqual($0, sheet) }) {
+                            guard bindingPid(parent), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                                  ProcessInfo.processInfo.systemUptime < deadline else { return }
+                            modal["replaceDismissed"] = true; modal["replaceSaveDismissed"] = true
+                            modal["replaceStatus"] = "complete"; return
+                        }
+                        Thread.sleep(forTimeInterval: min(0.02, max(0, dismissDeadline - ProcessInfo.processInfo.systemUptime)))
+                    }
+                }
+                replace()
             }
         }
         return modal
@@ -923,8 +1017,8 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
         }
     }
     currentAttribute = "AXActions"; currentRole = "button"; currentParentRole = "none"; currentPidState = "not_checked"; currentSheetBranch = true
-    result["saveActionStatus"] = "deadline"; result["savePressAction"] = "unknown"; result["saveActionError"] = 0
-    if ProcessInfo.processInfo.systemUptime < deadline {
+    result["saveActionStatus"] = replaceConfirmation ? "not_checked" : "deadline"; result["savePressAction"] = "unknown"; result["saveActionError"] = 0
+    if !replaceConfirmation && ProcessInfo.processInfo.systemUptime < deadline {
         let timeout = AXUIElementSetMessagingTimeout(save, 0.15)
         var actions: CFArray?
         let status = timeout == .success ? AXUIElementCopyActionNames(save, &actions) : timeout
@@ -1269,7 +1363,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             }
             if observesReplaceJson {
                 // Capture the actual context even when AXPress refuses; retain the original action result.
-                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet, parent: parent, cancelConfirmation: cancelsReplaceJson && pressActionCalled && (status == .success || status == .attributeUnsupported))
+                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet, parent: parent, cancelConfirmation: cancelsReplaceJson && pressActionCalled && (status == .success || status == .attributeUnsupported), replaceConfirmation: replacesJson && pressActionCalled && (status == .success || status == .attributeUnsupported))
                 if pressed { stage = "replace_observed" }
             }
             if pressed && !observesReplaceJson {
@@ -1312,7 +1406,7 @@ var result: [String: Any] = [
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
     "saveTargetExistingFixture": saveTargetExistingFixture, "replaceContext": replaceContext, "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask, "guardEnabledState": guardEnabledState,
-    "action": ["requested": cancelsReplaceJson ? "cancel_replace_json" : observesReplaceJson ? "observe_replace_json" : savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
+    "action": ["requested": replacesJson ? "replace_json" : cancelsReplaceJson ? "cancel_replace_json" : observesReplaceJson ? "observe_replace_json" : savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if observesReplaceJson { result["pressTimeoutError"] = pressTimeoutError; result["pressActionCalled"] = pressActionCalled }
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),

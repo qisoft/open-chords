@@ -12,6 +12,7 @@ import {
   installedMacArchiveSaveSucceeded,
   installedMacReplaceContextObserved,
   installedMacReplacementCancelled,
+  installedMacJsonReplacementConfirmed,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -1975,3 +1976,133 @@ it.each([0, 1, 3, 7, 15, 31, 63, 127])(
     );
   },
 );
+
+const jsonReplaced = {
+  ...boundModalObservation,
+  action: { requested: "replace_json", pressed: false, dismissed: false },
+  replaceContext: {
+    ...boundModalObservation.replaceContext,
+    saveActionStatus: "not_checked",
+    savePressAction: "unknown",
+    saveActionError: 0,
+    replaceStatus: "complete",
+    replaceGuardMask: 255,
+    replacePressed: true,
+    replaceDismissed: true,
+    replaceSaveDismissed: true,
+    replaceTargetFixtureVerified: true,
+    replaceError: 0,
+    replaceChainVisited: 2,
+  },
+};
+it("requires independent modal, exact fixture and full Replace guard without claiming Save AXPress success", () => {
+  const output = JSON.stringify(jsonReplaced);
+  expect(installedMacJsonReplacementConfirmed(output)).toBe(true);
+  expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  expect(installedMacReplacementCancelled(output)).toBe(false);
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+  const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+  expect(diagnostic).toContain("replace_context_replaceGuardMask=255");
+  expect(diagnostic).toContain("replace_context_replaceSaveDismissed=true");
+  expect(diagnostic).toContain("last_error=-25205");
+  expect(diagnostic).toContain("pressed=false");
+});
+it("also accepts an initially successful Save dispatch with the same guarded Replace proof", () => {
+  const output = JSON.stringify({
+    ...jsonReplaced,
+    lastError: 0,
+    stage: "replace_observed",
+    action: { requested: "replace_json", pressed: true, dismissed: false },
+    replaceContext: {
+      ...replacementObservation.replaceContext,
+      ...jsonReplaced.replaceContext,
+      status: "complete",
+      error: 0,
+    },
+  });
+  expect(installedMacJsonReplacementConfirmed(output)).toBe(true);
+});
+it.each([
+  { modalBindingParent: "parent" },
+  { windows: 2 },
+  { replaceStatus: "refused" },
+  { replaceStatus: "press_error" },
+  { replaceStatus: "not_dismissed" },
+  { replaceGuardMask: 254 },
+  { replacePressed: false },
+  { replaceDismissed: false },
+  { replaceSaveDismissed: false },
+  { replaceTargetFixtureVerified: false },
+  { replaceError: -25205 },
+  { replaceChainVisited: 1 },
+  { modalBindingParent: "other" },
+  { modalBindingSheetAttached: false },
+  { modalBindingForeground: false },
+  { modalReplace: 0 },
+  { modalCandidates: 2 },
+  { saveActionStatus: "error" },
+  { savePressAction: "present" },
+  { saveActionError: -25202 },
+])("refuses incomplete or unexpected Replace evidence %j", (change) => {
+  expect(
+    installedMacJsonReplacementConfirmed(
+      JSON.stringify({
+        ...jsonReplaced,
+        replaceContext: { ...jsonReplaced.replaceContext, ...change },
+      }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  "replaceStatus",
+  "replaceGuardMask",
+  "replacePressed",
+  "replaceDismissed",
+  "replaceSaveDismissed",
+  "replaceTargetFixtureVerified",
+  "replaceError",
+  "replaceChainVisited",
+])("refuses absent Replace proof field %s", (field) => {
+  expect(
+    installedMacJsonReplacementConfirmed(
+      JSON.stringify({
+        ...jsonReplaced,
+        replaceContext: { ...jsonReplaced.replaceContext, [field]: undefined },
+      }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  { replaceStatus: "/private/path" },
+  { replaceGuardMask: 256 },
+  { replaceError: 32768 },
+  { replaceChainVisited: 17 },
+  { replaceSaveDismissed: "private" },
+  { replaceTargetFixtureVerified: "private" },
+  { replaceTitle: "private content" },
+])("rejects private or unbounded Replace evidence %j", (change) => {
+  const output = JSON.stringify({
+    ...jsonReplaced,
+    replaceContext: { ...jsonReplaced.replaceContext, ...change },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+  expect(installedMacJsonReplacementConfirmed(output)).toBe(false);
+});
+it.each([
+  { saveTargetExistingFixture: false },
+  { guardMask: 254 },
+  { lastError: -25202 },
+  { action: { requested: "cancel_replace_json", pressed: false, dismissed: false } },
+  { action: { requested: "observe_replace_json", pressed: false, dismissed: false } },
+])("never upgrades a different action or missing original guard to Replace %j", (change) => {
+  expect(installedMacJsonReplacementConfirmed(JSON.stringify({ ...jsonReplaced, ...change }))).toBe(
+    false,
+  );
+});
+it("bounds explicit Replace evidence without changing ordinary AX output limits", () => {
+  const output = JSON.stringify(jsonReplaced);
+  expect(installedMacJsonReplacementConfirmed(output.padEnd(8192, " "))).toBe(true);
+  expect(installedMacJsonReplacementConfirmed(output.padEnd(8193, " "))).toBe(false);
+});
