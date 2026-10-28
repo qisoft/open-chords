@@ -677,6 +677,10 @@ describe("AnalysisJobs", () => {
     let publications = 0;
     let releaseResult!: () => void;
     let reportStarted!: () => void;
+    let reportLateResult!: () => void;
+    const lateResultReturned = new Promise<void>((resolve) => {
+      reportLateResult = resolve;
+    });
     const started = new Promise<void>((resolve) => {
       reportStarted = resolve;
     });
@@ -690,6 +694,7 @@ describe("AnalysisJobs", () => {
           signal.addEventListener("abort", () => resolve(), { once: true });
         });
         await resultReleased;
+        reportLateResult();
         return {
           revision: {
             ...structuredClone(goldenProject.analysisRevisions[0]!),
@@ -732,8 +737,17 @@ describe("AnalysisJobs", () => {
     });
 
     const running = jobs.runNext();
+    // Attach rejection handling immediately, then finish the first runtime's durable
+    // cancellation before opening another writer over the same state file.
+    const cancellation = running.then(
+      (result) => ({ result }),
+      (error: unknown) => ({ error }),
+    );
     await started;
     await jobs.cancel("job_cancel");
+    const cancelled = await cancellation;
+    if ("error" in cancelled) throw cancelled.error;
+    expect(cancelled.result).toMatchObject({ state: "cancelled" });
     const reopened = await openAnalysisJobs({
       authority: cancelAuthority,
       runner: cancellableRunner,
@@ -744,8 +758,17 @@ describe("AnalysisJobs", () => {
       job: { state: "cancelled" },
     });
     releaseResult();
-    await expect(running).resolves.toMatchObject({ state: "cancelled" });
+    await lateResultReturned;
+    const afterLateResult = await openAnalysisJobs({
+      authority: cancelAuthority,
+      runner: cancellableRunner,
+      stateRoot,
+    });
     expect(publications).toBe(0);
+    expect(afterLateResult.get("job_cancel")).toMatchObject({
+      attempts: [{ state: "cancelled" }],
+      job: { state: "cancelled" },
+    });
   });
 
   it("aborts and contains an Attempt cancelled as its running state becomes durable", async () => {
