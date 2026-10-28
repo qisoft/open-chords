@@ -1325,3 +1325,48 @@ it.each([{ foreignRole: "/private/path" }, { foreignRoleError: 32768 }, { foreig
     expect(installedMacReplaceContextObserved(output)).toBe(false);
   },
 );
+
+it.each([
+  { foreignRole: "static_text", parentRole: "group", sheetBranch: true },
+  { foreignRole: "scroll_area", parentRole: "split_group", sheetBranch: false },
+])(
+  "records fixed foreign-node role and captured-sheet encounter categories without accepting it %j",
+  (detail) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        attribute: "pid",
+        role: "unknown",
+        pidState: "foreign",
+        foreignRoleError: 0,
+        ...detail,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+    expect(diagnostic).toContain(`replace_context_foreignRole=${detail.foreignRole}`);
+    expect(diagnostic).toContain(`replace_context_parentRole=${detail.parentRole}`);
+    expect(diagnostic).toContain(`replace_context_sheetBranch=${detail.sheetBranch}`);
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { foreignRole: "private title" },
+  { parentRole: "/private/path" },
+  { sheetBranch: "private" },
+])("rejects private role or invalid captured-sheet detail %j", (detail) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...detail },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+});

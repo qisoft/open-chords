@@ -520,9 +520,11 @@ func isExistingReplacementFixture(_ path: String) -> Bool {
 }
 
 // Fresh read-only context after one guarded Save. No confirmation control is pressed.
-func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement) -> [String: Any] {
+func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement, sheet: AXUIElement) -> [String: Any] {
     var result: [String: Any] = ["status": "complete", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
     var currentAttribute = "none", currentRole = "unknown", currentParentRole = "none", currentPidState = "not_checked"
+    var currentSheetBranch = false
+    result["sheetBranch"] = false
     result["attribute"] = "none"; result["role"] = "unknown"; result["parentRole"] = "none"; result["pidState"] = "not_checked"
     result["foreignRole"] = "not_checked"; result["foreignRoleError"] = 0
     func roleCategory(_ role: String) -> String {
@@ -532,6 +534,37 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
         case "AXDialog": return "dialog"
         case "AXButton": return "button"
         case "AXWebArea": return "web_area"
+        case "AXGroup": return "group"
+        case "AXStaticText": return "static_text"
+        case "AXTextField": return "text_field"
+        case "AXTextArea": return "text_area"
+        case "AXScrollArea": return "scroll_area"
+        case "AXScrollBar": return "scroll_bar"
+        case "AXSplitGroup": return "split_group"
+        case "AXSplitter": return "splitter"
+        case "AXBrowser": return "browser"
+        case "AXList": return "list"
+        case "AXOutline": return "outline"
+        case "AXTable": return "table"
+        case "AXRow": return "row"
+        case "AXColumn": return "column"
+        case "AXCell": return "cell"
+        case "AXImage": return "image"
+        case "AXPopUpButton": return "popup_button"
+        case "AXMenuButton": return "menu_button"
+        case "AXMenu": return "menu"
+        case "AXMenuItem": return "menu_item"
+        case "AXMenuBar": return "menu_bar"
+        case "AXMenuBarItem": return "menu_bar_item"
+        case "AXCheckBox": return "check_box"
+        case "AXRadioButton": return "radio_button"
+        case "AXTabGroup": return "tab_group"
+        case "AXToolbar": return "toolbar"
+        case "AXComboBox": return "combo_box"
+        case "AXDisclosureTriangle": return "disclosure_triangle"
+        case "AXLink": return "link"
+        case "AXHeading": return "heading"
+        case "AXUnknown": return "ax_unknown"
         default: return "other"
         }
     }
@@ -539,7 +572,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
         if (result["status"] as? String) == "complete" {
             result["status"] = status; result["error"] = Int(error.rawValue)
             result["attribute"] = currentAttribute; result["role"] = currentRole
-            result["parentRole"] = currentParentRole; result["pidState"] = currentPidState
+            result["parentRole"] = currentParentRole; result["pidState"] = currentPidState; result["sheetBranch"] = currentSheetBranch
         }
     }
     func attribute(_ element: AXUIElement, _ name: String, optional: Bool = false) -> CFTypeRef? {
@@ -558,11 +591,12 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
     }
     result["windows"] = min(17, windows.count)
     guard !windows.isEmpty, windows.count <= 16 else { refuse(windows.isEmpty ? "invalid_value" : "bound"); return result }
-    var queue = windows.map { ($0, "none") }
+    var queue = windows.map { ($0, "none", false) }
     var seen: [AXUIElement] = []
     while !queue.isEmpty && (result["status"] as? String) == "complete" {
         if seen.count >= 256 { refuse("bound"); break }
-        let (element, parentRole) = queue.removeFirst()
+        let (element, parentRole, inheritedSheetBranch) = queue.removeFirst()
+        currentSheetBranch = inheritedSheetBranch || CFEqual(element, sheet)
         currentRole = "unknown"; currentParentRole = parentRole; currentPidState = "not_checked"
         if seen.contains(where: { CFEqual($0, element) }) { continue }
         seen.append(element); result["visited"] = seen.count
@@ -600,10 +634,10 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
         if let raw = raw {
             guard let children = raw as? [AXUIElement] else { refuse("invalid_value"); break }
             if queue.count + children.count + seen.count > 256 { refuse("bound"); break }
-            queue.append(contentsOf: children.map { ($0, currentRole) })
+            queue.append(contentsOf: children.map { ($0, currentRole, currentSheetBranch) })
         }
     }
-    currentAttribute = "AXActions"; currentRole = "button"; currentParentRole = "none"; currentPidState = "not_checked"
+    currentAttribute = "AXActions"; currentRole = "button"; currentParentRole = "none"; currentPidState = "not_checked"; currentSheetBranch = true
     result["saveActionStatus"] = "deadline"; result["savePressAction"] = "unknown"; result["saveActionError"] = 0
     if ProcessInfo.processInfo.systemUptime < deadline {
         let timeout = AXUIElementSetMessagingTimeout(save, 0.15)
@@ -948,7 +982,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             }
             if observesReplaceJson {
                 // Capture the actual context even when AXPress refuses; retain the original fatal result.
-                replaceContext = observeReplacementContext(app, pid: pid, save: button)
+                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet)
                 if pressed { stage = "replace_observed" }
             }
             if pressed && !observesReplaceJson {

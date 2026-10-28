@@ -113,6 +113,48 @@ const parentObservationSchema = z.strictObject({
   error: z.number().int().min(-32768).max(32767),
 });
 
+const replacementRoleKeys = [
+  "unknown",
+  "none",
+  "window",
+  "sheet",
+  "dialog",
+  "button",
+  "web_area",
+  "other",
+  "group",
+  "static_text",
+  "text_field",
+  "text_area",
+  "scroll_area",
+  "scroll_bar",
+  "split_group",
+  "splitter",
+  "browser",
+  "list",
+  "outline",
+  "table",
+  "row",
+  "column",
+  "cell",
+  "image",
+  "popup_button",
+  "menu_button",
+  "menu",
+  "menu_item",
+  "menu_bar",
+  "menu_bar_item",
+  "check_box",
+  "radio_button",
+  "tab_group",
+  "toolbar",
+  "combo_box",
+  "disclosure_triangle",
+  "link",
+  "heading",
+  "ax_unknown",
+] as const;
+
 const evidenceSchema = z.strictObject({
   staleSnapshot: z.strictObject({
     eligible: z.boolean(),
@@ -140,25 +182,11 @@ const evidenceSchema = z.strictObject({
       attribute: z
         .enum(["none", "pid", "AXWindows", "AXRole", "AXTitle", "AXChildren", "AXActions"])
         .optional(),
-      role: z
-        .enum(["unknown", "window", "sheet", "dialog", "button", "web_area", "other"])
-        .optional(),
-      parentRole: z
-        .enum(["none", "window", "sheet", "dialog", "button", "web_area", "other"])
-        .optional(),
+      role: z.enum(replacementRoleKeys).optional(),
+      parentRole: z.enum(replacementRoleKeys).optional(),
       pidState: z.enum(["not_checked", "same", "foreign", "unknown"]).optional(),
-      foreignRole: z
-        .enum([
-          "not_checked",
-          "unavailable",
-          "window",
-          "sheet",
-          "dialog",
-          "button",
-          "web_area",
-          "other",
-        ])
-        .optional(),
+      sheetBranch: z.boolean().optional(),
+      foreignRole: z.enum(["not_checked", "unavailable", ...replacementRoleKeys]).optional(),
       foreignRoleError: z.number().int().min(-32768).max(32767).optional(),
       saveActionStatus: z.enum(["success", "deadline", "error", "invalid_value"]).optional(),
       savePressAction: z.enum(["unknown", "present", "absent"]).optional(),
