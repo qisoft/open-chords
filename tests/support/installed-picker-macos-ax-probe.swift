@@ -621,6 +621,62 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                 queue.append(contentsOf: children)
             }
         }
+        // Fresh reciprocal attachment evidence, separate from the preserved broad-context refusal.
+        // This is read-only and does not authorize a confirmation action.
+        if (modal["modalStatus"] as? String) == "complete" {
+            modal["modalBindingStatus"] = "complete"; modal["modalBindingParent"] = "unknown"
+            modal["modalBindingMatches"] = 0; modal["modalBindingSheetAttached"] = false
+            modal["modalBindingForeground"] = false; modal["modalBindingError"] = 0; modal["modalBindingAttribute"] = "none"
+            func bindingFail(_ status: String, _ attribute: String, _ error: AXError = .success) {
+                if (modal["modalBindingStatus"] as? String) == "complete" {
+                    modal["modalBindingStatus"] = status; modal["modalBindingAttribute"] = attribute
+                    modal["modalBindingError"] = Int(error.rawValue)
+                }
+            }
+            func bindingPid(_ element: AXUIElement) -> Bool {
+                guard ProcessInfo.processInfo.systemUptime < deadline else { bindingFail("deadline", "pid"); return false }
+                var actualPid: pid_t = 0
+                let status = AXUIElementGetPid(element, &actualPid)
+                guard status == .success, actualPid == pid else { bindingFail("invalid_candidate", "pid", status); return false }
+                return true
+            }
+            func bindingRead(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+                guard ProcessInfo.processInfo.systemUptime < deadline else { bindingFail("deadline", name); return nil }
+                let timeout = AXUIElementSetMessagingTimeout(element, name == "AXRole" ? 0.5 : 0.15)
+                var output: CFTypeRef?
+                let status = timeout == .success ? AXUIElementCopyAttributeValue(element, name as CFString, &output) : timeout
+                guard status == .success, let output = output else { bindingFail("error", name, status); return nil }
+                guard ProcessInfo.processInfo.systemUptime < deadline else { bindingFail("deadline", name); return nil }
+                return output
+            }
+            func bind() {
+                guard bindingPid(root), bindingPid(sheet), bindingPid(parent) else { return }
+                guard (bindingRead(root, "AXRole") as? String) == "AXSheet" else { bindingFail("invalid_value", "AXRole"); return }
+                guard let rawParent = bindingRead(root, "AXParent") else { return }
+                guard CFGetTypeID(rawParent) == AXUIElementGetTypeID() else { bindingFail("invalid_value", "AXParent"); return }
+                let actualParent = unsafeBitCast(rawParent, to: AXUIElement.self)
+                guard bindingPid(actualParent) else { return }
+                let parentKind = CFEqual(actualParent, sheet) ? "sheet" : CFEqual(actualParent, parent) ? "parent" : "other"
+                modal["modalBindingParent"] = parentKind
+                guard parentKind != "other" else { bindingFail("invalid_candidate", "AXParent"); return }
+                guard let rawChildren = bindingRead(actualParent, "AXChildren") else { return }
+                guard let children = rawChildren as? [AXUIElement] else { bindingFail("invalid_value", "AXChildren"); return }
+                guard children.count <= 64 else { bindingFail("bound", "AXChildren"); return }
+                let matches = children.filter { CFEqual($0, root) }.count
+                modal["modalBindingMatches"] = matches
+                guard matches == 1 else { bindingFail("invalid_candidate", "AXChildren"); return }
+                guard let rawParentChildren = bindingRead(parent, "AXChildren") else { return }
+                guard let parentChildren = rawParentChildren as? [AXUIElement] else { bindingFail("invalid_value", "AXChildren"); return }
+                guard parentChildren.count <= 64 else { bindingFail("bound", "AXChildren"); return }
+                let attached = parentChildren.filter { CFEqual($0, sheet) }.count == 1
+                modal["modalBindingSheetAttached"] = attached
+                guard attached else { bindingFail("invalid_candidate", "AXChildren"); return }
+                let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+                modal["modalBindingForeground"] = foreground
+                if !foreground { bindingFail("invalid_candidate", "foreground") }
+            }
+            bind()
+        }
         return modal
     }
     func refuse(_ status: String, _ error: AXError = .success) {

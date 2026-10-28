@@ -218,6 +218,17 @@ const evidenceSchema = z.strictObject({
         .enum(["none", "pid", "AXRole", "AXTitle", "AXEnabled", "AXChildren"])
         .optional(),
       modalRole: z.enum(replacementRoleKeys).optional(),
+      modalBindingStatus: z
+        .enum(["complete", "deadline", "error", "bound", "invalid_candidate", "invalid_value"])
+        .optional(),
+      modalBindingParent: z.enum(["unknown", "sheet", "parent", "other"]).optional(),
+      modalBindingMatches: z.number().int().min(0).max(64).optional(),
+      modalBindingSheetAttached: z.boolean().optional(),
+      modalBindingForeground: z.boolean().optional(),
+      modalBindingError: z.number().int().min(-32768).max(32767).optional(),
+      modalBindingAttribute: z
+        .enum(["none", "pid", "foreground", "AXRole", "AXParent", "AXChildren"])
+        .optional(),
       attachmentStatus: z
         .enum([
           "absent",

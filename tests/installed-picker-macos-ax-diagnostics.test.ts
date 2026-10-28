@@ -1538,3 +1538,51 @@ it.each([{ pressTimeoutError: 32768 }, { pressActionCalled: "private" }])(
     ).toBe("Native macOS AX probe: invalid_evidence");
   },
 );
+
+it.each(["sheet", "parent", "other", "unknown"])(
+  "reports fresh modal attachment evidence without overriding the original refusal (%s)",
+  (modalBindingParent) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        modalStatus: "complete",
+        modalBindingStatus: modalBindingParent === "other" ? "invalid_candidate" : "complete",
+        modalBindingParent,
+        modalBindingMatches: 1,
+        modalBindingSheetAttached: true,
+        modalBindingForeground: true,
+        modalBindingError: 0,
+        modalBindingAttribute: "none",
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+    expect(diagnostic).toContain(`replace_context_modalBindingParent=${modalBindingParent}`);
+    expect(diagnostic).toContain("replace_context_modalBindingMatches=1");
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { modalBindingStatus: "private" },
+  { modalBindingParent: "/private/path" },
+  { modalBindingMatches: 65 },
+  { modalBindingMatches: -1 },
+  { modalBindingSheetAttached: "private" },
+  { modalBindingForeground: "private" },
+  { modalBindingError: 32768 },
+  { modalBindingAttribute: "private" },
+])("rejects private or unbounded modal binding detail %j", (detail) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...detail },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
