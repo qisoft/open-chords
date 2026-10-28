@@ -147,6 +147,19 @@ const evidenceSchema = z.strictObject({
         .enum(["none", "window", "sheet", "dialog", "button", "web_area", "other"])
         .optional(),
       pidState: z.enum(["not_checked", "same", "foreign", "unknown"]).optional(),
+      foreignRole: z
+        .enum([
+          "not_checked",
+          "unavailable",
+          "window",
+          "sheet",
+          "dialog",
+          "button",
+          "web_area",
+          "other",
+        ])
+        .optional(),
+      foreignRoleError: z.number().int().min(-32768).max(32767).optional(),
       saveActionStatus: z.enum(["success", "deadline", "error", "invalid_value"]).optional(),
       savePressAction: z.enum(["unknown", "present", "absent"]).optional(),
       saveActionError: z.number().int().min(-32768).max(32767).optional(),

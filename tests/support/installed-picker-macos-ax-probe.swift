@@ -524,6 +524,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
     var result: [String: Any] = ["status": "complete", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
     var currentAttribute = "none", currentRole = "unknown", currentParentRole = "none", currentPidState = "not_checked"
     result["attribute"] = "none"; result["role"] = "unknown"; result["parentRole"] = "none"; result["pidState"] = "not_checked"
+    result["foreignRole"] = "not_checked"; result["foreignRoleError"] = 0
     func roleCategory(_ role: String) -> String {
         switch role {
         case "AXWindow": return "window"
@@ -569,7 +570,19 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
         currentAttribute = "pid"
         let pidStatus = AXUIElementGetPid(element, &actualPid)
         currentPidState = pidStatus != .success ? "unknown" : actualPid == pid ? "same" : "foreign"
-        guard pidStatus == .success, actualPid == pid else { refuse("error", pidStatus == .success ? .illegalArgument : pidStatus); break }
+        guard pidStatus == .success, actualPid == pid else {
+            refuse("error", pidStatus == .success ? .illegalArgument : pidStatus)
+            // Diagnostic read only: the foreign-PID refusal remains first and fatal. Never skip or act on this node.
+            if pidStatus == .success && actualPid != pid && ProcessInfo.processInfo.systemUptime < deadline {
+                let timeout = AXUIElementSetMessagingTimeout(element, 0.5)
+                var foreignRole: CFTypeRef?
+                let status = timeout == .success ? AXUIElementCopyAttributeValue(element, "AXRole" as CFString, &foreignRole) : timeout
+                result["foreignRoleError"] = Int(status.rawValue)
+                if status == .success, let role = foreignRole as? String { result["foreignRole"] = roleCategory(role) }
+                else { result["foreignRole"] = "unavailable" }
+            }
+            break
+        }
         guard let role = attribute(element, "AXRole") as? String else {
             if (result["status"] as? String) == "complete" { refuse("invalid_value") }; break
         }

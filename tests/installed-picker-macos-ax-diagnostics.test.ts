@@ -1283,3 +1283,45 @@ it("accepts a bounded 16-node replacement ancestry without truncating diagnostic
     "parent_chain_node_15_role=AXSheet",
   );
 });
+
+it.each(["web_area", "button", "other", "unavailable"])(
+  "retains foreign-PID refusal while categorizing its diagnostic role as %s",
+  (foreignRole) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        attribute: "pid",
+        role: "unknown",
+        parentRole: "other",
+        pidState: "foreign",
+        foreignRole,
+        foreignRoleError: foreignRole === "unavailable" ? -25202 : 0,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 100);
+    expect(diagnostic).toContain("replace_context_pidState=foreign");
+    expect(diagnostic).toContain(`replace_context_foreignRole=${foreignRole}`);
+    expect(diagnostic).toContain("replace_context_error=-25201");
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([{ foreignRole: "/private/path" }, { foreignRoleError: 32768 }, { foreignPid: 1234 }])(
+  "rejects private or unbounded foreign-node details %j",
+  (change) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      replaceContext: { ...replacementObservation.replaceContext, ...change },
+    });
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+      "Native macOS AX probe: invalid_evidence",
+    );
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+  },
+);
