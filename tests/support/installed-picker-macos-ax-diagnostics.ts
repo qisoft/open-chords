@@ -837,22 +837,75 @@ export function installedMacReplaceContextObserved(stdout: string) {
     const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
     if (!parsed.success) return false;
     const value = parsed.data;
+    const context = value.replaceContext;
+    const originalObservation =
+      value.lastError === 0 &&
+      value.stage === "replace_observed" &&
+      value.action.pressed &&
+      context?.status === "complete" &&
+      context.error === 0;
+    // A refused action is never reported as successful. Independently observed, freshly
+    // attached confirmation context can satisfy this read-only journey without pruning
+    // the foreign splitter from the original traversal or issuing another input action.
+    const boundModalObservation =
+      value.lastError === -25205 &&
+      value.stage === "press" &&
+      !value.action.pressed &&
+      value.pressTimeoutError === 0 &&
+      value.pressActionCalled === true &&
+      value.pressSheetState === "attached_sheet" &&
+      value.pressFollowupError === 0 &&
+      context?.status === "error" &&
+      context.error === -25201 &&
+      context.windows === 1 &&
+      context.attribute === "pid" &&
+      context.pidState === "foreign" &&
+      context.parentRole === "split_group" &&
+      context.sheetBranch === true &&
+      context.foreignRole === "splitter" &&
+      context.foreignRoleError === 0 &&
+      context.foreignChildren === 0 &&
+      context.foreignChildrenStatus === "absent" &&
+      context.foreignChildrenError === -25212 &&
+      (context.modalCandidates === 1 ||
+        (context.modalCandidates === 0 &&
+          context.attachmentStatus === "complete" &&
+          context.attachmentCandidates === 1 &&
+          context.attachmentError === 0 &&
+          context.capturedSheetAttached === true)) &&
+      context.modalStatus === "complete" &&
+      context.modalError === 0 &&
+      context.modalAttribute === "none" &&
+      context.saveActionStatus === "success" &&
+      context.savePressAction === "present" &&
+      context.saveActionError === 0 &&
+      context.modalVisited !== undefined &&
+      context.modalVisited > 0 &&
+      context.modalButtons === 2 &&
+      context.modalCancel === 1 &&
+      context.modalReplace === 1 &&
+      context.modalEnabledCancel === 1 &&
+      context.modalEnabledReplace === 1 &&
+      context.modalBindingStatus === "complete" &&
+      context.modalBindingParent === "sheet" &&
+      context.modalBindingMatches === 1 &&
+      context.modalBindingSheetAttached === true &&
+      context.modalBindingForeground === true &&
+      context.modalBindingError === 0 &&
+      context.modalBindingAttribute === "none";
     return (
       directoryEvidenceVerified(value) &&
       filenameEvidenceVerified(value.saveFilename) &&
       value.saveTargetExistingFixture &&
       !value.saveTargetAbsent &&
-      value.lastError === 0 &&
-      value.stage === "replace_observed" &&
       value.action.requested === "observe_replace_json" &&
-      value.action.pressed &&
       !value.action.dismissed &&
-      value.replaceContext?.status === "complete" &&
-      value.replaceContext.error === 0 &&
-      value.replaceContext.windows > 0 &&
-      value.replaceContext.windows <= 16 &&
-      value.replaceContext.visited > 0 &&
-      value.replaceContext.foreground
+      context !== undefined &&
+      context.windows > 0 &&
+      context.windows <= 16 &&
+      context.visited > 0 &&
+      context.foreground &&
+      (originalObservation || boundModalObservation)
     );
   } catch {
     return false;
