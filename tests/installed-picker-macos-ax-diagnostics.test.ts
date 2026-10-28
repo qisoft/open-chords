@@ -1199,3 +1199,87 @@ it.each([
   );
   expect(installedMacReplaceContextObserved(output)).toBe(false);
 });
+
+it("preserves replacement diagnostics and acceptance through the scoped 8 KiB boundary", () => {
+  const raw = JSON.stringify(replacementObservation);
+  expect(raw.length).toBeLessThan(4096);
+  for (const size of [4097, 4878, 8192]) {
+    const output = raw.padEnd(size, " ");
+    expect(installedMacReplaceContextObserved(output)).toBe(true);
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain("action=observe_replace_json");
+    expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  }
+  const oversized = raw.padEnd(8193, " ");
+  expect(installedMacReplaceContextObserved(oversized)).toBe(false);
+  expect(installedMacAxProbeDiagnostic(oversized, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
+it("retains the 4 KiB diagnostic limit for ordinary Save and snapshot evidence", () => {
+  for (const ordinaryEvidence of [directorySnapshot, jsonSave]) {
+    const output = JSON.stringify(ordinaryEvidence).padEnd(4097, " ");
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+      "Native macOS AX probe: invalid_evidence",
+    );
+  }
+});
+it("still rejects private evidence inside the larger replacement limit", () => {
+  const output = JSON.stringify({ ...replacementObservation, privatePath: "/private/path" }).padEnd(
+    4878,
+    " ",
+  );
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
+
+it("accepts a bounded 16-node replacement ancestry without truncating diagnostic evidence", () => {
+  const originalNodes = replacementObservation.parentChain.nodes;
+  const output = JSON.stringify({
+    ...replacementObservation,
+    firstFailureParent: replacementObservation.invalidChildParent,
+    saveTargetContext: {
+      status: "not_checked",
+      fields: 0,
+      valueMatches: 0,
+      enabledMatches: 0,
+      labelMatches: 0,
+      descriptionMatches: 0,
+      linkedLabelMatches: 0,
+      linkedLabelRole: "none",
+      error: 0,
+      attribute: "none",
+    },
+    parentChain: {
+      ...replacementObservation.parentChain,
+      visited: 16,
+      unknownSelected: 16,
+      nodes: [
+        originalNodes[0],
+        ...Array.from({ length: 14 }, () => ({
+          role: "AXGroup",
+          selectedReference: false,
+          selectedState: "unknown",
+        })),
+        originalNodes.at(-1),
+      ],
+    },
+    replaceContext: {
+      ...replacementObservation.replaceContext,
+      attribute: "none",
+      role: "unknown",
+      parentRole: "none",
+      pidState: "not_checked",
+      saveActionStatus: "success",
+      savePressAction: "present",
+      saveActionError: 0,
+    },
+  });
+  expect(output.length).toBeGreaterThan(4096);
+  expect(output.length).toBeLessThanOrEqual(8192);
+  expect(installedMacReplaceContextObserved(output)).toBe(true);
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain(
+    "parent_chain_node_15_role=AXSheet",
+  );
+});

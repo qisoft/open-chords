@@ -403,9 +403,11 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       "Native macOS AX probe",
     );
   try {
-    if (stdout.length > 4096) return "Native macOS AX probe: invalid_evidence";
+    if (stdout.length > 8192) return "Native macOS AX probe: invalid_evidence";
     const evidence = evidenceSchema.safeParse(JSON.parse(stdout));
     if (!evidence.success) return "Native macOS AX probe: invalid_evidence";
+    if (stdout.length > 4096 && evidence.data.action.requested !== "observe_replace_json")
+      return "Native macOS AX probe: invalid_evidence";
     const {
       trusted,
       complete,
@@ -725,7 +727,7 @@ function nativeSaveSucceeded(
 
 // This proves bounded observation only, never confirmation dismissal or replacement.
 export function installedMacReplaceContextObserved(stdout: string) {
-  if (stdout.length > 4096) return false;
+  if (stdout.length > 8192) return false;
   try {
     const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
     if (!parsed.success) return false;

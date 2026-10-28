@@ -544,7 +544,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
     func attribute(_ element: AXUIElement, _ name: String, optional: Bool = false) -> CFTypeRef? {
         currentAttribute = name
         guard ProcessInfo.processInfo.systemUptime < deadline else { refuse("deadline"); return nil }
-        let timeout = AXUIElementSetMessagingTimeout(element, 0.15)
+        let timeout = AXUIElementSetMessagingTimeout(element, name == "AXRole" ? 0.5 : 0.15)
         guard timeout == .success else { refuse("error", timeout); return nil }
         var value: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)

@@ -992,3 +992,31 @@ it("never retries failed Save despite a complete post-failure replacement snapsh
   ).rejects.toThrow("last_error=-25205");
   expect(execute).toHaveBeenCalledTimes(6);
 });
+
+it("allows larger replacement evidence only for the final explicit observation process", async () => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const responses = [
+    prepared,
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    replaceObserved,
+  ];
+  execute.mockImplementation(async () => {
+    const value = responses.shift();
+    return {
+      stdout: JSON.stringify(value).padEnd(value === replaceObserved ? 4878 : 0, " "),
+      stderr: "",
+    };
+  });
+  await installedMacPickerDriver(
+    "observe_replace_json",
+    "/private/directory",
+    () => ({}),
+    "json",
+  )(42);
+  expect(execute.mock.calls.map((call) => call[2].maxBuffer)).toEqual([
+    65536, 4096, 4096, 4096, 4096, 8192,
+  ]);
+});

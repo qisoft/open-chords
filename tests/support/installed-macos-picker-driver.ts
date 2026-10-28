@@ -179,7 +179,11 @@ export function installedMacPickerDriver(
                   ? ["--verify-filename"]
                   : []),
             ],
-            { env: environment(), timeout: probeBudget, maxBuffer: 4096 },
+            {
+              env: environment(),
+              timeout: probeBudget,
+              maxBuffer: observeReplace && saveExport ? 8192 : 4096,
+            },
           ));
         } catch (error) {
           // Raw exec errors contain private paths/output; retaining cause defeats redaction.
