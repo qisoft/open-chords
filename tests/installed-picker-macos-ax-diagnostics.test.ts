@@ -1370,3 +1370,82 @@ it.each([
   );
   expect(installedMacReplaceContextObserved(output)).toBe(false);
 });
+
+it.each([
+  {
+    foreignChildrenStatus: "complete",
+    foreignChildren: 0,
+    modalStatus: "complete",
+    modalCancel: 1,
+    modalReplace: 1,
+    modalEnabledCancel: 1,
+    modalEnabledReplace: 1,
+  },
+  {
+    foreignChildrenStatus: "unsupported",
+    foreignChildren: 0,
+    modalStatus: "error",
+    modalError: -25201,
+    modalAttribute: "pid",
+  },
+  {
+    foreignChildrenStatus: "complete",
+    foreignChildren: 1,
+    modalStatus: "ambiguous",
+    modalCandidates: 2,
+  },
+])(
+  "keeps the original failure fatal while retaining independent leaf/modal observations %j",
+  (observation) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        attribute: "pid",
+        pidState: "foreign",
+        foreignRole: "splitter",
+        foreignRoleError: 0,
+        foreignChildrenError: 0,
+        modalCandidates: 1,
+        modalVisited: 8,
+        modalButtons: 2,
+        modalError: 0,
+        modalAttribute: "none",
+        modalRole: "unknown",
+        ...observation,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+    expect(diagnostic).toContain(
+      `replace_context_foreignChildrenStatus=${observation.foreignChildrenStatus}`,
+    );
+    expect(diagnostic).toContain(`replace_context_modalStatus=${observation.modalStatus}`);
+    expect(diagnostic).toContain("replace_context_pidState=foreign");
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { foreignChildren: 258 },
+  { foreignChildrenStatus: "private" },
+  { foreignChildrenError: -32769 },
+  { modalVisited: 65 },
+  { modalEnabledReplace: 65 },
+  { modalRole: "private title" },
+  { modalAttribute: "/private/path" },
+  { modalTitle: "private text" },
+])("rejects unbounded or private independent observations %j", (observation) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...observation },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+});

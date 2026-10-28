@@ -188,6 +188,34 @@ const evidenceSchema = z.strictObject({
       sheetBranch: z.boolean().optional(),
       foreignRole: z.enum(["not_checked", "unavailable", ...replacementRoleKeys]).optional(),
       foreignRoleError: z.number().int().min(-32768).max(32767).optional(),
+      foreignChildren: z.number().int().min(0).max(257).optional(),
+      foreignChildrenStatus: z
+        .enum(["complete", "bound", "absent", "unsupported", "invalid_value", "error"])
+        .optional(),
+      foreignChildrenError: z.number().int().min(-32768).max(32767).optional(),
+      modalCandidates: z.number().int().min(0).max(257).optional(),
+      modalStatus: z
+        .enum([
+          "not_checked",
+          "complete",
+          "ambiguous",
+          "deadline",
+          "bound",
+          "error",
+          "invalid_value",
+        ])
+        .optional(),
+      modalVisited: z.number().int().min(0).max(64).optional(),
+      modalButtons: z.number().int().min(0).max(64).optional(),
+      modalCancel: z.number().int().min(0).max(64).optional(),
+      modalReplace: z.number().int().min(0).max(64).optional(),
+      modalEnabledCancel: z.number().int().min(0).max(64).optional(),
+      modalEnabledReplace: z.number().int().min(0).max(64).optional(),
+      modalError: z.number().int().min(-32768).max(32767).optional(),
+      modalAttribute: z
+        .enum(["none", "pid", "AXRole", "AXTitle", "AXEnabled", "AXChildren"])
+        .optional(),
+      modalRole: z.enum(replacementRoleKeys).optional(),
       saveActionStatus: z.enum(["success", "deadline", "error", "invalid_value"]).optional(),
       savePressAction: z.enum(["unknown", "present", "absent"]).optional(),
       saveActionError: z.number().int().min(-32768).max(32767).optional(),

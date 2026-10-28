@@ -568,6 +568,59 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
         default: return "other"
         }
     }
+    // Separate diagnostics on an already encountered unique nested sheet. It authorizes no action.
+    func modalObservation(_ root: AXUIElement) -> [String: Any] {
+        var modal: [String: Any] = ["modalStatus": "complete", "modalVisited": 0, "modalButtons": 0, "modalCancel": 0, "modalReplace": 0, "modalEnabledCancel": 0, "modalEnabledReplace": 0, "modalError": 0, "modalAttribute": "none", "modalRole": "unknown"]
+        var roleCategoryNow = "unknown"
+        func fail(_ status: String, _ attribute: String, _ error: AXError = .success) {
+            if (modal["modalStatus"] as? String) == "complete" {
+                modal["modalStatus"] = status; modal["modalAttribute"] = attribute
+                modal["modalRole"] = roleCategoryNow; modal["modalError"] = Int(error.rawValue)
+            }
+        }
+        func value(_ element: AXUIElement, _ name: String, optional: Bool = false) -> CFTypeRef? {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { fail("deadline", name); return nil }
+            let timeout = AXUIElementSetMessagingTimeout(element, name == "AXRole" ? 0.5 : 0.15)
+            var output: CFTypeRef?
+            let status = timeout == .success ? AXUIElementCopyAttributeValue(element, name as CFString, &output) : timeout
+            if optional && (status == .noValue || status == .attributeUnsupported) { return nil }
+            guard status == .success, let output = output else { fail("error", name, status); return nil }
+            if ProcessInfo.processInfo.systemUptime >= deadline { fail("deadline", name); return nil }
+            return output
+        }
+        var queue = [root], visited: [AXUIElement] = []
+        while !queue.isEmpty && (modal["modalStatus"] as? String) == "complete" {
+            if visited.count >= 64 { fail("bound", "AXChildren"); break }
+            let element = queue.removeFirst()
+            if visited.contains(where: { CFEqual($0, element) }) { continue }
+            visited.append(element); modal["modalVisited"] = visited.count; roleCategoryNow = "unknown"
+            if ProcessInfo.processInfo.systemUptime >= deadline { fail("deadline", "pid"); break }
+            var actualPid: pid_t = 0
+            let pidStatus = AXUIElementGetPid(element, &actualPid)
+            guard pidStatus == .success, actualPid == pid else { fail("error", "pid", pidStatus == .success ? .illegalArgument : pidStatus); break }
+            guard let role = value(element, "AXRole") as? String else { fail("invalid_value", "AXRole"); break }
+            roleCategoryNow = roleCategory(role)
+            if role == "AXButton" {
+                modal["modalButtons"] = (modal["modalButtons"] as? Int ?? 0) + 1
+                let title = value(element, "AXTitle", optional: true) as? String
+                if title == "Cancel" || title == "Replace" {
+                    let key = title == "Cancel" ? "modalCancel" : "modalReplace"
+                    modal[key] = (modal[key] as? Int ?? 0) + 1
+                    guard let enabled = value(element, "AXEnabled") as? Bool else { fail("invalid_value", "AXEnabled"); break }
+                    if enabled {
+                        let enabledKey = title == "Cancel" ? "modalEnabledCancel" : "modalEnabledReplace"
+                        modal[enabledKey] = (modal[enabledKey] as? Int ?? 0) + 1
+                    }
+                }
+            }
+            if let raw = value(element, "AXChildren", optional: true) {
+                guard let children = raw as? [AXUIElement] else { fail("invalid_value", "AXChildren"); break }
+                if queue.count + children.count + visited.count > 64 { fail("bound", "AXChildren"); break }
+                queue.append(contentsOf: children)
+            }
+        }
+        return modal
+    }
     func refuse(_ status: String, _ error: AXError = .success) {
         if (result["status"] as? String) == "complete" {
             result["status"] = status; result["error"] = Int(error.rawValue)
@@ -591,6 +644,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
     }
     result["windows"] = min(17, windows.count)
     guard !windows.isEmpty, windows.count <= 16 else { refuse(windows.isEmpty ? "invalid_value" : "bound"); return result }
+    var modalCandidates: [AXUIElement] = []
     var queue = windows.map { ($0, "none", false) }
     var seen: [AXUIElement] = []
     while !queue.isEmpty && (result["status"] as? String) == "complete" {
@@ -614,6 +668,19 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                 result["foreignRoleError"] = Int(status.rawValue)
                 if status == .success, let role = foreignRole as? String { result["foreignRole"] = roleCategory(role) }
                 else { result["foreignRole"] = "unavailable" }
+                if (result["foreignRole"] as? String) == "splitter" && ProcessInfo.processInfo.systemUptime < deadline {
+                    let timeout = AXUIElementSetMessagingTimeout(element, 0.15)
+                    var children: CFTypeRef?
+                    let status = timeout == .success ? AXUIElementCopyAttributeValue(element, "AXChildren" as CFString, &children) : timeout
+                    result["foreignChildrenError"] = Int(status.rawValue)
+                    result["foreignChildren"] = 0
+                    if status == .success, let values = children as? [AXUIElement] {
+                        result["foreignChildren"] = min(257, values.count)
+                        result["foreignChildrenStatus"] = values.count <= 256 ? "complete" : "bound"
+                    } else if status == .noValue { result["foreignChildrenStatus"] = "absent" }
+                    else if status == .attributeUnsupported { result["foreignChildrenStatus"] = "unsupported" }
+                    else { result["foreignChildrenStatus"] = status == .success ? "invalid_value" : "error" }
+                }
             }
             break
         }
@@ -621,6 +688,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
             if (result["status"] as? String) == "complete" { refuse("invalid_value") }; break
         }
         currentRole = roleCategory(role)
+        if role == "AXSheet" && currentSheetBranch && !CFEqual(element, sheet) { modalCandidates.append(element) }
         let key = role == "AXSheet" ? "sheets" : role == "AXDialog" ? "dialogs" : role == "AXButton" ? "buttons" : "other"
         result[key] = (result[key] as? Int ?? 0) + 1
         if role == "AXButton" {
@@ -637,6 +705,10 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
             queue.append(contentsOf: children.map { ($0, currentRole, currentSheetBranch) })
         }
     }
+    result["modalCandidates"] = min(257, modalCandidates.count)
+    if modalCandidates.count == 1 {
+        for (key, value) in modalObservation(modalCandidates[0]) { result[key] = value }
+    } else { result["modalStatus"] = modalCandidates.isEmpty ? "not_checked" : "ambiguous" }
     currentAttribute = "AXActions"; currentRole = "button"; currentParentRole = "none"; currentPidState = "not_checked"; currentSheetBranch = true
     result["saveActionStatus"] = "deadline"; result["savePressAction"] = "unknown"; result["saveActionError"] = 0
     if ProcessInfo.processInfo.systemUptime < deadline {
