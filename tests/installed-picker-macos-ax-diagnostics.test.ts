@@ -10,6 +10,7 @@ import {
   installedMacTextSaveSucceeded,
   installedMacPdfSaveSucceeded,
   installedMacArchiveSaveSucceeded,
+  installedMacReplaceContextObserved,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -1062,4 +1063,786 @@ it.each([
   expect(installedMacArchiveSaveSucceeded(JSON.stringify({ ...archiveSave, ...change }))).toBe(
     false,
   );
+});
+
+const replacementObservation = {
+  ...directorySnapshot,
+  lastError: 0,
+  saveFilename: filenameProof,
+  saveTargetExistingFixture: true,
+  saveTargetAbsent: false,
+  stage: "replace_observed",
+  action: { requested: "observe_replace_json", pressed: true, dismissed: false },
+  replaceContext: {
+    status: "complete",
+    visited: 20,
+    windows: 1,
+    sheets: 2,
+    dialogs: 0,
+    buttons: 4,
+    cancel: 2,
+    replace: 1,
+    save: 1,
+    other: 14,
+    foreground: true,
+    error: 0,
+    modalCandidates: 1,
+    modalStatus: "complete",
+    modalError: 0,
+    modalVisited: 6,
+    modalButtons: 2,
+    modalCancel: 1,
+    modalReplace: 1,
+    modalEnabledCancel: 1,
+    modalEnabledReplace: 1,
+    modalBindingStatus: "complete",
+    modalBindingParent: "sheet",
+    modalBindingMatches: 1,
+    modalBindingSheetAttached: true,
+    modalBindingForeground: true,
+    modalBindingError: 0,
+    modalBindingAttribute: "none",
+  },
+};
+it("accepts only bounded replacement observation and never reports a completed Save", () => {
+  const output = JSON.stringify(replacementObservation);
+  expect(installedMacReplaceContextObserved(output)).toBe(true);
+  expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain("replace_context_replace=1");
+});
+it.each([
+  { saveTargetExistingFixture: false },
+  { saveTargetAbsent: true },
+  { guardMask: 254 },
+  { directoryVerified: false },
+  { saveFilename: { ...filenameProof, labelAttached: false } },
+  { action: { requested: "observe_replace_json", pressed: false, dismissed: false } },
+  { action: { requested: "observe_replace_json", pressed: true, dismissed: true } },
+  { replaceContext: { ...replacementObservation.replaceContext, status: "deadline" } },
+  { replaceContext: { ...replacementObservation.replaceContext, foreground: false } },
+  { replaceContext: { ...replacementObservation.replaceContext, windows: 0 } },
+  { replaceContext: { ...replacementObservation.replaceContext, visited: 257 } },
+  { replaceContext: { ...replacementObservation.replaceContext, error: -25202 } },
+  {
+    replaceContext: {
+      ...replacementObservation.replaceContext,
+      title: "private existing native export target fixture",
+    },
+  },
+  { replaceContext: { ...replacementObservation.replaceContext, status: "/private/path" } },
+])("refuses incomplete or private replacement context %j", (change) => {
+  const output = JSON.stringify({ ...replacementObservation, ...change });
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+});
+
+it.each([
+  { ...replacementObservation.replaceContext, title: "private fixture" },
+  { ...replacementObservation.replaceContext, status: "/private/path" },
+  { ...replacementObservation.replaceContext, url: "https://private.invalid/token" },
+])("redacts invalid private replacement observations", (replaceContext) => {
+  expect(
+    installedMacAxProbeDiagnostic(
+      JSON.stringify({ ...replacementObservation, replaceContext }),
+      null,
+      1,
+    ),
+  ).toBe("Native macOS AX probe: invalid_evidence");
+});
+
+it("retains failed Save refusal even when replacement context was observed", () => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    lastError: -25205,
+    stage: "press",
+    pressDurationMs: 90,
+    pressSheetState: "attached_sheet",
+    action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+  });
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+  const diagnostic = installedMacAxProbeDiagnostic(output, null, 100);
+  expect(diagnostic).toContain("last_error=-25205");
+  expect(diagnostic).toContain("replace_context_status=complete");
+  expect(diagnostic).toContain("replace_context_replace=1");
+  expect(diagnostic).toContain("pressed=false");
+});
+
+it.each([
+  { attribute: "pid", role: "unknown", parentRole: "sheet", pidState: "foreign" },
+  { attribute: "AXTitle", role: "button", parentRole: "other", pidState: "same" },
+])(
+  "distinguishes first replacement read failure categories without accepting the failed action %j",
+  (firstFailure) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        ...firstFailure,
+        saveActionStatus: "success",
+        savePressAction: "present",
+        saveActionError: 0,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 100);
+    expect(diagnostic).toContain(`replace_context_attribute=${firstFailure.attribute}`);
+    expect(diagnostic).toContain(`replace_context_role=${firstFailure.role}`);
+    expect(diagnostic).toContain(`replace_context_parentRole=${firstFailure.parentRole}`);
+    expect(diagnostic).toContain(`replace_context_pidState=${firstFailure.pidState}`);
+    expect(diagnostic).toContain("replace_context_savePressAction=present");
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { attribute: "/private/path" },
+  { role: "private title" },
+  { parentRole: "https://private.invalid/token" },
+  { pidState: "42" },
+  { saveActionStatus: "private" },
+  { savePressAction: "private" },
+  { saveActionError: 32768 },
+])("redacts unbounded or private replacement failure detail %j", (change) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...change },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 100)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+});
+
+it("preserves replacement diagnostics and acceptance through the scoped 8 KiB boundary", () => {
+  const raw = JSON.stringify(replacementObservation);
+  expect(raw.length).toBeLessThan(4096);
+  for (const size of [4097, 4878, 8192]) {
+    const output = raw.padEnd(size, " ");
+    expect(installedMacReplaceContextObserved(output)).toBe(true);
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain("action=observe_replace_json");
+    expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  }
+  const oversized = raw.padEnd(8193, " ");
+  expect(installedMacReplaceContextObserved(oversized)).toBe(false);
+  expect(installedMacAxProbeDiagnostic(oversized, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
+it("retains the 4 KiB diagnostic limit for ordinary Save and snapshot evidence", () => {
+  for (const ordinaryEvidence of [directorySnapshot, jsonSave]) {
+    const output = JSON.stringify(ordinaryEvidence).padEnd(4097, " ");
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+      "Native macOS AX probe: invalid_evidence",
+    );
+  }
+});
+it("still rejects private evidence inside the larger replacement limit", () => {
+  const output = JSON.stringify({ ...replacementObservation, privatePath: "/private/path" }).padEnd(
+    4878,
+    " ",
+  );
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
+
+it("accepts a bounded 16-node replacement ancestry without truncating diagnostic evidence", () => {
+  const originalNodes = replacementObservation.parentChain.nodes;
+  const output = JSON.stringify({
+    ...replacementObservation,
+    firstFailureParent: replacementObservation.invalidChildParent,
+    saveTargetContext: {
+      status: "not_checked",
+      fields: 0,
+      valueMatches: 0,
+      enabledMatches: 0,
+      labelMatches: 0,
+      descriptionMatches: 0,
+      linkedLabelMatches: 0,
+      linkedLabelRole: "none",
+      error: 0,
+      attribute: "none",
+    },
+    parentChain: {
+      ...replacementObservation.parentChain,
+      visited: 16,
+      unknownSelected: 16,
+      nodes: [
+        originalNodes[0],
+        ...Array.from({ length: 14 }, () => ({
+          role: "AXGroup",
+          selectedReference: false,
+          selectedState: "unknown",
+        })),
+        originalNodes.at(-1),
+      ],
+    },
+    replaceContext: {
+      ...replacementObservation.replaceContext,
+      attribute: "none",
+      role: "unknown",
+      parentRole: "none",
+      pidState: "not_checked",
+      saveActionStatus: "success",
+      savePressAction: "present",
+      saveActionError: 0,
+    },
+  });
+  expect(output.length).toBeGreaterThan(4096);
+  expect(output.length).toBeLessThanOrEqual(8192);
+  expect(installedMacReplaceContextObserved(output)).toBe(true);
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain(
+    "parent_chain_node_15_role=AXSheet",
+  );
+});
+
+it.each(["web_area", "button", "other", "unavailable"])(
+  "retains foreign-PID refusal while categorizing its diagnostic role as %s",
+  (foreignRole) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        attribute: "pid",
+        role: "unknown",
+        parentRole: "other",
+        pidState: "foreign",
+        foreignRole,
+        foreignRoleError: foreignRole === "unavailable" ? -25202 : 0,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 100);
+    expect(diagnostic).toContain("replace_context_pidState=foreign");
+    expect(diagnostic).toContain(`replace_context_foreignRole=${foreignRole}`);
+    expect(diagnostic).toContain("replace_context_error=-25201");
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([{ foreignRole: "/private/path" }, { foreignRoleError: 32768 }, { foreignPid: 1234 }])(
+  "rejects private or unbounded foreign-node details %j",
+  (change) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      replaceContext: { ...replacementObservation.replaceContext, ...change },
+    });
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+      "Native macOS AX probe: invalid_evidence",
+    );
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+  },
+);
+
+it.each([
+  { foreignRole: "static_text", parentRole: "group", sheetBranch: true },
+  { foreignRole: "scroll_area", parentRole: "split_group", sheetBranch: false },
+])(
+  "records fixed foreign-node role and captured-sheet encounter categories without accepting it %j",
+  (detail) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        attribute: "pid",
+        role: "unknown",
+        pidState: "foreign",
+        foreignRoleError: 0,
+        ...detail,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+    expect(diagnostic).toContain(`replace_context_foreignRole=${detail.foreignRole}`);
+    expect(diagnostic).toContain(`replace_context_parentRole=${detail.parentRole}`);
+    expect(diagnostic).toContain(`replace_context_sheetBranch=${detail.sheetBranch}`);
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { foreignRole: "private title" },
+  { parentRole: "/private/path" },
+  { sheetBranch: "private" },
+])("rejects private role or invalid captured-sheet detail %j", (detail) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...detail },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+});
+
+it.each([
+  {
+    foreignChildrenStatus: "complete",
+    foreignChildren: 0,
+    modalStatus: "complete",
+    modalCancel: 1,
+    modalReplace: 1,
+    modalEnabledCancel: 1,
+    modalEnabledReplace: 1,
+  },
+  {
+    foreignChildrenStatus: "unsupported",
+    foreignChildren: 0,
+    modalStatus: "error",
+    modalError: -25201,
+    modalAttribute: "pid",
+  },
+  {
+    foreignChildrenStatus: "complete",
+    foreignChildren: 1,
+    modalStatus: "ambiguous",
+    modalCandidates: 2,
+  },
+])(
+  "keeps the original failure fatal while retaining independent leaf/modal observations %j",
+  (observation) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        attribute: "pid",
+        pidState: "foreign",
+        foreignRole: "splitter",
+        foreignRoleError: 0,
+        foreignChildrenError: 0,
+        modalCandidates: 1,
+        modalVisited: 8,
+        modalButtons: 2,
+        modalError: 0,
+        modalAttribute: "none",
+        modalRole: "unknown",
+        ...observation,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+    expect(diagnostic).toContain(
+      `replace_context_foreignChildrenStatus=${observation.foreignChildrenStatus}`,
+    );
+    expect(diagnostic).toContain(`replace_context_modalStatus=${observation.modalStatus}`);
+    expect(diagnostic).toContain("replace_context_pidState=foreign");
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { foreignChildren: 258 },
+  { foreignChildrenStatus: "private" },
+  { foreignChildrenError: -32769 },
+  { modalVisited: 65 },
+  { modalEnabledReplace: 65 },
+  { modalRole: "private title" },
+  { modalAttribute: "/private/path" },
+  { modalTitle: "private text" },
+])("rejects unbounded or private independent observations %j", (observation) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...observation },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+  expect(installedMacReplaceContextObserved(output)).toBe(false);
+});
+
+it.each([
+  {
+    pressTimeoutError: 0,
+    pressActionCalled: true,
+    attachmentStatus: "complete",
+    attachmentAttempts: 3,
+    attachmentCandidates: 1,
+  },
+  {
+    pressTimeoutError: -25205,
+    pressActionCalled: false,
+    attachmentStatus: "absent",
+    attachmentAttempts: 32,
+    attachmentCandidates: 0,
+  },
+  {
+    pressTimeoutError: 0,
+    pressActionCalled: true,
+    attachmentStatus: "error",
+    attachmentAttempts: 1,
+    attachmentCandidates: 0,
+  },
+])(
+  "retains the original Save refusal while reporting dispatch and bounded attachment diagnostics %j",
+  ({ pressTimeoutError, pressActionCalled, ...attachment }) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      pressTimeoutError,
+      pressActionCalled,
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        attribute: "pid",
+        pidState: "foreign",
+        foreignRole: "splitter",
+        sheetBranch: true,
+        attachmentVisited: 48,
+        attachmentError: 0,
+        attachmentAttribute: "none",
+        attachmentSource: "none",
+        capturedSheetAttached: true,
+        modalStatus: "complete",
+        modalCancel: 1,
+        modalReplace: 1,
+        ...attachment,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+    expect(diagnostic).toContain(`press_timeout_error=${pressTimeoutError}`);
+    expect(diagnostic).toContain(`press_action_called=${pressActionCalled}`);
+    expect(diagnostic).toContain(`replace_context_attachmentStatus=${attachment.attachmentStatus}`);
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { attachmentAttempts: 33 },
+  { attachmentVisited: 257 },
+  { attachmentCandidates: 129 },
+  { attachmentSource: "/private/path" },
+  { attachmentAttribute: "private" },
+  { attachmentError: 32768 },
+  { capturedSheetAttached: "private" },
+])("rejects private or unbounded attachment evidence %j", (attachment) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...attachment },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
+it.each([{ pressTimeoutError: 32768 }, { pressActionCalled: "private" }])(
+  "rejects private or unbounded dispatch detail %j",
+  (detail) => {
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...replacementObservation, ...detail }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+  },
+);
+
+it.each(["sheet", "parent", "other", "unknown"])(
+  "reports fresh modal attachment evidence without overriding the original refusal (%s)",
+  (modalBindingParent) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        modalStatus: "complete",
+        modalBindingStatus: modalBindingParent === "other" ? "invalid_candidate" : "complete",
+        modalBindingParent,
+        modalBindingMatches: 1,
+        modalBindingSheetAttached: true,
+        modalBindingForeground: true,
+        modalBindingError: 0,
+        modalBindingAttribute: "none",
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+    expect(diagnostic).toContain(`replace_context_modalBindingParent=${modalBindingParent}`);
+    expect(diagnostic).toContain("replace_context_modalBindingMatches=1");
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { modalBindingStatus: "private" },
+  { modalBindingParent: "/private/path" },
+  { modalBindingMatches: 65 },
+  { modalBindingMatches: -1 },
+  { modalBindingSheetAttached: "private" },
+  { modalBindingForeground: "private" },
+  { modalBindingError: 32768 },
+  { modalBindingAttribute: "private" },
+])("rejects private or unbounded modal binding detail %j", (detail) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...detail },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
+
+const boundModalObservation = {
+  ...replacementObservation,
+  lastError: -25205,
+  stage: "press",
+  pressTimeoutError: 0,
+  pressActionCalled: true,
+  pressSheetState: "attached_sheet",
+  pressFollowupError: 0,
+  action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+  replaceContext: {
+    ...replacementObservation.replaceContext,
+    status: "error",
+    error: -25201,
+    attribute: "pid",
+    pidState: "foreign",
+    parentRole: "split_group",
+    sheetBranch: true,
+    foreignRole: "splitter",
+    foreignRoleError: 0,
+    foreignChildren: 0,
+    foreignChildrenStatus: "absent",
+    foreignChildrenError: -25212,
+    modalCandidates: 1,
+    modalStatus: "complete",
+    modalError: 0,
+    modalVisited: 6,
+    modalAttribute: "none",
+    saveActionStatus: "success",
+    savePressAction: "present",
+    saveActionError: 0,
+    modalButtons: 2,
+    modalCancel: 1,
+    modalReplace: 1,
+    modalEnabledCancel: 1,
+    modalEnabledReplace: 1,
+    modalBindingStatus: "complete",
+    modalBindingParent: "sheet",
+    modalBindingMatches: 1,
+    modalBindingSheetAttached: true,
+    modalBindingForeground: true,
+    modalBindingError: 0,
+    modalBindingAttribute: "none",
+  },
+};
+it("accepts independently bound modal observation while retaining the refused action", () => {
+  const output = JSON.stringify(boundModalObservation);
+  expect(installedMacReplaceContextObserved(output)).toBe(true);
+  expect(installedMacJsonSaveSucceeded(output)).toBe(false);
+  const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+  expect(diagnostic).toContain("last_error=-25205");
+  expect(diagnostic).toContain("pressed=false");
+  expect(diagnostic).toContain("replace_context_error=-25201");
+});
+it.each([
+  { modalBindingStatus: "deadline" },
+  { modalBindingParent: "parent" },
+  { modalBindingParent: "other" },
+  { modalBindingMatches: 0 },
+  { modalBindingMatches: 2 },
+  { modalBindingSheetAttached: false },
+  { modalBindingForeground: false },
+  { modalBindingError: -25202 },
+  { modalBindingAttribute: "AXParent" },
+  { modalStatus: "error" },
+  { modalError: -25202 },
+  { modalVisited: 0 },
+  { modalButtons: 3 },
+  { modalCancel: 0 },
+  { modalReplace: 2 },
+  { modalEnabledCancel: 0 },
+  { modalEnabledReplace: 0 },
+  { modalCandidates: 2 },
+  { modalCandidates: 0 },
+  { foreignRole: "other" },
+  { pidState: "same" },
+  { parentRole: "group" },
+  { sheetBranch: false },
+  { foreignRoleError: -25202 },
+  { foreignChildren: 1 },
+  { foreignChildrenStatus: "complete" },
+  { foreignChildrenError: 0 },
+  { status: "deadline" },
+  { error: -25202 },
+  { attribute: "AXChildren" },
+  { windows: 2 },
+  { foreground: false },
+])("refuses incomplete or different independent modal evidence %j", (change) => {
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({
+        ...boundModalObservation,
+        replaceContext: { ...boundModalObservation.replaceContext, ...change },
+      }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  { pressTimeoutError: -25205 },
+  { pressActionCalled: false },
+  { lastError: -25202 },
+  { pressSheetState: "detached_sheet" },
+  { pressFollowupError: -25202 },
+  { guardMask: 254 },
+  { saveTargetExistingFixture: false },
+  { saveTargetAbsent: true },
+  { directoryVerified: false },
+  { saveFilename: { ...filenameProof, labelAttached: false } },
+  { action: { requested: "observe_replace_json", pressed: false, dismissed: true } },
+])("refuses missing original Save guards for independent observation %j", (change) => {
+  expect(
+    installedMacReplaceContextObserved(JSON.stringify({ ...boundModalObservation, ...change })),
+  ).toBe(false);
+});
+it("requires complete unique attachment when the initial traversal had no modal candidate", () => {
+  const context = {
+    ...boundModalObservation.replaceContext,
+    modalCandidates: 0,
+    attachmentStatus: "complete",
+    attachmentCandidates: 1,
+    attachmentError: 0,
+    capturedSheetAttached: true,
+  };
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({ ...boundModalObservation, replaceContext: context }),
+    ),
+  ).toBe(true);
+  for (const change of [
+    { attachmentStatus: "error" },
+    { attachmentCandidates: 2 },
+    { attachmentError: -25202 },
+    { capturedSheetAttached: false },
+  ]) {
+    expect(
+      installedMacReplaceContextObserved(
+        JSON.stringify({
+          ...boundModalObservation,
+          replaceContext: { ...context, ...change },
+        }),
+      ),
+    ).toBe(false);
+  }
+});
+it.each([
+  "modalBindingStatus",
+  "modalBindingParent",
+  "modalBindingMatches",
+  "modalBindingSheetAttached",
+  "modalBindingForeground",
+  "modalBindingError",
+  "modalBindingAttribute",
+  "modalStatus",
+  "modalError",
+  "modalAttribute",
+  "modalVisited",
+  "modalButtons",
+  "modalCancel",
+  "modalReplace",
+  "modalEnabledCancel",
+  "modalEnabledReplace",
+  "modalCandidates",
+  "saveActionStatus",
+  "savePressAction",
+  "saveActionError",
+])("refuses missing independent modal proof field %s", (field) => {
+  const context = { ...boundModalObservation.replaceContext, [field]: undefined };
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({ ...boundModalObservation, replaceContext: context }),
+    ),
+  ).toBe(false);
+});
+
+it.each(["sheet", "parent"])(
+  "accepts successful press only with a uniquely bound replacement modal (%s)",
+  (modalBindingParent) => {
+    expect(
+      installedMacReplaceContextObserved(
+        JSON.stringify({
+          ...replacementObservation,
+          replaceContext: { ...replacementObservation.replaceContext, modalBindingParent },
+        }),
+      ),
+    ).toBe(true);
+  },
+);
+it.each([
+  { modalCandidates: 0, modalStatus: "not_checked" },
+  { modalCandidates: 2 },
+  { modalStatus: "error" },
+  { modalError: -25202 },
+  { modalVisited: 0 },
+  { modalButtons: 0 },
+  { modalButtons: 3 },
+  { modalCancel: 0 },
+  { modalReplace: 0 },
+  { modalEnabledCancel: 0 },
+  { modalEnabledReplace: 0 },
+  { modalBindingStatus: "error" },
+  { modalBindingParent: "other" },
+  { modalBindingMatches: 0 },
+  { modalBindingMatches: 2 },
+  { modalBindingSheetAttached: false },
+  { modalBindingForeground: false },
+  { modalBindingError: -25202 },
+  { modalBindingAttribute: "AXParent" },
+])("refuses a successful press without complete replacement-prompt evidence %j", (change) => {
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({
+        ...replacementObservation,
+        replaceContext: { ...replacementObservation.replaceContext, ...change },
+      }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  "modalCandidates",
+  "modalStatus",
+  "modalError",
+  "modalVisited",
+  "modalButtons",
+  "modalCancel",
+  "modalReplace",
+  "modalEnabledCancel",
+  "modalEnabledReplace",
+  "modalBindingStatus",
+  "modalBindingParent",
+  "modalBindingMatches",
+  "modalBindingSheetAttached",
+  "modalBindingForeground",
+  "modalBindingError",
+  "modalBindingAttribute",
+])("refuses missing successful-press modal proof field %s", (field) => {
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({
+        ...replacementObservation,
+        replaceContext: { ...replacementObservation.replaceContext, [field]: undefined },
+      }),
+    ),
+  ).toBe(false);
 });

@@ -606,6 +606,52 @@ for (const mode of [
   });
 }
 
+test("installed macOS observes replacement context without confirming or changing an existing JSON target", async () => {
+  test.skip(process.platform !== "darwin", "macOS native replacement context observation");
+  test.setTimeout(360_000);
+  const state = join(packageRoot, "macos-replace-json-observation");
+  const directory = realpathSync(mkdtempSync(join(packageRoot, "macos-replace-json-")));
+  const original = Buffer.from("private existing native export target fixture");
+  writeFileSync(join(directory, "Open Chords.json"), original);
+  writeFileSync(join(directory, "preserved.txt"), original);
+  const outputBefore = canonicalSerialize(await proofTreeHashes(directory));
+  const library = await openProjectLibrary({ stateRoot: state });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+  );
+  envelope.payload = leadSheetProject();
+  await library.createProject({ envelope, records: goldenRecords() });
+  await (await openNetworkMode(state)).setOffline(true);
+  const before = await library.readProject("project_golden");
+  const libraryBefore = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+  const action = {
+    type: "save_json",
+    projectId: "project_golden",
+    expectedProjectRevisionId: before.projectRevisionId,
+    presentation: "current",
+  };
+  // Observe the native prompt, then use the existing clean shutdown path. This is not an export-result proof.
+  const result = await inspectInstalled(
+    state,
+    `(() => { void window.openChords.exports.perform(${JSON.stringify(action)}).then(() => undefined, () => undefined); return { started: true }; })()`,
+    installedSystemEnvironment(),
+    installedMacPickerDriver("observe_replace_json", directory, installedSystemEnvironment, "json"),
+  );
+  expect(result).toEqual({ started: true });
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(await reopened.readProject("project_golden")).toEqual(before);
+  expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(libraryBefore);
+  expect(reopened.listExportReceipts("project_golden")).toEqual([]);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  expect(canonicalSerialize(await proofTreeHashes(directory))).toBe(outputBefore);
+  expect(readFileSync(join(directory, "Open Chords.json"))).toEqual(original);
+  // A second cold open must not materialize a pending export or Receipt.
+  const second = await openProjectLibrary({ stateRoot: state });
+  expect(await second.readProject("project_golden")).toEqual(before);
+  expect(second.listExportReceipts("project_golden")).toEqual([]);
+  expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
+});
+
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed macOS native ${format} Save publishes exact bytes and one cold durable Receipt`, async () => {
     test.skip(process.platform !== "darwin", "macOS native Save proof");

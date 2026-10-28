@@ -113,6 +113,48 @@ const parentObservationSchema = z.strictObject({
   error: z.number().int().min(-32768).max(32767),
 });
 
+const replacementRoleKeys = [
+  "unknown",
+  "none",
+  "window",
+  "sheet",
+  "dialog",
+  "button",
+  "web_area",
+  "other",
+  "group",
+  "static_text",
+  "text_field",
+  "text_area",
+  "scroll_area",
+  "scroll_bar",
+  "split_group",
+  "splitter",
+  "browser",
+  "list",
+  "outline",
+  "table",
+  "row",
+  "column",
+  "cell",
+  "image",
+  "popup_button",
+  "menu_button",
+  "menu",
+  "menu_item",
+  "menu_bar",
+  "menu_bar_item",
+  "check_box",
+  "radio_button",
+  "tab_group",
+  "toolbar",
+  "combo_box",
+  "disclosure_triangle",
+  "link",
+  "heading",
+  "ax_unknown",
+] as const;
+
 const evidenceSchema = z.strictObject({
   staleSnapshot: z.strictObject({
     eligible: z.boolean(),
@@ -124,6 +166,95 @@ const evidenceSchema = z.strictObject({
   invalidChildParent: parentObservationSchema,
   firstFailureParent: parentObservationSchema.optional(),
   saveTargetAbsent: z.boolean().default(false),
+  saveTargetExistingFixture: z.boolean().default(false),
+  pressTimeoutError: z.number().int().min(-32768).max(32767).optional(),
+  pressActionCalled: z.boolean().optional(),
+  replaceContext: z
+    .strictObject({
+      status: z.enum(["not_checked", "complete", "deadline", "error", "invalid_value", "bound"]),
+      visited: z.number().int().min(0).max(256),
+      windows: z.number().int().min(0).max(17),
+      sheets: z.number().int().min(0).max(256),
+      dialogs: z.number().int().min(0).max(256),
+      buttons: z.number().int().min(0).max(256),
+      cancel: z.number().int().min(0).max(256),
+      replace: z.number().int().min(0).max(256),
+      save: z.number().int().min(0).max(256),
+      other: z.number().int().min(0).max(256),
+      attribute: z
+        .enum(["none", "pid", "AXWindows", "AXRole", "AXTitle", "AXChildren", "AXActions"])
+        .optional(),
+      role: z.enum(replacementRoleKeys).optional(),
+      parentRole: z.enum(replacementRoleKeys).optional(),
+      pidState: z.enum(["not_checked", "same", "foreign", "unknown"]).optional(),
+      sheetBranch: z.boolean().optional(),
+      foreignRole: z.enum(["not_checked", "unavailable", ...replacementRoleKeys]).optional(),
+      foreignRoleError: z.number().int().min(-32768).max(32767).optional(),
+      foreignChildren: z.number().int().min(0).max(257).optional(),
+      foreignChildrenStatus: z
+        .enum(["complete", "bound", "absent", "unsupported", "invalid_value", "error"])
+        .optional(),
+      foreignChildrenError: z.number().int().min(-32768).max(32767).optional(),
+      modalCandidates: z.number().int().min(0).max(257).optional(),
+      modalStatus: z
+        .enum([
+          "not_checked",
+          "complete",
+          "ambiguous",
+          "deadline",
+          "bound",
+          "error",
+          "invalid_value",
+        ])
+        .optional(),
+      modalVisited: z.number().int().min(0).max(64).optional(),
+      modalButtons: z.number().int().min(0).max(64).optional(),
+      modalCancel: z.number().int().min(0).max(64).optional(),
+      modalReplace: z.number().int().min(0).max(64).optional(),
+      modalEnabledCancel: z.number().int().min(0).max(64).optional(),
+      modalEnabledReplace: z.number().int().min(0).max(64).optional(),
+      modalError: z.number().int().min(-32768).max(32767).optional(),
+      modalAttribute: z
+        .enum(["none", "pid", "AXRole", "AXTitle", "AXEnabled", "AXChildren"])
+        .optional(),
+      modalRole: z.enum(replacementRoleKeys).optional(),
+      modalBindingStatus: z
+        .enum(["complete", "deadline", "error", "bound", "invalid_candidate", "invalid_value"])
+        .optional(),
+      modalBindingParent: z.enum(["unknown", "sheet", "parent", "other"]).optional(),
+      modalBindingMatches: z.number().int().min(0).max(64).optional(),
+      modalBindingSheetAttached: z.boolean().optional(),
+      modalBindingForeground: z.boolean().optional(),
+      modalBindingError: z.number().int().min(-32768).max(32767).optional(),
+      modalBindingAttribute: z
+        .enum(["none", "pid", "foreground", "AXRole", "AXParent", "AXChildren"])
+        .optional(),
+      attachmentStatus: z
+        .enum([
+          "absent",
+          "complete",
+          "deadline",
+          "error",
+          "bound",
+          "ambiguous",
+          "invalid_candidate",
+          "invalid_value",
+        ])
+        .optional(),
+      attachmentAttempts: z.number().int().min(0).max(32).optional(),
+      attachmentVisited: z.number().int().min(0).max(256).optional(),
+      attachmentCandidates: z.number().int().min(0).max(128).optional(),
+      attachmentError: z.number().int().min(-32768).max(32767).optional(),
+      attachmentAttribute: z.enum(["none", "pid", "foreground", "AXRole", "AXChildren"]).optional(),
+      attachmentSource: z.enum(["none", "parent", "sheet"]).optional(),
+      capturedSheetAttached: z.boolean().optional(),
+      saveActionStatus: z.enum(["success", "deadline", "error", "invalid_value"]).optional(),
+      savePressAction: z.enum(["unknown", "present", "absent"]).optional(),
+      saveActionError: z.number().int().min(-32768).max(32767).optional(),
+      foreground: z.boolean(),
+      error: z.number().int().min(-32768).max(32767),
+    })
+    .optional(),
   saveFilename: z
     .strictObject({
       status: z.enum([
@@ -345,6 +476,7 @@ const evidenceSchema = z.strictObject({
     "dismissal",
     "complete",
     "directory_complete",
+    "replace_observed",
   ]),
   action: z.strictObject({
     requested: z.enum([
@@ -357,6 +489,7 @@ const evidenceSchema = z.strictObject({
       "save_new_chordpro",
       "save_new_pdf",
       "save_new_archive",
+      "observe_replace_json",
     ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
@@ -371,15 +504,19 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       "Native macOS AX probe",
     );
   try {
-    if (stdout.length > 4096) return "Native macOS AX probe: invalid_evidence";
+    if (stdout.length > 8192) return "Native macOS AX probe: invalid_evidence";
     const evidence = evidenceSchema.safeParse(JSON.parse(stdout));
     if (!evidence.success) return "Native macOS AX probe: invalid_evidence";
+    if (stdout.length > 4096 && evidence.data.action.requested !== "observe_replace_json")
+      return "Native macOS AX probe: invalid_evidence";
     const {
       trusted,
       complete,
       lastError,
       dismissalLastError,
       pressDurationMs,
+      pressTimeoutError,
+      pressActionCalled,
       pressSheetState,
       pressFollowupError,
       counts,
@@ -396,6 +533,8 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       saveTargetContext,
       saveFilename,
       saveTargetAbsent,
+      saveTargetExistingFixture,
+      replaceContext,
       staleSnapshot,
       invalidChildParent,
       firstFailureParent,
@@ -419,6 +558,8 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `last_error=${lastError}`,
       `dismissal_last_error=${dismissalLastError}`,
       `press_duration_ms=${pressDurationMs}`,
+      ...(pressTimeoutError === undefined ? [] : [`press_timeout_error=${pressTimeoutError}`]),
+      ...(pressActionCalled === undefined ? [] : [`press_action_called=${pressActionCalled}`]),
       `press_sheet_state=${pressSheetState}`,
       `press_followup_error=${pressFollowupError}`,
       `other_error=${firstOtherError}`,
@@ -437,6 +578,10 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
         ([key, value]) => `first_failure_parent_${key}=${value}`,
       ),
       `save_target_absent=${saveTargetAbsent}`,
+      `save_target_existing_fixture=${saveTargetExistingFixture}`,
+      ...Object.entries(replaceContext ?? {}).map(
+        ([key, value]) => `replace_context_${key}=${value}`,
+      ),
       ...Object.entries(saveFilename).map(([key, value]) => `save_filename_${key}=${value}`),
       ...Object.entries(saveTargetContext).map(([key, value]) => `save_target_${key}=${value}`),
       ...Object.entries(selectedDirectory).map(
@@ -679,6 +824,105 @@ function nativeSaveSucceeded(
       value.action.requested === `save_new_${format}` &&
       value.action.pressed &&
       value.action.dismissed
+    );
+  } catch {
+    return false;
+  }
+}
+
+// This proves bounded observation only, never confirmation dismissal or replacement.
+export function installedMacReplaceContextObserved(stdout: string) {
+  if (stdout.length > 8192) return false;
+  try {
+    const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return false;
+    const value = parsed.data;
+    const context = value.replaceContext;
+    const originalObservation =
+      value.lastError === 0 &&
+      value.stage === "replace_observed" &&
+      value.action.pressed &&
+      context?.status === "complete" &&
+      context.error === 0 &&
+      context.modalCandidates === 1 &&
+      context.modalStatus === "complete" &&
+      context.modalError === 0 &&
+      context.modalVisited !== undefined &&
+      context.modalVisited > 0 &&
+      context.modalButtons === 2 &&
+      context.modalCancel === 1 &&
+      context.modalReplace === 1 &&
+      context.modalEnabledCancel === 1 &&
+      context.modalEnabledReplace === 1 &&
+      context.modalBindingStatus === "complete" &&
+      (context.modalBindingParent === "sheet" || context.modalBindingParent === "parent") &&
+      context.modalBindingMatches === 1 &&
+      context.modalBindingSheetAttached === true &&
+      context.modalBindingForeground === true &&
+      context.modalBindingError === 0 &&
+      context.modalBindingAttribute === "none";
+    // A refused action is never reported as successful. Independently observed, freshly
+    // attached confirmation context can satisfy this read-only journey without pruning
+    // the foreign splitter from the original traversal or issuing another input action.
+    const boundModalObservation =
+      value.lastError === -25205 &&
+      value.stage === "press" &&
+      !value.action.pressed &&
+      value.pressTimeoutError === 0 &&
+      value.pressActionCalled === true &&
+      value.pressSheetState === "attached_sheet" &&
+      value.pressFollowupError === 0 &&
+      context?.status === "error" &&
+      context.error === -25201 &&
+      context.windows === 1 &&
+      context.attribute === "pid" &&
+      context.pidState === "foreign" &&
+      context.parentRole === "split_group" &&
+      context.sheetBranch === true &&
+      context.foreignRole === "splitter" &&
+      context.foreignRoleError === 0 &&
+      context.foreignChildren === 0 &&
+      context.foreignChildrenStatus === "absent" &&
+      context.foreignChildrenError === -25212 &&
+      (context.modalCandidates === 1 ||
+        (context.modalCandidates === 0 &&
+          context.attachmentStatus === "complete" &&
+          context.attachmentCandidates === 1 &&
+          context.attachmentError === 0 &&
+          context.capturedSheetAttached === true)) &&
+      context.modalStatus === "complete" &&
+      context.modalError === 0 &&
+      context.modalAttribute === "none" &&
+      context.saveActionStatus === "success" &&
+      context.savePressAction === "present" &&
+      context.saveActionError === 0 &&
+      context.modalVisited !== undefined &&
+      context.modalVisited > 0 &&
+      context.modalButtons === 2 &&
+      context.modalCancel === 1 &&
+      context.modalReplace === 1 &&
+      context.modalEnabledCancel === 1 &&
+      context.modalEnabledReplace === 1 &&
+      context.modalBindingStatus === "complete" &&
+      context.modalBindingParent === "sheet" &&
+      context.modalBindingMatches === 1 &&
+      context.modalBindingSheetAttached === true &&
+      context.modalBindingForeground === true &&
+      context.modalBindingError === 0 &&
+      context.modalBindingAttribute === "none";
+    return (
+      directoryEvidenceVerified(value) &&
+      filenameEvidenceVerified(value.saveFilename) &&
+      value.saveTargetExistingFixture &&
+      !value.saveTargetAbsent &&
+      value.action.requested === "observe_replace_json" &&
+      !value.action.dismissed &&
+      context !== undefined &&
+      context.windows > 0 &&
+      context.windows <= 16 &&
+      context.visited > 0 &&
+      context.foreground &&
+      (originalObservation || boundModalObservation)
     );
   } catch {
     return false;
