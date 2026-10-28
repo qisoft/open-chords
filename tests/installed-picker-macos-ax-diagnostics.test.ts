@@ -13,6 +13,7 @@ import {
   installedMacReplaceContextObserved,
   installedMacReplacementCancelled,
   installedMacJsonReplacementConfirmed,
+  installedMacTextReplacementConfirmed,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -2106,3 +2107,68 @@ it("bounds explicit Replace evidence without changing ordinary AX output limits"
   expect(installedMacJsonReplacementConfirmed(output.padEnd(8192, " "))).toBe(true);
   expect(installedMacJsonReplacementConfirmed(output.padEnd(8193, " "))).toBe(false);
 });
+
+it.each(["lrc", "chordpro"] as const)(
+  "requires isolated %s replacement evidence and never accepts it as JSON or Cancel",
+  (format) => {
+    const output = JSON.stringify({
+      ...jsonReplaced,
+      action: { ...jsonReplaced.action, requested: `replace_${format}` },
+    });
+    expect(installedMacTextReplacementConfirmed(output, format)).toBe(true);
+    expect(
+      installedMacTextReplacementConfirmed(output, format === "lrc" ? "chordpro" : "lrc"),
+    ).toBe(false);
+    expect(installedMacJsonReplacementConfirmed(output)).toBe(false);
+    expect(installedMacReplacementCancelled(output)).toBe(false);
+    expect(installedMacTextSaveSucceeded(output, format)).toBe(false);
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain(`action=replace_${format}`);
+    expect(installedMacTextReplacementConfirmed(output.padEnd(8192, " "), format)).toBe(true);
+    expect(installedMacTextReplacementConfirmed(output.padEnd(8193, " "), format)).toBe(false);
+  },
+);
+it.each(["lrc", "chordpro"] as const)(
+  "retains all original and confirmation guards for %s Replace",
+  (format) => {
+    const value = {
+      ...jsonReplaced,
+      action: { ...jsonReplaced.action, requested: `replace_${format}` },
+    };
+    for (const change of [
+      { replaceGuardMask: 254 },
+      { replaceTargetFixtureVerified: false },
+      { replacePressed: false },
+      { replaceSaveDismissed: false },
+      { replaceDismissed: false },
+      { replaceError: -25205 },
+      { replaceChainVisited: 1 },
+      { modalBindingParent: "parent" },
+      { modalBindingSheetAttached: false },
+      { modalBindingForeground: false },
+      { modalEnabledReplace: 0 },
+      { windows: 2 },
+    ]) {
+      expect(
+        installedMacTextReplacementConfirmed(
+          JSON.stringify({ ...value, replaceContext: { ...value.replaceContext, ...change } }),
+          format,
+        ),
+      ).toBe(false);
+    }
+    expect(
+      installedMacTextReplacementConfirmed(
+        JSON.stringify({ ...value, saveTargetExistingFixture: false }),
+        format,
+      ),
+    ).toBe(false);
+    expect(
+      installedMacTextReplacementConfirmed(JSON.stringify({ ...value, guardMask: 254 }), format),
+    ).toBe(false);
+    expect(
+      installedMacTextReplacementConfirmed(
+        JSON.stringify({ ...value, saveFilename: { ...filenameProof, labelAttached: false } }),
+        format,
+      ),
+    ).toBe(false);
+  },
+);

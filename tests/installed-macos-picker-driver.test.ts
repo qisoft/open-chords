@@ -1213,3 +1213,82 @@ it("rejects other formats for Replace before starting native processes", async (
   ).rejects.toThrow("JSON Save target unavailable");
   expect(execute).not.toHaveBeenCalled();
 });
+
+it.each(["lrc", "chordpro"] as const)(
+  "uses the text-only Replace flag and exact %s format after independent proof",
+  async (format) => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const final = {
+      ...confirmedJsonReplacement,
+      action: { ...confirmedJsonReplacement.action, requested: `replace_${format}` },
+    };
+    const responses = [
+      { ...prepared, saveFieldProbe: { ...probe, format } },
+      expanded,
+      snapshot,
+      directorySnapshot,
+      filenameSnapshot,
+      final,
+    ];
+    execute.mockImplementation(async () => ({
+      stdout: JSON.stringify(responses.shift()),
+      stderr: "",
+    }));
+    await installedMacPickerDriver(
+      `replace_${format}`,
+      "/private/directory",
+      () => ({}),
+      format,
+    )(42);
+    expect(execute).toHaveBeenCalledTimes(6);
+    expect(execute.mock.calls[5]?.[1]).toEqual([
+      "42",
+      "/private/directory",
+      "directory_snapshot",
+      format,
+      "--replace-text",
+    ]);
+    expect(execute.mock.calls.map((call) => call[2].maxBuffer)).toEqual([
+      65536, 4096, 4096, 4096, 4096, 8192,
+    ]);
+  },
+);
+it.each([
+  ["replace_lrc", "chordpro"],
+  ["replace_chordpro", "lrc"],
+  ["replace_lrc", "json"],
+  ["replace_chordpro", "pdf"],
+] as const)("refuses mismatched %s format %s before native execution", async (scenario, format) => {
+  await expect(
+    installedMacPickerDriver(scenario, "/private/directory", () => ({}), format)(42),
+  ).rejects.toThrow("text Save target unavailable");
+  expect(execute).not.toHaveBeenCalled();
+});
+it.each(["lrc", "chordpro"] as const)("does not retry refused %s replacement", async (format) => {
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const final = {
+    ...confirmedJsonReplacement,
+    action: { ...confirmedJsonReplacement.action, requested: `replace_${format}` },
+    replaceContext: {
+      ...confirmedJsonReplacement.replaceContext,
+      replaceGuardMask: 127,
+      replacePressed: false,
+    },
+  };
+  const responses = [
+    { ...prepared, saveFieldProbe: { ...probe, format } },
+    expanded,
+    snapshot,
+    directorySnapshot,
+    filenameSnapshot,
+    final,
+  ];
+  execute.mockImplementation(async () => ({
+    stdout: JSON.stringify(responses.shift()),
+    stderr: "",
+  }));
+  await expect(
+    installedMacPickerDriver(`replace_${format}`, "/private/directory", () => ({}), format)(42),
+  ).rejects.toThrow("Native macOS AX probe:");
+  expect(execute).toHaveBeenCalledTimes(6);
+});
