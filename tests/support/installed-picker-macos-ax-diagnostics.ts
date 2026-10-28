@@ -843,7 +843,24 @@ export function installedMacReplaceContextObserved(stdout: string) {
       value.stage === "replace_observed" &&
       value.action.pressed &&
       context?.status === "complete" &&
-      context.error === 0;
+      context.error === 0 &&
+      context.modalCandidates === 1 &&
+      context.modalStatus === "complete" &&
+      context.modalError === 0 &&
+      context.modalVisited !== undefined &&
+      context.modalVisited > 0 &&
+      context.modalButtons === 2 &&
+      context.modalCancel === 1 &&
+      context.modalReplace === 1 &&
+      context.modalEnabledCancel === 1 &&
+      context.modalEnabledReplace === 1 &&
+      context.modalBindingStatus === "complete" &&
+      (context.modalBindingParent === "sheet" || context.modalBindingParent === "parent") &&
+      context.modalBindingMatches === 1 &&
+      context.modalBindingSheetAttached === true &&
+      context.modalBindingForeground === true &&
+      context.modalBindingError === 0 &&
+      context.modalBindingAttribute === "none";
     // A refused action is never reported as successful. Independently observed, freshly
     // attached confirmation context can satisfy this read-only journey without pruning
     // the foreign splitter from the original traversal or issuing another input action.

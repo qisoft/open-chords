@@ -1086,6 +1086,22 @@ const replacementObservation = {
     other: 14,
     foreground: true,
     error: 0,
+    modalCandidates: 1,
+    modalStatus: "complete",
+    modalError: 0,
+    modalVisited: 6,
+    modalButtons: 2,
+    modalCancel: 1,
+    modalReplace: 1,
+    modalEnabledCancel: 1,
+    modalEnabledReplace: 1,
+    modalBindingStatus: "complete",
+    modalBindingParent: "sheet",
+    modalBindingMatches: 1,
+    modalBindingSheetAttached: true,
+    modalBindingForeground: true,
+    modalBindingError: 0,
+    modalBindingAttribute: "none",
   },
 };
 it("accepts only bounded replacement observation and never reports a completed Save", () => {
@@ -1756,6 +1772,77 @@ it.each([
   expect(
     installedMacReplaceContextObserved(
       JSON.stringify({ ...boundModalObservation, replaceContext: context }),
+    ),
+  ).toBe(false);
+});
+
+it.each(["sheet", "parent"])(
+  "accepts successful press only with a uniquely bound replacement modal (%s)",
+  (modalBindingParent) => {
+    expect(
+      installedMacReplaceContextObserved(
+        JSON.stringify({
+          ...replacementObservation,
+          replaceContext: { ...replacementObservation.replaceContext, modalBindingParent },
+        }),
+      ),
+    ).toBe(true);
+  },
+);
+it.each([
+  { modalCandidates: 0, modalStatus: "not_checked" },
+  { modalCandidates: 2 },
+  { modalStatus: "error" },
+  { modalError: -25202 },
+  { modalVisited: 0 },
+  { modalButtons: 0 },
+  { modalButtons: 3 },
+  { modalCancel: 0 },
+  { modalReplace: 0 },
+  { modalEnabledCancel: 0 },
+  { modalEnabledReplace: 0 },
+  { modalBindingStatus: "error" },
+  { modalBindingParent: "other" },
+  { modalBindingMatches: 0 },
+  { modalBindingMatches: 2 },
+  { modalBindingSheetAttached: false },
+  { modalBindingForeground: false },
+  { modalBindingError: -25202 },
+  { modalBindingAttribute: "AXParent" },
+])("refuses a successful press without complete replacement-prompt evidence %j", (change) => {
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({
+        ...replacementObservation,
+        replaceContext: { ...replacementObservation.replaceContext, ...change },
+      }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  "modalCandidates",
+  "modalStatus",
+  "modalError",
+  "modalVisited",
+  "modalButtons",
+  "modalCancel",
+  "modalReplace",
+  "modalEnabledCancel",
+  "modalEnabledReplace",
+  "modalBindingStatus",
+  "modalBindingParent",
+  "modalBindingMatches",
+  "modalBindingSheetAttached",
+  "modalBindingForeground",
+  "modalBindingError",
+  "modalBindingAttribute",
+])("refuses missing successful-press modal proof field %s", (field) => {
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({
+        ...replacementObservation,
+        replaceContext: { ...replacementObservation.replaceContext, [field]: undefined },
+      }),
     ),
   ).toBe(false);
 });

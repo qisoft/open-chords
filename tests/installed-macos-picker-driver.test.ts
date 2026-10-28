@@ -898,6 +898,22 @@ const replaceObserved = {
     other: 14,
     foreground: true,
     error: 0,
+    modalCandidates: 1,
+    modalStatus: "complete",
+    modalError: 0,
+    modalVisited: 6,
+    modalButtons: 2,
+    modalCancel: 1,
+    modalReplace: 1,
+    modalEnabledCancel: 1,
+    modalEnabledReplace: 1,
+    modalBindingStatus: "complete",
+    modalBindingParent: "sheet",
+    modalBindingMatches: 1,
+    modalBindingSheetAttached: true,
+    modalBindingForeground: true,
+    modalBindingError: 0,
+    modalBindingAttribute: "none",
   },
 };
 it("observes replacement with one guarded Save and no confirmation or Cancel action", async () => {
@@ -933,6 +949,14 @@ it.each([
   { saveTargetExistingFixture: false },
   { guardMask: 254 },
   { replaceContext: { ...replaceObserved.replaceContext, status: "error", error: -25202 } },
+  {
+    replaceContext: {
+      ...replaceObserved.replaceContext,
+      modalCandidates: 0,
+      modalStatus: "not_checked",
+    },
+  },
+  { replaceContext: { ...replaceObserved.replaceContext, modalBindingSheetAttached: false } },
 ])("does not retry a refused replacement observation %j", async (change) => {
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   const responses = [
