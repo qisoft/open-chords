@@ -203,7 +203,8 @@ let savesNewText = arguments.count == 6 && arguments[3] == "directory_snapshot" 
 let savesNewPdf = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "pdf" && arguments[5] == "--save-new-pdf"
 let savesNewArchive = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "archive" && arguments[5] == "--save-new-archive"
 let savesNewExport = savesNewJson || savesNewText || savesNewPdf || savesNewArchive
-let observesReplaceJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--observe-replace-json"
+let cancelsReplaceJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--cancel-replace-json"
+let observesReplaceJson = cancelsReplaceJson || (arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--observe-replace-json")
 let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewExport || observesReplaceJson
 var saveTargetExistingFixture = false
 var replaceContext: [String: Any] = ["status": "not_checked", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
@@ -521,8 +522,8 @@ func isExistingReplacementFixture(_ path: String) -> Bool {
     return (try? file.read(upToCount: expected.count + 1)) == expected
 }
 
-// Fresh read-only context after one guarded Save. No confirmation control is pressed.
-func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement, sheet: AXUIElement, parent: AXUIElement) -> [String: Any] {
+// Fresh context after one guarded Save. Confirmation Cancel is opt-in and separately guarded.
+func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement, sheet: AXUIElement, parent: AXUIElement, cancelConfirmation: Bool = false) -> [String: Any] {
     var result: [String: Any] = ["status": "complete", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
     var currentAttribute = "none", currentRole = "unknown", currentParentRole = "none", currentPidState = "not_checked"
     var currentSheetBranch = false
@@ -570,7 +571,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
         default: return "other"
         }
     }
-    // Separate diagnostics on an already encountered unique nested sheet. It authorizes no action.
+    // Bounded observation on a unique nested sheet; optional Cancel has separate fresh guards.
     func modalObservation(_ root: AXUIElement) -> [String: Any] {
         var modal: [String: Any] = ["modalStatus": "complete", "modalVisited": 0, "modalButtons": 0, "modalCancel": 0, "modalReplace": 0, "modalEnabledCancel": 0, "modalEnabledReplace": 0, "modalError": 0, "modalAttribute": "none", "modalRole": "unknown"]
         var roleCategoryNow = "unknown"
@@ -590,6 +591,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
             if ProcessInfo.processInfo.systemUptime >= deadline { fail("deadline", name); return nil }
             return output
         }
+        var cancelButtons: [AXUIElement] = []
         var queue = [root], visited: [AXUIElement] = []
         while !queue.isEmpty && (modal["modalStatus"] as? String) == "complete" {
             if visited.count >= 64 { fail("bound", "AXChildren"); break }
@@ -606,6 +608,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                 modal["modalButtons"] = (modal["modalButtons"] as? Int ?? 0) + 1
                 let title = value(element, "AXTitle", optional: true) as? String
                 if title == "Cancel" || title == "Replace" {
+                    if title == "Cancel" { cancelButtons.append(element) }
                     let key = title == "Cancel" ? "modalCancel" : "modalReplace"
                     modal[key] = (modal[key] as? Int ?? 0) + 1
                     guard let enabled = value(element, "AXEnabled") as? Bool else { fail("invalid_value", "AXEnabled"); break }
@@ -676,6 +679,90 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                 if !foreground { bindingFail("invalid_candidate", "foreground") }
             }
             bind()
+            if cancelConfirmation {
+                modal["cancelStatus"] = "refused"; modal["cancelGuardMask"] = 0
+                modal["cancelPressed"] = false; modal["cancelDismissed"] = false
+                modal["cancelSheetRetained"] = false; modal["cancelTargetUnchanged"] = false; modal["cancelError"] = 0; modal["cancelChainVisited"] = 0
+                let broadComplete = (result["status"] as? String) == "complete"
+                let knownSplitterRefusal = (result["status"] as? String) == "error" &&
+                    (result["error"] as? Int) == -25201 && (result["attribute"] as? String) == "pid" &&
+                    (result["pidState"] as? String) == "foreign" && (result["parentRole"] as? String) == "split_group" &&
+                    (result["sheetBranch"] as? Bool) == true && (result["foreignRole"] as? String) == "splitter" &&
+                    (result["foreignRoleError"] as? Int) == 0 && (result["foreignChildrenStatus"] as? String) == "absent" &&
+                    (result["foreignChildrenError"] as? Int) == -25212
+                func cancel() {
+                    guard broadComplete || knownSplitterRefusal,
+                          (modal["modalBindingStatus"] as? String) == "complete",
+                          (modal["modalBindingParent"] as? String) == "sheet",
+                          (modal["modalButtons"] as? Int) == 2,
+                          (modal["modalCancel"] as? Int) == 1, (modal["modalReplace"] as? Int) == 1,
+                          (modal["modalEnabledCancel"] as? Int) == 1, (modal["modalEnabledReplace"] as? Int) == 1,
+                          cancelButtons.count == 1 else { return }
+                    var mask = 1
+                    let button = cancelButtons[0]
+                    guard bindingPid(root), bindingPid(button), bindingPid(sheet), bindingPid(parent),
+                          (bindingRead(root, "AXRole") as? String) == "AXSheet" else { return }
+                    mask |= 2
+                    guard let rawParent = bindingRead(root, "AXParent"), CFGetTypeID(rawParent) == AXUIElementGetTypeID(),
+                          CFEqual(unsafeBitCast(rawParent, to: AXUIElement.self), sheet) else { return }
+                    mask |= 4
+                    guard let children = bindingRead(sheet, "AXChildren") as? [AXUIElement], children.count <= 64,
+                          children.filter({ CFEqual($0, root) }).count == 1,
+                          let parentChildren = bindingRead(parent, "AXChildren") as? [AXUIElement], parentChildren.count <= 64,
+                          parentChildren.filter({ CFEqual($0, sheet) }).count == 1 else { return }
+                    mask |= 8
+                    guard (bindingRead(button, "AXRole") as? String) == "AXButton",
+                          (bindingRead(button, "AXTitle") as? String) == "Cancel",
+                          (bindingRead(button, "AXEnabled") as? Bool) == true else { return }
+                    mask |= 16
+                    var node = button, seen: [AXUIElement] = []
+                    var attached = false
+                    for _ in 0..<16 {
+                        guard !seen.contains(where: { CFEqual($0, node) }), bindingPid(node) else { return }
+                        seen.append(node); modal["cancelChainVisited"] = seen.count
+                        if CFEqual(node, root) { attached = true; break }
+                        guard let raw = bindingRead(node, "AXParent"), CFGetTypeID(raw) == AXUIElementGetTypeID() else { return }
+                        node = unsafeBitCast(raw, to: AXUIElement.self)
+                    }
+                    guard attached else { return }
+                    mask |= 32
+                    guard ProcessInfo.processInfo.systemUptime < deadline,
+                          AXUIElementSetMessagingTimeout(button, 0.15) == .success else { return }
+                    var actions: CFArray?
+                    guard AXUIElementCopyActionNames(button, &actions) == .success,
+                          let names = actions as? [String], names.count <= 16, names.contains("AXPress"),
+                          isExistingReplacementFixture(URL(fileURLWithPath: arguments[2]).appendingPathComponent("Open Chords.json").path) else { return }
+                    mask |= 64
+                    guard (modal["modalBindingStatus"] as? String) == "complete",
+                          NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                          ProcessInfo.processInfo.systemUptime < deadline else { return }
+                    mask |= 128; modal["cancelGuardMask"] = mask
+                    let timeout = AXUIElementSetMessagingTimeout(button, 1)
+                    let status = timeout == .success ? AXUIElementPerformAction(button, "AXPress" as CFString) : timeout
+                    modal["cancelError"] = Int(status.rawValue)
+                    guard status == .success else { modal["cancelStatus"] = "press_error"; return }
+                    modal["cancelPressed"] = true; modal["cancelStatus"] = "not_dismissed"
+                    let dismissDeadline = min(deadline, ProcessInfo.processInfo.systemUptime + 2)
+                    while ProcessInfo.processInfo.systemUptime < dismissDeadline {
+                        guard let current = bindingRead(sheet, "AXChildren") as? [AXUIElement], current.count <= 64 else { return }
+                        if !current.contains(where: { CFEqual($0, root) }) {
+                            guard bindingPid(sheet), bindingPid(parent),
+                                  (bindingRead(sheet, "AXRole") as? String) == "AXSheet",
+                                  let fresh = bindingRead(parent, "AXChildren") as? [AXUIElement], fresh.count <= 64,
+                                  fresh.filter({ CFEqual($0, sheet) }).count == 1,
+                                  NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                                  ProcessInfo.processInfo.systemUptime < deadline else { return }
+                            let unchanged = isExistingReplacementFixture(URL(fileURLWithPath: arguments[2]).appendingPathComponent("Open Chords.json").path)
+                            modal["cancelTargetUnchanged"] = unchanged
+                            guard unchanged else { modal["cancelStatus"] = "target_changed"; return }
+                            modal["cancelDismissed"] = true; modal["cancelSheetRetained"] = true
+                            modal["cancelStatus"] = "complete"; return
+                        }
+                        Thread.sleep(forTimeInterval: min(0.02, max(0, dismissDeadline - ProcessInfo.processInfo.systemUptime)))
+                    }
+                }
+                cancel()
+            }
         }
         return modal
     }
@@ -1180,8 +1267,8 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
                 }
             }
             if observesReplaceJson {
-                // Capture the actual context even when AXPress refuses; retain the original fatal result.
-                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet, parent: parent)
+                // Capture the actual context even when AXPress refuses; retain the original action result.
+                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet, parent: parent, cancelConfirmation: cancelsReplaceJson && pressActionCalled && (status == .success || status == .attributeUnsupported))
                 if pressed { stage = "replace_observed" }
             }
             if pressed && !observesReplaceJson {
@@ -1224,7 +1311,7 @@ var result: [String: Any] = [
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
     "saveTargetExistingFixture": saveTargetExistingFixture, "replaceContext": replaceContext, "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask, "guardEnabledState": guardEnabledState,
-    "action": ["requested": observesReplaceJson ? "observe_replace_json" : savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
+    "action": ["requested": cancelsReplaceJson ? "cancel_replace_json" : observesReplaceJson ? "observe_replace_json" : savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if observesReplaceJson { result["pressTimeoutError"] = pressTimeoutError; result["pressActionCalled"] = pressActionCalled }
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
