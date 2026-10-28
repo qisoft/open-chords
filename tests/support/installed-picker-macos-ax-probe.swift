@@ -699,22 +699,23 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                           (modal["modalEnabledCancel"] as? Int) == 1, (modal["modalEnabledReplace"] as? Int) == 1,
                           cancelButtons.count == 1 else { return }
                     var mask = 1
+                    modal["cancelGuardMask"] = mask
                     let button = cancelButtons[0]
                     guard bindingPid(root), bindingPid(button), bindingPid(sheet), bindingPid(parent),
                           (bindingRead(root, "AXRole") as? String) == "AXSheet" else { return }
-                    mask |= 2
+                    mask |= 2; modal["cancelGuardMask"] = mask
                     guard let rawParent = bindingRead(root, "AXParent"), CFGetTypeID(rawParent) == AXUIElementGetTypeID(),
                           CFEqual(unsafeBitCast(rawParent, to: AXUIElement.self), sheet) else { return }
-                    mask |= 4
+                    mask |= 4; modal["cancelGuardMask"] = mask
                     guard let children = bindingRead(sheet, "AXChildren") as? [AXUIElement], children.count <= 64,
                           children.filter({ CFEqual($0, root) }).count == 1,
                           let parentChildren = bindingRead(parent, "AXChildren") as? [AXUIElement], parentChildren.count <= 64,
                           parentChildren.filter({ CFEqual($0, sheet) }).count == 1 else { return }
-                    mask |= 8
+                    mask |= 8; modal["cancelGuardMask"] = mask
                     guard (bindingRead(button, "AXRole") as? String) == "AXButton",
                           (bindingRead(button, "AXTitle") as? String) == "Cancel",
                           (bindingRead(button, "AXEnabled") as? Bool) == true else { return }
-                    mask |= 16
+                    mask |= 16; modal["cancelGuardMask"] = mask
                     var node = button, seen: [AXUIElement] = []
                     var attached = false
                     for _ in 0..<16 {
@@ -725,14 +726,14 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                         node = unsafeBitCast(raw, to: AXUIElement.self)
                     }
                     guard attached else { return }
-                    mask |= 32
+                    mask |= 32; modal["cancelGuardMask"] = mask
                     guard ProcessInfo.processInfo.systemUptime < deadline,
                           AXUIElementSetMessagingTimeout(button, 0.15) == .success else { return }
                     var actions: CFArray?
                     guard AXUIElementCopyActionNames(button, &actions) == .success,
                           let names = actions as? [String], names.count <= 16, names.contains("AXPress"),
                           isExistingReplacementFixture(URL(fileURLWithPath: arguments[2]).appendingPathComponent("Open Chords.json").path) else { return }
-                    mask |= 64
+                    mask |= 64; modal["cancelGuardMask"] = mask
                     guard (modal["modalBindingStatus"] as? String) == "complete",
                           NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
                           ProcessInfo.processInfo.systemUptime < deadline else { return }

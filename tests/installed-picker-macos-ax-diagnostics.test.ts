@@ -1955,3 +1955,23 @@ it("bounds explicit Cancel output at 8KiB without expanding ordinary AX limits",
     "Native macOS AX probe: invalid_evidence",
   );
 });
+
+it.each([0, 1, 3, 7, 15, 31, 63, 127])(
+  "retains partial Cancel guard mask %i without accepting the action",
+  (cancelGuardMask) => {
+    const output = JSON.stringify({
+      ...replacementCancelled,
+      replaceContext: {
+        ...replacementCancelled.replaceContext,
+        cancelStatus: "refused",
+        cancelGuardMask,
+        cancelPressed: false,
+        cancelDismissed: false,
+      },
+    });
+    expect(installedMacReplacementCancelled(output)).toBe(false);
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain(
+      `replace_context_cancelGuardMask=${cancelGuardMask}`,
+    );
+  },
+);
