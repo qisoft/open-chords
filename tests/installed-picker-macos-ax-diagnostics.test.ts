@@ -1449,3 +1449,92 @@ it.each([
   );
   expect(installedMacReplaceContextObserved(output)).toBe(false);
 });
+
+it.each([
+  {
+    pressTimeoutError: 0,
+    pressActionCalled: true,
+    attachmentStatus: "complete",
+    attachmentAttempts: 3,
+    attachmentCandidates: 1,
+  },
+  {
+    pressTimeoutError: -25205,
+    pressActionCalled: false,
+    attachmentStatus: "absent",
+    attachmentAttempts: 32,
+    attachmentCandidates: 0,
+  },
+  {
+    pressTimeoutError: 0,
+    pressActionCalled: true,
+    attachmentStatus: "error",
+    attachmentAttempts: 1,
+    attachmentCandidates: 0,
+  },
+])(
+  "retains the original Save refusal while reporting dispatch and bounded attachment diagnostics %j",
+  ({ pressTimeoutError, pressActionCalled, ...attachment }) => {
+    const output = JSON.stringify({
+      ...replacementObservation,
+      lastError: -25205,
+      stage: "press",
+      pressTimeoutError,
+      pressActionCalled,
+      action: { requested: "observe_replace_json", pressed: false, dismissed: false },
+      replaceContext: {
+        ...replacementObservation.replaceContext,
+        status: "error",
+        error: -25201,
+        attribute: "pid",
+        pidState: "foreign",
+        foreignRole: "splitter",
+        sheetBranch: true,
+        attachmentVisited: 48,
+        attachmentError: 0,
+        attachmentAttribute: "none",
+        attachmentSource: "none",
+        capturedSheetAttached: true,
+        modalStatus: "complete",
+        modalCancel: 1,
+        modalReplace: 1,
+        ...attachment,
+      },
+    });
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    const diagnostic = installedMacAxProbeDiagnostic(output, null, 1);
+    expect(diagnostic).toContain(`press_timeout_error=${pressTimeoutError}`);
+    expect(diagnostic).toContain(`press_action_called=${pressActionCalled}`);
+    expect(diagnostic).toContain(`replace_context_attachmentStatus=${attachment.attachmentStatus}`);
+    expect(diagnostic).toContain("last_error=-25205");
+  },
+);
+it.each([
+  { attachmentAttempts: 33 },
+  { attachmentVisited: 257 },
+  { attachmentCandidates: 129 },
+  { attachmentSource: "/private/path" },
+  { attachmentAttribute: "private" },
+  { attachmentError: 32768 },
+  { capturedSheetAttached: "private" },
+])("rejects private or unbounded attachment evidence %j", (attachment) => {
+  const output = JSON.stringify({
+    ...replacementObservation,
+    replaceContext: { ...replacementObservation.replaceContext, ...attachment },
+  });
+  expect(installedMacAxProbeDiagnostic(output, null, 1)).toBe(
+    "Native macOS AX probe: invalid_evidence",
+  );
+});
+it.each([{ pressTimeoutError: 32768 }, { pressActionCalled: "private" }])(
+  "rejects private or unbounded dispatch detail %j",
+  (detail) => {
+    expect(
+      installedMacAxProbeDiagnostic(
+        JSON.stringify({ ...replacementObservation, ...detail }),
+        null,
+        1,
+      ),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+  },
+);

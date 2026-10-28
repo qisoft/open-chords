@@ -167,6 +167,8 @@ const evidenceSchema = z.strictObject({
   firstFailureParent: parentObservationSchema.optional(),
   saveTargetAbsent: z.boolean().default(false),
   saveTargetExistingFixture: z.boolean().default(false),
+  pressTimeoutError: z.number().int().min(-32768).max(32767).optional(),
+  pressActionCalled: z.boolean().optional(),
   replaceContext: z
     .strictObject({
       status: z.enum(["not_checked", "complete", "deadline", "error", "invalid_value", "bound"]),
@@ -216,6 +218,25 @@ const evidenceSchema = z.strictObject({
         .enum(["none", "pid", "AXRole", "AXTitle", "AXEnabled", "AXChildren"])
         .optional(),
       modalRole: z.enum(replacementRoleKeys).optional(),
+      attachmentStatus: z
+        .enum([
+          "absent",
+          "complete",
+          "deadline",
+          "error",
+          "bound",
+          "ambiguous",
+          "invalid_candidate",
+          "invalid_value",
+        ])
+        .optional(),
+      attachmentAttempts: z.number().int().min(0).max(32).optional(),
+      attachmentVisited: z.number().int().min(0).max(256).optional(),
+      attachmentCandidates: z.number().int().min(0).max(128).optional(),
+      attachmentError: z.number().int().min(-32768).max(32767).optional(),
+      attachmentAttribute: z.enum(["none", "pid", "foreground", "AXRole", "AXChildren"]).optional(),
+      attachmentSource: z.enum(["none", "parent", "sheet"]).optional(),
+      capturedSheetAttached: z.boolean().optional(),
       saveActionStatus: z.enum(["success", "deadline", "error", "invalid_value"]).optional(),
       savePressAction: z.enum(["unknown", "present", "absent"]).optional(),
       saveActionError: z.number().int().min(-32768).max(32767).optional(),
@@ -483,6 +504,8 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       lastError,
       dismissalLastError,
       pressDurationMs,
+      pressTimeoutError,
+      pressActionCalled,
       pressSheetState,
       pressFollowupError,
       counts,
@@ -524,6 +547,8 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `last_error=${lastError}`,
       `dismissal_last_error=${dismissalLastError}`,
       `press_duration_ms=${pressDurationMs}`,
+      ...(pressTimeoutError === undefined ? [] : [`press_timeout_error=${pressTimeoutError}`]),
+      ...(pressActionCalled === undefined ? [] : [`press_action_called=${pressActionCalled}`]),
       `press_sheet_state=${pressSheetState}`,
       `press_followup_error=${pressFollowupError}`,
       `other_error=${firstOtherError}`,

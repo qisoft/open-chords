@@ -216,6 +216,8 @@ var pressed = false
 var dismissed = false
 var dismissalLastError = 0
 var pressDurationMs = 0
+var pressTimeoutError = 0
+var pressActionCalled = false
 var pressSheetState = "not_checked"
 var pressFollowupError = 0
 var foreground = false
@@ -520,7 +522,7 @@ func isExistingReplacementFixture(_ path: String) -> Bool {
 }
 
 // Fresh read-only context after one guarded Save. No confirmation control is pressed.
-func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement, sheet: AXUIElement) -> [String: Any] {
+func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement, sheet: AXUIElement, parent: AXUIElement) -> [String: Any] {
     var result: [String: Any] = ["status": "complete", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
     var currentAttribute = "none", currentRole = "unknown", currentParentRole = "none", currentPidState = "not_checked"
     var currentSheetBranch = false
@@ -709,6 +711,73 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
     if modalCandidates.count == 1 {
         for (key, value) in modalObservation(modalCandidates[0]) { result[key] = value }
     } else { result["modalStatus"] = modalCandidates.isEmpty ? "not_checked" : "ambiguous" }
+    // Read-only attachment polling starts only after the preserved, positively identified splitter refusal.
+    if modalCandidates.isEmpty && (result["pidState"] as? String) == "foreign" &&
+       (result["foreignRole"] as? String) == "splitter" && (result["sheetBranch"] as? Bool) == true {
+        result["attachmentStatus"] = "absent"; result["attachmentAttempts"] = 0; result["attachmentVisited"] = 0
+        result["attachmentCandidates"] = 0; result["attachmentError"] = 0; result["attachmentAttribute"] = "none"
+        result["attachmentSource"] = "none"; result["capturedSheetAttached"] = false
+        let attachmentDeadline = min(deadline, ProcessInfo.processInfo.systemUptime + 1)
+        var attachmentSource = "none"
+        func attachmentFail(_ status: String, _ attribute: String, _ error: AXError = .success) {
+            if (result["attachmentStatus"] as? String) == "absent" {
+                result["attachmentStatus"] = status; result["attachmentAttribute"] = attribute
+                result["attachmentSource"] = attachmentSource; result["attachmentError"] = Int(error.rawValue)
+            }
+        }
+        func attachmentRead(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { attachmentFail("deadline", name); return nil }
+            let timeout = AXUIElementSetMessagingTimeout(element, name == "AXRole" ? 0.5 : 0.15)
+            var output: CFTypeRef?
+            let status = timeout == .success ? AXUIElementCopyAttributeValue(element, name as CFString, &output) : timeout
+            guard status == .success, let output = output else { attachmentFail("error", name, status); return nil }
+            if ProcessInfo.processInfo.systemUptime >= deadline { attachmentFail("deadline", name); return nil }
+            return output
+        }
+        func attachmentPid(_ element: AXUIElement) -> Bool {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { attachmentFail("deadline", "pid"); return false }
+            var actualPid: pid_t = 0
+            let status = AXUIElementGetPid(element, &actualPid)
+            guard status == .success, actualPid == pid else { attachmentFail("invalid_candidate", "pid", status); return false }
+            return true
+        }
+        for attempt in 1...32 {
+            if ProcessInfo.processInfo.systemUptime >= attachmentDeadline || (result["attachmentStatus"] as? String) != "absent" { break }
+            result["attachmentAttempts"] = attempt
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier != pid { attachmentFail("invalid_candidate", "foreground"); break }
+            var candidates: [AXUIElement] = []
+            for (root, source) in [(parent, "parent"), (sheet, "sheet")] {
+                attachmentSource = source
+                guard attachmentPid(root) else { break }
+                guard let children = attachmentRead(root, "AXChildren") as? [AXUIElement], children.count <= 64 else {
+                    attachmentFail("bound", "AXChildren"); break
+                }
+                if source == "parent" {
+                    let attached = children.contains(where: { CFEqual($0, sheet) })
+                    result["capturedSheetAttached"] = attached
+                    if !attached { attachmentFail("invalid_candidate", "AXChildren"); break }
+                }
+                for child in children {
+                    let visited = (result["attachmentVisited"] as? Int ?? 0)
+                    if visited >= 256 { attachmentFail("bound", "AXChildren"); break }
+                    result["attachmentVisited"] = visited + 1
+                    guard attachmentPid(child) else { break }
+                    guard let role = attachmentRead(child, "AXRole") as? String else { attachmentFail("invalid_value", "AXRole"); break }
+                    if role == "AXSheet" && !CFEqual(child, sheet) && !candidates.contains(where: { CFEqual($0, child) }) { candidates.append(child) }
+                }
+                if (result["attachmentStatus"] as? String) != "absent" { break }
+            }
+            result["attachmentCandidates"] = candidates.count
+            if (result["attachmentStatus"] as? String) != "absent" { break }
+            if candidates.count == 1 {
+                result["attachmentStatus"] = "complete"
+                for (key, value) in modalObservation(candidates[0]) { result[key] = value }
+                break
+            }
+            if candidates.count > 1 { attachmentFail("ambiguous", "AXChildren"); break }
+            Thread.sleep(forTimeInterval: min(0.02, max(0, attachmentDeadline - ProcessInfo.processInfo.systemUptime)))
+        }
+    }
     currentAttribute = "AXActions"; currentRole = "button"; currentParentRole = "none"; currentPidState = "not_checked"; currentSheetBranch = true
     result["saveActionStatus"] = "deadline"; result["savePressAction"] = "unknown"; result["saveActionError"] = 0
     if ProcessInfo.processInfo.systemUptime < deadline {
@@ -1032,6 +1101,8 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             // Action callbacks can outlast the 150 ms attribute-read timeout.
             // Keep the single action bounded inside the unchanged seven-second host budget.
             let timeoutStatus = AXUIElementSetMessagingTimeout(button, 1)
+            pressTimeoutError = Int(timeoutStatus.rawValue)
+            pressActionCalled = timeoutStatus == .success
             let status = timeoutStatus == .success
                 ? AXUIElementPerformAction(button, "AXPress" as CFString) : timeoutStatus
             pressDurationMs = min(999999, max(0, Int((ProcessInfo.processInfo.systemUptime - pressStarted) * 1000)))
@@ -1054,7 +1125,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             }
             if observesReplaceJson {
                 // Capture the actual context even when AXPress refuses; retain the original fatal result.
-                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet)
+                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet, parent: parent)
                 if pressed { stage = "replace_observed" }
             }
             if pressed && !observesReplaceJson {
@@ -1082,7 +1153,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
 if !noReadFailures() { complete = false; directoryVerified = false }
 for key in Array(counts.keys) where key != "lastError" { counts[key] = min(counts[key] ?? 0, 999) }
 let lastError = counts.removeValue(forKey: "lastError") ?? 0
-let result: [String: Any] = [
+var result: [String: Any] = [
     "staleSnapshot": ["eligible": snapshotRefreshEligible, "traversalComplete": snapshotTraversalComplete, "candidates": vanishedChildCandidates,
         "allVanished": vanishedChildCandidates > 0 && allInvalidChildrenVanished,
         "onlyInvalidChildErrors": counts["otherErrors", default: 0] > 0 && onlyInvalidChildErrors],
@@ -1099,5 +1170,6 @@ let result: [String: Any] = [
     "saveTargetExistingFixture": saveTargetExistingFixture, "replaceContext": replaceContext, "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask, "guardEnabledState": guardEnabledState,
     "action": ["requested": observesReplaceJson ? "observe_replace_json" : savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
 ]
+if observesReplaceJson { result["pressTimeoutError"] = pressTimeoutError; result["pressActionCalled"] = pressActionCalled }
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
    let output = String(data: data, encoding: .utf8) { print(output) }
