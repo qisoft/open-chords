@@ -22,6 +22,8 @@ export const WindowsReplacementBindingSchema = z.strictObject({
   guardMask: z.number().int().min(0).max(255),
   yesRefusalMask: z.number().int().min(0).max(255).optional(),
   noRefusalMask: z.number().int().min(0).max(255).optional(),
+  yesBinding: z.enum(["none", "classic_direct", "modern_chain"]).optional(),
+  noBinding: z.enum(["none", "classic_direct", "modern_chain"]).optional(),
   yesFailure: buttonFailure.optional(),
   noFailure: buttonFailure.optional(),
   candidates: z.number().int().min(0).max(17),
@@ -91,6 +93,8 @@ export const WindowsReplacementBoundObservationSchema = WindowsReplacementObserv
     binding.guardMask === 255 &&
     binding.yesRefusalMask === 0 &&
     binding.noRefusalMask === 0 &&
+    (binding.yesBinding === "classic_direct" || binding.yesBinding === "modern_chain") &&
+    (binding.noBinding === "classic_direct" || binding.noBinding === "modern_chain") &&
     noButtonFailure(binding.yesFailure) &&
     noButtonFailure(binding.noFailure) &&
     binding.candidates === 1 &&

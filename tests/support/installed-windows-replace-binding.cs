@@ -36,9 +36,30 @@ public static class WindowsReplacementBinding {
       ClassIs(modal, "#32770") && GetWindow(modal, 4) == save && GetAncestor(modal, 2) == modal &&
       GetForegroundWindow() == modal;
   }
-  private static bool ButtonValid(IntPtr button, IntPtr modal, uint pid, int id) {
-    return Owned(button, pid) && IsWindowVisible(button) && IsWindowEnabled(button) &&
-      ClassIs(button, "Button") && GetParent(button) == modal && GetAncestor(button, 2) == modal && GetDlgCtrlID(button) == id;
+  private static bool ModernParentChain(IntPtr button, IntPtr modal, uint pid, DateTime deadline) {
+    var seen = new HashSet<IntPtr>();
+    int wrappers = 0;
+    IntPtr parent = GetParent(button);
+    for (int depth = 0; depth < 3; depth++) {
+      if (DateTime.UtcNow >= deadline || !Owned(parent, pid) || !seen.Add(parent) || GetAncestor(parent, 2) != modal) return false;
+      var kind = new StringBuilder(64);
+      if (GetClassName(parent, kind, kind.Capacity) == 0) return false;
+      if (depth == 2) return parent == modal && kind.ToString() == "#32770" && wrappers == 6;
+      if (parent == modal) return false;
+      int bit = kind.ToString() == "DirectUIHWND" ? 2 : kind.ToString() == "CtrlNotifySink" ? 4 : 0;
+      if (bit == 0 || (wrappers & bit) != 0) return false;
+      wrappers |= bit;
+      parent = GetParent(parent);
+    }
+    return false;
+  }
+  private static string ButtonBinding(IntPtr button, IntPtr modal, uint pid, int id, DateTime deadline) {
+    if (DateTime.UtcNow >= deadline || !Owned(button, pid) || !IsWindowVisible(button) || !IsWindowEnabled(button) ||
+        !ClassIs(button, "Button") || GetAncestor(button, 2) != modal) return "none";
+    if (GetParent(button) == modal && GetDlgCtrlID(button) == id) return "classic_direct";
+    // DirectUI buttons do not expose the classic IDs. Identity comes from the unique fixed
+    // label and a fresh exact same-PID/root chain, never from a zero GetDlgCtrlID return.
+    return ModernParentChain(button, modal, pid, deadline) ? "modern_chain" : "none";
   }
   private static int ButtonDiagnostic(IntPtr button, IntPtr modal, uint pid, int id) {
     // Failure-only classification; never substitutes for the original strict predicate.
@@ -101,6 +122,7 @@ public static class WindowsReplacementBinding {
     IntPtr modal = IntPtr.Zero, yesButton = IntPtr.Zero, noButton = IntPtr.Zero;
     var yesFailure = new ButtonFailure();
     var noFailure = new ButtonFailure();
+    string yesBinding = "none", noBinding = "none";
     if (budgetMs > 0 && budgetMs <= 2000 && SaveValid(save, pid)) {
       mask |= 1;
       status = "complete";
@@ -139,14 +161,16 @@ public static class WindowsReplacementBinding {
             }
             string name = title.ToString();
             if (name == "Yes" || name == "&Yes") {
-              if (ButtonValid(control, modal, pid, 6)) { yes++; yesButton = control; }
+              yesBinding = ButtonBinding(control, modal, pid, 6, deadline);
+              if (yesBinding != "none") { yes++; yesButton = control; }
               else if (DateTime.UtcNow < deadline) {
                 yesMask = ButtonDiagnostic(control, modal, pid, 6);
                 yesFailure = ObserveButtonFailure(control, modal, pid, deadline);
               }
             }
             if (name == "No" || name == "&No") {
-              if (ButtonValid(control, modal, pid, 7)) { no++; noButton = control; }
+              noBinding = ButtonBinding(control, modal, pid, 7, deadline);
+              if (noBinding != "none") { no++; noButton = control; }
               else if (DateTime.UtcNow < deadline) {
                 noMask = ButtonDiagnostic(control, modal, pid, 7);
                 noFailure = ObserveButtonFailure(control, modal, pid, deadline);
@@ -159,7 +183,9 @@ public static class WindowsReplacementBinding {
             if (no == 1) mask |= 16;
             if (buttons == 2 && yes == 1 && no == 1 && yesButton != noButton) mask |= 32;
             if (SaveValid(save, pid) && ModalValid(modal, save, pid) &&
-                ButtonValid(yesButton, modal, pid, 6) && ButtonValid(noButton, modal, pid, 7)) mask |= 64;
+                yesBinding != "none" && noBinding != "none" &&
+                ButtonBinding(yesButton, modal, pid, 6, deadline) == yesBinding &&
+                ButtonBinding(noButton, modal, pid, 7, deadline) == noBinding) mask |= 64;
             if (DateTime.UtcNow < deadline) mask |= 128;
             else status = "deadline";
           }
@@ -170,6 +196,7 @@ public static class WindowsReplacementBinding {
     return "{\"status\":\"" + status + "\",\"guardMask\":" + mask + ",\"candidates\":" + candidates +
       ",\"buttons\":" + buttons + ",\"yes\":" + yes + ",\"no\":" + no +
       ",\"yesRefusalMask\":" + yesMask + ",\"noRefusalMask\":" + noMask +
+      ",\"yesBinding\":\"" + yesBinding + "\",\"noBinding\":\"" + noBinding + "\"" +
       ",\"yesFailure\":" + yesFailure.Json() + ",\"noFailure\":" + noFailure.Json() + "}";
   }
 }

@@ -105,6 +105,8 @@ const boundEvidence = () => ({
     guardMask: 255,
     yesRefusalMask: 0,
     noRefusalMask: 0,
+    yesBinding: "classic_direct",
+    noBinding: "classic_direct",
     candidates: 1,
     buttons: 2,
     yes: 1,
@@ -114,6 +116,18 @@ const boundEvidence = () => ({
 it("requires a fresh bound snapshot in addition to the original complete inventory", () => {
   expect(WindowsReplacementBoundObservationSchema.parse(boundEvidence())).toEqual(boundEvidence());
   expect(WindowsReplacementBoundObservationSchema.safeParse(evidence()).success).toBe(false);
+});
+it("accepts a fully guarded modern-chain observation without treating control ID zero as identity", () => {
+  const value = boundEvidence();
+  Object.assign(value.binding, { yesBinding: "modern_chain", noBinding: "modern_chain" });
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(true);
+});
+it.each(["yesBinding", "noBinding"])("rejects missing, refused or private %s", (field) => {
+  for (const replacement of [undefined, "none", "/private"]) {
+    const value = boundEvidence();
+    Object.assign(value.binding, { [field]: replacement });
+    expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+  }
 });
 it.each([1, 2, 4, 8, 16, 32, 64, 128])("refuses a missing binding guard bit %i", (bit) => {
   const value = boundEvidence();
@@ -195,6 +209,8 @@ it("retains bounded button-parent evidence without accepting the original refuse
     noFailure: { controlId: 101, parentStatus: "complete", parentDepth: 3, parentClassMask: 7 },
   });
   expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(true);
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+  Object.assign(value.binding, { yesBinding: "modern_chain", noBinding: "modern_chain" });
   expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
 });
 it("refuses contradictory failure-parent data in a complete binding claim", () => {
