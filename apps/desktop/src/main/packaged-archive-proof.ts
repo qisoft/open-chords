@@ -5,6 +5,7 @@ import { canonicalSerialize } from "@open-chords/domain";
 import { readBoundedFile } from "./bounded-file.ts";
 import { openOfflineMediaCache } from "./offline-media-cache.ts";
 import { ARCHIVE_PROOF_CASES } from "./packaged-archive-proof-constants.ts";
+import { rethrowProjectionProofFailure } from "./packaged-projection-proof-diagnostic.ts";
 import { proofTreeHashes } from "./packaged-proof-tree.ts";
 import { archivedProjectFor } from "./project-archive-format.ts";
 import { ProjectArchiveImports } from "./project-archive-imports.ts";
@@ -15,17 +16,30 @@ import { openProjectLibrary } from "./project-library.ts";
 // Uses only fixed synthetic inputs prepared by native CI. Selection is a module
 // interface, so this proof does not claim native Open dialog interaction.
 export async function runPackagedArchiveProof(stateRoot: string) {
+  try {
+    return await runArchiveProof(stateRoot);
+  } catch (error) {
+    return await rethrowProjectionProofFailure("archive", error);
+  }
+}
+
+async function runArchiveProof(stateRoot: string) {
+  process.stderr.write("Archive proof stage: archive_read\n");
   const archive = join(dirname(stateRoot), "packaged-export-output", "song.ocarchive");
   const expected = inspectPortableProjectArchive(
     await readBoundedFile(archive, ARCHIVE_ZIP_LIMITS.maxArchiveBytes),
   ).document;
   const importedState = join(stateRoot, "archive-proof-import");
+  process.stderr.write("Archive proof stage: library_open\n");
   const library = await openProjectLibrary({ stateRoot: importedState });
+  process.stderr.write("Archive proof stage: library_ready\n");
   if (library.listProjects().length !== 0) throw new Error("archive_proof_fixture_invalid");
   const cache = await openOfflineMediaCache({ stateRoot: importedState });
   const importer = (path: string | null) =>
     new ProjectArchiveImports({ library, cache, pickArchive: async () => path });
+  process.stderr.write("Archive proof stage: import_started\n");
   const imported = await importer(archive).importArchive();
+  process.stderr.write("Archive proof stage: import_finished\n");
   if (
     imported.state !== "imported" ||
     imported.importedCopy ||
@@ -41,10 +55,12 @@ export async function runPackagedArchiveProof(stateRoot: string) {
     if (canonicalSerialize(await proofTreeHashes(library.activeRoot)) !== baseline)
       throw new Error("archive_proof_library_changed");
   };
+  process.stderr.write("Archive proof stage: duplicate\n");
   const duplicate = await importer(archive).importArchive();
   if (duplicate.state !== "already_present" || duplicate.importedCopy)
     throw new Error("archive_proof_duplicate_failed");
   await unchanged();
+  process.stderr.write("Archive proof stage: cancellation\n");
   if ((await importer(null).importArchive()).state !== "cancelled")
     throw new Error("archive_proof_cancellation_failed");
   await unchanged();
@@ -57,6 +73,7 @@ export async function runPackagedArchiveProof(stateRoot: string) {
       throw new Error("archive_proof_rejection_failed");
     await unchanged();
   }
+  process.stderr.write("Archive proof stage: reopen\n");
   const reopened = await openProjectLibrary({ stateRoot: importedState });
   if (
     reopened.listProjects().length !== 1 ||

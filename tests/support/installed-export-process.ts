@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { PROJECTION_PROOF_FAILURE_CODES } from "../../apps/desktop/src/main/packaged-projection-proof-diagnostic.ts";
+
 export function installedExportExitDiagnostic(error: unknown, durationMs: number) {
   return installedProcessExitDiagnostic("export", error, durationMs);
 }
@@ -81,6 +83,29 @@ function installedExportProofStages(error: unknown): string[] {
     .slice(0, 16384)
     .split(/\r?\n/)
     .flatMap((line) => {
+      const projectionFailure = /^Packaged (export|archive) proof failure: code=([A-Za-z_]+)$/.exec(
+        line,
+      );
+      if (projectionFailure && PROJECTION_PROOF_FAILURE_CODES.has(projectionFailure[2]!))
+        return [line];
+      if (
+        /^Export proof stage: (rejected_(stale_revision|protected_target|directory_target|missing_parent)|cancelled_existing_target_unchanged)$/.test(
+          line,
+        )
+      )
+        return [line];
+      if (
+        /^Export projection proof stage: (library_open|library_ready|cancellation|save_json|save_archive|save_chordpro|save_lrc|save_pdf|failure_cases|reopened)$/.test(
+          line,
+        )
+      )
+        return [line];
+      if (
+        /^Archive proof stage: (archive_read|library_open|library_ready|import_started|import_finished|roundtrip_verified|duplicate|cancellation|reopen|rejecting_(traversal|link|collision|executable|hash|future|size|encrypted))$/.test(
+          line,
+        )
+      )
+        return [line];
       const match = /^Export disk proof stage: ([a-z_]+) duration_ms=([0-9]{1,9})$/.exec(line);
       if (match && names.has(match[1]!)) return [line];
       if (

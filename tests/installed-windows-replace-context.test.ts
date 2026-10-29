@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   WindowsReplacementDiagnosticSchema,
   WindowsReplacementObservationSchema,
+  WindowsReplacementBoundObservationSchema,
 } from "./support/installed-windows-replace-context.ts";
 
 const evidence = () => ({
@@ -95,4 +96,177 @@ it("retains bounded refusal diagnostics while refusing them as accepted observat
   });
   expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(true);
   expect(WindowsReplacementObservationSchema.safeParse(value).success).toBe(false);
+});
+
+const boundEvidence = () => ({
+  ...evidence(),
+  binding: {
+    status: "complete",
+    guardMask: 255,
+    yesRefusalMask: 0,
+    noRefusalMask: 0,
+    yesBinding: "classic_direct",
+    noBinding: "classic_direct",
+    recheckStatus: "complete",
+    recheckButtons: 2,
+    recheckYes: 1,
+    recheckNo: 1,
+    recheckMatches: true,
+    candidates: 1,
+    buttons: 2,
+    yes: 1,
+    no: 1,
+  },
+});
+it("requires a fresh bound snapshot in addition to the original complete inventory", () => {
+  expect(WindowsReplacementBoundObservationSchema.parse(boundEvidence())).toEqual(boundEvidence());
+  expect(WindowsReplacementBoundObservationSchema.safeParse(evidence()).success).toBe(false);
+});
+it.each(["recheckStatus", "recheckButtons", "recheckYes", "recheckNo", "recheckMatches"])(
+  "refuses an otherwise complete binding without fresh %s evidence",
+  (field) => {
+    const value = boundEvidence();
+    delete (value.binding as Record<string, unknown>)[field];
+    expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+  },
+);
+it("accepts a fully guarded modern-chain observation without treating control ID zero as identity", () => {
+  const value = boundEvidence();
+  Object.assign(value.binding, { yesBinding: "modern_chain", noBinding: "modern_chain" });
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(true);
+});
+it.each(["yesBinding", "noBinding"])("rejects missing, refused or private %s", (field) => {
+  for (const replacement of [undefined, "none", "/private"]) {
+    const value = boundEvidence();
+    Object.assign(value.binding, { [field]: replacement });
+    expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+  }
+});
+it.each([1, 2, 4, 8, 16, 32, 64, 128])("refuses a missing binding guard bit %i", (bit) => {
+  const value = boundEvidence();
+  value.binding.guardMask &= ~bit;
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+});
+it.each([
+  ["status", "refused"],
+  ["status", "deadline"],
+  ["status", "bound"],
+  ["status", "read_error"],
+  ["candidates", 0],
+  ["candidates", 2],
+  ["buttons", 3],
+  ["yes", 0],
+  ["yes", 2],
+  ["no", 0],
+  ["no", 2],
+  ["yesRefusalMask", 239],
+  ["noRefusalMask", 191],
+  ["recheckStatus", "not_checked"],
+  ["recheckStatus", "read_error"],
+  ["recheckStatus", "deadline"],
+  ["recheckStatus", "bound"],
+  ["recheckStatus", "refused"],
+  ["recheckButtons", 3],
+  ["recheckButtons", 1],
+  ["recheckYes", 0],
+  ["recheckNo", 0],
+  ["recheckMatches", false],
+] as const)("retains fixed refusal evidence but rejects it as bound: %s=%s", (field, value) => {
+  const changed = boundEvidence();
+  Object.assign(changed.binding, { [field]: value });
+  expect(WindowsReplacementDiagnosticSchema.safeParse(changed).success).toBe(true);
+  expect(WindowsReplacementBoundObservationSchema.safeParse(changed).success).toBe(false);
+});
+
+it.each(["yesRefusalMask", "noRefusalMask"])("rejects malformed %s diagnostics", (field) => {
+  for (const value of [-1, 256, 0.5, "/private", null]) {
+    const changed = boundEvidence();
+    Object.assign(changed.binding, { [field]: value });
+    expect(WindowsReplacementDiagnosticSchema.safeParse(changed).success).toBe(false);
+  }
+});
+it.each([
+  ["capturedVisible", false],
+  ["capturedEnabled", true],
+  ["foregroundSave", true],
+  ["otherDialogs", 0],
+  ["ownedBySave", 0],
+  ["yes", 0],
+  ["no", 0],
+  ["cancel", 1],
+  ["replace", 1],
+  ["other", 1],
+] as const)("refuses a bound claim inconsistent with prior context %s", (field, value) => {
+  const changed = boundEvidence();
+  Object.assign(changed.context, { [field]: value });
+  expect(WindowsReplacementBoundObservationSchema.safeParse(changed).success).toBe(false);
+});
+it.each(["status", "guardMask", "candidates", "buttons", "yes", "no"])(
+  "rejects incomplete binding evidence missing %s",
+  (field) => {
+    const changed = boundEvidence();
+    delete (changed.binding as Record<string, unknown>)[field];
+    expect(WindowsReplacementDiagnosticSchema.safeParse(changed).success).toBe(false);
+  },
+);
+it("rejects raw native identities, titles, paths and action claims in binding output", () => {
+  for (const field of ["pid", "handle", "title", "path", "error", "pressed"]) {
+    const value = boundEvidence();
+    expect(
+      WindowsReplacementDiagnosticSchema.safeParse({
+        ...value,
+        binding: { ...value.binding, [field]: "/private" },
+      }).success,
+    ).toBe(false);
+  }
+});
+
+it("retains bounded button-parent evidence without accepting the original refused binding", () => {
+  const value = boundEvidence();
+  Object.assign(value.binding, {
+    status: "refused",
+    guardMask: 135,
+    yesRefusalMask: 175,
+    noRefusalMask: 175,
+    yesFailure: { controlId: 100, parentStatus: "complete", parentDepth: 3, parentClassMask: 7 },
+    noFailure: { controlId: 101, parentStatus: "complete", parentDepth: 3, parentClassMask: 7 },
+  });
+  expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(true);
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+  Object.assign(value.binding, { yesBinding: "modern_chain", noBinding: "modern_chain" });
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+});
+it("refuses contradictory failure-parent data in a complete binding claim", () => {
+  const value = boundEvidence();
+  Object.assign(value.binding, {
+    yesFailure: { controlId: 100, parentStatus: "complete", parentDepth: 3, parentClassMask: 7 },
+  });
+  expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(true);
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+});
+it.each([
+  ["controlId", -2],
+  ["controlId", 65536],
+  ["controlId", 1.5],
+  ["parentStatus", "/private"],
+  ["parentDepth", 17],
+  ["parentDepth", -1],
+  ["parentClassMask", 64],
+  ["parentClassMask", 0.5],
+  ["pid", 123],
+  ["handle", 123],
+  ["title", "private content"],
+  ["path", "/private"],
+] as const)("rejects malformed or private parent diagnostic %s", (field, replacement) => {
+  const value = boundEvidence();
+  Object.assign(value.binding, {
+    yesFailure: {
+      controlId: 0,
+      parentStatus: "not_checked",
+      parentDepth: 0,
+      parentClassMask: 0,
+      [field]: replacement,
+    },
+  });
+  expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(false);
 });

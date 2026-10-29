@@ -9,7 +9,8 @@ New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 $assembly = Join-Path $outputRoot 'windows-save-input.dll'
 if (Test-Path -LiteralPath $assembly) { Remove-Item -LiteralPath $assembly -Force }
 $replacementSource = Join-Path $PSScriptRoot 'installed-windows-replace-context.cs'
-Add-Type -Path @($source, $replacementSource) -OutputAssembly $assembly -OutputType Library
+$bindingSource = Join-Path $PSScriptRoot 'installed-windows-replace-binding.cs'
+Add-Type -Path @($source, $replacementSource, $bindingSource) -OutputAssembly $assembly -OutputType Library
 Add-Type -Path $assembly
 foreach ($format in @('json', 'lrc', 'chordpro', 'pdf', 'archive', 'media')) {
   [SaveNativeInput]::ConfigureFormat($format, $format -eq 'media')

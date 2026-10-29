@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { runPackagedExportDiskProof } from "./packaged-export-disk-proof.ts";
 import { runPackagedExportFailureProof } from "./packaged-export-failure-proof.ts";
 import { runPackagedExportRecoveryProof } from "./packaged-export-recovery-proof.ts";
+import { rethrowProjectionProofFailure } from "./packaged-projection-proof-diagnostic.ts";
 import { exportTarget, openProjectExports } from "./project-exports.ts";
 import { openProjectLibrary } from "./project-library.ts";
 
@@ -12,12 +13,23 @@ export const PACKAGED_EXPORT_PROOF_ARGUMENT = "--open-chords-export-proof";
 // CI seeds only synthetic Project data in an isolated user-data directory.
 // Fixed targets exercise bundled projections, not native Save dialog selection.
 export async function runPackagedExportProof(stateRoot: string, includeDiskFailures = true) {
+  try {
+    return await runProjectionProof(stateRoot, includeDiskFailures);
+  } catch (error) {
+    return await rethrowProjectionProofFailure("export", error);
+  }
+}
+
+async function runProjectionProof(stateRoot: string, includeDiskFailures: boolean) {
+  process.stderr.write("Export projection proof stage: library_open\n");
   const library = await openProjectLibrary({ stateRoot });
+  process.stderr.write("Export projection proof stage: library_ready\n");
   const projectId = "project_golden";
   const initial = await library.getSnapshot(projectId);
   if (!initial || library.listExportReceipts(projectId).length !== 0)
     throw new Error("export_proof_fixture_invalid");
   const cancelled = await openProjectExports({ library, stateRoot, pickTarget: async () => null });
+  process.stderr.write("Export projection proof stage: cancellation\n");
   const cancellation = await cancelled.saveJson({
     projectId,
     expectedProjectRevisionId: initial.projectRevisionId,
@@ -48,6 +60,7 @@ export async function runPackagedExportProof(stateRoot: string, includeDiskFailu
     "save_lrc",
     "save_pdf",
   ] as const) {
+    process.stderr.write(`Export projection proof stage: ${type}\n`);
     const snapshot = await library.getSnapshot(projectId);
     if (!snapshot) throw new Error("export_proof_project_missing");
     const request = { projectId, expectedProjectRevisionId: snapshot.projectRevisionId, type };
@@ -60,6 +73,7 @@ export async function runPackagedExportProof(stateRoot: string, includeDiskFailu
     );
     if (result.state !== "saved") throw new Error("export_proof_publication_failed");
   }
+  process.stderr.write("Export projection proof stage: failure_cases\n");
   const failures = await runPackagedExportFailureProof({
     library,
     stateRoot,
@@ -73,6 +87,7 @@ export async function runPackagedExportProof(stateRoot: string, includeDiskFailu
     ? await runPackagedExportRecoveryProof(library, stateRoot)
     : {};
   const reopened = await openProjectLibrary({ stateRoot });
+  process.stderr.write("Export projection proof stage: reopened\n");
   if (reopened.listExportReceipts(projectId).length !== 5)
     throw new Error("export_proof_reopen_failed");
   return {
