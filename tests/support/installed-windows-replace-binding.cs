@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -51,12 +52,55 @@ public static class WindowsReplacementBinding {
     if (GetDlgCtrlID(button) == id) mask |= 64;
     return mask;
   }
+  private sealed class ButtonFailure {
+    public int ControlId = -1, ParentDepth = 0, ParentClassMask = 0;
+    public string ParentStatus = "not_checked";
+    public string Json() {
+      return "{\"controlId\":" + ControlId + ",\"parentStatus\":\"" + ParentStatus +
+        "\",\"parentDepth\":" + ParentDepth + ",\"parentClassMask\":" + ParentClassMask + "}";
+    }
+  }
+  private static ButtonFailure ObserveButtonFailure(IntPtr button, IntPtr modal, uint pid, DateTime deadline) {
+    var result = new ButtonFailure();
+    if (DateTime.UtcNow >= deadline) { result.ParentStatus = "deadline"; return result; }
+    if (!IsWindow(button)) { result.ParentStatus = "unavailable"; return result; }
+    if (!Owned(button, pid)) { result.ParentStatus = "foreign"; return result; }
+    // A bounded dialog control ID is not a process ID or window handle. No raw UI name leaves this helper.
+    int id = GetDlgCtrlID(button);
+    if (id >= 0 && id <= 65535) result.ControlId = id;
+    var seen = new HashSet<IntPtr>();
+    IntPtr parent = GetParent(button);
+    for (int index = 0; index < 16; index++) {
+      if (DateTime.UtcNow >= deadline) { result.ParentStatus = "deadline"; return result; }
+      if (!IsWindow(parent)) { result.ParentStatus = "unavailable"; return result; }
+      if (!Owned(parent, pid)) { result.ParentStatus = "foreign"; return result; }
+      if (!seen.Add(parent)) { result.ParentStatus = "cycle"; return result; }
+      if (GetAncestor(parent, 2) != modal) { result.ParentStatus = "root_changed"; return result; }
+      var kind = new StringBuilder(64);
+      if (GetClassName(parent, kind, kind.Capacity) == 0) { result.ParentStatus = "read_error"; return result; }
+      switch (kind.ToString()) {
+        case "#32770": result.ParentClassMask |= 1; break;
+        case "DirectUIHWND": result.ParentClassMask |= 2; break;
+        case "CtrlNotifySink": result.ParentClassMask |= 4; break;
+        case "DUIViewWndClassName": result.ParentClassMask |= 8; break;
+        case "Button": result.ParentClassMask |= 16; break;
+        default: result.ParentClassMask |= 32; break;
+      }
+      result.ParentDepth++;
+      if (parent == modal) { result.ParentStatus = "complete"; return result; }
+      parent = GetParent(parent);
+    }
+    result.ParentStatus = "bound";
+    return result;
+  }
 
   public static string Observe(IntPtr save, uint pid, int budgetMs) {
     string status = "refused";
     int mask = 0, candidates = 0, buttons = 0, yes = 0, no = 0, scanned = 0, children = 0, yesMask = 0, noMask = 0;
     var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, Math.Min(2000, budgetMs)));
     IntPtr modal = IntPtr.Zero, yesButton = IntPtr.Zero, noButton = IntPtr.Zero;
+    var yesFailure = new ButtonFailure();
+    var noFailure = new ButtonFailure();
     if (budgetMs > 0 && budgetMs <= 2000 && SaveValid(save, pid)) {
       mask |= 1;
       status = "complete";
@@ -96,11 +140,17 @@ public static class WindowsReplacementBinding {
             string name = title.ToString();
             if (name == "Yes" || name == "&Yes") {
               if (ButtonValid(control, modal, pid, 6)) { yes++; yesButton = control; }
-              else if (DateTime.UtcNow < deadline) yesMask = ButtonDiagnostic(control, modal, pid, 6);
+              else if (DateTime.UtcNow < deadline) {
+                yesMask = ButtonDiagnostic(control, modal, pid, 6);
+                yesFailure = ObserveButtonFailure(control, modal, pid, deadline);
+              }
             }
             if (name == "No" || name == "&No") {
               if (ButtonValid(control, modal, pid, 7)) { no++; noButton = control; }
-              else if (DateTime.UtcNow < deadline) noMask = ButtonDiagnostic(control, modal, pid, 7);
+              else if (DateTime.UtcNow < deadline) {
+                noMask = ButtonDiagnostic(control, modal, pid, 7);
+                noFailure = ObserveButtonFailure(control, modal, pid, deadline);
+              }
             }
             return true;
           }, IntPtr.Zero);
@@ -119,6 +169,7 @@ public static class WindowsReplacementBinding {
     }
     return "{\"status\":\"" + status + "\",\"guardMask\":" + mask + ",\"candidates\":" + candidates +
       ",\"buttons\":" + buttons + ",\"yes\":" + yes + ",\"no\":" + no +
-      ",\"yesRefusalMask\":" + yesMask + ",\"noRefusalMask\":" + noMask + "}";
+      ",\"yesRefusalMask\":" + yesMask + ",\"noRefusalMask\":" + noMask +
+      ",\"yesFailure\":" + yesFailure.Json() + ",\"noFailure\":" + noFailure.Json() + "}";
   }
 }

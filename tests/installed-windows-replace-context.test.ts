@@ -183,3 +183,51 @@ it("rejects raw native identities, titles, paths and action claims in binding ou
     ).toBe(false);
   }
 });
+
+it("retains bounded button-parent evidence without accepting the original refused binding", () => {
+  const value = boundEvidence();
+  Object.assign(value.binding, {
+    status: "refused",
+    guardMask: 135,
+    yesRefusalMask: 175,
+    noRefusalMask: 175,
+    yesFailure: { controlId: 100, parentStatus: "complete", parentDepth: 3, parentClassMask: 7 },
+    noFailure: { controlId: 101, parentStatus: "complete", parentDepth: 3, parentClassMask: 7 },
+  });
+  expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(true);
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+});
+it("refuses contradictory failure-parent data in a complete binding claim", () => {
+  const value = boundEvidence();
+  Object.assign(value.binding, {
+    yesFailure: { controlId: 100, parentStatus: "complete", parentDepth: 3, parentClassMask: 7 },
+  });
+  expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(true);
+  expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+});
+it.each([
+  ["controlId", -2],
+  ["controlId", 65536],
+  ["controlId", 1.5],
+  ["parentStatus", "/private"],
+  ["parentDepth", 17],
+  ["parentDepth", -1],
+  ["parentClassMask", 64],
+  ["parentClassMask", 0.5],
+  ["pid", 123],
+  ["handle", 123],
+  ["title", "private content"],
+  ["path", "/private"],
+] as const)("rejects malformed or private parent diagnostic %s", (field, replacement) => {
+  const value = boundEvidence();
+  Object.assign(value.binding, {
+    yesFailure: {
+      controlId: 0,
+      parentStatus: "not_checked",
+      parentDepth: 0,
+      parentClassMask: 0,
+      [field]: replacement,
+    },
+  });
+  expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(false);
+});

@@ -1,11 +1,29 @@
 import { z } from "zod";
 
 const count = z.number().int().min(0).max(256);
+const buttonFailure = z.strictObject({
+  controlId: z.number().int().min(-1).max(65535),
+  parentStatus: z.enum([
+    "not_checked",
+    "deadline",
+    "unavailable",
+    "foreign",
+    "cycle",
+    "root_changed",
+    "read_error",
+    "complete",
+    "bound",
+  ]),
+  parentDepth: z.number().int().min(0).max(16),
+  parentClassMask: z.number().int().min(0).max(63),
+});
 export const WindowsReplacementBindingSchema = z.strictObject({
   status: z.enum(["complete", "refused", "deadline", "bound", "read_error"]),
   guardMask: z.number().int().min(0).max(255),
   yesRefusalMask: z.number().int().min(0).max(255).optional(),
   noRefusalMask: z.number().int().min(0).max(255).optional(),
+  yesFailure: buttonFailure.optional(),
+  noFailure: buttonFailure.optional(),
   candidates: z.number().int().min(0).max(17),
   buttons: count,
   yes: count,
@@ -50,6 +68,12 @@ export const WindowsReplacementObservationSchema = WindowsReplacementDiagnosticS
 );
 
 // A read-only snapshot, never an authorization to use a cached native handle for input.
+const noButtonFailure = (value: z.infer<typeof buttonFailure> | undefined) =>
+  value === undefined ||
+  (value.controlId === -1 &&
+    value.parentStatus === "not_checked" &&
+    value.parentDepth === 0 &&
+    value.parentClassMask === 0);
 export const WindowsReplacementBoundObservationSchema = WindowsReplacementObservationSchema.refine(
   ({ context, binding }) =>
     context.capturedVisible &&
@@ -67,6 +91,8 @@ export const WindowsReplacementBoundObservationSchema = WindowsReplacementObserv
     binding.guardMask === 255 &&
     binding.yesRefusalMask === 0 &&
     binding.noRefusalMask === 0 &&
+    noButtonFailure(binding.yesFailure) &&
+    noButtonFailure(binding.noFailure) &&
     binding.candidates === 1 &&
     binding.buttons === 2 &&
     binding.yes === 1 &&
