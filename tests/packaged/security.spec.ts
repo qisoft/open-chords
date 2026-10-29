@@ -657,7 +657,7 @@ test("installed macOS observes replacement context without confirming or changin
   expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
 });
 
-for (const format of ["json", "lrc", "chordpro"] as const) {
+for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed Windows native ${format} Save publishes with exact bytes and one durable Receipt`, async () => {
     test.skip(process.platform !== "win32", "Windows native Save proof");
     test.setTimeout(360_000);
@@ -665,7 +665,7 @@ for (const format of ["json", "lrc", "chordpro"] as const) {
     // The Windows executable directory is a protected production export root.
     const directory = realpathSync(mkdtempSync(join(tmpdir(), `windows-${format}-save-output-`)));
     externalOutputDirectories.push(directory);
-    const filename = `Open Chords.${format === "chordpro" ? "cho" : format}`;
+    const filename = `Open Chords.${format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format}`;
     const target = join(directory, filename);
     const external = join(packageRoot, `windows-${format}-save-preserved.bin`);
     const original = Buffer.from("private Windows native Save preservation fixture");
@@ -682,11 +682,20 @@ for (const format of ["json", "lrc", "chordpro"] as const) {
     await (await openNetworkMode(state)).setOffline(true);
     const before = await library.readProject("project_golden");
     expect(library.listExportReceipts("project_golden")).toEqual([]);
+    const archiveProjection = format === "archive" ? archivedProjectFor(before) : undefined;
+    const expectedArchive =
+      archiveProjection === undefined
+        ? undefined
+        : writePortableProjectArchive({ document: archiveProjection.document });
     const action = {
       type: `save_${format}`,
       projectId: "project_golden",
       expectedProjectRevisionId: before.projectRevisionId,
-      ...(format === "lrc" ? {} : { presentation: "current" }),
+      ...(format === "archive"
+        ? { includeMedia: false }
+        : format === "lrc"
+          ? {}
+          : { presentation: "current" }),
     };
     const result = await inspectInstalled(
       state,
@@ -720,18 +729,31 @@ for (const format of ["json", "lrc", "chordpro"] as const) {
         ? serializeJsonExport(snapshot)
         : format === "lrc"
           ? "[ti:project_golden]\n[00:00.41]home go\n"
-          : readFileSync("tests/fixtures/chordpro-golden.cho", "utf8");
+          : format === "chordpro"
+            ? readFileSync("tests/fixtures/chordpro-golden.cho", "utf8")
+            : undefined;
     const losses =
       format === "json"
         ? []
         : format === "chordpro"
           ? chordpro.losses
-          : lrc.kind === "lrc"
-            ? lrc.losses
-            : [];
-    expect(output).toEqual(Buffer.from(expected));
+          : format === "pdf"
+            ? PDF_GOLDEN_LOSSES
+            : lrc.kind === "lrc"
+              ? lrc.losses
+              : [];
+    if (expected !== undefined) expect(output).toEqual(Buffer.from(expected));
     expect(output.equals(original)).toBe(false);
     const digest = createNativeSelectionHash("sha256").update(output).digest("hex");
+    if (format === "pdf") expect(digest).toBe(PDF_GOLDEN_SHA256);
+    let archiveDocument: string | undefined;
+    if (expectedArchive !== undefined && archiveProjection !== undefined) {
+      expect(output).toEqual(expectedArchive.archive);
+      const inspected = inspectPortableProjectArchive(output);
+      archiveDocument = canonicalSerialize(inspected.document);
+      expect(archiveDocument).toBe(canonicalSerialize(archiveProjection.document));
+      expect(inspected.media).toBeUndefined();
+    }
     const expectedTree = { ...directoryBefore, [filename]: digest };
     expect(await proofTreeHashes(directory)).toEqual(expectedTree);
     expect(readFileSync(external)).toEqual(original);
@@ -741,17 +763,24 @@ for (const format of ["json", "lrc", "chordpro"] as const) {
     const receipts = reopened.listExportReceipts("project_golden");
     expect(receipts).toHaveLength(1);
     expect(receipts[0]).toMatchObject({
-      format: format === "json" ? "open_chords_json" : format,
+      format:
+        format === "json" ? "open_chords_json" : format === "archive" ? "project_archive" : format,
+      ...(expectedArchive === undefined ? {} : { activeViewHash: expectedArchive.projectHash }),
       outputHash: `sha256:${digest}`,
       profileVersion:
         format === "json"
           ? "open_chords_json/1.0/current"
           : format === "lrc"
             ? "lrc/1.0"
-            : "chordpro/1.0/current",
-      omissions: [...new Set([...snapshot.omissions, ...losses])].sort((a, b) =>
-        a.localeCompare(b),
-      ),
+            : format === "chordpro"
+              ? "chordpro/1.0/current"
+              : format === "pdf"
+                ? "pdf/1.0/a4/current"
+                : "project_archive/1.0/no_media",
+      omissions:
+        archiveProjection === undefined
+          ? [...new Set([...snapshot.omissions, ...losses])].sort((a, b) => a.localeCompare(b))
+          : archiveProjection.omissions,
     });
     // Windows dialogs expand 8.3 components; compare exact native canonical paths to the published file.
     expect(realpathSync.native(receipts[0]!.outputLocation)).toBe(realpathSync.native(target));
@@ -786,6 +815,8 @@ for (const format of ["json", "lrc", "chordpro"] as const) {
       for (const representation of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
         expect(JSON.stringify(result).includes(representation)).toBe(false);
         expect(output.includes(Buffer.from(representation))).toBe(false);
+        if (archiveDocument !== undefined)
+          expect(archiveDocument.includes(representation)).toBe(false);
       }
     }
   });
@@ -2241,7 +2272,7 @@ function installedMediaPickerDriver(
 function installedWindowsPickerDriver(
   scenario: "open" | "cancel_open_existing" | "save",
   selectedPath: string,
-  format: "media" | "json" | "lrc" | "chordpro",
+  format: "media" | "json" | "lrc" | "chordpro" | "pdf" | "archive",
 ) {
   if ((scenario === "save") !== (format !== "media"))
     throw new Error("Installed native picker mode unavailable");
