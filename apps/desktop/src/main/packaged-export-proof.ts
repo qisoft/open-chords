@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { runPackagedExportDiskProof } from "./packaged-export-disk-proof.ts";
 import { runPackagedExportFailureProof } from "./packaged-export-failure-proof.ts";
 import { runPackagedExportRecoveryProof } from "./packaged-export-recovery-proof.ts";
-import { projectionProofFailureCode } from "./packaged-projection-proof-diagnostic.ts";
+import { rethrowProjectionProofFailure } from "./packaged-projection-proof-diagnostic.ts";
 import { exportTarget, openProjectExports } from "./project-exports.ts";
 import { openProjectLibrary } from "./project-library.ts";
 
@@ -16,10 +16,7 @@ export async function runPackagedExportProof(stateRoot: string, includeDiskFailu
   try {
     return await runProjectionProof(stateRoot, includeDiskFailures);
   } catch (error) {
-    process.stderr.write(
-      `Packaged export proof failure: code=${projectionProofFailureCode(error)}\n`,
-    );
-    throw error;
+    return await rethrowProjectionProofFailure("export", error);
   }
 }
 

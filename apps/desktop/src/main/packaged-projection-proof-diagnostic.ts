@@ -35,3 +35,19 @@ export function projectionProofFailureCode(error: unknown): string {
   }
   return "unknown";
 }
+
+export async function rethrowProjectionProofFailure(
+  proof: "archive" | "export",
+  error: unknown,
+): Promise<never> {
+  const diagnostic = `Packaged ${proof} proof failure: code=${projectionProofFailureCode(error)}\n`;
+  await new Promise<void>((resolve) => {
+    try {
+      process.stderr.write(diagnostic, () => resolve());
+    } catch {
+      // A diagnostic transport failure must not replace the original proof failure.
+      resolve();
+    }
+  });
+  throw error;
+}

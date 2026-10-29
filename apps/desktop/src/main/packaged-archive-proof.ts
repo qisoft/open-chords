@@ -5,7 +5,7 @@ import { canonicalSerialize } from "@open-chords/domain";
 import { readBoundedFile } from "./bounded-file.ts";
 import { openOfflineMediaCache } from "./offline-media-cache.ts";
 import { ARCHIVE_PROOF_CASES } from "./packaged-archive-proof-constants.ts";
-import { projectionProofFailureCode } from "./packaged-projection-proof-diagnostic.ts";
+import { rethrowProjectionProofFailure } from "./packaged-projection-proof-diagnostic.ts";
 import { proofTreeHashes } from "./packaged-proof-tree.ts";
 import { archivedProjectFor } from "./project-archive-format.ts";
 import { ProjectArchiveImports } from "./project-archive-imports.ts";
@@ -19,10 +19,7 @@ export async function runPackagedArchiveProof(stateRoot: string) {
   try {
     return await runArchiveProof(stateRoot);
   } catch (error) {
-    process.stderr.write(
-      `Packaged archive proof failure: code=${projectionProofFailureCode(error)}\n`,
-    );
-    throw error;
+    return await rethrowProjectionProofFailure("archive", error);
   }
 }
 
