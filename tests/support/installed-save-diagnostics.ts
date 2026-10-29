@@ -191,6 +191,7 @@ export function installedSaveDriverDiagnostic(error: unknown, stderr: string, du
     ),
     `Native Save driver failure: started=${started} category=${category} spawn_code=${spawnCode}`,
     ...(counters ? [counters] : []),
+    ...installedWindowsFixtureDiagnostic(output),
     ...filenameReads,
     ...readiness,
     ...filenameErrors,
@@ -228,4 +229,26 @@ export function installedSaveDriverTiming(stderr: string, durationMs: number) {
       ? Math.min(999999, Math.round(durationMs))
       : "unknown";
   return `Native Windows picker timing: initialization_ms=${initialization} total_ms=${total}`;
+}
+
+export function installedWindowsFixtureDiagnostic(stderr: string): string[] {
+  const lines = stderr.slice(-65536).split(/\r?\n/u);
+  const refusal = lines
+    .filter((line) => line.startsWith("Native Windows replacement fixture refusal: "))
+    .at(-1);
+  const exception = lines
+    .filter((line) => line.startsWith("Native Windows replacement fixture exception: "))
+    .at(-1);
+  return [
+    ...(refusal &&
+    /^Native Windows replacement fixture refusal: check=(?:local_path|full_path|filename|parent_reparse|handle_open|handle_info|file_type|link_count|size|content|eof)$/u.test(
+      refusal,
+    )
+      ? [refusal]
+      : []),
+    ...(exception &&
+    /^Native Windows replacement fixture exception: kind=(?:io|access|argument)$/u.test(exception)
+      ? [exception]
+      : []),
+  ];
 }

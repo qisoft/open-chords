@@ -59,8 +59,13 @@ import {
   installedSaveDriverTiming,
 } from "../support/installed-save-diagnostics.ts";
 import {
+  WindowsReplacementDiagnosticSchema,
+  WindowsReplacementObservationSchema,
+} from "../support/installed-windows-replace-context.ts";
+import {
   WorkspacePlaybackProbeSchema,
   workspacePlaybackDiagnostic,
+  workspacePlaybackAlertCategory,
 } from "../support/installed-workspace-playback-diagnostics.ts";
 import { PDF_GOLDEN_SHA256, PDF_GOLDEN_LOSSES } from "../support/pdf-golden.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
@@ -655,6 +660,67 @@ test("installed macOS observes replacement context without confirming or changin
   expect(await second.readProject("project_golden")).toEqual(before);
   expect(second.listExportReceipts("project_golden")).toEqual([]);
   expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
+});
+
+test("installed Windows observes existing JSON replacement context without confirming", async () => {
+  const format = "json";
+  test.skip(process.platform !== "win32", "Windows replacement context observation");
+  test.setTimeout(360_000);
+  const state = join(packageRoot, "windows-replacement-context");
+  const directory = realpathSync.native(
+    mkdtempSync(join(tmpdir(), "windows-replacement-context-output-")),
+  );
+  externalOutputDirectories.push(directory);
+  const filename = "Open Chords.json";
+  const target = join(directory, filename);
+  const external = join(packageRoot, "windows-replacement-context-preserved.bin");
+  const original = Buffer.from("private existing Windows replacement target fixture");
+  writeFileSync(target, original);
+  writeFileSync(join(directory, "preserved.txt"), original);
+  writeFileSync(external, original);
+  const directoryBefore = await proofTreeHashes(directory);
+  const library = await openProjectLibrary({ stateRoot: state });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+  );
+  envelope.payload = leadSheetProject();
+  await library.createProject({ envelope, records: goldenRecords() });
+  await (await openNetworkMode(state)).setOffline(true);
+  const before = await library.readProject("project_golden");
+  expect(library.listExportReceipts("project_golden")).toEqual([]);
+  const tree = await proofTreeHashes(library.activeRoot);
+  const action = {
+    type: `save_${format}`,
+    projectId: "project_golden",
+    expectedProjectRevisionId: before.projectRevisionId,
+    presentation: "current",
+  };
+  const result = await inspectInstalled(
+    state,
+    `(() => { void window.openChords.exports.perform(${JSON.stringify(action)}).then(() => undefined, () => undefined); return { started: true }; })()`,
+    installedSystemEnvironment(),
+    installedWindowsPickerDriver("observe_replace", target, "json"),
+  );
+  expect(result).toEqual({ started: true });
+  expect(readFileSync(target)).toEqual(original);
+  expect(await proofTreeHashes(directory)).toEqual(directoryBefore);
+  expect(readFileSync(external)).toEqual(original);
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
+  expect(await reopened.readProject("project_golden")).toEqual(before);
+  expect(reopened.listExportReceipts("project_golden")).toEqual([]);
+  expect(await proofTreeHashes(reopened.activeRoot)).toEqual(tree);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  const second = await openProjectLibrary({ stateRoot: state });
+  expect(await second.readProject("project_golden")).toEqual(before);
+  expect(second.listExportReceipts("project_golden")).toEqual([]);
+  expect(await proofTreeHashes(second.activeRoot)).toEqual(tree);
+  expect(await proofTreeHashes(directory)).toEqual(directoryBefore);
+  expect(readFileSync(target)).toEqual(original);
+  expect(readFileSync(external)).toEqual(original);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  // Renderer output is only the fixed start marker. Actual native diagnostic privacy is
+  // enforced by the strict observation schema and its adversarial field tests.
 });
 
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
@@ -2421,11 +2487,13 @@ function installedMediaPickerDriver(
 }
 
 function installedWindowsPickerDriver(
-  scenario: "open" | "cancel_open_existing" | "save" | "cancel_existing",
+  scenario: "open" | "cancel_open_existing" | "save" | "cancel_existing" | "observe_replace",
   selectedPath: string,
   format: "media" | "json" | "lrc" | "chordpro" | "pdf" | "archive",
 ) {
-  const saveDialog = scenario === "save" || scenario === "cancel_existing";
+  const observesReplacement = scenario === "observe_replace";
+  if (observesReplacement && format !== "json") throw new Error("Replacement format unavailable");
+  const saveDialog = scenario === "save" || scenario === "cancel_existing" || observesReplacement;
   if (saveDialog ? format === "media" : format !== "media" && format !== "archive")
     throw new Error("Installed native picker mode unavailable");
   const env = installedSystemEnvironment();
@@ -2460,16 +2528,25 @@ function installedWindowsPickerDriver(
           }
           try {
             console.log(installedSaveDriverTiming(stderr, performance.now() - started));
-            const parsed = z
-              .strictObject({
-                action: z.literal(scenario),
-                filenameSet: z.literal(true),
-                nativeClick: z.literal(true),
-                dialogDismissed: z.literal(true),
-                defaultNameValid: z.literal(saveDialog),
-              })
-              .safeParse(JSON.parse(stdout.trim()));
+            const schema = observesReplacement
+              ? WindowsReplacementDiagnosticSchema
+              : z.strictObject({
+                  action: z.literal(scenario),
+                  filenameSet: z.literal(true),
+                  nativeClick: z.literal(true),
+                  dialogDismissed: z.literal(true),
+                  defaultNameValid: z.literal(saveDialog),
+                });
+            const parsed = schema.safeParse(JSON.parse(stdout.trim()));
             if (!parsed.success) throw new Error("Invalid native picker evidence");
+            if (observesReplacement) {
+              const diagnostic = WindowsReplacementDiagnosticSchema.parse(parsed.data);
+              process.stdout.write(
+                `Native Windows replacement context: ${JSON.stringify(diagnostic.context)}\n`,
+              );
+              if (!WindowsReplacementObservationSchema.safeParse(diagnostic).success)
+                throw new Error("Replacement context refused");
+            }
             resolve(parsed.data);
           } catch {
             reject(new Error("Installed native picker driver returned invalid evidence"));
@@ -2477,6 +2554,10 @@ function installedWindowsPickerDriver(
         },
       );
     });
+    if (observesReplacement) {
+      WindowsReplacementObservationSchema.parse(evidence);
+      return;
+    }
     expect(evidence).toEqual({
       action: scenario,
       filenameSet: true,
@@ -3223,6 +3304,7 @@ async function evaluatePackagedMedia(
               audioPositionPositive: knownAudio && audio.currentTime > 0,
               audioSourcePresent: knownAudio && audio.currentSrc.length > 0,
               alertPresent: document.querySelector('[role="alert"]') !== null,
+              sourceAlert: (${workspacePlaybackAlertCategory.toString()})(document.querySelector('.source-status[role="alert"]')?.textContent),
               mutations,
               oldPauseSeen,
             };

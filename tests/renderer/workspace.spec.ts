@@ -16,6 +16,10 @@ import { _electron as electron, expect, test, type Locator } from "@playwright/t
 import { LocalMediaService } from "../../apps/desktop/src/main/local-media.ts";
 import { openProjectLibrary } from "../../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "../support/editor-fixture.ts";
+import {
+  readWorkspaceProfileReadiness,
+  workspaceProfileReadinessDiagnostic,
+} from "../support/workspace-profile-readiness.ts";
 
 const repositoryRoot = join(import.meta.dirname, "../..");
 
@@ -818,9 +822,27 @@ test("profile committed timeline density before choosing virtualization", async 
     const application = await launch(stateRoot);
     try {
       const page = await application.firstWindow();
-      await expect(
-        page.getByRole("slider", { name: "Project position", exact: true }),
-      ).toBeVisible();
+      try {
+        await expect(
+          page.getByRole("slider", { name: "Project position", exact: true }),
+        ).toBeVisible();
+      } catch (cause) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const observation = await Promise.race([
+            page.evaluate(readWorkspaceProfileReadiness, envelope.payload.id),
+            new Promise<null>((resolve) => {
+              timer = setTimeout(() => resolve(null), 1000);
+            }),
+          ]);
+          console.log(workspaceProfileReadinessDiagnostic(fixture.name, observation));
+        } catch {
+          console.log("Workspace profile readiness: unavailable");
+        } finally {
+          clearTimeout(timer);
+        }
+        throw cause;
+      }
       const readyMs = performance.now() - start;
       const session = await page.context().newCDPSession(page);
       await session.send("Accessibility.enable");
