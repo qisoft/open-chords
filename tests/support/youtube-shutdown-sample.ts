@@ -21,10 +21,13 @@ export function youtubeShutdownSampleDiagnostic(raw: string) {
   let frames = 0;
   let mask = 0;
   let truncated = false;
+  let mainSamples = 0;
+  let mutexSamples = 0;
   for (const line of raw.split(/\r?\n/)) {
     if (/^\s*[0-9]{1,9}\s+Thread_/.test(line)) {
       if (main) break;
       main = /(?:com\.apple\.main-thread|CrBrowserMain)\b/.test(line);
+      if (main) mainSamples = Math.min(10000, Number(/^\s*([0-9]{1,9})/.exec(line)?.[1] ?? 0));
       continue;
     }
     if (!main) continue;
@@ -35,11 +38,15 @@ export function youtubeShutdownSampleDiagnostic(raw: string) {
       break;
     }
     frames++;
+    if (symbols[2].test(frame[1]!)) {
+      const count = /^\s*[+!:| ]*([0-9]{1,9})\s+/.exec(line)?.[1];
+      mutexSamples = Math.max(mutexSamples, Math.min(10000, Number(count ?? 0)));
+    }
     for (const [bit, expression] of symbols.entries())
       if (expression.test(frame[1]!)) mask |= 1 << bit;
   }
   if (!main || frames === 0) return "YouTube shutdown sample: invalid_evidence";
-  return `YouTube shutdown sample: main_thread=true frames=${String(frames)} category_mask=${String(mask)} truncated=${String(truncated)}`;
+  return `YouTube shutdown sample: main_thread=true frames=${String(frames)} category_mask=${String(mask)} truncated=${String(truncated)} main_samples=${String(mainSamples)} mutex_max_samples=${String(mutexSamples)}`;
 }
 
 export function observeSlowYouTubeClose(
