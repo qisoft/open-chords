@@ -1371,3 +1371,92 @@ it.each(["pdf", "archive"] as const)("does not retry a refused %s Replace", asyn
   ).rejects.toThrow("Native macOS AX probe:");
   expect(execute).toHaveBeenCalledTimes(6);
 });
+
+it.each(["lrc", "chordpro", "pdf", "archive"] as const)(
+  "uses format-bound confirmation Cancel for %s",
+  async (format) => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const final = {
+      ...cancelledReplacement,
+      action: { ...cancelledReplacement.action, requested: `cancel_replace_${format}` },
+    };
+    const responses = [
+      { ...prepared, saveFieldProbe: { ...probe, format } },
+      expanded,
+      snapshot,
+      directorySnapshot,
+      filenameSnapshot,
+      final,
+    ];
+    execute.mockImplementation(async () => ({
+      stdout: JSON.stringify(responses.shift()),
+      stderr: "",
+    }));
+    await installedMacPickerDriver(
+      `cancel_replace_${format}`,
+      "/private/directory",
+      () => ({}),
+      format,
+    )(42);
+    expect(execute).toHaveBeenCalledTimes(6);
+    expect(execute.mock.calls[5]?.[1]).toEqual([
+      "42",
+      "/private/directory",
+      "directory_snapshot",
+      format,
+      format === "lrc" || format === "chordpro"
+        ? "--cancel-replace-text"
+        : `--cancel-replace-${format}`,
+    ]);
+    expect(execute.mock.calls.map((call) => call[2].maxBuffer)).toEqual([
+      65536, 4096, 4096, 4096, 4096, 8192,
+    ]);
+  },
+);
+it.each([
+  ["cancel_replace_lrc", "chordpro"],
+  ["cancel_replace_chordpro", "lrc"],
+  ["cancel_replace_pdf", "archive"],
+  ["cancel_replace_archive", "pdf"],
+] as const)("refuses mismatched %s format %s before native execution", async (scenario, format) => {
+  await expect(
+    installedMacPickerDriver(scenario, "/private/directory", () => ({}), format)(42),
+  ).rejects.toThrow("replacement Cancel target unavailable");
+  expect(execute).not.toHaveBeenCalled();
+});
+it.each(["lrc", "chordpro", "pdf", "archive"] as const)(
+  "does not retry refused %s confirmation Cancel",
+  async (format) => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const final = {
+      ...cancelledReplacement,
+      action: { ...cancelledReplacement.action, requested: `cancel_replace_${format}` },
+      replaceContext: {
+        ...cancelledReplacement.replaceContext,
+        cancelGuardMask: 127,
+        cancelPressed: false,
+      },
+    };
+    const responses = [
+      { ...prepared, saveFieldProbe: { ...probe, format } },
+      expanded,
+      snapshot,
+      directorySnapshot,
+      filenameSnapshot,
+      final,
+    ];
+    execute.mockImplementation(async () => ({
+      stdout: JSON.stringify(responses.shift()),
+      stderr: "",
+    }));
+    await expect(
+      installedMacPickerDriver(
+        `cancel_replace_${format}`,
+        "/private/directory",
+        () => ({}),
+        format,
+      )(42),
+    ).rejects.toThrow("Native macOS AX probe:");
+    expect(execute).toHaveBeenCalledTimes(6);
+  },
+);

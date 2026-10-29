@@ -511,6 +511,10 @@ const evidenceSchema = z.strictObject({
       "save_new_archive",
       "observe_replace_json",
       "cancel_replace_json",
+      "cancel_replace_lrc",
+      "cancel_replace_chordpro",
+      "cancel_replace_pdf",
+      "cancel_replace_archive",
       "replace_json",
       "replace_lrc",
       "replace_chordpro",
@@ -538,6 +542,10 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       ![
         "observe_replace_json",
         "cancel_replace_json",
+        "cancel_replace_lrc",
+        "cancel_replace_chordpro",
+        "cancel_replace_pdf",
+        "cancel_replace_archive",
         "replace_json",
         "replace_lrc",
         "replace_chordpro",
@@ -877,6 +885,10 @@ function replacementContextObserved(
   expectedAction:
     | "observe_replace_json"
     | "cancel_replace_json"
+    | "cancel_replace_lrc"
+    | "cancel_replace_chordpro"
+    | "cancel_replace_pdf"
+    | "cancel_replace_archive"
     | "replace_json"
     | "replace_lrc"
     | "replace_chordpro"
@@ -992,7 +1004,15 @@ function replacementContextObserved(
 
 // Only the replacement confirmation is dismissed; the original Save sheet stays open.
 export function installedMacReplacementCancelled(stdout: string) {
-  if (!replacementContextObserved(stdout, "cancel_replace_json")) return false;
+  return installedMacFormatReplacementCancelled(stdout, "json");
+}
+
+export function installedMacFormatReplacementCancelled(
+  stdout: string,
+  format: "json" | "lrc" | "chordpro" | "pdf" | "archive",
+) {
+  if (!["json", "lrc", "chordpro", "pdf", "archive"].includes(format)) return false;
+  if (!replacementContextObserved(stdout, `cancel_replace_${format}`)) return false;
   try {
     const parsed = evidenceSchema.safeParse(JSON.parse(stdout));
     if (!parsed.success) return false;

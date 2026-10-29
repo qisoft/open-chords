@@ -27,7 +27,7 @@ import {
   installedMacPdfSaveSucceeded,
   installedMacArchiveSaveSucceeded,
   installedMacReplaceContextObserved,
-  installedMacReplacementCancelled,
+  installedMacFormatReplacementCancelled,
   installedMacJsonReplacementConfirmed,
   installedMacTextReplacementConfirmed,
   installedMacPdfReplacementConfirmed,
@@ -53,6 +53,10 @@ export function installedMacPickerDriver(
     | "cancel_save_directory_expanded"
     | "observe_replace_json"
     | "cancel_replace_json"
+    | "cancel_replace_lrc"
+    | "cancel_replace_chordpro"
+    | "cancel_replace_pdf"
+    | "cancel_replace_archive"
     | "replace_json"
     | "replace_lrc"
     | "replace_chordpro"
@@ -82,7 +86,12 @@ export function installedMacPickerDriver(
     const textSave = scenario === "save_lrc" || scenario === "save_chordpro";
     const pdfSave = scenario === "save_pdf";
     const archiveSave = scenario === "save_archive";
-    const cancelReplace = scenario === "cancel_replace_json";
+    const cancelReplace =
+      scenario === "cancel_replace_json" ||
+      scenario === "cancel_replace_lrc" ||
+      scenario === "cancel_replace_chordpro" ||
+      scenario === "cancel_replace_pdf" ||
+      scenario === "cancel_replace_archive";
     const replaceJson = scenario === "replace_json";
     const replaceText = scenario === "replace_lrc" || scenario === "replace_chordpro";
     const replacePdf = scenario === "replace_pdf";
@@ -100,7 +109,7 @@ export function installedMacPickerDriver(
     if (
       (scenario === "save_json" ||
         scenario === "observe_replace_json" ||
-        cancelReplace ||
+        scenario === "cancel_replace_json" ||
         replaceJson) &&
       (saveFormat !== "json" || selectedPath === undefined)
     )
@@ -109,6 +118,11 @@ export function installedMacPickerDriver(
       throw new Error("Native macOS PDF Save target unavailable");
     if ((archiveSave || replaceArchive) && (saveFormat !== "archive" || selectedPath === undefined))
       throw new Error("Native macOS archive Save target unavailable");
+    if (
+      cancelReplace &&
+      (saveFormat !== scenario.slice("cancel_replace_".length) || selectedPath === undefined)
+    )
+      throw new Error("Native macOS replacement Cancel target unavailable");
     const directoryScenario = scenario === "cancel_save_directory" || expandedDirectory;
     const saves =
       scenario === "cancel_save" ||
@@ -197,7 +211,13 @@ export function installedMacPickerDriver(
                           : replaceJson
                             ? "--replace-json"
                             : cancelReplace
-                              ? "--cancel-replace-json"
+                              ? saveFormat === "json"
+                                ? "--cancel-replace-json"
+                                : saveFormat === "pdf"
+                                  ? "--cancel-replace-pdf"
+                                  : saveFormat === "archive"
+                                    ? "--cancel-replace-archive"
+                                    : "--cancel-replace-text"
                               : observeReplace
                                 ? "--observe-replace-json"
                                 : archiveSave
@@ -245,7 +265,8 @@ export function installedMacPickerDriver(
                     : replaceJson
                       ? installedMacJsonReplacementConfirmed(output)
                       : cancelReplace
-                        ? installedMacReplacementCancelled(output)
+                        ? saveFormat !== undefined &&
+                          installedMacFormatReplacementCancelled(output, saveFormat)
                         : observeReplace
                           ? installedMacReplaceContextObserved(output)
                           : textSave

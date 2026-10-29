@@ -204,12 +204,16 @@ let savesNewPdf = arguments.count == 6 && arguments[3] == "directory_snapshot" &
 let savesNewArchive = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "archive" && arguments[5] == "--save-new-archive"
 let savesNewExport = savesNewJson || savesNewText || savesNewPdf || savesNewArchive
 let cancelsReplaceJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--cancel-replace-json"
+let cancelsReplaceText = arguments.count == 6 && arguments[3] == "directory_snapshot" && ["lrc", "chordpro"].contains(arguments[4]) && arguments[5] == "--cancel-replace-text"
+let cancelsReplacePdf = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "pdf" && arguments[5] == "--cancel-replace-pdf"
+let cancelsReplaceArchive = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "archive" && arguments[5] == "--cancel-replace-archive"
+let cancelsReplacement = cancelsReplaceJson || cancelsReplaceText || cancelsReplacePdf || cancelsReplaceArchive
 let replacesJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--replace-json"
 let replacesText = arguments.count == 6 && arguments[3] == "directory_snapshot" && ["lrc", "chordpro"].contains(arguments[4]) && arguments[5] == "--replace-text"
 let replacesPdf = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "pdf" && arguments[5] == "--replace-pdf"
 let replacesArchive = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "archive" && arguments[5] == "--replace-archive"
 let replacesExport = replacesJson || replacesText || replacesPdf || replacesArchive
-let observesReplacement = replacesExport || cancelsReplaceJson || (arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--observe-replace-json")
+let observesReplacement = replacesExport || cancelsReplacement || (arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--observe-replace-json")
 let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewExport || observesReplacement
 var saveTargetExistingFixture = false
 var replaceContext: [String: Any] = ["status": "not_checked", "visited": 0, "windows": 0, "sheets": 0, "dialogs": 0, "buttons": 0, "cancel": 0, "replace": 0, "save": 0, "other": 0, "foreground": false, "error": 0]
@@ -733,12 +737,13 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                     }
                     guard attached else { return }
                     mask |= 32; modal["cancelGuardMask"] = mask
-                    guard ProcessInfo.processInfo.systemUptime < deadline,
+                    guard let targetName = expectedSaveName,
+                          ProcessInfo.processInfo.systemUptime < deadline,
                           AXUIElementSetMessagingTimeout(button, 0.15) == .success else { return }
                     var actions: CFArray?
                     guard AXUIElementCopyActionNames(button, &actions) == .success,
                           let names = actions as? [String], names.count <= 16, names.contains("AXPress"),
-                          isExistingReplacementFixture(URL(fileURLWithPath: arguments[2]).appendingPathComponent("Open Chords.json").path) else { return }
+                          isExistingReplacementFixture(URL(fileURLWithPath: arguments[2]).appendingPathComponent(targetName).path) else { return }
                     mask |= 64; modal["cancelGuardMask"] = mask
                     guard (modal["modalBindingStatus"] as? String) == "complete",
                           NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
@@ -759,7 +764,7 @@ func observeReplacementContext(_ app: AXUIElement, pid: pid_t, save: AXUIElement
                                   fresh.filter({ CFEqual($0, sheet) }).count == 1,
                                   NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
                                   ProcessInfo.processInfo.systemUptime < deadline else { return }
-                            let unchanged = isExistingReplacementFixture(URL(fileURLWithPath: arguments[2]).appendingPathComponent("Open Chords.json").path)
+                            let unchanged = isExistingReplacementFixture(URL(fileURLWithPath: arguments[2]).appendingPathComponent(targetName).path)
                             modal["cancelTargetUnchanged"] = unchanged
                             guard unchanged else { modal["cancelStatus"] = "target_changed"; return }
                             modal["cancelDismissed"] = true; modal["cancelSheetRetained"] = true
@@ -1368,7 +1373,7 @@ if (arguments.count == 3 || arguments.count == 4 || (arguments.count == 5 && exp
             }
             if observesReplacement {
                 // Capture the actual context even when AXPress refuses; retain the original action result.
-                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet, parent: parent, cancelConfirmation: cancelsReplaceJson && pressActionCalled && (status == .success || status == .attributeUnsupported), replaceConfirmation: replacesExport && pressActionCalled && (status == .success || status == .attributeUnsupported))
+                replaceContext = observeReplacementContext(app, pid: pid, save: button, sheet: sheet, parent: parent, cancelConfirmation: cancelsReplacement && pressActionCalled && (status == .success || status == .attributeUnsupported), replaceConfirmation: replacesExport && pressActionCalled && (status == .success || status == .attributeUnsupported))
                 if pressed { stage = "replace_observed" }
             }
             if pressed && !observesReplacement {
@@ -1411,7 +1416,7 @@ var result: [String: Any] = [
     "firstCannotCompleteStage": firstCannotCompleteStage,
     "firstCannotCompleteDurationMs": firstCannotCompleteDurationMs,
     "saveTargetExistingFixture": saveTargetExistingFixture, "replaceContext": replaceContext, "saveTargetAbsent": saveTargetAbsent, "saveFilename": saveFilename, "saveTargetContext": saveTargetContext, "directoryVerified": directoryVerified, "verified": verified, "foreground": foreground, "stage": stage, "guardMask": guardMask, "guardEnabledState": guardEnabledState,
-    "action": ["requested": replacesExport ? "replace_" + arguments[4] : cancelsReplaceJson ? "cancel_replace_json" : observesReplacement ? "observe_replace_json" : savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
+    "action": ["requested": replacesExport ? "replace_" + arguments[4] : cancelsReplacement ? "cancel_replace_" + arguments[4] : observesReplacement ? "observe_replace_json" : savesNewExport ? "save_new_" + arguments[4] : requested, "pressed": pressed, "dismissed": dismissed]
 ]
 if observesReplacement { result["pressTimeoutError"] = pressTimeoutError; result["pressActionCalled"] = pressActionCalled }
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
