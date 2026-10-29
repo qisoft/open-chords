@@ -95,6 +95,7 @@ const archivePath = join(
   `${PRODUCT_NAME}-${process.platform}-${process.arch}-0.0.0.zip`,
 );
 const packageRoot = realpathSync(mkdtempSync(join(tmpdir(), "open-chords-installed-")));
+const externalOutputDirectories: string[] = [];
 const userDataDirectory = join(packageRoot, "user-data");
 const executablePath =
   process.platform === "darwin"
@@ -133,12 +134,14 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(() => {
-  rmSync(packageRoot, {
-    force: true,
-    maxRetries: 40,
-    recursive: true,
-    retryDelay: 250,
-  });
+  for (const directory of [packageRoot, ...externalOutputDirectories]) {
+    rmSync(directory, {
+      force: true,
+      maxRetries: 40,
+      recursive: true,
+      retryDelay: 250,
+    });
+  }
 });
 
 test("packaged shell flips every security fuse explicitly", async () => {
@@ -658,7 +661,9 @@ test("installed Windows native JSON Save publishes with exact bytes and one dura
   test.skip(process.platform !== "win32", "Windows native JSON Save proof");
   test.setTimeout(360_000);
   const state = join(packageRoot, "windows-native-json-save");
-  const directory = realpathSync(mkdtempSync(join(packageRoot, "windows-json-save-output-")));
+  // The Windows executable directory is a protected production export root.
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "windows-json-save-output-")));
+  externalOutputDirectories.push(directory);
   const target = join(directory, "Open Chords.json");
   const external = join(packageRoot, "windows-json-save-preserved.bin");
   const original = Buffer.from("private Windows native Save preservation fixture");

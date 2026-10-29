@@ -278,3 +278,41 @@ it.skipIf(process.platform === "win32")(
     }
   },
 );
+
+it("refuses output beneath the installed executable root while publishing to a sibling directory", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "oc-export-installed-boundary-")));
+  try {
+    const installedRoot = join(root, "installed");
+    const nestedOutput = join(installedRoot, "controlled-output");
+    const siblingOutput = join(root, "controlled-output");
+    await mkdir(nestedOutput, { recursive: true });
+    await mkdir(siblingOutput);
+    const stateRoot = join(installedRoot, "state");
+    const library = await openProjectLibrary({ stateRoot });
+    await library.createProject({ envelope: envelope(), records: goldenRecords() });
+    const before = await library.readProject("project_golden");
+    const request = {
+      projectId: "project_golden",
+      expectedProjectRevisionId: before.projectRevisionId,
+      presentation: "current",
+    };
+    let target = join(nestedOutput, "Open Chords.json");
+    const service = await openProjectExports({
+      library,
+      stateRoot,
+      protectedRoots: [installedRoot],
+      pickTarget: async () => target,
+    });
+    await expect(service.saveJson(request)).rejects.toThrow("Protected export target");
+    expect(await readdir(nestedOutput)).toEqual([]);
+    expect(await library.readProject("project_golden")).toEqual(before);
+    expect(library.listExportReceipts("project_golden")).toEqual([]);
+    target = join(siblingOutput, "Open Chords.json");
+    expect(await service.saveJson(request)).toEqual({ state: "saved" });
+    expect(await readdir(siblingOutput)).toEqual(["Open Chords.json"]);
+    expect(library.listExportReceipts("project_golden")).toHaveLength(1);
+    expect(library.listExportReceipts("project_golden")[0]?.outputLocation).toBe(target);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
