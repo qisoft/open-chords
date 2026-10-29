@@ -53,14 +53,14 @@ export async function readWorkspaceProfileReadiness(expectedProjectId: string) {
     lyricLines: 0,
     lyricTokens: 0,
   };
-  const deadline = Date.now() + 1000;
+  const deadline = Date.now() + 750;
   let active = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expiry = new Promise<typeof state>((resolve) => {
     timer = setTimeout(() => {
       active = false;
       resolve({ ...state, status: "deadline" });
-    }, 1000);
+    }, 750);
   });
   const read = async () => {
     if (!api) return state;
@@ -110,6 +110,7 @@ export async function readWorkspaceProfileReadiness(expectedProjectId: string) {
 export function workspaceProfileReadinessDiagnostic(fixture: string, value: unknown) {
   if (!["short", "many-events", "dense-events", "long-song", "dense-lyrics"].includes(fixture))
     return "Workspace profile readiness: invalid_evidence";
+  if (value === null) return `Workspace profile readiness: fixture=${fixture} status=host_timeout`;
   const parsed = schema.safeParse(value);
   if (!parsed.success) return "Workspace profile readiness: invalid_evidence";
   return (

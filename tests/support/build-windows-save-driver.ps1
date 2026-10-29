@@ -22,6 +22,9 @@ $fixtureTarget = Join-Path $fixtureRoot 'Open Chords.json'
 try {
   [IO.File]::WriteAllBytes($fixtureTarget, [Text.Encoding]::UTF8.GetBytes('private existing Windows replacement target fixture'))
   [WindowsReplacementContext]::VerifyFixture($fixtureTarget)
+  $nodeCanonicalTarget = & node -e "process.stdout.write(require('node:fs').realpathSync.native(process.argv[1]))" $fixtureTarget
+  if ($LASTEXITCODE -ne 0) { throw 'Native fixture canonicalization failed' }
+  [WindowsReplacementContext]::VerifyFixture($nodeCanonicalTarget)
   $link = Join-Path $fixtureRoot 'linked.json'
   New-Item -ItemType HardLink -Path $link -Target $fixtureTarget | Out-Null
   $refused = $false
@@ -37,7 +40,7 @@ try {
   $refused = $false
   try { [WindowsReplacementContext]::VerifyFixture($fixtureTarget) } catch { $refused = $true }
   if (!$refused) { throw 'Replacement directory fixture was accepted' }
-  Write-Host 'Native Windows replacement fixture gate: regular=passed hardlink=refused changed=refused directory=refused'
+  Write-Host 'Native Windows replacement fixture gate: regular=passed node_canonical=passed hardlink=refused changed=refused directory=refused'
 } finally {
   Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
 }

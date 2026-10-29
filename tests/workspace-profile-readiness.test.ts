@@ -76,7 +76,7 @@ it("stops at the deadline and never requests a snapshot after a late listing", a
         }),
       getSnapshot,
     });
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(750);
     expect(workspaceProfileReadinessDiagnostic("dense-lyrics", await pending)).toContain(
       "status=deadline",
     );
@@ -105,4 +105,10 @@ it("retains only a fixed refusal code rather than the private API message", asyn
   const line = workspaceProfileReadinessDiagnostic("dense-lyrics", value);
   expect(line).toContain("refusalCode=project_read_only");
   expect(line).not.toContain("/private");
+});
+
+it("distinguishes the outer host timeout from malformed evidence", () => {
+  expect(workspaceProfileReadinessDiagnostic("dense-lyrics", null)).toBe(
+    "Workspace profile readiness: fixture=dense-lyrics status=host_timeout",
+  );
 });
