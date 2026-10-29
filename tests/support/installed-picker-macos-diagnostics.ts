@@ -106,6 +106,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...guards,
     ...guardSnapshots,
     ...freshControls,
+    ...installedMacPickerFreshPrimary(stderr),
     ...installedMacPickerControlFailure(stderr),
     ...(installedMacSaveControlsDiagnostic(stderr)
       ? [installedMacSaveControlsDiagnostic(stderr)]
@@ -249,4 +250,29 @@ export function installedMacPickerContentsFailure(stderr: string): string[] {
     )
     ? [last]
     : [];
+}
+
+export function installedMacPickerFreshPrimary(stderr: string): string[] {
+  const prefix = "Native macOS picker fresh primary: ";
+  const line = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((entry) => entry.startsWith(prefix))
+    .at(-1);
+  if (!line) return [];
+  const match =
+    /^Native macOS picker fresh primary: phase=(?:activate|before_input|after_probe) status=(?:complete|deadline|bound|error) present=([0-9]{1,2}) enabled=([0-9]{1,2}) disabled=([0-9]{1,2}) unknown=([0-9]{1,2})$/u.exec(
+      line,
+    );
+  if (!match) return [];
+  const present = Number(match[1]);
+  const enabled = Number(match[2]);
+  const disabled = Number(match[3]);
+  const unknown = Number(match[4]);
+  if (
+    [present, enabled, disabled, unknown].some((value) => value > 17) ||
+    enabled + disabled + unknown > present
+  )
+    return [];
+  return [line];
 }

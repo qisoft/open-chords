@@ -658,6 +658,96 @@ test("installed macOS observes replacement context without confirming or changin
 });
 
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
+  test(`installed Windows cancels ${format} Save without changing an existing target`, async () => {
+    test.skip(process.platform !== "win32", "Windows existing-target Cancel proof");
+    test.setTimeout(360_000);
+    const state = join(packageRoot, `windows-existing-${format}-cancel`);
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), `windows-${format}-cancel-output-`)));
+    externalOutputDirectories.push(directory);
+    const filename = `Open Chords.${format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format}`;
+    const target = join(directory, filename);
+    const external = join(packageRoot, `windows-${format}-cancel-preserved.bin`);
+    const original = Buffer.from("private existing Windows native export target fixture");
+    writeFileSync(target, original);
+    writeFileSync(join(directory, "preserved.txt"), original);
+    writeFileSync(external, original);
+    const directoryBefore = await proofTreeHashes(directory);
+    const library = await openProjectLibrary({ stateRoot: state });
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+    );
+    envelope.payload = leadSheetProject();
+    await library.createProject({ envelope, records: goldenRecords() });
+    await (await openNetworkMode(state)).setOffline(true);
+    const before = await library.readProject("project_golden");
+    expect(library.listExportReceipts("project_golden")).toEqual([]);
+    const tree = await proofTreeHashes(library.activeRoot);
+    const action = {
+      type: `save_${format}`,
+      projectId: "project_golden",
+      expectedProjectRevisionId: before.projectRevisionId,
+      ...(format === "archive"
+        ? { includeMedia: false }
+        : format === "lrc"
+          ? {}
+          : { presentation: "current" }),
+    };
+    const result = await inspectInstalled(
+      state,
+      `(async () => {
+        const response = await window.openChords.exports.perform(${JSON.stringify(action)});
+        const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+        return { response, offline };
+      })()`,
+      installedSystemEnvironment(),
+      installedWindowsPickerDriver("cancel_existing", target, format),
+    );
+    process.stdout.write(`${installedExportResponseDiagnostic(result)}\n`);
+    z.object({
+      response: z.object({
+        type: z.literal("exports.result"),
+        projectId: z.literal("project_golden"),
+        state: z.literal("cancelled"),
+        busy: z.literal(false),
+        pendingRecovery: z.literal(0),
+        receipts: z.array(z.unknown()).length(0),
+      }),
+      offline: z.literal(true),
+    }).parse(result);
+    expect(readFileSync(target)).toEqual(original);
+    expect(await proofTreeHashes(directory)).toEqual(directoryBefore);
+    expect(readFileSync(external)).toEqual(original);
+    const reopened = await openProjectLibrary({ stateRoot: state });
+    expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
+    expect(await reopened.readProject("project_golden")).toEqual(before);
+    expect(reopened.listExportReceipts("project_golden")).toEqual([]);
+    expect(await proofTreeHashes(reopened.activeRoot)).toEqual(tree);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    const second = await openProjectLibrary({ stateRoot: state });
+    expect(await second.readProject("project_golden")).toEqual(before);
+    expect(second.listExportReceipts("project_golden")).toEqual([]);
+    expect(await proofTreeHashes(second.activeRoot)).toEqual(tree);
+    expect(await proofTreeHashes(directory)).toEqual(directoryBefore);
+    expect(readFileSync(target)).toEqual(original);
+    expect(readFileSync(external)).toEqual(original);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    for (const value of [
+      state,
+      directory,
+      target,
+      external,
+      original.toString(),
+      "/unavailable/golden-fixture.wav",
+    ]) {
+      const escaped = JSON.stringify(value).slice(1, -1);
+      for (const representation of [value, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+        expect(JSON.stringify(result).includes(representation)).toBe(false);
+      }
+    }
+  });
+}
+
+for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed Windows native ${format} Save publishes with exact bytes and one durable Receipt`, async () => {
     test.skip(process.platform !== "win32", "Windows native Save proof");
     test.setTimeout(360_000);
@@ -2270,11 +2360,12 @@ function installedMediaPickerDriver(
 }
 
 function installedWindowsPickerDriver(
-  scenario: "open" | "cancel_open_existing" | "save",
+  scenario: "open" | "cancel_open_existing" | "save" | "cancel_existing",
   selectedPath: string,
   format: "media" | "json" | "lrc" | "chordpro" | "pdf" | "archive",
 ) {
-  if ((scenario === "save") !== (format !== "media"))
+  const saveDialog = scenario === "save" || scenario === "cancel_existing";
+  if (saveDialog !== (format !== "media"))
     throw new Error("Installed native picker mode unavailable");
   const env = installedSystemEnvironment();
   const windows = process.env.SystemRoot ?? process.env.WINDIR;
@@ -2314,7 +2405,7 @@ function installedWindowsPickerDriver(
                 filenameSet: z.literal(true),
                 nativeClick: z.literal(true),
                 dialogDismissed: z.literal(true),
-                defaultNameValid: z.literal(scenario === "save"),
+                defaultNameValid: z.literal(saveDialog),
               })
               .safeParse(JSON.parse(stdout.trim()));
             if (!parsed.success) throw new Error("Invalid native picker evidence");
@@ -2330,7 +2421,7 @@ function installedWindowsPickerDriver(
       filenameSet: true,
       nativeClick: true,
       dialogDismissed: true,
-      defaultNameValid: scenario === "save",
+      defaultNameValid: saveDialog,
     });
   };
 }

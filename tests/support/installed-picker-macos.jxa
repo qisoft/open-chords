@@ -50,6 +50,7 @@ function run(argv) {
   }
   function reportFreshControls(freshSheets, phase) {
     var status = 'complete', elements = 0, primary = 0, cancel = 0, osError = 'none';
+    var primaryPresent = 0, primaryDisabled = 0, primaryUnknown = 0;
     try {
       if (freshSheets.length > 16) status = 'bound';
       else for (var s = 0; s < freshSheets.length && status === 'complete'; s++) {
@@ -61,9 +62,15 @@ function run(argv) {
           elements++;
           if (current[e].role() !== 'AXButton') continue;
           var name = current[e].name();
-          if ((name === primaryAction || name === 'Cancel') && current[e].enabled() === true) {
-            if (name === primaryAction) primary = Math.min(17, primary + 1);
-            if (name === 'Cancel') cancel = Math.min(17, cancel + 1);
+          if (name === primaryAction || name === 'Cancel') {
+            if (name === primaryAction) primaryPresent = Math.min(17, primaryPresent + 1);
+            var enabled = current[e].enabled();
+            if (name === primaryAction) {
+              if (enabled === true) primary = Math.min(17, primary + 1);
+              else if (enabled === false) primaryDisabled = Math.min(17, primaryDisabled + 1);
+              else primaryUnknown = Math.min(17, primaryUnknown + 1);
+            }
+            if (name === 'Cancel' && enabled === true) cancel = Math.min(17, cancel + 1);
           }
         }
       }
@@ -74,6 +81,8 @@ function run(argv) {
     console.log('Native macOS picker fresh controls: phase=' + phase + ' status=' + status +
       ' before_input=' + !nativeInputStarted + ' elements=' + elements + ' primary=' + primary +
       ' cancel=' + cancel + ' os_error=' + osError);
+    console.log('Native macOS picker fresh primary: phase=' + phase + ' status=' + status +
+      ' present=' + primaryPresent + ' enabled=' + primary + ' disabled=' + primaryDisabled + ' unknown=' + primaryUnknown);
   }
   function reportGuardSnapshot(process, candidate, phase) {
     var status = 'complete', windows = 0, sheets = 0, osError = 'none';
