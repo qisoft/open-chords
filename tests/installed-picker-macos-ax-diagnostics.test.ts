@@ -12,6 +12,7 @@ import {
   installedMacArchiveSaveSucceeded,
   installedMacReplaceContextObserved,
   installedMacReplacementCancelled,
+  installedMacFormatReplacementCancelled,
   installedMacJsonReplacementConfirmed,
   installedMacTextReplacementConfirmed,
   installedMacPdfReplacementConfirmed,
@@ -2226,6 +2227,60 @@ it.each(["pdf", "archive"] as const)(
       verify(
         JSON.stringify({ ...value, saveFilename: { ...filenameProof, labelAttached: false } }),
       ),
+    ).toBe(false);
+  },
+);
+
+it.each(["lrc", "chordpro", "pdf", "archive"] as const)(
+  "requires isolated %s confirmation Cancel proof and never accepts Replace",
+  (format) => {
+    const value = {
+      ...replacementCancelled,
+      action: { ...replacementCancelled.action, requested: `cancel_replace_${format}` },
+    };
+    const output = JSON.stringify(value);
+    expect(installedMacFormatReplacementCancelled(output, format)).toBe(true);
+    expect(installedMacReplacementCancelled(output)).toBe(false);
+    expect(
+      installedMacFormatReplacementCancelled(output, format === "lrc" ? "chordpro" : "lrc"),
+    ).toBe(false);
+    expect(installedMacJsonReplacementConfirmed(output)).toBe(false);
+    expect(installedMacTextReplacementConfirmed(output, "lrc")).toBe(false);
+    expect(installedMacPdfReplacementConfirmed(output)).toBe(false);
+    expect(installedMacArchiveReplacementConfirmed(output)).toBe(false);
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain(
+      `action=cancel_replace_${format}`,
+    );
+    expect(installedMacFormatReplacementCancelled(output.padEnd(8192, " "), format)).toBe(true);
+    expect(installedMacFormatReplacementCancelled(output.padEnd(8193, " "), format)).toBe(false);
+    for (const change of [
+      { cancelGuardMask: 254 },
+      { cancelPressed: false },
+      { cancelDismissed: false },
+      { cancelSheetRetained: false },
+      { cancelTargetUnchanged: false },
+      { cancelError: -25205 },
+      { cancelChainVisited: 1 },
+      { modalBindingParent: "other" },
+      { modalBindingSheetAttached: false },
+      { modalBindingForeground: false },
+      { modalEnabledCancel: 0 },
+    ]) {
+      expect(
+        installedMacFormatReplacementCancelled(
+          JSON.stringify({ ...value, replaceContext: { ...value.replaceContext, ...change } }),
+          format,
+        ),
+      ).toBe(false);
+    }
+    expect(
+      installedMacFormatReplacementCancelled(
+        JSON.stringify({ ...value, saveTargetExistingFixture: false }),
+        format,
+      ),
+    ).toBe(false);
+    expect(
+      installedMacFormatReplacementCancelled(JSON.stringify({ ...value, guardMask: 254 }), format),
     ).toBe(false);
   },
 );

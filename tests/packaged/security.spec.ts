@@ -652,53 +652,73 @@ test("installed macOS observes replacement context without confirming or changin
   expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
 });
 
-test("installed macOS cancels replacement confirmation without changing an existing JSON target", async () => {
-  test.skip(process.platform !== "darwin", "macOS native replacement confirmation Cancel");
-  test.setTimeout(360_000);
-  const state = join(packageRoot, "macos-replace-json-cancel");
-  const directory = realpathSync(mkdtempSync(join(packageRoot, "macos-replace-cancel-output-")));
-  const original = Buffer.from("private existing native export target fixture");
-  writeFileSync(join(directory, "Open Chords.json"), original);
-  writeFileSync(join(directory, "preserved.txt"), original);
-  const outputBefore = canonicalSerialize(await proofTreeHashes(directory));
-  const library = await openProjectLibrary({ stateRoot: state });
-  const envelope = ProjectEnvelopeSchema.parse(
-    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
-  );
-  envelope.payload = leadSheetProject();
-  await library.createProject({ envelope, records: goldenRecords() });
-  await (await openNetworkMode(state)).setOffline(true);
-  const before = await library.readProject("project_golden");
-  const libraryBefore = canonicalSerialize(await proofTreeHashes(library.activeRoot));
-  const action = {
-    type: "save_json",
-    projectId: "project_golden",
-    expectedProjectRevisionId: before.projectRevisionId,
-    presentation: "current",
-  };
-  // Cancel only the confirmation; the retained Save sheet closes through the existing shutdown path.
-  const result = await inspectInstalled(
-    state,
-    `(() => { void window.openChords.exports.perform(${JSON.stringify(action)}).then(() => undefined, () => undefined); return { started: true }; })()`,
-    installedSystemEnvironment(),
-    installedMacPickerDriver("cancel_replace_json", directory, installedSystemEnvironment, "json"),
-  );
-  expect(result).toEqual({ started: true });
-  const reopened = await openProjectLibrary({ stateRoot: state });
-  expect(await reopened.readProject("project_golden")).toEqual(before);
-  expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(libraryBefore);
-  expect(reopened.listExportReceipts("project_golden")).toEqual([]);
-  expect((await openNetworkMode(state)).offline).toBe(true);
-  expect(canonicalSerialize(await proofTreeHashes(directory))).toBe(outputBefore);
-  expect(readFileSync(join(directory, "Open Chords.json"))).toEqual(original);
-  // A second cold open must not materialize a pending export or Receipt.
-  const second = await openProjectLibrary({ stateRoot: state });
-  expect(await second.readProject("project_golden")).toEqual(before);
-  expect(second.listExportReceipts("project_golden")).toEqual([]);
-  expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
-  expect((await openNetworkMode(state)).offline).toBe(true);
-  expect(canonicalSerialize(await proofTreeHashes(directory))).toBe(outputBefore);
-});
+for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
+  test(`installed macOS cancels replacement confirmation without changing an existing ${format} target`, async () => {
+    test.skip(process.platform !== "darwin", "macOS native replacement confirmation Cancel");
+    test.setTimeout(360_000);
+    const state = join(packageRoot, `macos-replace-${format}-cancel`);
+    const directory = realpathSync(
+      mkdtempSync(join(packageRoot, `macos-replace-${format}-cancel-output-`)),
+    );
+    const original = Buffer.from("private existing native export target fixture");
+    const filename = `Open Chords.${format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format}`;
+    const target = join(directory, filename);
+    writeFileSync(target, original);
+    writeFileSync(join(directory, "preserved.txt"), original);
+    const outputBefore = canonicalSerialize(await proofTreeHashes(directory));
+    const library = await openProjectLibrary({ stateRoot: state });
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+    );
+    envelope.payload = leadSheetProject();
+    await library.createProject({ envelope, records: goldenRecords() });
+    await (await openNetworkMode(state)).setOffline(true);
+    const before = await library.readProject("project_golden");
+    const libraryBefore = canonicalSerialize(await proofTreeHashes(library.activeRoot));
+    const action = {
+      type: `save_${format}`,
+      projectId: "project_golden",
+      expectedProjectRevisionId: before.projectRevisionId,
+      ...(format === "archive"
+        ? { includeMedia: false }
+        : format === "lrc"
+          ? {}
+          : { presentation: "current" }),
+    };
+    // Cancel only the confirmation; the retained Save sheet closes through the existing shutdown path.
+    const result = await inspectInstalled(
+      state,
+      `(() => { void window.openChords.exports.perform(${JSON.stringify(action)}).then(() => undefined, () => undefined); return { started: true }; })()`,
+      installedSystemEnvironment(),
+      installedMacPickerDriver(
+        `cancel_replace_${format}`,
+        directory,
+        installedSystemEnvironment,
+        format,
+      ),
+    );
+    expect(result).toEqual({ started: true });
+    const reopened = await openProjectLibrary({ stateRoot: state });
+    expect(await reopened.readProject("project_golden")).toEqual(before);
+    expect(canonicalSerialize(await proofTreeHashes(reopened.activeRoot))).toBe(libraryBefore);
+    expect(reopened.listExportReceipts("project_golden")).toEqual([]);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    expect(canonicalSerialize(await proofTreeHashes(directory))).toBe(outputBefore);
+    expect(readFileSync(target)).toEqual(original);
+    // A second cold open must not materialize a pending export or Receipt.
+    const second = await openProjectLibrary({ stateRoot: state });
+    expect(await second.readProject("project_golden")).toEqual(before);
+    expect(second.listExportReceipts("project_golden")).toEqual([]);
+    expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    expect(canonicalSerialize(await proofTreeHashes(directory))).toBe(outputBefore);
+    for (const privateValue of [state, directory, target, original.toString()]) {
+      const escaped = JSON.stringify(privateValue).slice(1, -1);
+      for (const representation of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)])
+        expect(JSON.stringify(result).includes(representation)).toBe(false);
+    }
+  });
+}
 
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed macOS replaces an existing ${format} fixture with exact bytes and one durable Receipt`, async () => {
