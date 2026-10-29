@@ -723,11 +723,12 @@ test("installed Windows native JSON Save publishes with exact bytes and one dura
   expect(receipts).toHaveLength(1);
   expect(receipts[0]).toMatchObject({
     format: "open_chords_json",
-    outputLocation: target,
     outputHash: `sha256:${digest}`,
     profileVersion: "open_chords_json/1.0/current",
     omissions: [...new Set(snapshot.omissions)].sort((a, b) => a.localeCompare(b)),
   });
+  // Windows dialogs expand 8.3 components; compare exact native canonical paths to the published file.
+  expect(realpathSync.native(receipts[0]!.outputLocation)).toBe(realpathSync.native(target));
   expect(after.envelope).toEqual(before.envelope);
   expect(after.compatibility).toBe(before.compatibility);
   expect(after.records).toEqual({ ...before.records, exportReceipts: receipts });
