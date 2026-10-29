@@ -4,6 +4,8 @@ const count = z.number().int().min(0).max(256);
 export const WindowsReplacementBindingSchema = z.strictObject({
   status: z.enum(["complete", "refused", "deadline", "bound", "read_error"]),
   guardMask: z.number().int().min(0).max(255),
+  yesRefusalMask: z.number().int().min(0).max(255).optional(),
+  noRefusalMask: z.number().int().min(0).max(255).optional(),
   candidates: z.number().int().min(0).max(17),
   buttons: count,
   yes: count,
@@ -63,6 +65,8 @@ export const WindowsReplacementBoundObservationSchema = WindowsReplacementObserv
     context.other === 0 &&
     binding?.status === "complete" &&
     binding.guardMask === 255 &&
+    binding.yesRefusalMask === 0 &&
+    binding.noRefusalMask === 0 &&
     binding.candidates === 1 &&
     binding.buttons === 2 &&
     binding.yes === 1 &&

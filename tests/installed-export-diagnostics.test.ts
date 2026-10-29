@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 
+import { projectionProofFailureCode } from "../apps/desktop/src/main/packaged-projection-proof-diagnostic.ts";
 import {
   installedExportExitDiagnostic,
   runInstalledExportProcess,
@@ -36,6 +37,13 @@ it("redacts the actual child-process rejection while retaining fixed proof stage
         "-e",
         `
       process.stderr.write("/private/provider-token\\n");
+      process.stderr.write("Export projection proof stage: save_archive\\n");
+      process.stderr.write("Archive proof stage: import_started\\n");
+      process.stderr.write("Archive proof stage: rejecting_hash\\n");
+      process.stderr.write("Archive proof stage: /private/archive\\n");
+      process.stderr.write("Packaged archive proof failure: code=archive_proof_import_failed\\n");
+      process.stderr.write("Packaged export proof failure: code=EPERM\\n");
+      process.stderr.write("Packaged archive proof failure: code=/private/exception\\n");
       process.stderr.write("Export disk proof source delta: added=1 removed=0 changed=2 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=1 other=0\\n");
       process.stderr.write("Export disk proof source delta: added=1 removed=0 changed=2 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=1 other=0 /private/delta\\n");
       process.stderr.write("Export disk proof source delta: added=10000 removed=0 changed=2 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=1 other=0\\n");
@@ -63,6 +71,13 @@ it("redacts the actual child-process rejection while retaining fixed proof stage
   expect(failure).toBeInstanceOf(Error);
   if (!(failure instanceof Error)) throw new Error("fixture_child_did_not_fail");
   expect(failure.message).toContain("exit_code=7");
+  expect(failure.message).toContain("Export projection proof stage: save_archive");
+  expect(failure.message).toContain("Archive proof stage: import_started");
+  expect(failure.message).toContain("Archive proof stage: rejecting_hash");
+  expect(failure.message).toContain(
+    "Packaged archive proof failure: code=archive_proof_import_failed",
+  );
+  expect(failure.message).toContain("Packaged export proof failure: code=EPERM");
   expect(failure.message).toContain("retry_saving duration_ms=123");
   expect(failure.message).toContain("published_pending duration_ms=456");
   expect(failure.message).toContain("refused_changed_output duration_ms=789");
@@ -88,4 +103,21 @@ it("redacts the actual child-process rejection while retaining fixed proof stage
   }
   expect(Object.hasOwn(failure, "cause")).toBe(false);
   expect(Object.hasOwn(failure, "stderr")).toBe(false);
+});
+
+it("classifies only exact synthetic proof and filesystem failure codes", () => {
+  expect(projectionProofFailureCode(new Error("archive_proof_import_failed"))).toBe(
+    "archive_proof_import_failed",
+  );
+  expect(
+    projectionProofFailureCode(Object.assign(new Error("private file"), { code: "EPERM" })),
+  ).toBe("EPERM");
+  for (const cause of [
+    new Error("/private/file"),
+    new Error("archive_proof_import_failed /private"),
+    { code: "/private" },
+    null,
+  ]) {
+    expect(projectionProofFailureCode(cause)).toBe("unknown");
+  }
 });

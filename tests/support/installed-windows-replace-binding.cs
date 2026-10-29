@@ -39,10 +39,22 @@ public static class WindowsReplacementBinding {
     return Owned(button, pid) && IsWindowVisible(button) && IsWindowEnabled(button) &&
       ClassIs(button, "Button") && GetParent(button) == modal && GetAncestor(button, 2) == modal && GetDlgCtrlID(button) == id;
   }
+  private static int ButtonDiagnostic(IntPtr button, IntPtr modal, uint pid, int id) {
+    // Failure-only classification; never substitutes for the original strict predicate.
+    int mask = 128; // Exact fixed label was already read successfully.
+    if (Owned(button, pid)) mask |= 1;
+    if (IsWindowVisible(button)) mask |= 2;
+    if (IsWindowEnabled(button)) mask |= 4;
+    if (ClassIs(button, "Button")) mask |= 8;
+    if (GetParent(button) == modal) mask |= 16;
+    if (GetAncestor(button, 2) == modal) mask |= 32;
+    if (GetDlgCtrlID(button) == id) mask |= 64;
+    return mask;
+  }
 
   public static string Observe(IntPtr save, uint pid, int budgetMs) {
     string status = "refused";
-    int mask = 0, candidates = 0, buttons = 0, yes = 0, no = 0, scanned = 0, children = 0;
+    int mask = 0, candidates = 0, buttons = 0, yes = 0, no = 0, scanned = 0, children = 0, yesMask = 0, noMask = 0;
     var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, Math.Min(2000, budgetMs)));
     IntPtr modal = IntPtr.Zero, yesButton = IntPtr.Zero, noButton = IntPtr.Zero;
     if (budgetMs > 0 && budgetMs <= 2000 && SaveValid(save, pid)) {
@@ -82,8 +94,14 @@ public static class WindowsReplacementBinding {
               status = "read_error"; return false;
             }
             string name = title.ToString();
-            if ((name == "Yes" || name == "&Yes") && ButtonValid(control, modal, pid, 6)) { yes++; yesButton = control; }
-            if ((name == "No" || name == "&No") && ButtonValid(control, modal, pid, 7)) { no++; noButton = control; }
+            if (name == "Yes" || name == "&Yes") {
+              if (ButtonValid(control, modal, pid, 6)) { yes++; yesButton = control; }
+              else if (DateTime.UtcNow < deadline) yesMask = ButtonDiagnostic(control, modal, pid, 6);
+            }
+            if (name == "No" || name == "&No") {
+              if (ButtonValid(control, modal, pid, 7)) { no++; noButton = control; }
+              else if (DateTime.UtcNow < deadline) noMask = ButtonDiagnostic(control, modal, pid, 7);
+            }
             return true;
           }, IntPtr.Zero);
           if (status == "complete") {
@@ -100,6 +118,7 @@ public static class WindowsReplacementBinding {
       if (status == "complete" && mask != 255) status = "refused";
     }
     return "{\"status\":\"" + status + "\",\"guardMask\":" + mask + ",\"candidates\":" + candidates +
-      ",\"buttons\":" + buttons + ",\"yes\":" + yes + ",\"no\":" + no + "}";
+      ",\"buttons\":" + buttons + ",\"yes\":" + yes + ",\"no\":" + no +
+      ",\"yesRefusalMask\":" + yesMask + ",\"noRefusalMask\":" + noMask + "}";
   }
 }

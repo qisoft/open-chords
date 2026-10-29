@@ -100,7 +100,16 @@ it("retains bounded refusal diagnostics while refusing them as accepted observat
 
 const boundEvidence = () => ({
   ...evidence(),
-  binding: { status: "complete", guardMask: 255, candidates: 1, buttons: 2, yes: 1, no: 1 },
+  binding: {
+    status: "complete",
+    guardMask: 255,
+    yesRefusalMask: 0,
+    noRefusalMask: 0,
+    candidates: 1,
+    buttons: 2,
+    yes: 1,
+    no: 1,
+  },
 });
 it("requires a fresh bound snapshot in addition to the original complete inventory", () => {
   expect(WindowsReplacementBoundObservationSchema.parse(boundEvidence())).toEqual(boundEvidence());
@@ -123,11 +132,21 @@ it.each([
   ["yes", 2],
   ["no", 0],
   ["no", 2],
+  ["yesRefusalMask", 239],
+  ["noRefusalMask", 191],
 ] as const)("retains fixed refusal evidence but rejects it as bound: %s=%s", (field, value) => {
   const changed = boundEvidence();
   Object.assign(changed.binding, { [field]: value });
   expect(WindowsReplacementDiagnosticSchema.safeParse(changed).success).toBe(true);
   expect(WindowsReplacementBoundObservationSchema.safeParse(changed).success).toBe(false);
+});
+
+it.each(["yesRefusalMask", "noRefusalMask"])("rejects malformed %s diagnostics", (field) => {
+  for (const value of [-1, 256, 0.5, "/private", null]) {
+    const changed = boundEvidence();
+    Object.assign(changed.binding, { [field]: value });
+    expect(WindowsReplacementDiagnosticSchema.safeParse(changed).success).toBe(false);
+  }
 });
 it.each([
   ["capturedVisible", false],
