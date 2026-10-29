@@ -245,9 +245,12 @@ while ([DateTime]::UtcNow -lt $deadline) {
     Write-NativeSaveProbe 'action_clicked'
     if ($observesReplacement) {
       $remaining = [Math]::Min(2000, [int][Math]::Floor(($deadline - [DateTime]::UtcNow).TotalMilliseconds))
+      $observationDeadline = [DateTime]::UtcNow.AddMilliseconds($remaining)
       $context = [WindowsReplacementContext]::Observe($dialogHandle, [uint32]$ApplicationPid, $remaining) | ConvertFrom-Json
+      $bindingRemaining = [Math]::Max(0, [int][Math]::Floor(($observationDeadline - [DateTime]::UtcNow).TotalMilliseconds))
+      $binding = [WindowsReplacementBinding]::Observe($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining) | ConvertFrom-Json
       [WindowsReplacementContext]::VerifyFixture($TargetPath)
-      ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $true; nativeClick = $true; defaultNameValid = $true; targetFixtureVerified = $true; context = $context } -Compress
+      ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $true; nativeClick = $true; defaultNameValid = $true; targetFixtureVerified = $true; context = $context; binding = $binding } -Compress
       exit 0
     }
     [SaveNativeInput]::WaitForDismissal($dialogHandle, $actionHandle, $ApplicationPid)
