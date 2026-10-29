@@ -1,7 +1,9 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive', 'media')][string]$Format = 'json')
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open', 'observe_replace')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive', 'media')][string]$Format = 'json')
 $ErrorActionPreference = 'Stop'
 $isImport = $Scenario -in @('cancel_open', 'cancel_open_existing', 'open')
-$setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open')
+$observesReplacement = $Scenario -eq 'observe_replace'
+if ($observesReplacement -and $Format -ne 'json') { throw 'Replacement format unavailable' }
+$setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open', 'observe_replace')
 if ($isImport -and $Format -notin @('archive', 'media')) { throw 'Native import format unavailable' }
 if ($Format -eq 'media' -and !$isImport) { throw 'Native media Save unavailable' }
 $extension = if ($Format -eq 'chordpro') { 'cho' } elseif ($Format -eq 'archive') { 'ocarchive' } else { $Format }
@@ -86,7 +88,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $fileNameValue = $null
     $nativeFilenameHandle = [IntPtr]::Zero
     $button = $null
-    $buttonName = if ($Scenario -eq 'open') { 'Open' } elseif ($Scenario -eq 'save') { 'Save' } else { 'Cancel' }
+    $buttonName = if ($Scenario -eq 'open') { 'Open' } elseif ($Scenario -in @('save', 'observe_replace')) { 'Save' } else { 'Cancel' }
     $editTypes = 0
     $buttonTypes = 0
     $fileLabels = 0
@@ -237,9 +239,17 @@ while ([DateTime]::UtcNow -lt $deadline) {
     if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) { throw 'action_bounds' }
     $dialogHandle = [IntPtr]$window.Current.NativeWindowHandle
     $actionHandle = [IntPtr]$button.Current.NativeWindowHandle
+    if ($observesReplacement) { [WindowsReplacementContext]::VerifyFixture($TargetPath) }
     [SaveNativeInput]::Click($dialogHandle, $actionHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
+    if ($observesReplacement) {
+      $remaining = [Math]::Min(2000, [int][Math]::Floor(($deadline - [DateTime]::UtcNow).TotalMilliseconds))
+      $context = [WindowsReplacementContext]::Observe($dialogHandle, [uint32]$ApplicationPid, $remaining) | ConvertFrom-Json
+      [WindowsReplacementContext]::VerifyFixture($TargetPath)
+      ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $true; nativeClick = $true; defaultNameValid = $true; targetFixtureVerified = $true; context = $context } -Compress
+      exit 0
+    }
     [SaveNativeInput]::WaitForDismissal($dialogHandle, $actionHandle, $ApplicationPid)
     ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $setFilename; nativeClick = $true; dialogDismissed = $true; defaultNameValid = (!$isImport) } -Compress
     exit 0
