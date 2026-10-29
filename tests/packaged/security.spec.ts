@@ -1416,10 +1416,14 @@ for (const { adoptOfflineMedia, wholeSource } of [
   { adoptOfflineMedia: false, wholeSource: true },
   { adoptOfflineMedia: true, wholeSource: true },
 ]) {
-  test(`installed macOS archive ${wholeSource ? "full Source" : "partial range"} media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
-    test.skip(process.platform !== "darwin", "macOS native archive media import proof");
+  test(`installed ${process.platform === "win32" ? "Windows" : "macOS"} archive ${wholeSource ? "full Source" : "partial range"} media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
+    test.skip(!["win32", "darwin"].includes(process.platform), "Native archive media import proof");
     test.setTimeout(360_000);
-    const root = realpathSync(mkdtempSync(join(packageRoot, "macos-archive-media-")));
+    const root = realpathSync(
+      mkdtempSync(
+        join(packageRoot, `${process.platform === "win32" ? "windows" : "macos"}-archive-media-`),
+      ),
+    );
     const originState = join(root, "origin");
     const state = join(root, "destination");
     const sourcePath = join(root, "private-recording.wav");
@@ -1483,7 +1487,7 @@ for (const { adoptOfflineMedia, wholeSource } of [
         return { response, offline };
       })()`,
       installedSystemEnvironment(),
-      installedMacPickerDriver("open", target, installedSystemEnvironment),
+      installedArchiveOpenDriver(target),
     );
     expect(result).toMatchObject({
       response: {
@@ -1544,7 +1548,7 @@ for (const { adoptOfflineMedia, wholeSource } of [
         return { response, offline };
       })()`,
       installedSystemEnvironment(),
-      installedMacPickerDriver("open", target, installedSystemEnvironment),
+      installedArchiveOpenDriver(target),
     );
     expect(repeated).toMatchObject({
       response: {
@@ -1623,7 +1627,7 @@ for (const { adoptOfflineMedia, wholeSource } of [
             return { response, offline };
           })()`,
           installedSystemEnvironment(),
-          installedMacPickerDriver("open", target, installedSystemEnvironment),
+          installedArchiveOpenDriver(target),
         );
         verifiedCacheReplays.push(replay);
         expect(replay).toMatchObject({
@@ -2400,6 +2404,12 @@ test("installed local Source refusals and matching relink preserve Project revis
     else expect(readFileSync(path)).toEqual(monoPcmWav([4, 5, 6, 7]));
   }
 });
+
+function installedArchiveOpenDriver(selectedPath: string) {
+  if (process.platform === "darwin")
+    return installedMacPickerDriver("open", selectedPath, installedSystemEnvironment);
+  return installedWindowsPickerDriver("open", selectedPath, "archive");
+}
 
 function installedMediaPickerDriver(
   scenario: "open" | "cancel_open_existing",
