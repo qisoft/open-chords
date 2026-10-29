@@ -924,16 +924,23 @@ function replacementContextObserved(
       context.modalBindingForeground === true &&
       context.modalBindingError === 0 &&
       context.modalBindingAttribute === "none";
-    // A refused action is never reported as successful. Independently observed, freshly
-    // attached confirmation context can satisfy this read-only journey without pruning
-    // the foreign splitter from the original traversal or issuing another input action.
-    const boundModalObservation =
+    // Preserve the actual single-dispatch result. The observed successful variant is
+    // limited to the read-only observer; all independent binding and refusal checks remain.
+    const refusedDispatch =
       value.lastError === -25205 &&
       value.stage === "press" &&
       !value.action.pressed &&
+      value.pressSheetState === "attached_sheet";
+    const successfulObserverDispatch =
+      expectedAction === "observe_replace_json" &&
+      value.lastError === 0 &&
+      value.stage === "replace_observed" &&
+      value.action.pressed &&
+      value.pressSheetState === "not_checked";
+    const boundModalObservation =
+      (refusedDispatch || successfulObserverDispatch) &&
       value.pressTimeoutError === 0 &&
       value.pressActionCalled === true &&
-      value.pressSheetState === "attached_sheet" &&
       value.pressFollowupError === 0 &&
       context?.status === "error" &&
       context.error === -25201 &&

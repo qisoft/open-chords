@@ -65,6 +65,7 @@ import {
 import {
   WorkspacePlaybackProbeSchema,
   workspacePlaybackDiagnostic,
+  workspacePlaybackAlertCategory,
 } from "../support/installed-workspace-playback-diagnostics.ts";
 import { PDF_GOLDEN_SHA256, PDF_GOLDEN_LOSSES } from "../support/pdf-golden.ts";
 import { readStagedReleaseManifest } from "./release-manifest-file.ts";
@@ -3314,6 +3315,7 @@ async function evaluatePackagedMedia(
               audioPositionPositive: knownAudio && audio.currentTime > 0,
               audioSourcePresent: knownAudio && audio.currentSrc.length > 0,
               alertPresent: document.querySelector('[role="alert"]') !== null,
+              sourceAlert: (${workspacePlaybackAlertCategory.toString()})(document.querySelector('.source-status[role="alert"]')?.textContent),
               mutations,
               oldPauseSeen,
             };

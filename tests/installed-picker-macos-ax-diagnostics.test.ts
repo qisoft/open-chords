@@ -2284,3 +2284,67 @@ it.each(["lrc", "chordpro", "pdf", "archive"] as const)(
     ).toBe(false);
   },
 );
+
+const successfulForeignSplitterObservation = {
+  ...boundModalObservation,
+  lastError: 0,
+  stage: "replace_observed",
+  pressSheetState: "not_checked",
+  action: { requested: "observe_replace_json", pressed: true, dismissed: false },
+  replaceContext: {
+    ...boundModalObservation.replaceContext,
+    modalCandidates: 0,
+    attachmentStatus: "complete",
+    attachmentAttempts: 1,
+    attachmentVisited: 20,
+    attachmentCandidates: 1,
+    attachmentError: 0,
+    attachmentAttribute: "none",
+    attachmentSource: "none",
+    capturedSheetAttached: true,
+  },
+};
+it("accepts actual successful Save dispatch with an independently bound modal despite the retained foreign splitter refusal", () => {
+  expect(
+    installedMacReplaceContextObserved(JSON.stringify(successfulForeignSplitterObservation)),
+  ).toBe(true);
+  expect(installedMacJsonSaveSucceeded(JSON.stringify(successfulForeignSplitterObservation))).toBe(
+    false,
+  );
+});
+it.each([
+  { lastError: -25202 },
+  { stage: "press" },
+  { pressActionCalled: false },
+  { pressTimeoutError: -25202 },
+  { pressSheetState: "unknown" },
+  { pressFollowupError: -25202 },
+  { action: { requested: "observe_replace_json", pressed: false, dismissed: false } },
+  { action: { requested: "cancel_replace_json", pressed: true, dismissed: false } },
+])("refuses mixed or unproven successful-dispatch evidence %j", (change) => {
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({ ...successfulForeignSplitterObservation, ...change }),
+    ),
+  ).toBe(false);
+});
+it.each([
+  { modalBindingStatus: "error" },
+  { modalBindingParent: "parent" },
+  { modalBindingMatches: 0 },
+  { modalBindingForeground: false },
+  { modalBindingSheetAttached: false },
+  { attachmentCandidates: 2 },
+  { modalEnabledReplace: 0 },
+  { error: 0 },
+  { foreignRole: "button" },
+])("retains every independent binding and original-refusal requirement %j", (change) => {
+  expect(
+    installedMacReplaceContextObserved(
+      JSON.stringify({
+        ...successfulForeignSplitterObservation,
+        replaceContext: { ...successfulForeignSplitterObservation.replaceContext, ...change },
+      }),
+    ),
+  ).toBe(false);
+});
