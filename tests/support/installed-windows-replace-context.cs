@@ -28,27 +28,40 @@ public static class WindowsReplacementContext {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
 
   public static void VerifyFixture(string target) {
+    try { VerifyFixtureCore(target); }
+    catch (IOException) { Console.Error.WriteLine("Native Windows replacement fixture exception: kind=io"); throw; }
+    catch (UnauthorizedAccessException) { Console.Error.WriteLine("Native Windows replacement fixture exception: kind=access"); throw; }
+    catch (ArgumentException) { Console.Error.WriteLine("Native Windows replacement fixture exception: kind=argument"); throw; }
+  }
+  private static InvalidOperationException RefuseFixture(string check) {
+    Console.Error.WriteLine("Native Windows replacement fixture refusal: check=" + check);
+    return new InvalidOperationException("Replacement fixture unavailable");
+  }
+  private static void VerifyFixtureCore(string target) {
     byte[] expected = Encoding.UTF8.GetBytes("private existing Windows replacement target fixture");
     string root = Path.GetPathRoot(target);
-    if (!Path.IsPathRooted(target) || root.Length != 3 || !Char.IsLetter(root[0]) || root[1] != ':' || root[2] != '\\' ||
-        !String.Equals(Path.GetFullPath(target), target, StringComparison.OrdinalIgnoreCase) || Path.GetFileName(target) != "Open Chords.json")
-      throw new InvalidOperationException("Replacement fixture unavailable");
+    if (!Path.IsPathRooted(target) || root.Length != 3 || !Char.IsLetter(root[0]) || root[1] != ':' || root[2] != '\\')
+      throw RefuseFixture("local_path");
+    if (!String.Equals(Path.GetFullPath(target), target, StringComparison.OrdinalIgnoreCase))
+      throw RefuseFixture("full_path");
+    if (Path.GetFileName(target) != "Open Chords.json") throw RefuseFixture("filename");
     for (var directory = new DirectoryInfo(Path.GetDirectoryName(target)); directory != null; directory = directory.Parent) {
       if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
-        throw new InvalidOperationException("Replacement fixture unavailable");
+        throw RefuseFixture("parent_reparse");
     }
     // OPEN_REPARSE_POINT prevents following a substituted final symlink; inspect the actual opened handle.
     using (var handle = CreateFile(target, 0x80000000, 1, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero)) {
       FileInformation information;
-      if (handle.IsInvalid || !GetFileInformationByHandle(handle, out information) ||
-          (information.attributes & (0x400U | 0x10U)) != 0 || information.links != 1 ||
-          information.sizeHigh != 0 || information.sizeLow != expected.Length)
-        throw new InvalidOperationException("Replacement fixture unavailable");
+      if (handle.IsInvalid) throw RefuseFixture("handle_open");
+      if (!GetFileInformationByHandle(handle, out information)) throw RefuseFixture("handle_info");
+      if ((information.attributes & (0x400U | 0x10U)) != 0) throw RefuseFixture("file_type");
+      if (information.links != 1) throw RefuseFixture("link_count");
+      if (information.sizeHigh != 0 || information.sizeLow != expected.Length) throw RefuseFixture("size");
       using (var stream = new FileStream(handle, FileAccess.Read)) {
         for (int index = 0; index < expected.Length; index++) {
-          if (stream.ReadByte() != expected[index]) throw new InvalidOperationException("Replacement fixture unavailable");
+          if (stream.ReadByte() != expected[index]) throw RefuseFixture("content");
         }
-        if (stream.ReadByte() != -1) throw new InvalidOperationException("Replacement fixture unavailable");
+        if (stream.ReadByte() != -1) throw RefuseFixture("eof");
       }
     }
   }

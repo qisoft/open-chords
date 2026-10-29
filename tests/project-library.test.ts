@@ -1369,16 +1369,34 @@ describe("ProjectLibrary", () => {
   });
 
   it("migrates independently versioned mixed envelope and Project states", async () => {
+    const started = performance.now();
+    let caseIndex = 0;
+    const probe = (
+      stage:
+        | "root"
+        | "library_open"
+        | "library_ready"
+        | "restore"
+        | "restored"
+        | "read"
+        | "verified",
+    ) => {
+      process.stdout.write(
+        `Mixed migration probe: case=${caseIndex} stage=${stage} duration_ms=${Math.min(200000, Math.max(0, Math.floor(performance.now() - started)))}\n`,
+      );
+    };
     for (const [envelopeVersion, projectVersion] of [
       ["1.0", "1.1"],
       ["1.1", "1.0"],
     ] as const) {
+      probe("root");
       const stateRoot = await temporaryDirectory(
         `open-chords-library-mixed-${envelopeVersion}-${projectVersion}-`,
       );
       const mixedEnvelope = structuredClone(goldenEnvelope());
       mixedEnvelope.schemaVersion = envelopeVersion;
       mixedEnvelope.payload.schemaVersion = projectVersion;
+      probe("library_open");
       const library = await openProjectLibrary({
         currentSchemaVersion: "1.1",
         migrations: [
@@ -1395,10 +1413,16 @@ describe("ProjectLibrary", () => {
         ],
         stateRoot,
       });
+      probe("library_ready");
+      probe("restore");
       await library.restoreProjectRevision({ envelope: mixedEnvelope, records: ownedRecords() });
+      probe("restored");
+      probe("read");
       const migrated = await library.readProject("project_golden");
       expect(migrated.compatibility).toBe("writable");
       expect(migrated.revisions.map(({ reason }) => reason)).toEqual(["restored", "migration"]);
+      probe("verified");
+      caseIndex++;
     }
   });
 
