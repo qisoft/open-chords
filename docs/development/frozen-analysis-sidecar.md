@@ -26,7 +26,7 @@ FFprobe is limited to the first audio stream and a small named JSON field set. B
 
 ## Reviewed native build
 
-`tools/build-ffmpeg.sh` downloads FFmpeg 8.1.2 from the official HTTPS release URL and refuses any archive except SHA-256 `464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c`. The committed configuration disables network, auto-detected libraries, devices, hardware acceleration, all protocols by default, GPL/nonfree/version-3 features, assembly, and unrelated encoders/muxers. It enables only:
+`tools/build-ffmpeg.sh` downloads the unchanged FFmpeg 8.1.2 release archive from the [VideoLAN HTTPS source mirror](https://download.videolan.org/pub/contrib/ffmpeg/ffmpeg-8.1.2.tar.xz) and refuses any archive except SHA-256 `464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c`. The mirror serves the exact pinned upstream archive; it replaces the upstream download endpoint after repeated connection failures in both macOS and Windows CI. HTTPS certificate validation and the pinned digest remain mandatory. No mirror content is accepted based on its filename alone. The committed configuration disables network, auto-detected libraries, devices, hardware acceleration, all protocols by default, GPL/nonfree/version-3 features, assembly, and unrelated encoders/muxers. It enables only:
 
 - file and pipe protocols;
 - WAV, MP3, FLAC, Ogg, Matroska, and MOV demuxers;
