@@ -89,6 +89,12 @@ function installedExportProofStages(error: unknown): string[] {
       if (projectionFailure && PROJECTION_PROOF_FAILURE_CODES.has(projectionFailure[2]!))
         return [line];
       if (
+        /^Export proof stage: (rejected_(stale_revision|protected_target|directory_target|missing_parent)|cancelled_existing_target_unchanged)$/.test(
+          line,
+        )
+      )
+        return [line];
+      if (
         /^Export projection proof stage: (library_open|library_ready|cancellation|save_json|save_archive|save_chordpro|save_lrc|save_pdf|failure_cases|reopened)$/.test(
           line,
         )

@@ -121,3 +121,38 @@ it("classifies only exact synthetic proof and filesystem failure codes", () => {
     expect(projectionProofFailureCode(cause)).toBe("unknown");
   }
 });
+
+it("retains all nested export failure stages and rejects private or unrecognized additions", async () => {
+  const stages = [
+    "rejected_stale_revision",
+    "rejected_protected_target",
+    "rejected_directory_target",
+    "rejected_missing_parent",
+    "cancelled_existing_target_unchanged",
+  ];
+  let failure: unknown;
+  try {
+    await runInstalledExportProcess(
+      process.execPath,
+      [
+        "-e",
+        `
+      for (const stage of ${JSON.stringify(stages)}) {
+        process.stderr.write('Export proof stage: ' + stage + '\\n');
+        process.stderr.write('Export proof stage: ' + stage + ' /private/token\\n');
+      }
+      process.stderr.write('Export proof stage: rejected_private_case\\n');
+      process.exit(7);
+    `,
+      ],
+      {},
+    );
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  if (!(failure instanceof Error)) throw new Error("fixture_child_did_not_fail");
+  for (const stage of stages) expect(failure.message).toContain(`Export proof stage: ${stage}`);
+  expect(failure.message).not.toContain("/private");
+  expect(failure.message).not.toContain("private_case");
+});

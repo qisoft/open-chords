@@ -107,6 +107,11 @@ const boundEvidence = () => ({
     noRefusalMask: 0,
     yesBinding: "classic_direct",
     noBinding: "classic_direct",
+    recheckStatus: "complete",
+    recheckButtons: 2,
+    recheckYes: 1,
+    recheckNo: 1,
+    recheckMatches: true,
     candidates: 1,
     buttons: 2,
     yes: 1,
@@ -117,6 +122,14 @@ it("requires a fresh bound snapshot in addition to the original complete invento
   expect(WindowsReplacementBoundObservationSchema.parse(boundEvidence())).toEqual(boundEvidence());
   expect(WindowsReplacementBoundObservationSchema.safeParse(evidence()).success).toBe(false);
 });
+it.each(["recheckStatus", "recheckButtons", "recheckYes", "recheckNo", "recheckMatches"])(
+  "refuses an otherwise complete binding without fresh %s evidence",
+  (field) => {
+    const value = boundEvidence();
+    delete (value.binding as Record<string, unknown>)[field];
+    expect(WindowsReplacementBoundObservationSchema.safeParse(value).success).toBe(false);
+  },
+);
 it("accepts a fully guarded modern-chain observation without treating control ID zero as identity", () => {
   const value = boundEvidence();
   Object.assign(value.binding, { yesBinding: "modern_chain", noBinding: "modern_chain" });
@@ -148,6 +161,16 @@ it.each([
   ["no", 2],
   ["yesRefusalMask", 239],
   ["noRefusalMask", 191],
+  ["recheckStatus", "not_checked"],
+  ["recheckStatus", "read_error"],
+  ["recheckStatus", "deadline"],
+  ["recheckStatus", "bound"],
+  ["recheckStatus", "refused"],
+  ["recheckButtons", 3],
+  ["recheckButtons", 1],
+  ["recheckYes", 0],
+  ["recheckNo", 0],
+  ["recheckMatches", false],
 ] as const)("retains fixed refusal evidence but rejects it as bound: %s=%s", (field, value) => {
   const changed = boundEvidence();
   Object.assign(changed.binding, { [field]: value });

@@ -24,6 +24,13 @@ export const WindowsReplacementBindingSchema = z.strictObject({
   noRefusalMask: z.number().int().min(0).max(255).optional(),
   yesBinding: z.enum(["none", "classic_direct", "modern_chain"]).optional(),
   noBinding: z.enum(["none", "classic_direct", "modern_chain"]).optional(),
+  recheckStatus: z
+    .enum(["not_checked", "complete", "refused", "deadline", "bound", "read_error"])
+    .optional(),
+  recheckButtons: count.optional(),
+  recheckYes: count.optional(),
+  recheckNo: count.optional(),
+  recheckMatches: z.boolean().optional(),
   yesFailure: buttonFailure.optional(),
   noFailure: buttonFailure.optional(),
   candidates: z.number().int().min(0).max(17),
@@ -91,6 +98,11 @@ export const WindowsReplacementBoundObservationSchema = WindowsReplacementObserv
     context.other === 0 &&
     binding?.status === "complete" &&
     binding.guardMask === 255 &&
+    binding.recheckStatus === "complete" &&
+    binding.recheckButtons === 2 &&
+    binding.recheckYes === 1 &&
+    binding.recheckNo === 1 &&
+    binding.recheckMatches === true &&
     binding.yesRefusalMask === 0 &&
     binding.noRefusalMask === 0 &&
     (binding.yesBinding === "classic_direct" || binding.yesBinding === "modern_chain") &&

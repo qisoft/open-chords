@@ -115,14 +115,65 @@ public static class WindowsReplacementBinding {
     return result;
   }
 
+  private sealed class ChildBudget { public int Children = 0; }
+  private sealed class ButtonSnapshot {
+    public string Status = "complete", YesBinding = "none", NoBinding = "none";
+    public int Buttons = 0, Yes = 0, No = 0, YesMask = 0, NoMask = 0;
+    public IntPtr YesButton = IntPtr.Zero, NoButton = IntPtr.Zero;
+    public ButtonFailure YesFailure = new ButtonFailure(), NoFailure = new ButtonFailure();
+  }
+  private static ButtonSnapshot ReadButtons(IntPtr modal, uint pid, DateTime deadline, ChildBudget budget) {
+    var snapshot = new ButtonSnapshot();
+    // EnumChildWindows' return value is unused by Win32; callback snapshot.Status records every refusal.
+    EnumChildWindows(modal, (control, parameter) => {
+      if (DateTime.UtcNow >= deadline) { snapshot.Status = "deadline"; return false; }
+      if (++budget.Children > 256) { snapshot.Status = "bound"; return false; }
+      if (!Owned(control, pid)) { snapshot.Status = "read_error"; return false; }
+      if (!IsWindowVisible(control)) return true;
+      var kind = new StringBuilder(64);
+      if (GetClassName(control, kind, kind.Capacity) == 0) { snapshot.Status = "read_error"; return false; }
+      if (kind.ToString() != "Button") return true;
+      snapshot.Buttons++;
+      var title = new StringBuilder(128);
+      UIntPtr result;
+      int remaining = Math.Min(50, (int)(deadline - DateTime.UtcNow).TotalMilliseconds);
+      if (remaining <= 0) { snapshot.Status = "deadline"; return false; }
+      if (SendMessageTimeout(control, 0x000D, (UIntPtr)(uint)title.Capacity, title, 2, (uint)remaining, out result) == IntPtr.Zero) {
+        snapshot.Status = "read_error"; return false;
+      }
+      string name = title.ToString();
+      if (name == "Yes" || name == "&Yes") {
+        snapshot.YesBinding = ButtonBinding(control, modal, pid, 6, deadline);
+        if (snapshot.YesBinding != "none") { snapshot.Yes++; snapshot.YesButton = control; }
+        else if (DateTime.UtcNow < deadline) {
+          snapshot.YesMask = ButtonDiagnostic(control, modal, pid, 6);
+          snapshot.YesFailure = ObserveButtonFailure(control, modal, pid, deadline);
+        }
+      }
+      if (name == "No" || name == "&No") {
+        snapshot.NoBinding = ButtonBinding(control, modal, pid, 7, deadline);
+        if (snapshot.NoBinding != "none") { snapshot.No++; snapshot.NoButton = control; }
+        else if (DateTime.UtcNow < deadline) {
+          snapshot.NoMask = ButtonDiagnostic(control, modal, pid, 7);
+          snapshot.NoFailure = ObserveButtonFailure(control, modal, pid, deadline);
+        }
+      }
+      return true;
+    }, IntPtr.Zero);
+    return snapshot;
+  }
+
   public static string Observe(IntPtr save, uint pid, int budgetMs) {
     string status = "refused";
-    int mask = 0, candidates = 0, buttons = 0, yes = 0, no = 0, scanned = 0, children = 0, yesMask = 0, noMask = 0;
+    int mask = 0, candidates = 0, buttons = 0, yes = 0, no = 0, scanned = 0, yesMask = 0, noMask = 0;
     var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, Math.Min(2000, budgetMs)));
     IntPtr modal = IntPtr.Zero, yesButton = IntPtr.Zero, noButton = IntPtr.Zero;
     var yesFailure = new ButtonFailure();
     var noFailure = new ButtonFailure();
-    string yesBinding = "none", noBinding = "none";
+    string yesBinding = "none", noBinding = "none", recheckStatus = "not_checked";
+    int recheckButtons = 0, recheckYes = 0, recheckNo = 0;
+    bool recheckMatches = false;
+    var childBudget = new ChildBudget();
     if (budgetMs > 0 && budgetMs <= 2000 && SaveValid(save, pid)) {
       mask |= 1;
       status = "complete";
@@ -142,47 +193,28 @@ public static class WindowsReplacementBinding {
         mask |= 2;
         if (ModalValid(modal, save, pid)) {
           mask |= 4;
-          // EnumChildWindows' return value is unused by Win32; callback status records every refusal.
-          EnumChildWindows(modal, (control, parameter) => {
-            if (DateTime.UtcNow >= deadline) { status = "deadline"; return false; }
-            if (++children > 256) { status = "bound"; return false; }
-            if (!Owned(control, pid)) { status = "read_error"; return false; }
-            if (!IsWindowVisible(control)) return true;
-            var kind = new StringBuilder(64);
-            if (GetClassName(control, kind, kind.Capacity) == 0) { status = "read_error"; return false; }
-            if (kind.ToString() != "Button") return true;
-            buttons++;
-            var title = new StringBuilder(128);
-            UIntPtr result;
-            int remaining = Math.Min(50, (int)(deadline - DateTime.UtcNow).TotalMilliseconds);
-            if (remaining <= 0) { status = "deadline"; return false; }
-            if (SendMessageTimeout(control, 0x000D, (UIntPtr)(uint)title.Capacity, title, 2, (uint)remaining, out result) == IntPtr.Zero) {
-              status = "read_error"; return false;
-            }
-            string name = title.ToString();
-            if (name == "Yes" || name == "&Yes") {
-              yesBinding = ButtonBinding(control, modal, pid, 6, deadline);
-              if (yesBinding != "none") { yes++; yesButton = control; }
-              else if (DateTime.UtcNow < deadline) {
-                yesMask = ButtonDiagnostic(control, modal, pid, 6);
-                yesFailure = ObserveButtonFailure(control, modal, pid, deadline);
-              }
-            }
-            if (name == "No" || name == "&No") {
-              noBinding = ButtonBinding(control, modal, pid, 7, deadline);
-              if (noBinding != "none") { no++; noButton = control; }
-              else if (DateTime.UtcNow < deadline) {
-                noMask = ButtonDiagnostic(control, modal, pid, 7);
-                noFailure = ObserveButtonFailure(control, modal, pid, deadline);
-              }
-            }
-            return true;
-          }, IntPtr.Zero);
+          var first = ReadButtons(modal, pid, deadline, childBudget);
+          status = first.Status;
+          buttons = first.Buttons; yes = first.Yes; no = first.No;
+          yesButton = first.YesButton; noButton = first.NoButton;
+          yesBinding = first.YesBinding; noBinding = first.NoBinding;
+          yesMask = first.YesMask; noMask = first.NoMask;
+          yesFailure = first.YesFailure; noFailure = first.NoFailure;
           if (status == "complete") {
             if (yes == 1) mask |= 8;
             if (no == 1) mask |= 16;
             if (buttons == 2 && yes == 1 && no == 1 && yesButton != noButton) mask |= 32;
-            if (SaveValid(save, pid) && ModalValid(modal, save, pid) &&
+            if (buttons == 2 && yes == 1 && no == 1 && yesButton != noButton) {
+              var fresh = ReadButtons(modal, pid, deadline, childBudget);
+              recheckStatus = fresh.Status;
+              recheckButtons = fresh.Buttons; recheckYes = fresh.Yes; recheckNo = fresh.No;
+              recheckMatches = fresh.Status == "complete" && fresh.Buttons == 2 && fresh.Yes == 1 && fresh.No == 1 &&
+                fresh.YesButton == yesButton && fresh.NoButton == noButton &&
+                fresh.YesBinding == yesBinding && fresh.NoBinding == noBinding;
+              if (recheckStatus == "complete" && !recheckMatches) recheckStatus = "refused";
+              if (fresh.Status != "complete") status = fresh.Status;
+            }
+            if (recheckMatches && SaveValid(save, pid) && ModalValid(modal, save, pid) &&
                 yesBinding != "none" && noBinding != "none" &&
                 ButtonBinding(yesButton, modal, pid, 6, deadline) == yesBinding &&
                 ButtonBinding(noButton, modal, pid, 7, deadline) == noBinding) mask |= 64;
@@ -197,6 +229,9 @@ public static class WindowsReplacementBinding {
       ",\"buttons\":" + buttons + ",\"yes\":" + yes + ",\"no\":" + no +
       ",\"yesRefusalMask\":" + yesMask + ",\"noRefusalMask\":" + noMask +
       ",\"yesBinding\":\"" + yesBinding + "\",\"noBinding\":\"" + noBinding + "\"" +
-      ",\"yesFailure\":" + yesFailure.Json() + ",\"noFailure\":" + noFailure.Json() + "}";
+      ",\"yesFailure\":" + yesFailure.Json() + ",\"noFailure\":" + noFailure.Json() +
+      ",\"recheckStatus\":\"" + recheckStatus + "\",\"recheckButtons\":" + recheckButtons +
+      ",\"recheckYes\":" + recheckYes + ",\"recheckNo\":" + recheckNo +
+      ",\"recheckMatches\":" + (recheckMatches ? "true" : "false") + "}";
   }
 }
