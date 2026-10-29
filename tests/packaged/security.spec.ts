@@ -51,6 +51,7 @@ import {
   installedEffectiveCspDiagnostic,
   installedCspInterruptionDiagnostic,
 } from "../support/installed-effective-csp-diagnostics.ts";
+import { installedExportResponseDiagnostic } from "../support/installed-export-response-diagnostic.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import {
@@ -690,6 +691,7 @@ test("installed Windows native JSON Save publishes with exact bytes and one dura
     installedSystemEnvironment(),
     installedWindowsPickerDriver("save", target, "json"),
   );
+  process.stdout.write(`${installedExportResponseDiagnostic(result)}\n`);
   z.object({
     response: z.object({
       type: z.literal("exports.result"),
