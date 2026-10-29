@@ -2,6 +2,7 @@ import { execFile as runNativeFile, spawn } from "node:child_process";
 import { createHash as createNativeSelectionHash } from "node:crypto";
 import {
   cpSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -50,6 +51,7 @@ import {
   installedEffectiveCspDiagnostic,
   installedCspInterruptionDiagnostic,
 } from "../support/installed-effective-csp-diagnostics.ts";
+import { installedExportResponseDiagnostic } from "../support/installed-export-response-diagnostic.ts";
 import { installedMacPickerDriver } from "../support/installed-macos-picker-driver.ts";
 import { installedRendererExpression } from "../support/installed-renderer-expression.ts";
 import {
@@ -93,6 +95,7 @@ const archivePath = join(
   `${PRODUCT_NAME}-${process.platform}-${process.arch}-0.0.0.zip`,
 );
 const packageRoot = realpathSync(mkdtempSync(join(tmpdir(), "open-chords-installed-")));
+const externalOutputDirectories: string[] = [];
 const userDataDirectory = join(packageRoot, "user-data");
 const executablePath =
   process.platform === "darwin"
@@ -131,12 +134,14 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(() => {
-  rmSync(packageRoot, {
-    force: true,
-    maxRetries: 40,
-    recursive: true,
-    retryDelay: 250,
-  });
+  for (const directory of [packageRoot, ...externalOutputDirectories]) {
+    rmSync(directory, {
+      force: true,
+      maxRetries: 40,
+      recursive: true,
+      retryDelay: 250,
+    });
+  }
 });
 
 test("packaged shell flips every security fuse explicitly", async () => {
@@ -650,6 +655,113 @@ test("installed macOS observes replacement context without confirming or changin
   expect(await second.readProject("project_golden")).toEqual(before);
   expect(second.listExportReceipts("project_golden")).toEqual([]);
   expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
+});
+
+test("installed Windows native JSON Save publishes with exact bytes and one durable Receipt", async () => {
+  test.skip(process.platform !== "win32", "Windows native JSON Save proof");
+  test.setTimeout(360_000);
+  const state = join(packageRoot, "windows-native-json-save");
+  // The Windows executable directory is a protected production export root.
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "windows-json-save-output-")));
+  externalOutputDirectories.push(directory);
+  const target = join(directory, "Open Chords.json");
+  const external = join(packageRoot, "windows-json-save-preserved.bin");
+  const original = Buffer.from("private Windows native Save preservation fixture");
+  expect(existsSync(target)).toBe(false);
+  writeFileSync(join(directory, "preserved.txt"), original);
+  writeFileSync(external, original);
+  const directoryBefore = await proofTreeHashes(directory);
+  const library = await openProjectLibrary({ stateRoot: state });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+  );
+  envelope.payload = leadSheetProject();
+  await library.createProject({ envelope, records: goldenRecords() });
+  await (await openNetworkMode(state)).setOffline(true);
+  const before = await library.readProject("project_golden");
+  expect(library.listExportReceipts("project_golden")).toEqual([]);
+  const action = {
+    type: "save_json",
+    projectId: "project_golden",
+    expectedProjectRevisionId: before.projectRevisionId,
+    presentation: "current",
+  };
+  const result = await inspectInstalled(
+    state,
+    `(async () => {
+      const response = await window.openChords.exports.perform(${JSON.stringify(action)});
+      const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+      return { response, offline };
+    })()`,
+    installedSystemEnvironment(),
+    installedWindowsPickerDriver("save", target, "json"),
+  );
+  process.stdout.write(`${installedExportResponseDiagnostic(result)}\n`);
+  z.object({
+    response: z.object({
+      type: z.literal("exports.result"),
+      projectId: z.literal("project_golden"),
+      state: z.literal("saved"),
+      busy: z.literal(false),
+      pendingRecovery: z.literal(0),
+      receipts: z.array(z.unknown()).length(1),
+    }),
+    offline: z.literal(true),
+  }).parse(result);
+  const snapshot = captureJsonExport(envelope.payload, { presentation: "current" });
+  const output = readFileSync(target);
+  expect(output).toEqual(Buffer.from(serializeJsonExport(snapshot)));
+  expect(output.equals(original)).toBe(false);
+  const digest = createNativeSelectionHash("sha256").update(output).digest("hex");
+  const expectedTree = { ...directoryBefore, "Open Chords.json": digest };
+  expect(await proofTreeHashes(directory)).toEqual(expectedTree);
+  expect(readFileSync(external)).toEqual(original);
+  const reopened = await openProjectLibrary({ stateRoot: state });
+  expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
+  const after = await reopened.readProject("project_golden");
+  const receipts = reopened.listExportReceipts("project_golden");
+  expect(receipts).toHaveLength(1);
+  expect(receipts[0]).toMatchObject({
+    format: "open_chords_json",
+    outputHash: `sha256:${digest}`,
+    profileVersion: "open_chords_json/1.0/current",
+    omissions: [...new Set(snapshot.omissions)].sort((a, b) => a.localeCompare(b)),
+  });
+  // Windows dialogs expand 8.3 components; compare exact native canonical paths to the published file.
+  expect(realpathSync.native(receipts[0]!.outputLocation)).toBe(realpathSync.native(target));
+  expect(after.envelope).toEqual(before.envelope);
+  expect(after.compatibility).toBe(before.compatibility);
+  expect(after.records).toEqual({ ...before.records, exportReceipts: receipts });
+  expect(after.revisions).toHaveLength(before.revisions.length + 1);
+  expect(after.revisions.slice(0, before.revisions.length)).toEqual(before.revisions);
+  expect(after.revisions.at(-1)).toMatchObject({
+    reason: "edit_transaction",
+    projectRevisionId: after.projectRevisionId,
+  });
+  expect(after.projectRevisionId).not.toBe(before.projectRevisionId);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  const tree = await proofTreeHashes(reopened.activeRoot);
+  const second = await openProjectLibrary({ stateRoot: state });
+  expect(await second.readProject("project_golden")).toEqual(after);
+  expect(second.listExportReceipts("project_golden")).toEqual(receipts);
+  expect(await proofTreeHashes(second.activeRoot)).toEqual(tree);
+  expect(await proofTreeHashes(directory)).toEqual(expectedTree);
+  expect(readFileSync(external)).toEqual(original);
+  expect((await openNetworkMode(state)).offline).toBe(true);
+  for (const privateValue of [
+    state,
+    directory,
+    target,
+    external,
+    original.toString(),
+    "/unavailable/golden-fixture.wav",
+  ]) {
+    const escaped = JSON.stringify(privateValue).slice(1, -1);
+    for (const representation of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+      expect(JSON.stringify(result).includes(representation)).toBe(false);
+      expect(output.includes(Buffer.from(representation))).toBe(false);
+    }
+  }
 });
 
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
@@ -2096,6 +2208,16 @@ function installedMediaPickerDriver(
 ) {
   if (process.platform === "darwin")
     return installedMacPickerDriver(scenario, selectedPath, installedSystemEnvironment);
+  return installedWindowsPickerDriver(scenario, selectedPath, "media");
+}
+
+function installedWindowsPickerDriver(
+  scenario: "open" | "cancel_open_existing" | "save",
+  selectedPath: string,
+  format: "media" | "json",
+) {
+  if ((scenario === "save") !== (format === "json"))
+    throw new Error("Installed native picker mode unavailable");
   const env = installedSystemEnvironment();
   const windows = process.env.SystemRoot ?? process.env.WINDIR;
   if (!windows) throw new Error("Windows OS directory unavailable");
@@ -2114,7 +2236,7 @@ function installedMediaPickerDriver(
           "-Scenario",
           scenario,
           "-Format",
-          "media",
+          format,
           "-TargetPath",
           selectedPath,
         ],
@@ -2128,9 +2250,19 @@ function installedMediaPickerDriver(
           }
           try {
             console.log(installedSaveDriverTiming(stderr, performance.now() - started));
-            resolve(JSON.parse(stdout.trim()));
+            const parsed = z
+              .strictObject({
+                action: z.literal(scenario),
+                filenameSet: z.literal(true),
+                nativeClick: z.literal(true),
+                dialogDismissed: z.literal(true),
+                defaultNameValid: z.literal(scenario === "save"),
+              })
+              .safeParse(JSON.parse(stdout.trim()));
+            if (!parsed.success) throw new Error("Invalid native picker evidence");
+            resolve(parsed.data);
           } catch {
-            reject(new Error("Installed native media picker driver returned invalid evidence"));
+            reject(new Error("Installed native picker driver returned invalid evidence"));
           }
         },
       );
@@ -2140,7 +2272,7 @@ function installedMediaPickerDriver(
       filenameSet: true,
       nativeClick: true,
       dialogDismissed: true,
-      defaultNameValid: false,
+      defaultNameValid: scenario === "save",
     });
   };
 }

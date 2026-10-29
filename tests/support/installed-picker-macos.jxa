@@ -373,7 +373,29 @@ function run(argv) {
           if (attribute(sheets[s], 'role') !== 'AXSheet') continue;
           stage = 'elements';
           // Action controls are outside the file browser. Native Swift still verifies the full selected-file tree.
-          var elements = (expandedControls || !saves) ? expandedSaveControls(sheets[s]) : sheets[s].entireContents();
+          var elements;
+          if (expandedControls || !saves) elements = expandedSaveControls(sheets[s]);
+          else {
+            try { elements = sheets[s].entireContents(); }
+            catch (error) {
+              // Preserve the original refusal; observe only the captured references, never reacquire or retry.
+              var contentStatus = 'complete', sheetExists = 'unknown', windowExists = 'unknown';
+              function capturedExists(reference) {
+                if (Date.now() >= deadline) { contentStatus = 'deadline'; return 'unknown'; }
+                try {
+                  var exists = reference.exists();
+                  return exists === true ? 'true' : exists === false ? 'false' : 'unknown';
+                } catch (existenceError) { contentStatus = 'error'; return 'unknown'; }
+              }
+              sheetExists = capturedExists(sheets[s]);
+              windowExists = capturedExists(windows[w]);
+              var contentError = error && Number.isInteger(error.errorNumber) && error.errorNumber >= -32768 && error.errorNumber <= 32767 ? error.errorNumber : 'unknown';
+              console.log('Native macOS picker contents failure: status=' + contentStatus +
+                ' sheet_exists=' + sheetExists + ' window_exists=' + windowExists +
+                ' before_input=' + !nativeInputStarted + ' os_error=' + contentError);
+              throw error;
+            }
+          }
           counts.elements = Math.min(elements.length, 257);
           if (elements.length > 256) {
             if (preparesExpandedDirectory) {

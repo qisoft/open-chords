@@ -100,6 +100,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       "Native macOS picker",
     ),
     ...probes,
+    ...installedMacPickerContentsFailure(stderr),
     ...selection,
     ...target,
     ...guards,
@@ -233,4 +234,19 @@ export function installedMacPickerControlFailure(stderr: string): string[] {
       );
     })
     .slice(-1);
+}
+
+export function installedMacPickerContentsFailure(stderr: string): string[] {
+  const prefix = "Native macOS picker contents failure: ";
+  const last = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith(prefix))
+    .at(-1);
+  return last &&
+    /^Native macOS picker contents failure: status=(?:complete|deadline|error) sheet_exists=(?:true|false|unknown) window_exists=(?:true|false|unknown) before_input=(?:true|false) os_error=(?:unknown|-?[0-9]{1,5})$/u.test(
+      last,
+    )
+    ? [last]
+    : [];
 }
