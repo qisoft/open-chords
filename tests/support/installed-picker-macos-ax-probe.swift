@@ -206,7 +206,9 @@ let savesNewExport = savesNewJson || savesNewText || savesNewPdf || savesNewArch
 let cancelsReplaceJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--cancel-replace-json"
 let replacesJson = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--replace-json"
 let replacesText = arguments.count == 6 && arguments[3] == "directory_snapshot" && ["lrc", "chordpro"].contains(arguments[4]) && arguments[5] == "--replace-text"
-let replacesExport = replacesJson || replacesText
+let replacesPdf = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "pdf" && arguments[5] == "--replace-pdf"
+let replacesArchive = arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "archive" && arguments[5] == "--replace-archive"
+let replacesExport = replacesJson || replacesText || replacesPdf || replacesArchive
 let observesReplacement = replacesExport || cancelsReplaceJson || (arguments.count == 6 && arguments[3] == "directory_snapshot" && arguments[4] == "json" && arguments[5] == "--observe-replace-json")
 let verifiesFilename = (arguments.count == 6 && arguments[5] == "--verify-filename") || savesNewExport || observesReplacement
 var saveTargetExistingFixture = false

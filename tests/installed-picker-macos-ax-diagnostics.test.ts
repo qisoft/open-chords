@@ -14,6 +14,8 @@ import {
   installedMacReplacementCancelled,
   installedMacJsonReplacementConfirmed,
   installedMacTextReplacementConfirmed,
+  installedMacPdfReplacementConfirmed,
+  installedMacArchiveReplacementConfirmed,
   MAC_AX_COUNT_FIELDS,
 } from "./support/installed-picker-macos-ax-diagnostics.ts";
 
@@ -2168,6 +2170,61 @@ it.each(["lrc", "chordpro"] as const)(
       installedMacTextReplacementConfirmed(
         JSON.stringify({ ...value, saveFilename: { ...filenameProof, labelAttached: false } }),
         format,
+      ),
+    ).toBe(false);
+  },
+);
+
+it.each(["pdf", "archive"] as const)(
+  "requires an isolated guarded %s replacement action",
+  (format) => {
+    const verify =
+      format === "pdf"
+        ? installedMacPdfReplacementConfirmed
+        : installedMacArchiveReplacementConfirmed;
+    const other =
+      format === "pdf"
+        ? installedMacArchiveReplacementConfirmed
+        : installedMacPdfReplacementConfirmed;
+    const value = {
+      ...jsonReplaced,
+      action: { ...jsonReplaced.action, requested: `replace_${format}` },
+    };
+    const output = JSON.stringify(value);
+    expect(verify(output)).toBe(true);
+    expect(other(output)).toBe(false);
+    expect(installedMacJsonReplacementConfirmed(output)).toBe(false);
+    expect(installedMacTextReplacementConfirmed(output, "lrc")).toBe(false);
+    expect(installedMacReplacementCancelled(output)).toBe(false);
+    expect(installedMacReplaceContextObserved(output)).toBe(false);
+    expect(installedMacAxProbeDiagnostic(output, null, 1)).toContain(`action=replace_${format}`);
+    expect(verify(output.padEnd(8192, " "))).toBe(true);
+    expect(verify(output.padEnd(8193, " "))).toBe(false);
+    for (const change of [
+      { replaceGuardMask: 254 },
+      { replaceTargetFixtureVerified: false },
+      { replacePressed: false },
+      { replaceDismissed: false },
+      { replaceSaveDismissed: false },
+      { replaceError: -25205 },
+      { replaceChainVisited: 1 },
+      { modalBindingParent: "parent" },
+      { modalBindingSheetAttached: false },
+      { modalBindingForeground: false },
+      { modalEnabledReplace: 0 },
+      { windows: 2 },
+    ]) {
+      expect(
+        verify(
+          JSON.stringify({ ...value, replaceContext: { ...value.replaceContext, ...change } }),
+        ),
+      ).toBe(false);
+    }
+    expect(verify(JSON.stringify({ ...value, saveTargetExistingFixture: false }))).toBe(false);
+    expect(verify(JSON.stringify({ ...value, guardMask: 254 }))).toBe(false);
+    expect(
+      verify(
+        JSON.stringify({ ...value, saveFilename: { ...filenameProof, labelAttached: false } }),
       ),
     ).toBe(false);
   },
