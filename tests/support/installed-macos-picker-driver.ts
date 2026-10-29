@@ -30,6 +30,8 @@ import {
   installedMacReplacementCancelled,
   installedMacJsonReplacementConfirmed,
   installedMacTextReplacementConfirmed,
+  installedMacPdfReplacementConfirmed,
+  installedMacArchiveReplacementConfirmed,
   installedMacAxProbeDiagnostic,
 } from "./installed-picker-macos-ax-diagnostics.ts";
 import {
@@ -54,6 +56,8 @@ export function installedMacPickerDriver(
     | "replace_json"
     | "replace_lrc"
     | "replace_chordpro"
+    | "replace_pdf"
+    | "replace_archive"
     | "save_json"
     | "save_lrc"
     | "save_chordpro"
@@ -81,7 +85,9 @@ export function installedMacPickerDriver(
     const cancelReplace = scenario === "cancel_replace_json";
     const replaceJson = scenario === "replace_json";
     const replaceText = scenario === "replace_lrc" || scenario === "replace_chordpro";
-    const replacesExport = replaceJson || replaceText;
+    const replacePdf = scenario === "replace_pdf";
+    const replaceArchive = scenario === "replace_archive";
+    const replacesExport = replaceJson || replaceText || replacePdf || replaceArchive;
     const observeReplace = scenario === "observe_replace_json" || cancelReplace || replacesExport;
     const nativeSave =
       scenario === "save_json" || textSave || pdfSave || archiveSave || observeReplace;
@@ -99,9 +105,9 @@ export function installedMacPickerDriver(
       (saveFormat !== "json" || selectedPath === undefined)
     )
       throw new Error("Native macOS JSON Save target unavailable");
-    if (pdfSave && (saveFormat !== "pdf" || selectedPath === undefined))
+    if ((pdfSave || replacePdf) && (saveFormat !== "pdf" || selectedPath === undefined))
       throw new Error("Native macOS PDF Save target unavailable");
-    if (archiveSave && (saveFormat !== "archive" || selectedPath === undefined))
+    if ((archiveSave || replaceArchive) && (saveFormat !== "archive" || selectedPath === undefined))
       throw new Error("Native macOS archive Save target unavailable");
     const directoryScenario = scenario === "cancel_save_directory" || expandedDirectory;
     const saves =
@@ -182,21 +188,25 @@ export function installedMacPickerDriver(
               ...(requested === "directory_snapshot" ? [saveFormat ?? ""] : []),
               ...(saveExport
                 ? [
-                    replaceText
-                      ? "--replace-text"
-                      : replaceJson
-                        ? "--replace-json"
-                        : cancelReplace
-                          ? "--cancel-replace-json"
-                          : observeReplace
-                            ? "--observe-replace-json"
-                            : archiveSave
-                              ? "--save-new-archive"
-                              : pdfSave
-                                ? "--save-new-pdf"
-                                : textSave
-                                  ? "--save-new-text"
-                                  : "--save-new-json",
+                    replacePdf
+                      ? "--replace-pdf"
+                      : replaceArchive
+                        ? "--replace-archive"
+                        : replaceText
+                          ? "--replace-text"
+                          : replaceJson
+                            ? "--replace-json"
+                            : cancelReplace
+                              ? "--cancel-replace-json"
+                              : observeReplace
+                                ? "--observe-replace-json"
+                                : archiveSave
+                                  ? "--save-new-archive"
+                                  : pdfSave
+                                    ? "--save-new-pdf"
+                                    : textSave
+                                      ? "--save-new-text"
+                                      : "--save-new-json",
                   ]
                 : verifyFilename
                   ? ["--verify-filename"]
@@ -223,27 +233,31 @@ export function installedMacPickerDriver(
         const refused =
           diagnostic === "Native macOS AX probe: invalid_evidence" ||
           (saveExport
-            ? !(replaceText
-                ? installedMacTextReplacementConfirmed(
-                    output,
-                    scenario === "replace_lrc" ? "lrc" : "chordpro",
-                  )
-                : replaceJson
-                  ? installedMacJsonReplacementConfirmed(output)
-                  : cancelReplace
-                    ? installedMacReplacementCancelled(output)
-                    : observeReplace
-                      ? installedMacReplaceContextObserved(output)
-                      : textSave
-                        ? installedMacTextSaveSucceeded(
-                            output,
-                            scenario === "save_lrc" ? "lrc" : "chordpro",
-                          )
-                        : pdfSave
-                          ? installedMacPdfSaveSucceeded(output)
-                          : archiveSave
-                            ? installedMacArchiveSaveSucceeded(output)
-                            : installedMacJsonSaveSucceeded(output))
+            ? !(replacePdf
+                ? installedMacPdfReplacementConfirmed(output)
+                : replaceArchive
+                  ? installedMacArchiveReplacementConfirmed(output)
+                  : replaceText
+                    ? installedMacTextReplacementConfirmed(
+                        output,
+                        scenario === "replace_lrc" ? "lrc" : "chordpro",
+                      )
+                    : replaceJson
+                      ? installedMacJsonReplacementConfirmed(output)
+                      : cancelReplace
+                        ? installedMacReplacementCancelled(output)
+                        : observeReplace
+                          ? installedMacReplaceContextObserved(output)
+                          : textSave
+                            ? installedMacTextSaveSucceeded(
+                                output,
+                                scenario === "save_lrc" ? "lrc" : "chordpro",
+                              )
+                            : pdfSave
+                              ? installedMacPdfSaveSucceeded(output)
+                              : archiveSave
+                                ? installedMacArchiveSaveSucceeded(output)
+                                : installedMacJsonSaveSucceeded(output))
             : requested === "directory_snapshot"
               ? !(verifyFilename
                   ? installedMacSaveFilenameVerified(output)

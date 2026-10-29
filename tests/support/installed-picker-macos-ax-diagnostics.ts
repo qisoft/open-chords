@@ -514,6 +514,8 @@ const evidenceSchema = z.strictObject({
       "replace_json",
       "replace_lrc",
       "replace_chordpro",
+      "replace_pdf",
+      "replace_archive",
     ]),
     pressed: z.boolean(),
     dismissed: z.boolean(),
@@ -539,6 +541,8 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
         "replace_json",
         "replace_lrc",
         "replace_chordpro",
+        "replace_pdf",
+        "replace_archive",
       ].includes(evidence.data.action.requested)
     )
       return "Native macOS AX probe: invalid_evidence";
@@ -875,7 +879,9 @@ function replacementContextObserved(
     | "cancel_replace_json"
     | "replace_json"
     | "replace_lrc"
-    | "replace_chordpro",
+    | "replace_chordpro"
+    | "replace_pdf"
+    | "replace_archive",
 ) {
   if (stdout.length > 8192) return false;
   try {
@@ -938,7 +944,13 @@ function replacementContextObserved(
       context.modalStatus === "complete" &&
       context.modalError === 0 &&
       context.modalAttribute === "none" &&
-      (["replace_json", "replace_lrc", "replace_chordpro"].includes(expectedAction)
+      ([
+        "replace_json",
+        "replace_lrc",
+        "replace_chordpro",
+        "replace_pdf",
+        "replace_archive",
+      ].includes(expectedAction)
         ? context.saveActionStatus === "not_checked" &&
           context.savePressAction === "unknown" &&
           context.saveActionError === 0
@@ -1011,9 +1023,17 @@ export function installedMacTextReplacementConfirmed(stdout: string, format: "lr
   return replacementConfirmed(stdout, `replace_${format}`);
 }
 
+export function installedMacPdfReplacementConfirmed(stdout: string) {
+  return replacementConfirmed(stdout, "replace_pdf");
+}
+
+export function installedMacArchiveReplacementConfirmed(stdout: string) {
+  return replacementConfirmed(stdout, "replace_archive");
+}
+
 function replacementConfirmed(
   stdout: string,
-  action: "replace_json" | "replace_lrc" | "replace_chordpro",
+  action: "replace_json" | "replace_lrc" | "replace_chordpro" | "replace_pdf" | "replace_archive",
 ) {
   if (!replacementContextObserved(stdout, action)) return false;
   try {
