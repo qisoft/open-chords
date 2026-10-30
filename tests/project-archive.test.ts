@@ -220,6 +220,39 @@ describe("Portable Project Archive round trip", () => {
 });
 
 describe("Portable Project Archive identity", () => {
+  it("keeps a divergent practice history while importing the archived payload as a separate copy", async () => {
+    const root = await temporaryRoot("oc-archive-practice-conflict-");
+    const library = await libraryWithGolden(root);
+    const archived = archivedProjectFor(await library.readProject("project_golden")).document;
+    const archive = writePortableProjectArchive({ document: archived });
+    const target = join(root, "conflicting.ocarchive");
+    await writeFile(target, archive.archive);
+    await library.changePractice({
+      action: { speed: 1.25, type: "settings" },
+      expectedProjectRevisionId: (await library.readProject("project_golden")).projectRevisionId,
+      projectId: "project_golden",
+    });
+    const before = await library.readProject("project_golden");
+    expect(before.envelope).not.toEqual(archived.envelope);
+    const { imports } = await importerFor(root, () => target, library);
+    const imported = await imports.importArchive();
+    expect(imported).toMatchObject({ state: "imported", importedCopy: true });
+    if (imported.state !== "imported") throw new Error("Copy was not imported");
+    const copy = await library.readProject(imported.projectId);
+    expect(copy.envelope).toEqual({
+      ...archived.envelope,
+      payload: {
+        ...archived.envelope.payload,
+        id: imported.projectId,
+        importOrigins: [{ archiveManifestHash: archive.manifestHash, projectId: "project_golden" }],
+      },
+    });
+    expect(copy.records).toEqual({ ...archived.records, sources: before.records.sources });
+    expect(await library.readProject("project_golden")).toEqual(before);
+    expect(await imports.importArchive()).toEqual({ ...imported, state: "already_present" });
+    expect(library.listProjects()).toHaveLength(2);
+  });
+
   it("never overwrites or merges: duplicates converge, conflicts become Imported Project Copies", async () => {
     const root = await temporaryRoot("oc-archive-identity-");
     const library = await libraryWithGolden(root);
