@@ -151,7 +151,7 @@ it.each([
   );
 });
 
-it("expanded filename verification excludes only identified search fields", () => {
+it("filename verification excludes only identified search fields in either panel state", () => {
   const source = readFileSync(
     new URL("./support/installed-picker-macos.jxa", import.meta.url),
     "utf8",
@@ -171,13 +171,13 @@ it("expanded filename verification excludes only identified search fields", () =
     verifyDefaultFilename('json', [filename, search]).probe.total;
   `;
   expect(runInNewContext(fixture, { console: { log() {} } }, { timeout: 1000 })).toBe(1);
-  expect(() =>
+  expect(
     runInNewContext(
       fixture.replace("var expandedControls = true", "var expandedControls = false"),
-      {},
+      { console: { log() {} } },
       { timeout: 1000 },
     ),
-  ).toThrow("default filename unavailable");
+  ).toBe(1);
   expect(() =>
     runInNewContext(
       fixture.replace("subrole: 'AXSearchField'", "subrole: 'other'"),

@@ -27,6 +27,48 @@ var initialValue = -1, finalValue = -1
 var firstErrorAttribute = "none", stage = "arguments"
 var firstErrorDurationMs = 0
 var disclosures: [AXUIElement] = [], saves: [AXUIElement] = [], cancels: [AXUIElement] = []
+var failureReferences: (AXUIElement, AXUIElement, AXUIElement, pid_t)?
+var referenceStatus = "not_checked", referenceOwnerMatches = "unknown", referenceParentRole = "unknown"
+var referenceParentContains = "unknown", referenceSheetAttached = "unknown", referenceError = 0
+func referenceRead(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    guard ProcessInfo.processInfo.systemUptime < deadline else { referenceStatus = "deadline"; return nil }
+    let timeout = AXUIElementSetMessagingTimeout(element, 0.15)
+    guard timeout == .success else { referenceStatus = "error"; referenceError = Int(timeout.rawValue); return nil }
+    var value: CFTypeRef?
+    let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+    guard status == .success else { referenceStatus = "error"; referenceError = Int(status.rawValue); return nil }
+    return value
+}
+func observeFailureReferences(_ disclosure: AXUIElement, _ sheet: AXUIElement, _ parent: AXUIElement, _ pid: pid_t) {
+    guard ProcessInfo.processInfo.systemUptime < deadline else { referenceStatus = "deadline"; return }
+    referenceStatus = "complete"
+    var owner: pid_t = 0
+    let ownership = AXUIElementGetPid(disclosure, &owner)
+    guard ownership == .success else { referenceStatus = "error"; referenceError = Int(ownership.rawValue); return }
+    referenceOwnerMatches = owner == pid ? "true" : "false"
+    guard owner == pid else { referenceStatus = "foreign"; return }
+    guard let rawParent = referenceRead(disclosure, "AXParent"), CFGetTypeID(rawParent) == AXUIElementGetTypeID() else {
+        if referenceStatus == "complete" { referenceStatus = "error" }
+        return
+    }
+    let actualParent = unsafeBitCast(rawParent, to: AXUIElement.self)
+    guard let role = referenceRead(actualParent, "AXRole") as? String else {
+        if referenceStatus == "complete" { referenceStatus = "error" }
+        return
+    }
+    referenceParentRole = role == "AXSheet" ? "sheet" : role == "AXGroup" ? "group" : "other"
+    guard let peers = referenceRead(actualParent, "AXChildren") as? [AXUIElement], peers.count <= 256 else {
+        if referenceStatus == "complete" { referenceStatus = "error" }
+        return
+    }
+    referenceParentContains = peers.contains { CFEqual($0, disclosure) } ? "true" : "false"
+    guard let siblings = referenceRead(parent, "AXChildren") as? [AXUIElement], siblings.count <= 256 else {
+        if referenceStatus == "complete" { referenceStatus = "error" }
+        return
+    }
+    referenceSheetAttached = siblings.contains { CFEqual($0, sheet) } ? "true" : "false"
+    if ProcessInfo.processInfo.systemUptime >= deadline { referenceStatus = "deadline" }
+}
 func failure(_ status: AXError, _ attribute: String, _ durationMs: Int = 0) {
     complete = false
     lastError = Int(status.rawValue)
@@ -113,6 +155,7 @@ if (args.count == 2 || collapse || ensureExpanded), let pid = Int32(args[1]), pi
     if complete && disclosures.count == 1 && saves.count == 1 && cancels.count == 1 {
         stage = "guard"
         let disclosure = disclosures[0], sheet = sheets[0], parent = parents[0]
+        failureReferences = (disclosure, sheet, parent, pid)
         var owner: pid_t = 0
         if AXUIElementGetPid(disclosure, &owner) == .success && owner == pid { guardMask |= 1 }
         foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
@@ -156,9 +199,16 @@ if (args.count == 2 || collapse || ensureExpanded), let pid = Int32(args[1]), pi
         }
     }
 } else { complete = false }
+if !complete && pressed && stage == "expansion" && firstErrorAttribute == "AXValue", let refs = failureReferences {
+    // Preserve the original fatal status. Never repeat the failed AXValue read or any action.
+    observeFailureReferences(refs.0, refs.1, refs.2, refs.3)
+}
 let result: [String: Any] = ["trusted": trusted, "complete": complete, "foreground": foreground,
     "guardMask": guardMask, "lastError": lastError, "firstErrorAttribute": firstErrorAttribute, "firstErrorDurationMs": firstErrorDurationMs, "stage": stage,
     "pressed": pressed, "expanded": expanded, "initialValue": initialValue, "finalValue": finalValue,
     "windows": windowsCount, "sheets": sheetsCount, "visited": visited, "unsupported": min(unsupported, 999),
-    "disclosures": min(disclosures.count, 999), "saveButtons": min(saves.count, 999), "cancelButtons": min(cancels.count, 999)]
+    "disclosures": min(disclosures.count, 999), "saveButtons": min(saves.count, 999), "cancelButtons": min(cancels.count, 999),
+    "referenceStatus": referenceStatus, "referenceOwnerMatches": referenceOwnerMatches,
+    "referenceParentRole": referenceParentRole, "referenceParentContains": referenceParentContains,
+    "referenceSheetAttached": referenceSheetAttached, "referenceError": referenceError]
 if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), let output = String(data: data, encoding: .utf8) { print(output) }

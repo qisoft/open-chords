@@ -41,6 +41,12 @@ const schema = z.strictObject({
   disclosures: z.number().int().min(0).max(999),
   saveButtons: z.number().int().min(0).max(999),
   cancelButtons: z.number().int().min(0).max(999),
+  referenceStatus: z.enum(["not_checked", "complete", "deadline", "error", "foreign"]).optional(),
+  referenceOwnerMatches: z.enum(["true", "false", "unknown"]).optional(),
+  referenceParentRole: z.enum(["sheet", "group", "other", "unknown"]).optional(),
+  referenceParentContains: z.enum(["true", "false", "unknown"]).optional(),
+  referenceSheetAttached: z.enum(["true", "false", "unknown"]).optional(),
+  referenceError: z.number().int().min(-32768).max(32767).optional(),
 });
 function parse(stdout: string) {
   if (stdout.length > 4096) return undefined;
