@@ -829,7 +829,10 @@ const windowsPublicationCases = [
     format,
     replaces: false,
   })),
-  ...(["json", "lrc", "chordpro"] as const).map((format) => ({ format, replaces: true })),
+  ...(["json", "lrc", "chordpro", "pdf", "archive"] as const).map((format) => ({
+    format,
+    replaces: true,
+  })),
 ];
 for (const { format, replaces } of windowsPublicationCases) {
   test(`installed Windows native ${format} ${replaces ? "Replace" : "Save"} publishes with exact bytes and one durable Receipt`, async () => {
@@ -987,7 +990,10 @@ for (const { format, replaces } of windowsPublicationCases) {
     expect(readFileSync(external)).toEqual(original);
     expect((await openNetworkMode(state)).offline).toBe(true);
     let freshImport: unknown;
-    const freshState = join(packageRoot, "windows-native-saved-archive-import");
+    const freshState = join(
+      packageRoot,
+      replaces ? "windows-native-replaced-archive-import" : "windows-native-saved-archive-import",
+    );
     if (archiveProjection !== undefined) {
       const empty = await openProjectLibrary({ stateRoot: freshState });
       expect(empty.listProjects()).toEqual([]);
@@ -2532,7 +2538,7 @@ function installedWindowsPickerDriver(
   if (
     observesReplacement &&
     format !== "json" &&
-    !(confirmsReplacement && (format === "lrc" || format === "chordpro"))
+    !(confirmsReplacement && ["lrc", "chordpro", "pdf", "archive"].includes(format))
   )
     throw new Error("Replacement format unavailable");
   const saveDialog = scenario === "save" || scenario === "cancel_existing" || observesReplacement;

@@ -4,7 +4,7 @@ $isImport = $Scenario -in @('cancel_open', 'cancel_open_existing', 'open')
 $cancelsReplacement = $Scenario -eq 'cancel_replace'
 $confirmsReplacement = $Scenario -eq 'confirm_replace'
 $observesReplacement = $Scenario -in @('observe_replace', 'cancel_replace', 'confirm_replace')
-if ($observesReplacement -and $Format -ne 'json' -and !($confirmsReplacement -and $Format -in @('lrc', 'chordpro'))) { throw 'Replacement format unavailable' }
+if ($observesReplacement -and $Format -ne 'json' -and !($confirmsReplacement -and $Format -in @('lrc', 'chordpro', 'pdf', 'archive'))) { throw 'Replacement format unavailable' }
 $setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open', 'observe_replace', 'cancel_replace', 'confirm_replace')
 if ($isImport -and $Format -notin @('archive', 'media')) { throw 'Native import format unavailable' }
 if ($Format -eq 'media' -and !$isImport) { throw 'Native media Save unavailable' }
