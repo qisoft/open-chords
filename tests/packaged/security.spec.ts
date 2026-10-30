@@ -671,19 +671,26 @@ test("installed macOS observes replacement context without confirming or changin
   expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
 });
 
-for (const scenario of ["observe_replace", "cancel_replace"] as const) {
-  test(`installed Windows ${scenario === "observe_replace" ? "verifies both bound JSON confirmation input targets without confirming" : "clicks JSON confirmation No once and preserves the Save dialog and target"}`, async () => {
-    const format = "json";
+const windowsConfirmationCases = [
+  { scenario: "observe_replace", format: "json" } as const,
+  ...(["json", "lrc", "chordpro", "pdf", "archive"] as const).map((format) => ({
+    scenario: "cancel_replace" as const,
+    format,
+  })),
+];
+for (const { scenario, format } of windowsConfirmationCases) {
+  test(`installed Windows ${scenario === "observe_replace" ? "verifies both bound JSON confirmation input targets without confirming" : `clicks ${format} confirmation No once and preserves the Save dialog and target`}`, async () => {
     test.skip(process.platform !== "win32", "Windows replacement context observation");
     test.setTimeout(360_000);
-    const state = join(packageRoot, `windows-replacement-${scenario}`);
+    const caseName = format === "json" ? scenario : `${scenario}-${format}`;
+    const state = join(packageRoot, `windows-replacement-${caseName}`);
     const directory = realpathSync.native(
-      mkdtempSync(join(tmpdir(), `windows-replacement-${scenario}-output-`)),
+      mkdtempSync(join(tmpdir(), `windows-replacement-${caseName}-output-`)),
     );
     externalOutputDirectories.push(directory);
-    const filename = "Open Chords.json";
+    const filename = `Open Chords.${format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format}`;
     const target = join(directory, filename);
-    const external = join(packageRoot, `windows-replacement-${scenario}-preserved.bin`);
+    const external = join(packageRoot, `windows-replacement-${caseName}-preserved.bin`);
     const original = Buffer.from("private existing Windows replacement target fixture");
     writeFileSync(target, original);
     writeFileSync(join(directory, "preserved.txt"), original);
@@ -703,13 +710,17 @@ for (const scenario of ["observe_replace", "cancel_replace"] as const) {
       type: `save_${format}`,
       projectId: "project_golden",
       expectedProjectRevisionId: before.projectRevisionId,
-      presentation: "current",
+      ...(format === "archive"
+        ? { includeMedia: false }
+        : format === "lrc"
+          ? {}
+          : { presentation: "current" }),
     };
     const result = await inspectInstalled(
       state,
       `(() => { void window.openChords.exports.perform(${JSON.stringify(action)}).then(() => undefined, () => undefined); return { started: true }; })()`,
       installedSystemEnvironment(),
-      installedWindowsPickerDriver(scenario, target, "json"),
+      installedWindowsPickerDriver(scenario, target, format),
     );
     expect(result).toEqual({ started: true });
     expect(readFileSync(target)).toEqual(original);
@@ -2538,7 +2549,10 @@ function installedWindowsPickerDriver(
   if (
     observesReplacement &&
     format !== "json" &&
-    !(confirmsReplacement && ["lrc", "chordpro", "pdf", "archive"].includes(format))
+    !(
+      (confirmsReplacement || cancelsReplacement) &&
+      ["lrc", "chordpro", "pdf", "archive"].includes(format)
+    )
   )
     throw new Error("Replacement format unavailable");
   const saveDialog = scenario === "save" || scenario === "cancel_existing" || observesReplacement;

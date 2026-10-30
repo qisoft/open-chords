@@ -4,7 +4,7 @@ $isImport = $Scenario -in @('cancel_open', 'cancel_open_existing', 'open')
 $cancelsReplacement = $Scenario -eq 'cancel_replace'
 $confirmsReplacement = $Scenario -eq 'confirm_replace'
 $observesReplacement = $Scenario -in @('observe_replace', 'cancel_replace', 'confirm_replace')
-if ($observesReplacement -and $Format -ne 'json' -and !($confirmsReplacement -and $Format -in @('lrc', 'chordpro', 'pdf', 'archive'))) { throw 'Replacement format unavailable' }
+if ($observesReplacement -and $Format -ne 'json' -and !(($confirmsReplacement -or $cancelsReplacement) -and $Format -in @('lrc', 'chordpro', 'pdf', 'archive'))) { throw 'Replacement format unavailable' }
 $setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open', 'observe_replace', 'cancel_replace', 'confirm_replace')
 if ($isImport -and $Format -notin @('archive', 'media')) { throw 'Native import format unavailable' }
 if ($Format -eq 'media' -and !$isImport) { throw 'Native media Save unavailable' }
@@ -258,13 +258,13 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $replacement = $binding.replacement
         $binding.PSObject.Properties.Remove('replacement')
       } elseif ($cancelsReplacement -and $contextReady) {
-        $binding = [WindowsReplacementBinding]::CancelNo($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining, $TargetPath) | ConvertFrom-Json
+        $binding = [WindowsReplacementBinding]::CancelNo($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining, $TargetPath, $Format) | ConvertFrom-Json
         $cancellation = $binding.cancellation
         $binding.PSObject.Properties.Remove('cancellation')
       } else {
         $binding = [WindowsReplacementBinding]::Observe($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining) | ConvertFrom-Json
       }
-      if (!$confirmsReplacement) { [WindowsReplacementContext]::VerifyFixture($TargetPath) }
+      if (!$confirmsReplacement) { [WindowsReplacementContext]::VerifyFixture($TargetPath, $Format) }
       $observation = @{ action = 'observe_replace'; filenameSet = $true; nativeClick = $true; defaultNameValid = $true; targetFixtureVerified = $true; context = $context; binding = $binding }
       if ($confirmsReplacement) {
         ConvertTo-Json -InputObject @{ action = 'confirm_replace'; observation = $observation; replacement = $replacement } -Depth 8 -Compress
