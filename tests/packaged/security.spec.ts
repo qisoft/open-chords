@@ -48,6 +48,11 @@ import { leadSheetProject } from "../support/export-fixture.ts";
 import { installedCdpExceptionDiagnostic } from "../support/installed-cdp-diagnostics.ts";
 import { installedCspFrameTreeDiagnostic } from "../support/installed-csp-frame-diagnostic.ts";
 import {
+  InstalledCspDocumentContextSchema,
+  installedCspFrameNavigationDiagnostic,
+  installedCspPriorMediaDiagnostic,
+} from "../support/installed-csp-transition-diagnostics.ts";
+import {
   installedEffectiveCspDiagnostic,
   installedCspInterruptionDiagnostic,
 } from "../support/installed-effective-csp-diagnostics.ts";
@@ -2719,6 +2724,8 @@ const EffectiveCspProbeSchema = z.object({
 });
 
 const OfflinePlaybackSchema = z.object({
+  entryContext: InstalledCspDocumentContextSchema.optional(),
+  exitContext: InstalledCspDocumentContextSchema.optional(),
   workspaceProbe: WorkspacePlaybackProbeSchema.nullable(),
   offline: z.boolean(),
   body: z.string(),
@@ -2801,7 +2808,10 @@ async function inspectPackagedRenderer(
     }
     if (target !== undefined) {
       const offlinePlayback = await evaluatePackagedMedia(target.webSocketDebuggerUrl, projectId);
-      const security = await evaluateRendererTarget(target.webSocketDebuggerUrl);
+      const security = await evaluateRendererTarget(target.webSocketDebuggerUrl, {
+        targetUrl: target.url,
+        playback: offlinePlayback,
+      });
       return RendererSnapshotSchema.parse({ ...security, offlinePlayback });
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -2944,7 +2954,14 @@ async function evaluatePackagedExpression(
   });
 }
 
-async function evaluateRendererTarget(webSocketUrl: string) {
+async function evaluateRendererTarget(
+  webSocketUrl: string,
+  priorMedia: { targetUrl: string; playback: unknown },
+) {
+  const priorMediaDiagnostic = installedCspPriorMediaDiagnostic(
+    priorMedia.targetUrl,
+    priorMedia.playback,
+  );
   const expression = `new Promise((resolve, reject) => {
     const inspect = async () => {
       await new Promise((probeComplete) => {
@@ -3063,17 +3080,19 @@ async function evaluateRendererTarget(webSocketUrl: string) {
     let effectiveCsp: z.infer<typeof EffectiveCspProbeSchema> | undefined;
     let refusedCsp: { observation: unknown } | undefined;
     let undeclaredAssetStatus: number | undefined;
+    const interruptionDiagnostic = (reason: "timeout" | "error" | "close") =>
+      `${installedCspInterruptionDiagnostic(reason, refusedCsp)}${refusedCsp === undefined ? "" : `\n${priorMediaDiagnostic}`}`;
     const timeout = setTimeout(() => {
       socket.close();
-      reject(new Error(installedCspInterruptionDiagnostic("timeout", refusedCsp)));
+      reject(new Error(interruptionDiagnostic("timeout")));
     }, 5_000);
     socket.addEventListener("error", () => {
       clearTimeout(timeout);
-      reject(new Error(installedCspInterruptionDiagnostic("error", refusedCsp)));
+      reject(new Error(interruptionDiagnostic("error")));
     });
     socket.addEventListener("close", () => {
       clearTimeout(timeout);
-      reject(new Error(installedCspInterruptionDiagnostic("close", refusedCsp)));
+      reject(new Error(interruptionDiagnostic("close")));
     });
     socket.addEventListener("open", () => {
       socket.send(
@@ -3209,7 +3228,7 @@ async function evaluateRendererTarget(webSocketUrl: string) {
           socket.close();
           reject(
             new Error(
-              `${installedEffectiveCspDiagnostic(refusedCsp.observation)}\n${installedCspFrameTreeDiagnostic(tree.success ? tree.data.result.frameTree : undefined)}`,
+              `${installedEffectiveCspDiagnostic(refusedCsp.observation)}\n${installedCspFrameTreeDiagnostic(tree.success ? tree.data.result.frameTree : undefined)}\n${installedCspFrameNavigationDiagnostic(tree.success ? tree.data.result.frameTree : undefined)}\n${priorMediaDiagnostic}`,
             ),
           );
           return;
@@ -3262,6 +3281,16 @@ async function evaluatePackagedMedia(
 ): Promise<z.infer<typeof OfflinePlaybackSchema>> {
   const projectIdLiteral = JSON.stringify(projectId);
   const expression = `(async () => {
+    const readDocumentContext = () => {
+      try {
+        const url = new URL(location.href);
+        const document = location.href === "about:blank" ? "about_blank"
+          : url.protocol === "open-chords:" && url.hostname === "app"
+            ? url.pathname === "/index.html" ? "app_index" : "app_other" : "other";
+        return { document, preloadPresent: typeof window.openChords === "object" && window.openChords !== null };
+      } catch { return { document: "unavailable", preloadPresent: false }; }
+    };
+    const entryContext = readDocumentContext();
     let playback = { type: "media.probe_failed" };
     let response = null;
     let body = "";
@@ -3404,6 +3433,8 @@ async function evaluatePackagedMedia(
       error = String(cause);
     }
     return {
+      entryContext,
+      exitContext: readDocumentContext(),
       body,
       error,
       offline,
