@@ -11,6 +11,15 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
       ),
     )
     .slice(-3);
+  const filenameIdentity = stderr
+    .slice(-65536)
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^Native macOS Save filename identity: pid_matches=(?:true|false|unknown) foreground=(?:true|false|unknown) before_input=true$/u.test(
+        line,
+      ),
+    )
+    .slice(-1);
   const invalidFilenameReference = stderr
     .slice(-65536)
     .split(/\r?\n/u)
@@ -34,7 +43,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     .split(/\r?\n/u)
     .filter((line) => {
       const match =
-        /^Native macOS picker guard: phase=(?:activate|before_input|after_probe) mask=([0-9]{1,3}) unknown_mask=([0-9]{1,3})$/u.exec(
+        /^Native macOS picker guard: phase=(?:activate|before_input|after_probe|filename) mask=([0-9]{1,3}) unknown_mask=([0-9]{1,3})$/u.exec(
           line,
         );
       return match !== null && Number(match[1]) <= 255 && Number(match[2]) <= 255;
@@ -44,7 +53,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     .slice(-65536)
     .split(/\r?\n/u)
     .filter((line) =>
-      /^Native macOS picker guard snapshot: phase=(?:activate|before_input|after_probe) status=(?:complete|deadline|bound|error) age_ms=[0-9]{1,6} sheet_exists=(?:true|false|unknown) button_exists=(?:true|false|unknown) windows=(?:[0-9]|1[0-7]) sheets=(?:[0-9]|1[0-7]) os_error=(?:none|unknown|-?[0-9]{1,5})$/u.test(
+      /^Native macOS picker guard snapshot: phase=(?:activate|before_input|after_probe|filename) status=(?:complete|deadline|bound|error) age_ms=[0-9]{1,6} sheet_exists=(?:true|false|unknown) button_exists=(?:true|false|unknown) windows=(?:[0-9]|1[0-7]) sheets=(?:[0-9]|1[0-7]) os_error=(?:none|unknown|-?[0-9]{1,5})$/u.test(
         line,
       ),
     )
@@ -54,7 +63,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     .split(/\r?\n/u)
     .filter((line) => {
       const match =
-        /^Native macOS picker fresh controls: phase=(?:activate|before_input|after_probe) status=(?:complete|deadline|bound|error) before_input=(?:true|false) elements=([0-9]{1,3}) primary=([0-9]{1,2}) cancel=([0-9]{1,2}) os_error=(?:none|unknown|-?[0-9]{1,5})$/u.exec(
+        /^Native macOS picker fresh controls: phase=(?:activate|before_input|after_probe|filename) status=(?:complete|deadline|bound|error) before_input=(?:true|false) elements=([0-9]{1,3}) primary=([0-9]{1,2}) cancel=([0-9]{1,2}) os_error=(?:none|unknown|-?[0-9]{1,5})$/u.exec(
           line,
         );
       return (
@@ -117,6 +126,7 @@ export function installedMacPickerDiagnostic(error: unknown, stderr: string, dur
     ...reads,
     ...refusal,
     ...invalidFilenameReference,
+    ...filenameIdentity,
     ...installedMacSaveUnreadableReferences(stderr),
     ...installedMacSaveInitialDisclosure(stderr),
     ...installedMacSaveFailureFields(stderr),
@@ -261,7 +271,7 @@ export function installedMacPickerFreshPrimary(stderr: string): string[] {
     .at(-1);
   if (!line) return [];
   const match =
-    /^Native macOS picker fresh primary: phase=(?:activate|before_input|after_probe) status=(?:complete|deadline|bound|error) present=([0-9]{1,2}) enabled=([0-9]{1,2}) disabled=([0-9]{1,2}) unknown=([0-9]{1,2})$/u.exec(
+    /^Native macOS picker fresh primary: phase=(?:activate|before_input|after_probe|filename) status=(?:complete|deadline|bound|error) present=([0-9]{1,2}) enabled=([0-9]{1,2}) disabled=([0-9]{1,2}) unknown=([0-9]{1,2})$/u.exec(
       line,
     );
   if (!match) return [];

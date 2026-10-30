@@ -328,3 +328,36 @@ it.each([
     installedMacPickerDiagnostic({}, `Native macOS Save invalid filename reference: ${fields}`, 1),
   ).not.toContain("invalid filename reference:");
 });
+
+it("retains only fixed failure-only filename identity and fresh snapshot classifications", () => {
+  const identity =
+    "Native macOS Save filename identity: pid_matches=true foreground=true before_input=true";
+  const snapshot =
+    "Native macOS picker guard snapshot: phase=filename status=complete age_ms=210 sheet_exists=false button_exists=true windows=1 sheets=1 os_error=none";
+  const fresh =
+    "Native macOS picker fresh controls: phase=filename status=complete before_input=true elements=9 primary=1 cancel=1 os_error=none";
+  const primary =
+    "Native macOS picker fresh primary: phase=filename status=complete present=1 enabled=1 disabled=0 unknown=0";
+  const result = installedMacPickerDiagnostic(
+    {},
+    [
+      identity,
+      identity,
+      snapshot,
+      fresh,
+      primary,
+      identity + " /private",
+      identity.replace("foreground=true", "foreground=/private"),
+      snapshot.replace("windows=1", "windows=18"),
+      fresh.replace("elements=9", "elements=999"),
+    ].join("\n"),
+    1,
+  );
+  expect(result.split(identity)).toHaveLength(2);
+  expect(result).toContain(snapshot);
+  expect(result).toContain(fresh);
+  expect(result).toContain(primary);
+  expect(result).not.toContain("private");
+  expect(result).not.toContain("windows=18");
+  expect(result).not.toContain("elements=999");
+});

@@ -8,7 +8,7 @@ const start = source.indexOf("  function reportFreshControls(");
 const end = source.indexOf("  function requireCancelTarget(", start);
 const functions = source.slice(start, end);
 
-function probe(change = "", freshFailure = false) {
+function probe(change = "", freshFailure = false, phase: "activate" | "filename" = "activate") {
   const lines: string[] = [];
   const result: unknown = runInNewContext(
     `
@@ -20,7 +20,7 @@ function probe(change = "", freshFailure = false) {
     var candidate = { capturedAt: Date.now(), sheet: { exists: () => false }, button: { exists: () => true } };
     ${functions}
     ${change}
-    reportGuardSnapshot(process, candidate, 'activate');
+    reportGuardSnapshot(process, candidate, '${phase}');
   `,
     { console: { log: (line: string) => lines.push(line) } },
     { timeout: 1000 },
@@ -52,4 +52,12 @@ it("bounds the inventory before reading any oversized collection", () => {
 });
 it("does not treat post-input fresh evidence as pre-input", () => {
   expect(probe("nativeInputStarted = true;").output).toContain("before_input=false");
+});
+
+it("observes filename-failure references without changing stale-reference eligibility", () => {
+  const result = probe("", false, "filename");
+  expect(result.result).toBe(false);
+  expect(result.output).toContain("phase=filename status=complete");
+  expect(result.output).toContain("sheet_exists=false button_exists=true windows=1 sheets=1");
+  expect(result.output).toContain("before_input=true elements=2 primary=1 cancel=1");
 });

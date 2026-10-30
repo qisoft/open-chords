@@ -503,6 +503,18 @@ function run(argv) {
       }
       throw new Error('not dismissed');
       } catch (error) {
+        if (error && error.message === 'default filename unavailable' && saves && !nativeInputStarted && Date.now() < deadline) {
+          // Failure-only observation: retain the original refusal and do not rediscover or act.
+          try {
+            var failurePid = attribute(process, 'unixId');
+            var failureForeground = Date.now() < deadline ? attribute(process, 'frontmost') : null;
+            console.log('Native macOS Save filename identity: pid_matches=' +
+              (failurePid === applicationPid ? 'true' : failurePid === null ? 'unknown' : 'false') +
+              ' foreground=' + (failureForeground === true ? 'true' : failureForeground === false ? 'false' : 'unknown') +
+              ' before_input=true');
+            reportGuardSnapshot(process, candidate, 'filename');
+          } catch (_) {}
+        }
         if (error && error.message === 'stale control discovery before input' && (retainedDirectory || selectsFile) && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
           referenceRefreshes++;
           console.log('Native macOS picker refresh: reason=stale_control_discovery attempt=1 before_input=true');
