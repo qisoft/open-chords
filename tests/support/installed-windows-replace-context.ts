@@ -37,6 +37,12 @@ export const WindowsReplacementBindingSchema = z.strictObject({
       guardMask: z.number().int().min(0).max(255),
     })
     .optional(),
+  yesInputGuard: z
+    .strictObject({
+      status: z.enum(["not_checked", "complete", "refused", "deadline", "read_error"]),
+      guardMask: z.number().int().min(0).max(255),
+    })
+    .optional(),
   yesFailure: buttonFailure.optional(),
   noFailure: buttonFailure.optional(),
   candidates: z.number().int().min(0).max(17),
@@ -125,6 +131,13 @@ export const WindowsReplacementNoInputObservationSchema =
   WindowsReplacementBoundObservationSchema.refine(
     ({ binding }) =>
       binding?.noInputGuard?.status === "complete" && binding.noInputGuard.guardMask === 255,
+  );
+
+// Both snapshots are read-only; future confirmation input must rebuild its own proof.
+export const WindowsReplacementYesInputObservationSchema =
+  WindowsReplacementNoInputObservationSchema.refine(
+    ({ binding }) =>
+      binding?.yesInputGuard?.status === "complete" && binding.yesInputGuard.guardMask === 255,
   );
 
 export const WindowsReplacementCancellationDiagnosticSchema = z.strictObject({

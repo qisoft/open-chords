@@ -7,6 +7,7 @@ import {
   WindowsReplacementObservationSchema,
   WindowsReplacementBoundObservationSchema,
   WindowsReplacementNoInputObservationSchema,
+  WindowsReplacementYesInputObservationSchema,
 } from "./support/installed-windows-replace-context.ts";
 
 const evidence = () => ({
@@ -405,3 +406,55 @@ for (const status of ["not_checked", "refused", "deadline", "read_error"]) {
     expect(WindowsReplacementCancellationSchema.safeParse(value).success).toBe(false);
   });
 }
+
+const bothInputEvidence = () => {
+  const value = noInputEvidence();
+  return {
+    ...value,
+    binding: { ...value.binding, yesInputGuard: { status: "complete", guardMask: 255 } },
+  };
+};
+it("requires an independently complete Yes target as well as the No target and full binding", () => {
+  expect(WindowsReplacementYesInputObservationSchema.parse(bothInputEvidence())).toEqual(
+    bothInputEvidence(),
+  );
+  expect(WindowsReplacementYesInputObservationSchema.safeParse(noInputEvidence()).success).toBe(
+    false,
+  );
+  expect(WindowsReplacementYesInputObservationSchema.safeParse(boundEvidence()).success).toBe(
+    false,
+  );
+});
+for (const bit of [1, 2, 4, 8, 16, 32, 64, 128]) {
+  it(`refuses missing Yes target guard bit ${bit}`, () => {
+    const value = bothInputEvidence();
+    value.binding.yesInputGuard.guardMask &= ~bit;
+    expect(WindowsReplacementYesInputObservationSchema.safeParse(value).success).toBe(false);
+  });
+}
+for (const status of ["not_checked", "refused", "deadline", "read_error"]) {
+  it(`retains fixed Yes ${status} evidence but refuses acceptance`, () => {
+    const value = bothInputEvidence();
+    value.binding.yesInputGuard.status = status;
+    expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(true);
+    expect(WindowsReplacementYesInputObservationSchema.safeParse(value).success).toBe(false);
+  });
+}
+for (const field of ["x", "y", "hwnd", "pid", "title", "path", "error"]) {
+  it(`rejects private Yes target field ${field}`, () => {
+    const value = bothInputEvidence();
+    Object.assign(value.binding.yesInputGuard, { [field]: "private" });
+    expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(false);
+  });
+}
+it("a complete Yes guard cannot substitute for the existing No guard or binding", () => {
+  const no = bothInputEvidence();
+  no.binding.noInputGuard.guardMask = 0;
+  expect(WindowsReplacementYesInputObservationSchema.safeParse(no).success).toBe(false);
+  const binding = bothInputEvidence();
+  binding.binding.recheckMatches = false;
+  expect(WindowsReplacementYesInputObservationSchema.safeParse(binding).success).toBe(false);
+});
+it("adding the Yes observer does not make Yes a prerequisite for the independent No action proof", () => {
+  expect(WindowsReplacementCancellationSchema.safeParse(cancellationEvidence()).success).toBe(true);
+});

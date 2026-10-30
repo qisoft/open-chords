@@ -67,7 +67,7 @@ import {
   WindowsReplacementCancellationDiagnosticSchema,
   WindowsReplacementCancellationSchema,
   WindowsReplacementDiagnosticSchema,
-  WindowsReplacementNoInputObservationSchema,
+  WindowsReplacementYesInputObservationSchema,
 } from "../support/installed-windows-replace-context.ts";
 import {
   WorkspacePlaybackProbeSchema,
@@ -670,7 +670,7 @@ test("installed macOS observes replacement context without confirming or changin
 });
 
 for (const scenario of ["observe_replace", "cancel_replace"] as const) {
-  test(`installed Windows ${scenario === "observe_replace" ? "verifies the bound JSON confirmation No input target without confirming" : "clicks JSON confirmation No once and preserves the Save dialog and target"}`, async () => {
+  test(`installed Windows ${scenario === "observe_replace" ? "verifies both bound JSON confirmation input targets without confirming" : "clicks JSON confirmation No once and preserves the Save dialog and target"}`, async () => {
     const format = "json";
     test.skip(process.platform !== "win32", "Windows replacement context observation");
     test.setTimeout(360_000);
@@ -2572,7 +2572,7 @@ function installedWindowsPickerDriver(
               process.stdout.write(
                 `Native Windows replacement binding: ${JSON.stringify(diagnostic.binding)}\n`,
               );
-              if (!WindowsReplacementNoInputObservationSchema.safeParse(diagnostic).success)
+              if (!WindowsReplacementYesInputObservationSchema.safeParse(diagnostic).success)
                 throw new Error("Replacement context refused");
             }
             resolve(parsed.data);
@@ -2587,7 +2587,7 @@ function installedWindowsPickerDriver(
       return;
     }
     if (observesReplacement) {
-      WindowsReplacementNoInputObservationSchema.parse(evidence);
+      WindowsReplacementYesInputObservationSchema.parse(evidence);
       return;
     }
     expect(evidence).toEqual({
