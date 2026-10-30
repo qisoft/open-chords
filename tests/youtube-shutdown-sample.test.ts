@@ -206,3 +206,15 @@ it("suppresses both summaries when the close completed before the sampler callba
     log.mockRestore();
   }
 });
+
+it("continues to IO and pool threads after truncating one overlong main stack", () => {
+  const raw =
+    " 100 Thread_1: CrBrowserMain\n" +
+    " + 100 uv_run (in /private/lib) + 1\n".repeat(128) +
+    " + 100 sqlite3_step (in /private/overflow) + 1\n" +
+    " 100 Thread_2: Chrome_IOThread\n + 100 base::WaitableEvent::Wait() (in /private/lib) + 1\n" +
+    " 100 Thread_3: ThreadPoolForegroundWorker\n + 100 pthread_cond_wait (in /private/lib) + 1\n";
+  expect(youtubeShutdownThreadDiagnostic(raw)).toBe(
+    "YouTube shutdown threads: threads=3 frames=130 main=1 io=1 pool=1 other=0 io_mask=16 pool_mask=8 other_mask=0 category_threads=0,0,0,1,1,0,0,1,0,0,0,0 truncated=true",
+  );
+});

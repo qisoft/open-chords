@@ -94,9 +94,13 @@ export function youtubeShutdownThreadDiagnostic(raw: string) {
     if (group === undefined) continue;
     const frame = /^\s*[+!:| ]*[0-9]{1,9}\s+(.+?)\s+\(in [^)]+\)/.exec(line);
     if (!frame) continue;
-    if (frames === 2048 || threadFrames === 128) {
+    if (frames === 2048) {
       truncated = true;
       break;
+    }
+    if (threadFrames === 128) {
+      truncated = true;
+      continue;
     }
     frames++;
     threadFrames++;
