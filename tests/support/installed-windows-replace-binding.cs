@@ -243,14 +243,14 @@ public static class WindowsReplacementBinding {
   }
   private static string CancelBoundNo(IntPtr save, IntPtr modal, IntPtr yesButton, IntPtr noButton,
       uint pid, string yesBinding, string noBinding, DateTime deadline, ChildBudget childBudget,
-      string fixturePath, Point point, Rect bounds) {
+      string fixturePath, string format, Point point, Rect bounds) {
     string status = "refused";
     bool moved = false, attempted = false, sent = false, dismissed = false, retained = false;
     bool censusMatches = false, pointUnchanged = false, cursorMatches = false;
     string freshGuard = "{\"status\":\"not_checked\",\"guardMask\":0}";
     int guardMask = 0;
     // Verify the exact controlled fixture again before any pointer movement or input.
-    WindowsReplacementContext.VerifyFixture(fixturePath);
+    WindowsReplacementContext.VerifyFixture(fixturePath, format);
     if (DateTime.UtcNow < deadline && IntPtr.Size == 8 && SetCursorPos(point.x, point.y)) {
       moved = true;
       var fresh = ReadButtons(modal, pid, deadline, childBudget);
@@ -279,7 +279,7 @@ public static class WindowsReplacementBinding {
             retained = Owned(save, pid) && IsWindowVisible(save) && IsWindowEnabled(save) &&
               ClassIs(save, "#32770") && GetForegroundWindow() == save && GetAncestor(save, 2) == save;
             if (dismissed && retained && DateTime.UtcNow < deadline) {
-              WindowsReplacementContext.VerifyFixture(fixturePath);
+              WindowsReplacementContext.VerifyFixture(fixturePath, format);
               if (DateTime.UtcNow < deadline) status = "complete";
             }
           }
@@ -398,9 +398,9 @@ public static class WindowsReplacementBinding {
   public static string Observe(IntPtr save, uint pid, int budgetMs) {
     return ObserveCore(save, pid, budgetMs, null);
   }
-  public static string CancelNo(IntPtr save, uint pid, int budgetMs, string fixturePath) {
+  public static string CancelNo(IntPtr save, uint pid, int budgetMs, string fixturePath, string format) {
     if (String.IsNullOrEmpty(fixturePath)) throw new InvalidOperationException("Replacement fixture unavailable");
-    return ObserveCore(save, pid, budgetMs, fixturePath);
+    return ObserveCore(save, pid, budgetMs, fixturePath, false, format);
   }
   public static string ReplaceYes(IntPtr save, uint pid, int budgetMs, string fixturePath, string format) {
     if (String.IsNullOrEmpty(fixturePath)) throw new InvalidOperationException("Replacement fixture unavailable");
@@ -481,7 +481,7 @@ public static class WindowsReplacementBinding {
           yesInputGuard = ObserveButtonInputGuard(save, modal, yesButton, pid, 6, yesBinding, deadline, out yesPoint, out yesBounds);
         }
         if (fixturePath != null && !replaceYes && noInputGuard == "{\"status\":\"complete\",\"guardMask\":255}")
-          cancellation = CancelBoundNo(save, modal, yesButton, noButton, pid, yesBinding, noBinding, deadline, childBudget, fixturePath, point, bounds);
+          cancellation = CancelBoundNo(save, modal, yesButton, noButton, pid, yesBinding, noBinding, deadline, childBudget, fixturePath, format, point, bounds);
         if (replaceYes && noInputGuard == "{\"status\":\"complete\",\"guardMask\":255}" && yesInputGuard == "{\"status\":\"complete\",\"guardMask\":255}")
           replacement = ReplaceBoundYes(save, modal, yesButton, noButton, pid, yesBinding, noBinding, deadline, childBudget, fixturePath, format, yesPoint, yesBounds);
       }

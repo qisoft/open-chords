@@ -457,6 +457,8 @@ const evidenceSchema = z.strictObject({
   pressFollowupError: z.number().int().min(-32768).max(32767),
   firstOtherSelectedReference: z.boolean(),
   firstOtherSelectedBranch: z.boolean(),
+  firstOtherParentKnown: z.boolean().optional(),
+  firstOtherStaleChildContext: z.boolean().optional(),
   firstOtherError: z.number().int().min(-32768).max(32767),
   firstOtherAttribute: z.enum(AX_ATTRIBUTE_KEYS),
   firstOtherStage: z.enum([
@@ -568,6 +570,8 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       firstOtherError,
       firstOtherSelectedReference,
       firstOtherSelectedBranch,
+      firstOtherParentKnown,
+      firstOtherStaleChildContext,
       firstOtherAttribute,
       firstOtherStage,
       firstOtherVisited,
@@ -610,6 +614,12 @@ export function installedMacAxProbeDiagnostic(stdout: string, error: unknown, du
       `other_error=${firstOtherError}`,
       `other_selected_reference=${firstOtherSelectedReference}`,
       `other_selected_branch=${firstOtherSelectedBranch}`,
+      ...(firstOtherParentKnown === undefined
+        ? []
+        : [`other_parent_known=${firstOtherParentKnown}`]),
+      ...(firstOtherStaleChildContext === undefined
+        ? []
+        : [`other_stale_child_context=${firstOtherStaleChildContext}`]),
       `other_attribute=${firstOtherAttribute}`,
       `other_stage=${firstOtherStage}`,
       `other_visited=${firstOtherVisited}`,
@@ -925,20 +935,27 @@ function replacementContextObserved(
       context.modalBindingError === 0 &&
       context.modalBindingAttribute === "none";
     // Preserve the actual single-dispatch result. The observed successful variant is
-    // limited to the read-only observer; all independent binding and refusal checks remain.
+    // limited to observation and independently verified Cancel; Replace and ordinary Save remain unchanged.
     const refusedDispatch =
       value.lastError === -25205 &&
       value.stage === "press" &&
       !value.action.pressed &&
       value.pressSheetState === "attached_sheet";
-    const successfulObserverDispatch =
-      expectedAction === "observe_replace_json" &&
+    const successfulObservedOrCancelledDispatch =
+      (expectedAction === "observe_replace_json" ||
+        [
+          "cancel_replace_json",
+          "cancel_replace_lrc",
+          "cancel_replace_chordpro",
+          "cancel_replace_pdf",
+          "cancel_replace_archive",
+        ].includes(expectedAction)) &&
       value.lastError === 0 &&
       value.stage === "replace_observed" &&
       value.action.pressed &&
       value.pressSheetState === "not_checked";
     const boundModalObservation =
-      (refusedDispatch || successfulObserverDispatch) &&
+      (refusedDispatch || successfulObservedOrCancelledDispatch) &&
       value.pressTimeoutError === 0 &&
       value.pressActionCalled === true &&
       value.pressFollowupError === 0 &&

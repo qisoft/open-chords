@@ -48,6 +48,12 @@ function run(argv) {
       return null;
     }
   }
+  // Event modifiers apply only to failure diagnostics, never ordinary guards or actions.
+  function diagnosticRead(element, name, phase) {
+    if (phase !== 'filename') return element[name]();
+    if (Date.now() >= deadline) throw new Error('diagnostic deadline');
+    return element[name]({ timeout: 1 });
+  }
   function reportFreshControls(freshSheets, phase) {
     var status = 'complete', elements = 0, primary = 0, cancel = 0, osError = 'none';
     var primaryPresent = 0, primaryDisabled = 0, primaryUnknown = 0;
@@ -55,16 +61,16 @@ function run(argv) {
       if (freshSheets.length > 16) status = 'bound';
       else for (var s = 0; s < freshSheets.length && status === 'complete'; s++) {
         if (Date.now() >= deadline) { status = 'deadline'; break; }
-        var current = freshSheets[s].entireContents();
+        var current = diagnosticRead(freshSheets[s], 'entireContents', phase);
         if (current.length > 256 || elements + current.length > 256) { elements = 257; status = 'bound'; break; }
         for (var e = 0; e < current.length; e++) {
           if (Date.now() >= deadline) { status = 'deadline'; break; }
           elements++;
-          if (current[e].role() !== 'AXButton') continue;
-          var name = current[e].name();
+          if (diagnosticRead(current[e], 'role', phase) !== 'AXButton') continue;
+          var name = diagnosticRead(current[e], 'name', phase);
           if (name === primaryAction || name === 'Cancel') {
             if (name === primaryAction) primaryPresent = Math.min(17, primaryPresent + 1);
-            var enabled = current[e].enabled();
+            var enabled = diagnosticRead(current[e], 'enabled', phase);
             if (name === primaryAction) {
               if (enabled === true) primary = Math.min(17, primary + 1);
               else if (enabled === false) primaryDisabled = Math.min(17, primaryDisabled + 1);
@@ -89,7 +95,7 @@ function run(argv) {
     var sheetExists = 'unknown', buttonExists = 'unknown', freshSheets = [];
     function existence(element) {
       try {
-        var value = element.exists();
+        var value = diagnosticRead(element, 'exists', phase);
         return value === true ? 'true' : value === false ? 'false' : 'unknown';
       } catch (error) {
         status = 'error';
@@ -102,12 +108,12 @@ function run(argv) {
       else {
         sheetExists = existence(candidate.sheet);
         buttonExists = existence(candidate.button);
-        var currentWindows = process.windows();
+        var currentWindows = diagnosticRead(process, 'windows', phase);
         windows = Math.min(currentWindows.length, 17);
         if (windows > 16) { if (status === 'complete') status = 'bound'; }
         else for (var w = 0; w < currentWindows.length; w++) {
           if (Date.now() >= deadline) { if (status === 'complete') status = 'deadline'; break; }
-          var currentSheets = currentWindows[w].sheets();
+          var currentSheets = diagnosticRead(currentWindows[w], 'sheets', phase);
           freshSheets = freshSheets.concat(currentSheets);
           sheets = Math.min(17, sheets + currentSheets.length);
           if (sheets > 16) { if (status === 'complete') status = 'bound'; break; }
@@ -503,6 +509,22 @@ function run(argv) {
       }
       throw new Error('not dismissed');
       } catch (error) {
+        if (error && error.message === 'default filename unavailable' && saves && !nativeInputStarted && Date.now() < deadline) {
+          // Preserve the refusal even if a diagnostic Apple Event stalls or fails.
+          console.log('Native macOS picker refusal: reason=default_filename_unavailable');
+          var refusalDeadline = deadline;
+          deadline = Math.min(deadline, Date.now() + 1000);
+          try {
+            var failurePid = diagnosticRead(process, 'unixId', 'filename');
+            var failureForeground = Date.now() < deadline ? diagnosticRead(process, 'frontmost', 'filename') : null;
+            console.log('Native macOS Save filename identity: pid_matches=' +
+              (failurePid === applicationPid ? 'true' : failurePid === null ? 'unknown' : 'false') +
+              ' foreground=' + (failureForeground === true ? 'true' : failureForeground === false ? 'false' : 'unknown') +
+              ' before_input=true');
+            reportGuardSnapshot(process, candidate, 'filename');
+          } catch (_) {}
+          finally { deadline = refusalDeadline; }
+        }
         if (error && error.message === 'stale control discovery before input' && (retainedDirectory || selectsFile) && !nativeInputStarted && referenceRefreshes === 0 && Date.now() < deadline) {
           referenceRefreshes++;
           console.log('Native macOS picker refresh: reason=stale_control_discovery attempt=1 before_input=true');

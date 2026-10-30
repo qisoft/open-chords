@@ -2348,3 +2348,75 @@ it.each([
     ),
   ).toBe(false);
 });
+
+it.each(["json", "lrc", "chordpro", "pdf", "archive"] as const)(
+  "accepts the observed successful Save dispatch only with complete independent %s confirmation Cancel proof",
+  (format) => {
+    const value = {
+      ...successfulForeignSplitterObservation,
+      action: { requested: `cancel_replace_${format}`, pressed: true, dismissed: false },
+      replaceContext: {
+        ...successfulForeignSplitterObservation.replaceContext,
+        ...Object.fromEntries(
+          Object.entries(replacementCancelled.replaceContext).filter(([key]) =>
+            key.startsWith("cancel"),
+          ),
+        ),
+        cancelChainVisited: 2,
+      },
+    };
+    expect(installedMacFormatReplacementCancelled(JSON.stringify(value), format)).toBe(true);
+    expect(installedMacJsonSaveSucceeded(JSON.stringify(value))).toBe(false);
+    expect(installedMacReplaceContextObserved(JSON.stringify(value))).toBe(false);
+    for (const change of [
+      { cancelStatus: "not_checked" },
+      { cancelGuardMask: 254 },
+      { cancelPressed: false },
+      { cancelDismissed: false },
+      { cancelSheetRetained: false },
+      { cancelTargetUnchanged: false },
+      { cancelError: -25205 },
+      { cancelChainVisited: 1 },
+      { modalBindingParent: "parent" },
+      { modalBindingForeground: false },
+      { modalBindingSheetAttached: false },
+      { modalEnabledCancel: 0 },
+      { attachmentCandidates: 2 },
+      { foreignRole: "button" },
+    ])
+      expect(
+        installedMacFormatReplacementCancelled(
+          JSON.stringify({ ...value, replaceContext: { ...value.replaceContext, ...change } }),
+          format,
+        ),
+      ).toBe(false);
+    for (const change of [
+      { lastError: -25202 },
+      { stage: "press" },
+      { pressActionCalled: false },
+      { pressTimeoutError: -25202 },
+      { pressSheetState: "unknown" },
+      { pressFollowupError: -25202 },
+      { guardMask: 254 },
+      { saveTargetExistingFixture: false },
+    ])
+      expect(
+        installedMacFormatReplacementCancelled(JSON.stringify({ ...value, ...change }), format),
+      ).toBe(false);
+  },
+);
+
+it("reports only boolean first-error parent/context flags without granting action authority", () => {
+  const value = {
+    ...replacementObservation,
+    firstOtherParentKnown: true,
+    firstOtherStaleChildContext: false,
+  };
+  const diagnostic = installedMacAxProbeDiagnostic(JSON.stringify(value), null, 1);
+  expect(diagnostic).toContain("other_parent_known=true");
+  expect(diagnostic).toContain("other_stale_child_context=false");
+  for (const key of ["firstOtherParentKnown", "firstOtherStaleChildContext"])
+    expect(
+      installedMacAxProbeDiagnostic(JSON.stringify({ ...value, [key]: "private-path" }), null, 1),
+    ).toBe("Native macOS AX probe: invalid_evidence");
+});
