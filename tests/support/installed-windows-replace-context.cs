@@ -45,7 +45,7 @@ public static class WindowsReplacementContext {
       throw RefuseFixture("local_path");
     if (!String.Equals(Path.GetFullPath(target), target, StringComparison.OrdinalIgnoreCase))
       throw RefuseFixture("full_path");
-    string filename = format == "json" ? "Open Chords.json" : format == "lrc" ? "Open Chords.lrc" : format == "chordpro" ? "Open Chords.cho" : null;
+    string filename = format == "json" ? "Open Chords.json" : format == "lrc" ? "Open Chords.lrc" : format == "chordpro" ? "Open Chords.cho" : format == "pdf" ? "Open Chords.pdf" : format == "archive" ? "Open Chords.ocarchive" : null;
     if (filename == null || Path.GetFileName(target) != filename) throw RefuseFixture("filename");
     for (var directory = new DirectoryInfo(Path.GetDirectoryName(target)); directory != null; directory = directory.Parent) {
       if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
