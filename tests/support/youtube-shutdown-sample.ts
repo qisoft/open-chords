@@ -113,6 +113,47 @@ export function youtubeShutdownThreadDiagnostic(raw: string) {
   return `YouTube shutdown threads: threads=${threads} frames=${frames} main=${groups[0]} io=${groups[1]} pool=${groups[2]} other=${groups[3]} io_mask=${masks[1]} pool_mask=${masks[2]} other_mask=${masks[3]} category_threads=${categoryThreads.join(",")} truncated=${truncated}`;
 }
 
+export function youtubeShutdownSampleFailureDiagnostic(error: unknown, durationMs: number) {
+  const own = (name: string): unknown => {
+    try {
+      return typeof error === "object" && error !== null
+        ? Object.getOwnPropertyDescriptor(error, name)?.value
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const code = own("code");
+  const exitCode =
+    typeof code === "number" && Number.isSafeInteger(code) && code >= 0 && code <= 255
+      ? code
+      : "none";
+  const category =
+    exitCode !== "none"
+      ? "exit"
+      : typeof code === "string" &&
+          [
+            "ENOENT",
+            "EACCES",
+            "EPERM",
+            "ETIMEDOUT",
+            "ENOBUFS",
+            "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+          ].includes(code)
+        ? code
+        : "unknown";
+  const rawSignal = own("signal");
+  const signal =
+    typeof rawSignal === "string" &&
+    ["SIGTERM", "SIGKILL", "SIGABRT", "SIGSEGV", "SIGHUP", "SIGINT", "SIGBUS"].includes(rawSignal)
+      ? rawSignal
+      : "none";
+  const duration = Number.isFinite(durationMs)
+    ? Math.min(999999, Math.max(0, Math.floor(durationMs)))
+    : "unknown";
+  return `YouTube shutdown sample: unavailable code=${category} killed=${own("killed") === true} exit_code=${exitCode} signal=${signal} duration_ms=${duration}`;
+}
+
 export function observeSlowYouTubeClose(
   pid: number | undefined,
   platform: NodeJS.Platform = process.platform,
@@ -127,6 +168,7 @@ export function observeSlowYouTubeClose(
     return () => {};
   let active = true;
   const timer = setTimeout(() => {
+    const started = performance.now();
     execFile(
       "/usr/bin/sample",
       [String(pid), "1", "10", "-file", "/dev/stdout"],
@@ -140,7 +182,7 @@ export function observeSlowYouTubeClose(
         console.log(
           error === null
             ? youtubeShutdownSampleDiagnostic(stdout)
-            : "YouTube shutdown sample: unavailable",
+            : youtubeShutdownSampleFailureDiagnostic(error, performance.now() - started),
         );
         if (error === null) console.log(youtubeShutdownThreadDiagnostic(stdout));
       },
