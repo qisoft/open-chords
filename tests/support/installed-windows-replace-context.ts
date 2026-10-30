@@ -177,3 +177,45 @@ export const WindowsReplacementCancellationSchema =
       cancellation.modalDismissed &&
       cancellation.saveRetained,
   );
+
+export const WindowsReplacementPublicationDiagnosticSchema = z.strictObject({
+  action: z.literal("confirm_replace"),
+  observation: WindowsReplacementDiagnosticSchema,
+  replacement: z.strictObject({
+    status: z.enum(["not_checked", "complete", "refused", "deadline"]),
+    guardMask: z.number().int().min(0).max(255),
+    freshYesInputGuard: z.strictObject({
+      status: z.enum(["not_checked", "complete", "refused", "deadline", "read_error"]),
+      guardMask: z.number().int().min(0).max(255),
+    }),
+    censusMatches: z.boolean(),
+    pointUnchanged: z.boolean(),
+    cursorMatches: z.boolean(),
+    cursorMoved: z.boolean(),
+    fixtureVerified: z.boolean(),
+    attempted: z.boolean(),
+    sent: z.boolean(),
+    modalDismissed: z.boolean(),
+    saveDismissed: z.boolean(),
+    foregroundOwned: z.boolean(),
+  }),
+});
+export const WindowsReplacementPublicationSchema =
+  WindowsReplacementPublicationDiagnosticSchema.refine(
+    ({ observation, replacement: r }) =>
+      WindowsReplacementYesInputObservationSchema.safeParse(observation).success &&
+      r.status === "complete" &&
+      r.guardMask === 255 &&
+      r.freshYesInputGuard.status === "complete" &&
+      r.freshYesInputGuard.guardMask === 255 &&
+      r.censusMatches &&
+      r.pointUnchanged &&
+      r.cursorMatches &&
+      r.cursorMoved &&
+      r.fixtureVerified &&
+      r.attempted &&
+      r.sent &&
+      r.modalDismissed &&
+      r.saveDismissed &&
+      r.foregroundOwned,
+  );

@@ -6,6 +6,7 @@ import {
   observeSlowYouTubeClose,
   youtubeShutdownSampleDiagnostic,
   youtubeShutdownThreadDiagnostic,
+  youtubeShutdownSampleFailureDiagnostic,
 } from "./support/youtube-shutdown-sample.ts";
 
 vi.mock("node:child_process", () => ({ execFile: vi.fn<typeof execFile>() }));
@@ -86,7 +87,11 @@ it("never logs raw sampler failures or stderr", async () => {
       "/private/stdout",
       "/private/stderr",
     );
-    expect(log).toHaveBeenCalledExactlyOnceWith("YouTube shutdown sample: unavailable");
+    expect(log).toHaveBeenCalledExactlyOnceWith(
+      expect.stringMatching(
+        /^YouTube shutdown sample: unavailable code=unknown killed=false exit_code=none signal=none duration_ms=[0-9]{1,6}$/,
+      ),
+    );
   } finally {
     stop();
     log.mockRestore();
@@ -216,5 +221,70 @@ it("continues to IO and pool threads after truncating one overlong main stack", 
     " 100 Thread_3: ThreadPoolForegroundWorker\n + 100 pthread_cond_wait (in /private/lib) + 1\n";
   expect(youtubeShutdownThreadDiagnostic(raw)).toBe(
     "YouTube shutdown threads: threads=3 frames=130 main=1 io=1 pool=1 other=0 io_mask=16 pool_mask=8 other_mask=0 category_threads=0,0,0,1,1,0,0,1,0,0,0,0 truncated=true",
+  );
+});
+
+it.each([
+  [{ killed: true, signal: "SIGTERM" }, "unknown", "none", "SIGTERM"],
+  [
+    { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER", killed: true, signal: "SIGTERM" },
+    "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+    "none",
+    "SIGTERM",
+  ],
+  [{ code: 1, signal: null }, "exit", "1", "none"],
+  [{ code: "EACCES" }, "EACCES", "none", "none"],
+  [{ code: "ENOENT" }, "ENOENT", "none", "none"],
+  [{ code: "private", signal: "private" }, "unknown", "none", "none"],
+  [{ code: 256 }, "unknown", "none", "none"],
+])("reports only fixed sampler failure metadata", (error, code, exit, signal) => {
+  const value = {
+    ...error,
+    message: "/private/message",
+    cmd: "/private/command",
+    stdout: "private",
+    stderr: "private",
+  };
+  expect(youtubeShutdownSampleFailureDiagnostic(value, 123.9)).toBe(
+    `YouTube shutdown sample: unavailable code=${code} killed=${"killed" in error && error.killed} exit_code=${exit} signal=${signal} duration_ms=123`,
+  );
+});
+it("does not invoke failure-property getters or leak proxy exceptions", () => {
+  const error = {
+    get code() {
+      throw new Error("private");
+    },
+    get signal() {
+      throw new Error("private");
+    },
+    get killed() {
+      throw new Error("private");
+    },
+  };
+  expect(youtubeShutdownSampleFailureDiagnostic(error, 0)).toContain(
+    "code=unknown killed=false exit_code=none signal=none",
+  );
+  expect(
+    youtubeShutdownSampleFailureDiagnostic(
+      new Proxy(
+        {},
+        {
+          getOwnPropertyDescriptor() {
+            throw new Error("private");
+          },
+        },
+      ),
+      0,
+    ),
+  ).not.toContain("private");
+});
+it.each([
+  [Number.NaN, "unknown"],
+  [Number.POSITIVE_INFINITY, "unknown"],
+  [-1, "0"],
+  [10000000, "999999"],
+])("bounds sampler failure duration", (duration, expected) => {
+  expect(youtubeShutdownSampleFailureDiagnostic(null, duration)).toContain(
+    `duration_ms=${expected}`,
   );
 });

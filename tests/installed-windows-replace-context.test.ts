@@ -3,6 +3,8 @@ import { expect, it } from "vitest";
 import {
   WindowsReplacementCancellationDiagnosticSchema,
   WindowsReplacementCancellationSchema,
+  WindowsReplacementPublicationDiagnosticSchema,
+  WindowsReplacementPublicationSchema,
   WindowsReplacementDiagnosticSchema,
   WindowsReplacementObservationSchema,
   WindowsReplacementBoundObservationSchema,
@@ -458,3 +460,85 @@ it("a complete Yes guard cannot substitute for the existing No guard or binding"
 it("adding the Yes observer does not make Yes a prerequisite for the independent No action proof", () => {
   expect(WindowsReplacementCancellationSchema.safeParse(cancellationEvidence()).success).toBe(true);
 });
+
+const publicationEvidence = () => ({
+  action: "confirm_replace",
+  observation: bothInputEvidence(),
+  replacement: {
+    status: "complete",
+    guardMask: 255,
+    freshYesInputGuard: { status: "complete", guardMask: 255 },
+    censusMatches: true,
+    pointUnchanged: true,
+    cursorMatches: true,
+    cursorMoved: true,
+    fixtureVerified: true,
+    attempted: true,
+    sent: true,
+    modalDismissed: true,
+    saveDismissed: true,
+    foregroundOwned: true,
+  },
+});
+it("requires fresh fixture/Yes dispatch/destruction evidence independently of the read-only snapshot", () => {
+  expect(WindowsReplacementPublicationSchema.parse(publicationEvidence())).toEqual(
+    publicationEvidence(),
+  );
+  expect(WindowsReplacementPublicationSchema.safeParse(bothInputEvidence()).success).toBe(false);
+  expect(WindowsReplacementPublicationSchema.safeParse(cancellationEvidence()).success).toBe(false);
+});
+for (const field of [
+  "censusMatches",
+  "pointUnchanged",
+  "cursorMatches",
+  "cursorMoved",
+  "fixtureVerified",
+  "attempted",
+  "sent",
+  "modalDismissed",
+  "saveDismissed",
+  "foregroundOwned",
+] as const) {
+  it(`refuses replacement when ${field} is false or missing`, () => {
+    const value = publicationEvidence();
+    value.replacement[field] = false;
+    expect(WindowsReplacementPublicationSchema.safeParse(value).success).toBe(false);
+    const missing = structuredClone(value) as { replacement: Record<string, unknown> };
+    delete missing.replacement[field];
+    expect(WindowsReplacementPublicationDiagnosticSchema.safeParse(missing).success).toBe(false);
+  });
+}
+for (const bit of [1, 2, 4, 8, 16, 32, 64, 128]) {
+  it(`refuses missing Yes action or fresh pointer guard bit ${bit}`, () => {
+    const action = publicationEvidence();
+    action.replacement.guardMask &= ~bit;
+    expect(WindowsReplacementPublicationSchema.safeParse(action).success).toBe(false);
+    const guard = publicationEvidence();
+    guard.replacement.freshYesInputGuard.guardMask &= ~bit;
+    expect(WindowsReplacementPublicationSchema.safeParse(guard).success).toBe(false);
+  });
+}
+for (const status of ["not_checked", "refused", "deadline", "read_error"]) {
+  it(`refuses a fresh Yes action guard with status ${status}`, () => {
+    const value = publicationEvidence();
+    value.replacement.freshYesInputGuard.status = status;
+    expect(WindowsReplacementPublicationSchema.safeParse(value).success).toBe(false);
+  });
+}
+it("requires the full prior No/Yes snapshot and second inventory for publication", () => {
+  const no = publicationEvidence();
+  no.observation.binding.noInputGuard.guardMask = 0;
+  const yes = publicationEvidence();
+  yes.observation.binding.yesInputGuard.guardMask = 0;
+  const binding = publicationEvidence();
+  binding.observation.binding.recheckMatches = false;
+  for (const value of [no, yes, binding])
+    expect(WindowsReplacementPublicationSchema.safeParse(value).success).toBe(false);
+});
+for (const field of ["x", "y", "hwnd", "pid", "title", "path", "error"]) {
+  it(`rejects private Yes action field ${field}`, () => {
+    const value = publicationEvidence();
+    Object.assign(value.replacement, { [field]: "private" });
+    expect(WindowsReplacementPublicationDiagnosticSchema.safeParse(value).success).toBe(false);
+  });
+}
