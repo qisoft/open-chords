@@ -1527,6 +1527,8 @@ for (const { adoptOfflineMedia, wholeSource, nativeSaved } of [
   { adoptOfflineMedia: true, wholeSource: true, nativeSaved: false },
   { adoptOfflineMedia: false, wholeSource: false, nativeSaved: true },
   { adoptOfflineMedia: true, wholeSource: false, nativeSaved: true },
+  { adoptOfflineMedia: false, wholeSource: true, nativeSaved: true },
+  { adoptOfflineMedia: true, wholeSource: true, nativeSaved: true },
 ]) {
   test(`installed ${process.platform === "win32" ? "Windows" : "macOS"} ${nativeSaved ? "native-saved archive" : "archive"} ${wholeSource ? "full Source" : "partial range"} media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
     test.skip(!["win32", "darwin"].includes(process.platform), "Native archive media import proof");
