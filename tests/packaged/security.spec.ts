@@ -1520,13 +1520,15 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   });
 }
 
-for (const { adoptOfflineMedia, wholeSource } of [
-  { adoptOfflineMedia: false, wholeSource: false },
-  { adoptOfflineMedia: true, wholeSource: false },
-  { adoptOfflineMedia: false, wholeSource: true },
-  { adoptOfflineMedia: true, wholeSource: true },
+for (const { adoptOfflineMedia, wholeSource, nativeSaved } of [
+  { adoptOfflineMedia: false, wholeSource: false, nativeSaved: false },
+  { adoptOfflineMedia: true, wholeSource: false, nativeSaved: false },
+  { adoptOfflineMedia: false, wholeSource: true, nativeSaved: false },
+  { adoptOfflineMedia: true, wholeSource: true, nativeSaved: false },
+  { adoptOfflineMedia: false, wholeSource: false, nativeSaved: true },
+  { adoptOfflineMedia: true, wholeSource: false, nativeSaved: true },
 ]) {
-  test(`installed ${process.platform === "win32" ? "Windows" : "macOS"} archive ${wholeSource ? "full Source" : "partial range"} media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
+  test(`installed ${process.platform === "win32" ? "Windows" : "macOS"} ${nativeSaved ? "native-saved archive" : "archive"} ${wholeSource ? "full Source" : "partial range"} media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
     test.skip(!["win32", "darwin"].includes(process.platform), "Native archive media import proof");
     test.setTimeout(360_000);
     const root = realpathSync(
@@ -1555,6 +1557,7 @@ for (const { adoptOfflineMedia, wholeSource } of [
     });
     await media.dispose();
     const before = await origin.readProject(created.projectId);
+    let expectedOrigin = before;
     const projection = archivedProjectFor(before);
     const rangeSamples = sourceSamples.slice(startSourceSample, endSourceSample);
     const rangeBytes = Buffer.alloc(rangeSamples.length * 2);
@@ -1580,9 +1583,92 @@ for (const { adoptOfflineMedia, wholeSource } of [
         endSourceSample,
       },
     });
-    const target = join(root, "media.ocarchive");
-    writeFileSync(target, archive.archive);
-    const inspected = inspectPortableProjectArchive(archive.archive);
+    const outputDirectory = nativeSaved
+      ? realpathSync.native(mkdtempSync(join(tmpdir(), "native-archive-media-output-")))
+      : undefined;
+    if (outputDirectory !== undefined) externalOutputDirectories.push(outputDirectory);
+    const target =
+      outputDirectory === undefined
+        ? join(root, "media.ocarchive")
+        : join(outputDirectory, "Open Chords.ocarchive");
+    let nativeSaveResult: unknown;
+    let savedOutputTree: Record<string, string> | undefined;
+    if (outputDirectory !== undefined) {
+      const preserved = Buffer.from("private native archive media preservation fixture");
+      writeFileSync(join(outputDirectory, "preserved.bin"), preserved);
+      const outputBefore = await proofTreeHashes(outputDirectory);
+      expect(existsSync(target)).toBe(false);
+      expect(origin.listExportReceipts(created.projectId)).toEqual([]);
+      await (await openNetworkMode(originState)).setOffline(true);
+      const action = {
+        type: "save_archive",
+        projectId: created.projectId,
+        expectedProjectRevisionId: before.projectRevisionId,
+        includeMedia: true,
+      };
+      nativeSaveResult = await inspectInstalled(
+        originState,
+        `(async () => {
+          const response = await window.openChords.exports.perform(${JSON.stringify(action)});
+          const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+          return { response, offline };
+        })()`,
+        installedSystemEnvironment(),
+        process.platform === "win32"
+          ? installedWindowsPickerDriver("save", target, "archive")
+          : installedMacPickerDriver(
+              "save_archive",
+              outputDirectory,
+              installedSystemEnvironment,
+              "archive",
+            ),
+      );
+      expect(nativeSaveResult).toMatchObject({
+        response: {
+          type: "exports.result",
+          projectId: created.projectId,
+          state: "saved",
+          busy: false,
+          pendingRecovery: 0,
+          receipts: [expect.anything()],
+        },
+        offline: true,
+      });
+      expect(readFileSync(target)).toEqual(archive.archive);
+      const digest = createNativeSelectionHash("sha256").update(archive.archive).digest("hex");
+      savedOutputTree = { ...outputBefore, "Open Chords.ocarchive": digest };
+      expect(await proofTreeHashes(outputDirectory)).toEqual(savedOutputTree);
+      const savedOrigin = await openProjectLibrary({ stateRoot: originState });
+      const receipts = savedOrigin.listExportReceipts(created.projectId);
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0]).toMatchObject({
+        format: "project_archive",
+        profileVersion: "project_archive/1.0/project_range_media",
+        activeViewHash: archive.projectHash,
+        outputHash: `sha256:${digest}`,
+        omissions: projection.omissions,
+      });
+      expect(realpathSync.native(receipts[0]!.outputLocation)).toBe(realpathSync.native(target));
+      expectedOrigin = await savedOrigin.readProject(created.projectId);
+      expect(expectedOrigin.envelope).toEqual(before.envelope);
+      expect(expectedOrigin.compatibility).toBe(before.compatibility);
+      expect(expectedOrigin.records).toEqual({ ...before.records, exportReceipts: receipts });
+      expect(expectedOrigin.revisions).toHaveLength(before.revisions.length + 1);
+      expect(expectedOrigin.revisions.slice(0, before.revisions.length)).toEqual(before.revisions);
+      expect(expectedOrigin.revisions.at(-1)).toMatchObject({
+        reason: "edit_transaction",
+        projectRevisionId: expectedOrigin.projectRevisionId,
+      });
+      expect(expectedOrigin.projectRevisionId).not.toBe(before.projectRevisionId);
+      expect((await openNetworkMode(originState)).offline).toBe(true);
+      const savedTree = await proofTreeHashes(savedOrigin.activeRoot);
+      const secondSource = await openProjectLibrary({ stateRoot: originState });
+      expect(await secondSource.readProject(created.projectId)).toEqual(expectedOrigin);
+      expect(await proofTreeHashes(secondSource.activeRoot)).toEqual(savedTree);
+      expect(readFileSync(sourcePath)).toEqual(sourceBytes);
+      expect(readFileSync(join(outputDirectory, "preserved.bin"))).toEqual(preserved);
+    } else writeFileSync(target, archive.archive);
+    const inspected = inspectPortableProjectArchive(readFileSync(target));
     expect(inspected.media?.bytes).toEqual(rangeBytes);
     const externalBefore = await proofTreeHashes(root);
     const originTree = await proofTreeHashes(origin.activeRoot);
@@ -1770,7 +1856,9 @@ for (const { adoptOfflineMedia, wholeSource } of [
       }
     }
     expect((await openNetworkMode(state)).offline).toBe(true);
-    expect(await origin.readProject(created.projectId)).toEqual(before);
+    expect(
+      await (await openProjectLibrary({ stateRoot: originState })).readProject(created.projectId),
+    ).toEqual(expectedOrigin);
     expect(await proofTreeHashes(origin.activeRoot)).toEqual(originTree);
     expect(readFileSync(sourcePath)).toEqual(sourceBytes);
     expect(readFileSync(target)).toEqual(archive.archive);
@@ -1781,10 +1869,23 @@ for (const { adoptOfflineMedia, wholeSource } of [
         Object.entries(externalAfter).filter(([path]) => !path.startsWith("destination/")),
       ),
     ).toEqual(externalBefore);
+    if (outputDirectory !== undefined) {
+      expect(await proofTreeHashes(outputDirectory)).toEqual(savedOutputTree);
+      expect((await openNetworkMode(originState)).offline).toBe(true);
+    }
     const document = canonicalSerialize(inspected.document);
-    for (const privateValue of [originState, state, sourcePath, root, target]) {
+    for (const privateValue of [
+      originState,
+      state,
+      sourcePath,
+      root,
+      target,
+      ...(outputDirectory === undefined ? [] : [outputDirectory]),
+    ]) {
       const escaped = JSON.stringify(privateValue).slice(1, -1);
       for (const value of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+        if (nativeSaveResult !== undefined)
+          expect(JSON.stringify(nativeSaveResult).includes(value)).toBe(false);
         expect(JSON.stringify(result).includes(value)).toBe(false);
         expect(JSON.stringify(repeated).includes(value)).toBe(false);
         expect(JSON.stringify(verifiedCacheReplays).includes(value)).toBe(false);
