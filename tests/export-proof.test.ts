@@ -10,10 +10,12 @@ import { runPackagedExportProof } from "../apps/desktop/src/main/packaged-export
 import { openProjectLibrary } from "../apps/desktop/src/main/project-library.ts";
 import { goldenRecords } from "./support/editor-fixture.ts";
 import { leadSheetProject } from "./support/export-fixture.ts";
+import { observeExportProofIO } from "./support/export-proof-io-diagnostic.ts";
 
 it("exports the synthetic fixture through the production service with cancelled and durable outcomes", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "oc-export-proof-")));
   const stateRoot = join(root, "state");
+  const stopIO = observeExportProofIO((line) => process.stderr.write(line));
   try {
     const envelope = ProjectEnvelopeSchema.parse(
       JSON.parse(
@@ -52,6 +54,7 @@ it("exports the synthetic fixture through the production service with cancelled 
       (await openProjectLibrary({ stateRoot })).listExportReceipts("project_golden"),
     ).toHaveLength(5);
   } finally {
+    stopIO();
     await rm(root, { recursive: true, force: true });
   }
 }, 30000);
