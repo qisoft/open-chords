@@ -172,3 +172,25 @@ it("a diagnostic read failure cannot throw into the original media probe", () =>
   });
   expect(value).toEqual({ document: "unavailable", preloadPresent: false });
 });
+
+it("retains failed-media entry and exit classifications without leaking the missing-preload exception", () => {
+  const line = installedCspPriorMediaDiagnostic("open-chords://app/index.html?private", {
+    ...playback,
+    type: "media.probe_failed",
+    offline: false,
+    played: false,
+    workspacePlayed: false,
+    timelineMoved: false,
+    seeked: false,
+    error: "TypeError: Cannot read properties of undefined (reading 'youtube') private-token",
+    entryContext: { document: "about_blank", preloadPresent: false },
+    exitContext: { document: "app_index", preloadPresent: true },
+  });
+  expect(line).toContain("target=app_index type=probe_failed offline=false");
+  expect(line).toContain(
+    "error_present=true entry=about_blank entry_preload=false exit=app_index exit_preload=true",
+  );
+  expect(line).not.toContain("TypeError");
+  expect(line).not.toContain("youtube");
+  expect(line).not.toContain("private");
+});
