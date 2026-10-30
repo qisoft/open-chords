@@ -49,6 +49,70 @@ export function youtubeShutdownSampleDiagnostic(raw: string) {
   return `YouTube shutdown sample: main_thread=true frames=${String(frames)} category_mask=${String(mask)} truncated=${String(truncated)} main_samples=${String(mainSamples)} mutex_max_samples=${String(mutexSamples)}`;
 }
 
+// Classify only the same bounded sample response already captured for the main
+// thread. No additional sampler, native read, process discovery or raw output.
+export function youtubeShutdownThreadDiagnostic(raw: string) {
+  if (raw.length > 262144) return "YouTube shutdown threads: invalid_evidence";
+  const categoryThreads = symbols.map(() => 0);
+  const groups = [0, 0, 0, 0]; // main, IO, thread pool, other
+  const masks = [0, 0, 0, 0];
+  let threads = 0,
+    frames = 0,
+    mainFrames = 0,
+    threadFrames = 0,
+    mask = 0;
+  let group: number | undefined;
+  let truncated = false;
+  const finishThread = () => {
+    if (group === undefined) return;
+    masks[group]! |= mask;
+    for (let bit = 0; bit < symbols.length; bit++)
+      if ((mask & (1 << bit)) !== 0) categoryThreads[bit]!++;
+  };
+  for (const line of raw.split(/\r?\n/)) {
+    if (/^\s*(?:Total number in stack|Sort by top of stack|Binary Images:)/.test(line)) break;
+    if (/^\s*[0-9]{1,9}\s+Thread_/.test(line)) {
+      finishThread();
+      group = undefined;
+      if (threads === 64) {
+        truncated = true;
+        break;
+      }
+      group = /(?:com\.apple\.main-thread|CrBrowserMain)\b/.test(line)
+        ? 0
+        : /\bChrome_IOThread\b/.test(line)
+          ? 1
+          : /\bThreadPool[A-Za-z0-9_]*/.test(line)
+            ? 2
+            : 3;
+      groups[group]!++;
+      threads++;
+      mask = 0;
+      threadFrames = 0;
+      continue;
+    }
+    if (group === undefined) continue;
+    const frame = /^\s*[+!:| ]*[0-9]{1,9}\s+(.+?)\s+\(in [^)]+\)/.exec(line);
+    if (!frame) continue;
+    if (frames === 2048) {
+      truncated = true;
+      break;
+    }
+    if (threadFrames === 128) {
+      truncated = true;
+      continue;
+    }
+    frames++;
+    threadFrames++;
+    if (group === 0) mainFrames++;
+    for (const [bit, expression] of symbols.entries())
+      if (expression.test(frame[1]!)) mask |= 1 << bit;
+  }
+  finishThread();
+  if (mainFrames === 0) return "YouTube shutdown threads: invalid_evidence";
+  return `YouTube shutdown threads: threads=${threads} frames=${frames} main=${groups[0]} io=${groups[1]} pool=${groups[2]} other=${groups[3]} io_mask=${masks[1]} pool_mask=${masks[2]} other_mask=${masks[3]} category_threads=${categoryThreads.join(",")} truncated=${truncated}`;
+}
+
 export function observeSlowYouTubeClose(
   pid: number | undefined,
   platform: NodeJS.Platform = process.platform,
@@ -78,6 +142,7 @@ export function observeSlowYouTubeClose(
             ? youtubeShutdownSampleDiagnostic(stdout)
             : "YouTube shutdown sample: unavailable",
         );
+        if (error === null) console.log(youtubeShutdownThreadDiagnostic(stdout));
       },
     );
   }, 5000);

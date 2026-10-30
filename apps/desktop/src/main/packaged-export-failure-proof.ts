@@ -22,16 +22,27 @@ export async function runPackagedExportFailureProof(options: {
   await mkdir(join(outputRoot, "directory.json"));
   const baseline = canonicalSerialize(await proofTreeHashes(stateRoot));
   const targets = canonicalSerialize(await proofTreeHashes(outputRoot));
-  const unchanged = async (service: ProjectExports) => {
+  const probe = (caseName: string, stage: string) =>
+    process.stderr.write(`Export refusal probe: case=${caseName} stage=${stage}\n`);
+  const unchanged = async (service: ProjectExports, caseName: string) => {
+    const changed = () => {
+      throw new Error("export_failure_proof_state_changed");
+    };
+    probe(caseName, "check_service");
     if (
       service.busy ||
       service.pendingRecovery !== 0 ||
-      library.listExportReceipts(projectId).length !== 5 ||
-      (await library.getSnapshot(projectId))?.projectRevisionId !== snapshot.projectRevisionId ||
-      canonicalSerialize(await proofTreeHashes(stateRoot)) !== baseline ||
-      canonicalSerialize(await proofTreeHashes(outputRoot)) !== targets
+      library.listExportReceipts(projectId).length !== 5
     )
-      throw new Error("export_failure_proof_state_changed");
+      changed();
+    probe(caseName, "check_snapshot");
+    if ((await library.getSnapshot(projectId))?.projectRevisionId !== snapshot.projectRevisionId)
+      changed();
+    probe(caseName, "check_library_tree");
+    if (canonicalSerialize(await proofTreeHashes(stateRoot)) !== baseline) changed();
+    probe(caseName, "check_output_tree");
+    if (canonicalSerialize(await proofTreeHashes(outputRoot)) !== targets) changed();
+    probe(caseName, "unchanged");
   };
   const cases = [
     {
@@ -62,6 +73,7 @@ export async function runPackagedExportFailureProof(options: {
   ];
   for (const failure of cases) {
     let calls = 0;
+    probe(failure.name, "service_open");
     const service = await openProjectExports({
       library,
       stateRoot,
@@ -70,7 +82,9 @@ export async function runPackagedExportFailureProof(options: {
         return failure.target;
       },
     });
+    probe(failure.name, "service_ready");
     let rejected = false;
+    probe(failure.name, "save_started");
     try {
       await service.saveJson({
         projectId,
@@ -84,11 +98,13 @@ export async function runPackagedExportFailureProof(options: {
           ? "code" in error && error.code === failure.code
           : error.message === failure.message);
     }
+    probe(failure.name, "save_returned");
     if (!rejected || calls !== failure.calls)
       throw new Error("export_failure_proof_refusal_failed");
-    await unchanged(service);
+    await unchanged(service, failure.name);
     process.stderr.write(`Export proof stage: rejected_${failure.name}\n`);
   }
+  probe("cancel_existing", "service_open");
   const cancelling = await openProjectExports({
     library,
     stateRoot,
@@ -97,13 +113,16 @@ export async function runPackagedExportFailureProof(options: {
       return join(outputRoot, "score.json");
     },
   });
+  probe("cancel_existing", "service_ready");
+  probe("cancel_existing", "save_started");
   const cancelled = await cancelling.saveJson({
     projectId,
     expectedProjectRevisionId: snapshot.projectRevisionId,
     presentation: "current",
   });
+  probe("cancel_existing", "save_returned");
   if (cancelled.state !== "cancelled") throw new Error("export_failure_proof_cancellation_failed");
-  await unchanged(cancelling);
+  await unchanged(cancelling, "cancel_existing");
   process.stderr.write("Export proof stage: cancelled_existing_target_unchanged\n");
   return { rejectedUnchanged: cases.length, cancelledTargetUnchanged: true };
 }

@@ -26,7 +26,7 @@ it.each(["archive", "export"] as const)(
       expect(flushed).toBeTypeOf("function");
       flushed!();
       expect(await rejected).toBe(original);
-      expect(lines).toEqual([`Packaged ${proof} proof failure: code=unknown\n`]);
+      expect(lines).toEqual([`Packaged ${proof} proof failure: code=unknown syscall=unknown\n`]);
       expect(write).toHaveBeenCalledTimes(1);
     } finally {
       write.mockRestore();

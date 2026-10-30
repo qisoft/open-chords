@@ -186,17 +186,17 @@ public static class WindowsReplacementBinding {
     return snapshot;
   }
 
-  private static string ObserveNoInputGuard(IntPtr save, IntPtr modal, IntPtr noButton, uint pid, string binding, DateTime deadline, out Point guardedPoint, out Rect guardedRect) {
+  private static string ObserveButtonInputGuard(IntPtr save, IntPtr modal, IntPtr button, uint pid, int controlId, string binding, DateTime deadline, out Point guardedPoint, out Rect guardedRect) {
     guardedPoint = new Point(); guardedRect = new Rect();
     int mask = 0;
     string status = "refused";
     if (DateTime.UtcNow >= deadline) status = "deadline";
     else if (SaveValid(save, pid) && ModalValid(modal, save, pid)) {
       mask |= 1;
-      if (binding != "none" && ButtonBinding(noButton, modal, pid, 7, deadline) == binding) {
+      if (binding != "none" && ButtonBinding(button, modal, pid, controlId, deadline) == binding) {
         mask |= 2;
         Rect buttonRect, modalRect;
-        if (!GetWindowRect(noButton, out buttonRect) || !GetWindowRect(modal, out modalRect)) status = "read_error";
+        if (!GetWindowRect(button, out buttonRect) || !GetWindowRect(modal, out modalRect)) status = "read_error";
         else {
           Point center = new Point();
           long width = (long)buttonRect.right - buttonRect.left, height = (long)buttonRect.bottom - buttonRect.top;
@@ -207,7 +207,7 @@ public static class WindowsReplacementBinding {
               mask |= 8;
               center = new Point { x = (int)((long)buttonRect.left + width / 2), y = (int)((long)buttonRect.top + height / 2) };
               IntPtr hit = WindowFromPoint(center);
-              if (Owned(hit, pid) && GetAncestor(hit, 2) == modal && (hit == noButton || IsChild(noButton, hit))) mask |= 16;
+              if (Owned(hit, pid) && GetAncestor(hit, 2) == modal && (hit == button || IsChild(button, hit))) mask |= 16;
             }
           }
           uint owner;
@@ -220,12 +220,12 @@ public static class WindowsReplacementBinding {
           }
           if (DateTime.UtcNow >= deadline) status = "deadline";
           else if (mask == 127 && status != "read_error" && SaveValid(save, pid) && ModalValid(modal, save, pid) &&
-                   ButtonBinding(noButton, modal, pid, 7, deadline) == binding) {
+                   ButtonBinding(button, modal, pid, controlId, deadline) == binding) {
             Rect fresh;
-            if (!GetWindowRect(noButton, out fresh)) status = "read_error";
+            if (!GetWindowRect(button, out fresh)) status = "read_error";
             else if (fresh.left == buttonRect.left && fresh.top == buttonRect.top && fresh.right == buttonRect.right && fresh.bottom == buttonRect.bottom) {
               IntPtr hit = WindowFromPoint(center);
-              if (Owned(hit, pid) && GetAncestor(hit, 2) == modal && (hit == noButton || IsChild(noButton, hit))) mask |= 128;
+              if (Owned(hit, pid) && GetAncestor(hit, 2) == modal && (hit == button || IsChild(button, hit))) mask |= 128;
             }
           }
           if (DateTime.UtcNow >= deadline && status != "read_error") status = "deadline";
@@ -258,7 +258,7 @@ public static class WindowsReplacementBinding {
         fresh.YesButton == yesButton && fresh.NoButton == noButton && fresh.YesBinding == yesBinding && fresh.NoBinding == noBinding;
       if (censusMatches) {
         Point cursor, guardedPoint; Rect guardedRect;
-        freshGuard = ObserveNoInputGuard(save, modal, noButton, pid, noBinding, deadline, out guardedPoint, out guardedRect);
+        freshGuard = ObserveButtonInputGuard(save, modal, noButton, pid, 7, noBinding, deadline, out guardedPoint, out guardedRect);
         pointUnchanged = SameRect(bounds, guardedRect) && guardedPoint.x == point.x && guardedPoint.y == point.y;
         cursorMatches = GetCursorPos(out cursor) && cursor.x == point.x && cursor.y == point.y;
         if (freshGuard == "{\"status\":\"complete\",\"guardMask\":255}" && pointUnchanged && cursorMatches && DateTime.UtcNow < deadline) {
@@ -314,6 +314,7 @@ public static class WindowsReplacementBinding {
     bool recheckMatches = false;
     var childBudget = new ChildBudget();
     string noInputGuard = "{\"status\":\"not_checked\",\"guardMask\":0}";
+    string yesInputGuard = "{\"status\":\"not_checked\",\"guardMask\":0}";
     string cancellation = "{\"status\":\"not_checked\",\"guardMask\":0,\"freshNoInputGuard\":{\"status\":\"not_checked\",\"guardMask\":0},\"censusMatches\":false,\"pointUnchanged\":false,\"cursorMatches\":false,\"cursorMoved\":false,\"attempted\":false,\"sent\":false,\"modalDismissed\":false,\"saveRetained\":false}";
     if (budgetMs > 0 && budgetMs <= 2000 && SaveValid(save, pid)) {
       mask |= 1;
@@ -367,7 +368,13 @@ public static class WindowsReplacementBinding {
       if (status == "complete" && mask != 255) status = "refused";
       if (status == "complete" && mask == 255) {
         Point point; Rect bounds;
-        noInputGuard = ObserveNoInputGuard(save, modal, noButton, pid, noBinding, deadline, out point, out bounds);
+        noInputGuard = ObserveButtonInputGuard(save, modal, noButton, pid, 7, noBinding, deadline, out point, out bounds);
+        // The observer additionally checks Yes, without moving the cursor or issuing input.
+        // Cancellation retains exactly its existing No-only action path and budget.
+        if (fixturePath == null && noInputGuard == "{\"status\":\"complete\",\"guardMask\":255}") {
+          Point yesPoint; Rect yesBounds;
+          yesInputGuard = ObserveButtonInputGuard(save, modal, yesButton, pid, 6, yesBinding, deadline, out yesPoint, out yesBounds);
+        }
         if (fixturePath != null && noInputGuard == "{\"status\":\"complete\",\"guardMask\":255}")
           cancellation = CancelBoundNo(save, modal, yesButton, noButton, pid, yesBinding, noBinding, deadline, childBudget, fixturePath, point, bounds);
       }
@@ -379,6 +386,6 @@ public static class WindowsReplacementBinding {
       ",\"yesFailure\":" + yesFailure.Json() + ",\"noFailure\":" + noFailure.Json() +
       ",\"recheckStatus\":\"" + recheckStatus + "\",\"recheckButtons\":" + recheckButtons +
       ",\"recheckYes\":" + recheckYes + ",\"recheckNo\":" + recheckNo +
-      ",\"recheckMatches\":" + (recheckMatches ? "true" : "false") + ",\"noInputGuard\":" + noInputGuard + (fixturePath == null ? "" : ",\"cancellation\":" + cancellation) + "}";
+      ",\"recheckMatches\":" + (recheckMatches ? "true" : "false") + ",\"noInputGuard\":" + noInputGuard + (fixturePath == null ? ",\"yesInputGuard\":" + yesInputGuard : ",\"cancellation\":" + cancellation) + "}";
   }
 }
