@@ -2968,6 +2968,8 @@ async function inspectPackagedRenderer(
     }
     if (target !== undefined) {
       const offlinePlayback = await evaluatePackagedMedia(target.webSocketDebuggerUrl, projectId);
+      if (offlinePlayback.error !== null || offlinePlayback.type !== "media.playback_ready")
+        console.log(installedCspPriorMediaDiagnostic(target.url, offlinePlayback));
       const security = await evaluateRendererTarget(target.webSocketDebuggerUrl, {
         targetUrl: target.url,
         playback: offlinePlayback,
