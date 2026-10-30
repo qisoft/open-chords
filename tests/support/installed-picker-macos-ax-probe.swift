@@ -240,6 +240,8 @@ var firstOtherStage = "none"
 var firstOtherVisited = 0
 var firstOtherOrigin = "none"
 var firstOtherParentRole = "none"
+var firstOtherParentKnown = false
+var firstOtherStaleChildContext = false
 var selectedDirectory: [String: Any] = ["fields": 0, "uniqueUrls": 0, "terminalUrls": 0, "terminalMatches": 0, "validShape": false]
 var invalidChildParent: [String: Any] = ["status": "not_checked", "role": "none", "pidMatches": false, "selectedReference": false, "children": 0, "containsFailedReference": "unknown", "attribute": "none", "error": 0]
 var firstFailureParent = invalidChildParent
@@ -281,6 +283,8 @@ func recordReadError(_ status: AXError, name: String, duration: TimeInterval, in
             firstOtherStage = stage; firstOtherVisited = counts["visited"] ?? 0
             firstOtherOrigin = readOrigin
             firstOtherParentRole = readParentRole
+            firstOtherParentKnown = currentDirectParent != nil
+            firstOtherStaleChildContext = staleChildContext
             firstOtherSelectedReference = readSelectedReference
             firstOtherSelectedBranch = readSelectedBranch
         }
@@ -1409,6 +1413,7 @@ var result: [String: Any] = [
     "pressDurationMs": pressDurationMs, "pressSheetState": pressSheetState,
     "pressFollowupError": pressFollowupError,
     "trusted": trusted, "complete": complete,
+    "firstOtherParentKnown": firstOtherParentKnown, "firstOtherStaleChildContext": firstOtherStaleChildContext,
     "firstOtherSelectedReference": firstOtherSelectedReference, "firstOtherSelectedBranch": firstOtherSelectedBranch,
     "firstOtherError": firstOtherError, "firstOtherAttribute": firstOtherAttribute,
     "firstOtherStage": firstOtherStage, "firstOtherVisited": firstOtherVisited, "firstOtherOrigin": firstOtherOrigin, "firstOtherParentRole": firstOtherParentRole,
