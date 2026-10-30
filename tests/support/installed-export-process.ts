@@ -1,7 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { PROJECTION_PROOF_FAILURE_CODES } from "../../apps/desktop/src/main/packaged-projection-proof-diagnostic.ts";
+import {
+  PROJECTION_PROOF_FAILURE_CODES,
+  PROJECTION_PROOF_SYSCALLS,
+} from "../../apps/desktop/src/main/packaged-projection-proof-diagnostic.ts";
 
 export function installedExportExitDiagnostic(error: unknown, durationMs: number) {
   return installedProcessExitDiagnostic("export", error, durationMs);
@@ -83,10 +86,21 @@ function installedExportProofStages(error: unknown): string[] {
     .slice(0, 16384)
     .split(/\r?\n/)
     .flatMap((line) => {
-      const projectionFailure = /^Packaged (export|archive) proof failure: code=([A-Za-z_]+)$/.exec(
-        line,
-      );
-      if (projectionFailure && PROJECTION_PROOF_FAILURE_CODES.has(projectionFailure[2]!))
+      const projectionFailure =
+        /^Packaged (export|archive) proof failure: code=([A-Za-z_]+)(?: syscall=([a-z]+))?$/.exec(
+          line,
+        );
+      if (
+        projectionFailure &&
+        PROJECTION_PROOF_FAILURE_CODES.has(projectionFailure[2]!) &&
+        (projectionFailure[3] === undefined || PROJECTION_PROOF_SYSCALLS.has(projectionFailure[3]))
+      )
+        return [line];
+      if (
+        /^Export refusal probe: case=(stale_revision|protected_target|directory_target|missing_parent|cancel_existing) stage=(service_open|service_ready|save_started|save_returned|check_service|check_snapshot|check_library_tree|check_output_tree|unchanged)$/.test(
+          line,
+        )
+      )
         return [line];
       if (
         /^Export proof stage: (rejected_(stale_revision|protected_target|directory_target|missing_parent)|cancelled_existing_target_unchanged)$/.test(

@@ -36,11 +36,41 @@ export function projectionProofFailureCode(error: unknown): string {
   return "unknown";
 }
 
+export const PROJECTION_PROOF_SYSCALLS = new Set([
+  "open",
+  "rename",
+  "unlink",
+  "scandir",
+  "stat",
+  "lstat",
+  "mkdir",
+  "read",
+  "write",
+  "fsync",
+  "fstat",
+  "rmdir",
+  "realpath",
+  "access",
+  "readlink",
+  "unknown",
+]);
+export function projectionProofFailureSyscall(error: unknown): string {
+  try {
+    if (typeof error === "object" && error !== null) {
+      const value: unknown = Object.getOwnPropertyDescriptor(error, "syscall")?.value;
+      if (typeof value === "string" && PROJECTION_PROOF_SYSCALLS.has(value)) return value;
+    }
+  } catch {
+    /* An uninspectable diagnostic must not replace the original failure. */
+  }
+  return "unknown";
+}
+
 export async function rethrowProjectionProofFailure(
   proof: "archive" | "export",
   error: unknown,
 ): Promise<never> {
-  const diagnostic = `Packaged ${proof} proof failure: code=${projectionProofFailureCode(error)}\n`;
+  const diagnostic = `Packaged ${proof} proof failure: code=${projectionProofFailureCode(error)} syscall=${projectionProofFailureSyscall(error)}\n`;
   await new Promise<void>((resolve) => {
     try {
       process.stderr.write(diagnostic, () => resolve());

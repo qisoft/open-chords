@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 
-import { projectionProofFailureCode } from "../apps/desktop/src/main/packaged-projection-proof-diagnostic.ts";
+import {
+  projectionProofFailureCode,
+  projectionProofFailureSyscall,
+} from "../apps/desktop/src/main/packaged-projection-proof-diagnostic.ts";
 import {
   installedExportExitDiagnostic,
   runInstalledExportProcess,
@@ -155,4 +158,65 @@ it("retains all nested export failure stages and rejects private or unrecognized
   for (const stage of stages) expect(failure.message).toContain(`Export proof stage: ${stage}`);
   expect(failure.message).not.toContain("/private");
   expect(failure.message).not.toContain("private_case");
+});
+
+it("classifies syscall values without exposing paths or invoking getters", () => {
+  for (const syscall of ["open", "rename", "scandir", "unlink", "fsync"]) {
+    expect(
+      projectionProofFailureSyscall(
+        Object.assign(new Error("private"), { syscall, path: "/private/path" }),
+      ),
+    ).toBe(syscall);
+  }
+  expect(projectionProofFailureSyscall({ syscall: "rename /private/path" })).toBe("unknown");
+  expect(
+    projectionProofFailureSyscall({
+      get syscall() {
+        throw new Error("private");
+      },
+    }),
+  ).toBe("unknown");
+  expect(
+    projectionProofFailureSyscall(
+      new Proxy(
+        {},
+        {
+          getOwnPropertyDescriptor() {
+            throw new Error("private");
+          },
+        },
+      ),
+    ),
+  ).toBe("unknown");
+});
+it("retains only fixed refusal boundaries and syscall evidence from a failed child", async () => {
+  let failure: unknown;
+  try {
+    await runInstalledExportProcess(
+      process.execPath,
+      [
+        "-e",
+        `
+      process.stderr.write('Export refusal probe: case=protected_target stage=service_open\\n');
+      process.stderr.write('Export refusal probe: case=protected_target stage=check_library_tree\\n');
+      process.stderr.write('Packaged export proof failure: code=EBUSY syscall=rename\\n');
+      process.stderr.write('Export refusal probe: case=private stage=service_open\\n');
+      process.stderr.write('Export refusal probe: case=protected_target stage=private\\n');
+      process.stderr.write('Export refusal probe: case=protected_target stage=service_open /private\\n');
+      process.stderr.write('Packaged export proof failure: code=EBUSY syscall=rename /private\\n');
+      process.stderr.write('Packaged export proof failure: code=EBUSY syscall=private\\n');
+      process.exit(7);
+    `,
+      ],
+      {},
+    );
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  if (!(failure instanceof Error)) throw new Error("fixture_child_did_not_fail");
+  expect(failure.message).toContain("case=protected_target stage=service_open");
+  expect(failure.message).toContain("case=protected_target stage=check_library_tree");
+  expect(failure.message).toContain("code=EBUSY syscall=rename");
+  expect(failure.message).not.toContain("private");
 });
