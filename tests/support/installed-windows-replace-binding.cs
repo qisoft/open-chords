@@ -295,6 +295,46 @@ public static class WindowsReplacementBinding {
       ",\"sent\":" + sent.ToString().ToLowerInvariant() + ",\"modalDismissed\":" + dismissed.ToString().ToLowerInvariant() +
       ",\"saveRetained\":" + retained.ToString().ToLowerInvariant() + "}";
   }
+  // NULL is a documented activation transition, not permission to ignore a foreign HWND.
+  // State: 0=NULL, 1=owned, -1=foreign/unverifiable. No retry of a nonzero refused handle.
+  private static bool WaitForOwnedForeground(Func<int> readState, Func<int> remainingMs, Action<int> wait) {
+    while (remainingMs() > 0) {
+      int state = readState();
+      if (state != 0) return state == 1 && remainingMs() > 0;
+      int remaining = remainingMs();
+      if (remaining <= 0) return false;
+      wait(Math.Min(20, remaining));
+    }
+    return false;
+  }
+  private static void CheckForegroundPolicy(int[] states, int budget, bool expected, int expectedReads, int expectedWaits, bool expireOnRead = false) {
+    int elapsed = 0, reads = 0, waits = 0;
+    bool result = WaitForOwnedForeground(
+      () => {
+        int state = states[Math.Min(reads++, states.Length - 1)];
+        if (expireOnRead) elapsed = budget;
+        return state;
+      },
+      () => budget - elapsed,
+      delay => {
+        if (delay <= 0 || delay > 20 || delay > budget - elapsed) throw new InvalidOperationException("Replacement foreground wait bound failed");
+        elapsed += delay; waits++;
+      });
+    if (result != expected || reads != expectedReads || waits != expectedWaits)
+      throw new InvalidOperationException("Replacement foreground policy check failed");
+  }
+  // Native-free delegate tests are compiled/executed only by the Windows CI build script.
+  public static int VerifyForegroundWaitPolicy() {
+    CheckForegroundPolicy(new[] { 1 }, 60, true, 1, 0);
+    CheckForegroundPolicy(new[] { 0, 0, 1 }, 60, true, 3, 2);
+    CheckForegroundPolicy(new[] { 0 }, 35, false, 2, 2);
+    CheckForegroundPolicy(new[] { -1, 1 }, 60, false, 1, 0);
+    CheckForegroundPolicy(new[] { 0, -1, 1 }, 60, false, 2, 1);
+    CheckForegroundPolicy(new[] { 1 }, 20, false, 1, 0, true);
+    CheckForegroundPolicy(new[] { 2, 1 }, 60, false, 1, 0);
+    CheckForegroundPolicy(new[] { 1 }, 0, false, 0, 0);
+    return 8;
+  }
   private static string ReplaceBoundYes(IntPtr save, IntPtr modal, IntPtr yesButton, IntPtr noButton,
       uint pid, string yesBinding, string noBinding, DateTime deadline, ChildBudget childBudget,
       string fixturePath, Point point, Rect bounds) {
@@ -333,7 +373,15 @@ public static class WindowsReplacementBinding {
               if ((!modalDismissed && !Owned(modal, pid)) || (!saveDismissed && !Owned(save, pid))) break;
               System.Threading.Thread.Sleep(Math.Min(20, Math.Max(1, (int)(deadline - DateTime.UtcNow).TotalMilliseconds)));
             }
-            foregroundOwned = Owned(GetForegroundWindow(), pid);
+            if (modalDismissed && saveDismissed) {
+              foregroundOwned = WaitForOwnedForeground(
+                () => {
+                  IntPtr foreground = GetForegroundWindow();
+                  return foreground == IntPtr.Zero ? 0 : Owned(foreground, pid) ? 1 : -1;
+                },
+                () => Math.Max(0, (int)(deadline - DateTime.UtcNow).TotalMilliseconds),
+                delay => System.Threading.Thread.Sleep(delay));
+            }
             if (modalDismissed && saveDismissed && foregroundOwned && DateTime.UtcNow < deadline) status = "complete";
           }
         }

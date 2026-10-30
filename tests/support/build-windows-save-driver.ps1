@@ -12,6 +12,9 @@ $replacementSource = Join-Path $PSScriptRoot 'installed-windows-replace-context.
 $bindingSource = Join-Path $PSScriptRoot 'installed-windows-replace-binding.cs'
 Add-Type -Path @($source, $replacementSource, $bindingSource) -OutputAssembly $assembly -OutputType Library
 Add-Type -Path $assembly
+$foregroundChecks = [WindowsReplacementBinding]::VerifyForegroundWaitPolicy()
+if ($foregroundChecks -ne 8) { throw 'Replacement foreground policy checks incomplete' }
+Write-Host "Native Windows replacement foreground policy: checks=$foregroundChecks"
 foreach ($format in @('json', 'lrc', 'chordpro', 'pdf', 'archive', 'media')) {
   [SaveNativeInput]::ConfigureFormat($format, $format -eq 'media')
 }
