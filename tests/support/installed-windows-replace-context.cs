@@ -27,8 +27,9 @@ public static class WindowsReplacementContext {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int count);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr capacity, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
 
-  public static void VerifyFixture(string target) {
-    try { VerifyFixtureCore(target); }
+  public static void VerifyFixture(string target) { VerifyFixture(target, "json"); }
+  public static void VerifyFixture(string target, string format) {
+    try { VerifyFixtureCore(target, format); }
     catch (IOException) { Console.Error.WriteLine("Native Windows replacement fixture exception: kind=io"); throw; }
     catch (UnauthorizedAccessException) { Console.Error.WriteLine("Native Windows replacement fixture exception: kind=access"); throw; }
     catch (ArgumentException) { Console.Error.WriteLine("Native Windows replacement fixture exception: kind=argument"); throw; }
@@ -37,14 +38,15 @@ public static class WindowsReplacementContext {
     Console.Error.WriteLine("Native Windows replacement fixture refusal: check=" + check);
     return new InvalidOperationException("Replacement fixture unavailable");
   }
-  private static void VerifyFixtureCore(string target) {
+  private static void VerifyFixtureCore(string target, string format) {
     byte[] expected = Encoding.UTF8.GetBytes("private existing Windows replacement target fixture");
     string root = Path.GetPathRoot(target);
     if (!Path.IsPathRooted(target) || root.Length != 3 || !Char.IsLetter(root[0]) || root[1] != ':' || root[2] != '\\')
       throw RefuseFixture("local_path");
     if (!String.Equals(Path.GetFullPath(target), target, StringComparison.OrdinalIgnoreCase))
       throw RefuseFixture("full_path");
-    if (Path.GetFileName(target) != "Open Chords.json") throw RefuseFixture("filename");
+    string filename = format == "json" ? "Open Chords.json" : format == "lrc" ? "Open Chords.lrc" : format == "chordpro" ? "Open Chords.cho" : null;
+    if (filename == null || Path.GetFileName(target) != filename) throw RefuseFixture("filename");
     for (var directory = new DirectoryInfo(Path.GetDirectoryName(target)); directory != null; directory = directory.Parent) {
       if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
         throw RefuseFixture("parent_reparse");
