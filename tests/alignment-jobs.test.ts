@@ -152,7 +152,8 @@ function project() {
   );
 }
 
-async function runnableJob() {
+async function runnableJob(probe: (stage: string) => void = () => {}) {
+  probe("fixture_root");
   const stateRoot = await mkdtemp(join(tmpdir(), "open-chords-alignment-"));
   roots.push(stateRoot);
   const data = Buffer.from("bounded alignment dependency");
@@ -169,13 +170,16 @@ async function runnableJob() {
       },
     ],
   };
+  probe("fixture_model_open");
   const modelStore = await openModelStore({
     stateRoot,
     packs: [pack],
     runtime: pack.runtime,
     fetch: async () => new Response(data),
   });
+  probe("fixture_model_install");
   await modelStore.install(pack.id);
+  probe("fixture_library_open");
   const library = await openProjectLibrary({ stateRoot });
   const original = project();
   const envelope = JSON.parse(
@@ -184,11 +188,13 @@ async function runnableJob() {
       "utf8",
     ),
   );
+  probe("fixture_project_create");
   await library.createProject({
     envelope: { ...envelope, payload: original },
     records: goldenRecords(),
   });
   const options = { stateRoot, modelStore, packs: [pack], runtimeManifestHash: "a".repeat(64) };
+  probe("fixture_jobs_open");
   const jobs = await openAlignmentJobs(options);
   const request = {
     project: original,
@@ -196,6 +202,7 @@ async function runnableJob() {
     analysisRevisionId: original.activeView!.analysisRevisionId,
     canonicalAudioFingerprint: `sha256:${"d".repeat(64)}`,
   };
+  probe("fixture_job_request");
   const job = await jobs.request(request);
   const output = {
     recipeHash: job.key,
@@ -204,6 +211,7 @@ async function runnableJob() {
       .at(-1)!
       .tokens.map((token) => ({ tokenId: token.id, reason: "alignment_mismatch" })),
   };
+  probe("fixture_ready");
   return { options, jobs, job, request, output, library, original };
 }
 
@@ -306,31 +314,53 @@ it("rejects an invalid worker result without a partial Alignment and permits onl
 });
 
 it("keeps publication failures retryable without blaming the runtime", async () => {
-  const context = await runnableJob();
+  const started = performance.now();
+  let probeCount = 0;
+  let currentAttempt = -1;
+  const probe = (stage: string) => {
+    if (probeCount++ >= 64) return;
+    const duration = Math.min(999999, Math.max(0, Math.round(performance.now() - started)));
+    process.stderr.write(
+      `Alignment publication probe: stage=${stage} attempt=${currentAttempt} duration_ms=${duration}\n`,
+    );
+  };
+  const context = await runnableJob(probe);
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    currentAttempt = attempt;
+    probe("run_started");
     await expect(
       context.jobs.run(context.job.id, {
         library: context.library,
         worker: async () => {
+          probe("worker_trash_started");
           await context.library.trashProject(context.original.id);
+          probe("worker_trash_finished");
           return context.output;
         },
       }),
     ).rejects.toThrow("Project unavailable");
+    probe("run_rejected");
+    probe("job_get");
     expect(await context.jobs.get(context.job.id)).toMatchObject({
       state: "retryable",
       failure: "storage",
       circuitOpen: false,
     });
+    probe("project_restore");
     await context.library.restoreTrashedProject(context.original.id);
+    probe("job_confirm");
     await context.jobs.confirm(context.job.id);
+    probe("attempt_finished");
   }
+  currentAttempt = 3;
+  probe("final_run_started");
   expect(
     await context.jobs.run(context.job.id, {
       library: context.library,
       worker: async () => context.output,
     }),
   ).toMatchObject({ state: "succeeded" });
+  probe("final_run_finished");
 });
 
 it("keeps stage persistence failures retryable without opening the runtime circuit", async () => {
