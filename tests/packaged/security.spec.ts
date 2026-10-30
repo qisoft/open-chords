@@ -60,7 +60,7 @@ import {
 } from "../support/installed-save-diagnostics.ts";
 import {
   WindowsReplacementDiagnosticSchema,
-  WindowsReplacementBoundObservationSchema,
+  WindowsReplacementNoInputObservationSchema,
 } from "../support/installed-windows-replace-context.ts";
 import {
   WorkspacePlaybackProbeSchema,
@@ -662,7 +662,7 @@ test("installed macOS observes replacement context without confirming or changin
   expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
 });
 
-test("installed Windows binds existing JSON replacement context without confirming", async () => {
+test("installed Windows verifies the bound JSON confirmation No input target without confirming", async () => {
   const format = "json";
   test.skip(process.platform !== "win32", "Windows replacement context observation");
   test.setTimeout(360_000);
@@ -2547,7 +2547,7 @@ function installedWindowsPickerDriver(
               process.stdout.write(
                 `Native Windows replacement binding: ${JSON.stringify(diagnostic.binding)}\n`,
               );
-              if (!WindowsReplacementBoundObservationSchema.safeParse(diagnostic).success)
+              if (!WindowsReplacementNoInputObservationSchema.safeParse(diagnostic).success)
                 throw new Error("Replacement context refused");
             }
             resolve(parsed.data);
@@ -2558,7 +2558,7 @@ function installedWindowsPickerDriver(
       );
     });
     if (observesReplacement) {
-      WindowsReplacementBoundObservationSchema.parse(evidence);
+      WindowsReplacementNoInputObservationSchema.parse(evidence);
       return;
     }
     expect(evidence).toEqual({

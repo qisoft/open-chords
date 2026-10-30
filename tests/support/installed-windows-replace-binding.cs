@@ -5,6 +5,17 @@ using System.Text;
 
 // Read-only, fresh identity checks. No input API or confirmation action is exposed.
 public static class WindowsReplacementBinding {
+  [StructLayout(LayoutKind.Sequential)] private struct Point { public int x, y; }
+  [StructLayout(LayoutKind.Sequential)] private struct Rect { public int left, top, right, bottom; }
+  [StructLayout(LayoutKind.Sequential)] private struct GuiInfo {
+    public uint size, flags;
+    public IntPtr active, focus, capture, menuOwner, moveSize, caret;
+    public Rect caretRect;
+  }
+  [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect bounds);
+  [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+  [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
+  [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
   private delegate bool WindowCallback(IntPtr window, IntPtr parameter);
   [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
   [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
@@ -163,6 +174,55 @@ public static class WindowsReplacementBinding {
     return snapshot;
   }
 
+  private static string ObserveNoInputGuard(IntPtr save, IntPtr modal, IntPtr noButton, uint pid, string binding, DateTime deadline) {
+    int mask = 0;
+    string status = "refused";
+    if (DateTime.UtcNow >= deadline) status = "deadline";
+    else if (SaveValid(save, pid) && ModalValid(modal, save, pid)) {
+      mask |= 1;
+      if (binding != "none" && ButtonBinding(noButton, modal, pid, 7, deadline) == binding) {
+        mask |= 2;
+        Rect buttonRect, modalRect;
+        if (!GetWindowRect(noButton, out buttonRect) || !GetWindowRect(modal, out modalRect)) status = "read_error";
+        else {
+          Point center = new Point();
+          long width = (long)buttonRect.right - buttonRect.left, height = (long)buttonRect.bottom - buttonRect.top;
+          if (width > 0 && width <= 4096 && height > 0 && height <= 4096) {
+            mask |= 4;
+            if (modalRect.left <= buttonRect.left && modalRect.top <= buttonRect.top &&
+                modalRect.right >= buttonRect.right && modalRect.bottom >= buttonRect.bottom) {
+              mask |= 8;
+              center = new Point { x = (int)((long)buttonRect.left + width / 2), y = (int)((long)buttonRect.top + height / 2) };
+              IntPtr hit = WindowFromPoint(center);
+              if (Owned(hit, pid) && GetAncestor(hit, 2) == modal && (hit == noButton || IsChild(noButton, hit))) mask |= 16;
+            }
+          }
+          uint owner;
+          uint thread = GetWindowThreadProcessId(modal, out owner);
+          var gui = new GuiInfo { size = (uint)Marshal.SizeOf(typeof(GuiInfo)) };
+          if (owner != pid || thread == 0 || !GetGUIThreadInfo(thread, ref gui)) status = "read_error";
+          else {
+            if (gui.active == modal && Owned(gui.focus, pid) && GetAncestor(gui.focus, 2) == modal) mask |= 32;
+            if (gui.capture == IntPtr.Zero && gui.menuOwner == IntPtr.Zero && gui.moveSize == IntPtr.Zero) mask |= 64;
+          }
+          if (DateTime.UtcNow >= deadline) status = "deadline";
+          else if (mask == 127 && status != "read_error" && SaveValid(save, pid) && ModalValid(modal, save, pid) &&
+                   ButtonBinding(noButton, modal, pid, 7, deadline) == binding) {
+            Rect fresh;
+            if (!GetWindowRect(noButton, out fresh)) status = "read_error";
+            else if (fresh.left == buttonRect.left && fresh.top == buttonRect.top && fresh.right == buttonRect.right && fresh.bottom == buttonRect.bottom) {
+              IntPtr hit = WindowFromPoint(center);
+              if (Owned(hit, pid) && GetAncestor(hit, 2) == modal && (hit == noButton || IsChild(noButton, hit))) mask |= 128;
+            }
+          }
+          if (DateTime.UtcNow >= deadline && status != "read_error") status = "deadline";
+          if (mask == 255 && status != "read_error" && DateTime.UtcNow < deadline) status = "complete";
+        }
+      }
+    }
+    return "{\"status\":\"" + status + "\",\"guardMask\":" + mask + "}";
+  }
+
   public static string Observe(IntPtr save, uint pid, int budgetMs) {
     string status = "refused";
     int mask = 0, candidates = 0, buttons = 0, yes = 0, no = 0, scanned = 0, yesMask = 0, noMask = 0;
@@ -174,6 +234,7 @@ public static class WindowsReplacementBinding {
     int recheckButtons = 0, recheckYes = 0, recheckNo = 0;
     bool recheckMatches = false;
     var childBudget = new ChildBudget();
+    string noInputGuard = "{\"status\":\"not_checked\",\"guardMask\":0}";
     if (budgetMs > 0 && budgetMs <= 2000 && SaveValid(save, pid)) {
       mask |= 1;
       status = "complete";
@@ -224,6 +285,7 @@ public static class WindowsReplacementBinding {
         }
       }
       if (status == "complete" && mask != 255) status = "refused";
+      if (status == "complete" && mask == 255) noInputGuard = ObserveNoInputGuard(save, modal, noButton, pid, noBinding, deadline);
     }
     return "{\"status\":\"" + status + "\",\"guardMask\":" + mask + ",\"candidates\":" + candidates +
       ",\"buttons\":" + buttons + ",\"yes\":" + yes + ",\"no\":" + no +
@@ -232,6 +294,6 @@ public static class WindowsReplacementBinding {
       ",\"yesFailure\":" + yesFailure.Json() + ",\"noFailure\":" + noFailure.Json() +
       ",\"recheckStatus\":\"" + recheckStatus + "\",\"recheckButtons\":" + recheckButtons +
       ",\"recheckYes\":" + recheckYes + ",\"recheckNo\":" + recheckNo +
-      ",\"recheckMatches\":" + (recheckMatches ? "true" : "false") + "}";
+      ",\"recheckMatches\":" + (recheckMatches ? "true" : "false") + ",\"noInputGuard\":" + noInputGuard + "}";
   }
 }

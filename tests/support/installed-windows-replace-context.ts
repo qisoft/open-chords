@@ -31,6 +31,12 @@ export const WindowsReplacementBindingSchema = z.strictObject({
   recheckYes: count.optional(),
   recheckNo: count.optional(),
   recheckMatches: z.boolean().optional(),
+  noInputGuard: z
+    .strictObject({
+      status: z.enum(["not_checked", "complete", "refused", "deadline", "read_error"]),
+      guardMask: z.number().int().min(0).max(255),
+    })
+    .optional(),
   yesFailure: buttonFailure.optional(),
   noFailure: buttonFailure.optional(),
   candidates: z.number().int().min(0).max(17),
@@ -114,3 +120,9 @@ export const WindowsReplacementBoundObservationSchema = WindowsReplacementObserv
     binding.yes === 1 &&
     binding.no === 1,
 );
+
+export const WindowsReplacementNoInputObservationSchema =
+  WindowsReplacementBoundObservationSchema.refine(
+    ({ binding }) =>
+      binding?.noInputGuard?.status === "complete" && binding.noInputGuard.guardMask === 255,
+  );
