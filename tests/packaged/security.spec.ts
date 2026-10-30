@@ -1520,17 +1520,19 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   });
 }
 
-for (const { adoptOfflineMedia, wholeSource, nativeSaved } of [
-  { adoptOfflineMedia: false, wholeSource: false, nativeSaved: false },
-  { adoptOfflineMedia: true, wholeSource: false, nativeSaved: false },
-  { adoptOfflineMedia: false, wholeSource: true, nativeSaved: false },
-  { adoptOfflineMedia: true, wholeSource: true, nativeSaved: false },
-  { adoptOfflineMedia: false, wholeSource: false, nativeSaved: true },
-  { adoptOfflineMedia: true, wholeSource: false, nativeSaved: true },
-  { adoptOfflineMedia: false, wholeSource: true, nativeSaved: true },
-  { adoptOfflineMedia: true, wholeSource: true, nativeSaved: true },
+for (const { adoptOfflineMedia, wholeSource, nativeSaved, replaces } of [
+  { adoptOfflineMedia: false, wholeSource: false, nativeSaved: false, replaces: false },
+  { adoptOfflineMedia: true, wholeSource: false, nativeSaved: false, replaces: false },
+  { adoptOfflineMedia: false, wholeSource: true, nativeSaved: false, replaces: false },
+  { adoptOfflineMedia: true, wholeSource: true, nativeSaved: false, replaces: false },
+  { adoptOfflineMedia: false, wholeSource: false, nativeSaved: true, replaces: false },
+  { adoptOfflineMedia: true, wholeSource: false, nativeSaved: true, replaces: false },
+  { adoptOfflineMedia: false, wholeSource: true, nativeSaved: true, replaces: false },
+  { adoptOfflineMedia: true, wholeSource: true, nativeSaved: true, replaces: false },
+  { adoptOfflineMedia: false, wholeSource: false, nativeSaved: true, replaces: true },
+  { adoptOfflineMedia: true, wholeSource: false, nativeSaved: true, replaces: true },
 ]) {
-  test(`installed ${process.platform === "win32" ? "Windows" : "macOS"} ${nativeSaved ? "native-saved archive" : "archive"} ${wholeSource ? "full Source" : "partial range"} media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
+  test(`installed ${process.platform === "win32" ? "Windows" : "macOS"} ${replaces ? "native-replaced archive" : nativeSaved ? "native-saved archive" : "archive"} ${wholeSource ? "full Source" : "partial range"} media import honors explicit adoption ${String(adoptOfflineMedia)}`, async () => {
     test.skip(!["win32", "darwin"].includes(process.platform), "Native archive media import proof");
     test.setTimeout(360_000);
     const root = realpathSync(
@@ -1593,13 +1595,21 @@ for (const { adoptOfflineMedia, wholeSource, nativeSaved } of [
       outputDirectory === undefined
         ? join(root, "media.ocarchive")
         : join(outputDirectory, "Open Chords.ocarchive");
+    const replacementFixture = replaces
+      ? Buffer.from(
+          process.platform === "win32"
+            ? "private existing Windows replacement target fixture"
+            : "private existing native export target fixture",
+        )
+      : undefined;
     let nativeSaveResult: unknown;
     let savedOutputTree: Record<string, string> | undefined;
     if (outputDirectory !== undefined) {
       const preserved = Buffer.from("private native archive media preservation fixture");
       writeFileSync(join(outputDirectory, "preserved.bin"), preserved);
+      if (replacementFixture !== undefined) writeFileSync(target, replacementFixture);
+      else expect(existsSync(target)).toBe(false);
       const outputBefore = await proofTreeHashes(outputDirectory);
-      expect(existsSync(target)).toBe(false);
       expect(origin.listExportReceipts(created.projectId)).toEqual([]);
       await (await openNetworkMode(originState)).setOffline(true);
       const action = {
@@ -1617,9 +1627,9 @@ for (const { adoptOfflineMedia, wholeSource, nativeSaved } of [
         })()`,
         installedSystemEnvironment(),
         process.platform === "win32"
-          ? installedWindowsPickerDriver("save", target, "archive")
+          ? installedWindowsPickerDriver(replaces ? "confirm_replace" : "save", target, "archive")
           : installedMacPickerDriver(
-              "save_archive",
+              replaces ? "replace_archive" : "save_archive",
               outputDirectory,
               installedSystemEnvironment,
               "archive",
@@ -1883,6 +1893,7 @@ for (const { adoptOfflineMedia, wholeSource, nativeSaved } of [
       root,
       target,
       ...(outputDirectory === undefined ? [] : [outputDirectory]),
+      ...(replacementFixture === undefined ? [] : [replacementFixture.toString()]),
     ]) {
       const escaped = JSON.stringify(privateValue).slice(1, -1);
       for (const value of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
