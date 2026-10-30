@@ -66,6 +66,8 @@ import {
 import {
   WindowsReplacementCancellationDiagnosticSchema,
   WindowsReplacementCancellationSchema,
+  WindowsReplacementPublicationDiagnosticSchema,
+  WindowsReplacementPublicationSchema,
   WindowsReplacementDiagnosticSchema,
   WindowsReplacementYesInputObservationSchema,
 } from "../support/installed-windows-replace-context.ts";
@@ -822,19 +824,35 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   });
 }
 
-for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
-  test(`installed Windows native ${format} Save publishes with exact bytes and one durable Receipt`, async () => {
+const windowsPublicationCases = [
+  ...(["json", "lrc", "chordpro", "pdf", "archive"] as const).map((format) => ({
+    format,
+    replaces: false,
+  })),
+  { format: "json", replaces: true } as const,
+];
+for (const { format, replaces } of windowsPublicationCases) {
+  test(`installed Windows native ${format} ${replaces ? "Replace" : "Save"} publishes with exact bytes and one durable Receipt`, async () => {
     test.skip(process.platform !== "win32", "Windows native Save proof");
     test.setTimeout(360_000);
-    const state = join(packageRoot, `windows-native-${format}-save`);
+    const mode = replaces ? "replace" : "save";
+    const state = join(packageRoot, `windows-native-${format}-${mode}`);
     // The Windows executable directory is a protected production export root.
-    const directory = realpathSync(mkdtempSync(join(tmpdir(), `windows-${format}-save-output-`)));
+    const outputDirectory = mkdtempSync(join(tmpdir(), `windows-${format}-${mode}-output-`));
+    const directory = replaces
+      ? realpathSync.native(outputDirectory)
+      : realpathSync(outputDirectory);
     externalOutputDirectories.push(directory);
     const filename = `Open Chords.${format === "chordpro" ? "cho" : format === "archive" ? "ocarchive" : format}`;
     const target = join(directory, filename);
-    const external = join(packageRoot, `windows-${format}-save-preserved.bin`);
-    const original = Buffer.from("private Windows native Save preservation fixture");
-    expect(existsSync(target)).toBe(false);
+    const external = join(packageRoot, `windows-${format}-${mode}-preserved.bin`);
+    const original = Buffer.from(
+      replaces
+        ? "private existing Windows replacement target fixture"
+        : "private Windows native Save preservation fixture",
+    );
+    if (replaces) writeFileSync(target, original);
+    else expect(existsSync(target)).toBe(false);
     writeFileSync(join(directory, "preserved.txt"), original);
     writeFileSync(external, original);
     const directoryBefore = await proofTreeHashes(directory);
@@ -870,7 +888,7 @@ for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
       return { response, offline };
     })()`,
       installedSystemEnvironment(),
-      installedWindowsPickerDriver("save", target, format),
+      installedWindowsPickerDriver(replaces ? "confirm_replace" : "save", target, format),
     );
     process.stdout.write(`${installedExportResponseDiagnostic(result)}\n`);
     z.object({
@@ -2502,12 +2520,15 @@ function installedWindowsPickerDriver(
     | "save"
     | "cancel_existing"
     | "observe_replace"
-    | "cancel_replace",
+    | "cancel_replace"
+    | "confirm_replace",
   selectedPath: string,
   format: "media" | "json" | "lrc" | "chordpro" | "pdf" | "archive",
 ) {
   const cancelsReplacement = scenario === "cancel_replace";
-  const observesReplacement = scenario === "observe_replace" || cancelsReplacement;
+  const confirmsReplacement = scenario === "confirm_replace";
+  const observesReplacement =
+    scenario === "observe_replace" || cancelsReplacement || confirmsReplacement;
   if (observesReplacement && format !== "json") throw new Error("Replacement format unavailable");
   const saveDialog = scenario === "save" || scenario === "cancel_existing" || observesReplacement;
   if (saveDialog ? format === "media" : format !== "media" && format !== "archive")
@@ -2544,20 +2565,29 @@ function installedWindowsPickerDriver(
           }
           try {
             console.log(installedSaveDriverTiming(stderr, performance.now() - started));
-            const schema = cancelsReplacement
-              ? WindowsReplacementCancellationDiagnosticSchema
-              : observesReplacement
-                ? WindowsReplacementDiagnosticSchema
-                : z.strictObject({
-                    action: z.literal(scenario),
-                    filenameSet: z.literal(true),
-                    nativeClick: z.literal(true),
-                    dialogDismissed: z.literal(true),
-                    defaultNameValid: z.literal(saveDialog),
-                  });
+            const schema = confirmsReplacement
+              ? WindowsReplacementPublicationDiagnosticSchema
+              : cancelsReplacement
+                ? WindowsReplacementCancellationDiagnosticSchema
+                : observesReplacement
+                  ? WindowsReplacementDiagnosticSchema
+                  : z.strictObject({
+                      action: z.literal(scenario),
+                      filenameSet: z.literal(true),
+                      nativeClick: z.literal(true),
+                      dialogDismissed: z.literal(true),
+                      defaultNameValid: z.literal(saveDialog),
+                    });
             const parsed = schema.safeParse(JSON.parse(stdout.trim()));
             if (!parsed.success) throw new Error("Invalid native picker evidence");
-            if (cancelsReplacement) {
+            if (confirmsReplacement) {
+              const diagnostic = WindowsReplacementPublicationDiagnosticSchema.parse(parsed.data);
+              process.stdout.write(
+                `Native Windows confirmation Yes: ${JSON.stringify(diagnostic)}\n`,
+              );
+              if (!WindowsReplacementPublicationSchema.safeParse(diagnostic).success)
+                throw new Error("Replacement publication action refused");
+            } else if (cancelsReplacement) {
               const diagnostic = WindowsReplacementCancellationDiagnosticSchema.parse(parsed.data);
               process.stdout.write(
                 `Native Windows confirmation No: ${JSON.stringify(diagnostic)}\n`,
@@ -2582,6 +2612,10 @@ function installedWindowsPickerDriver(
         },
       );
     });
+    if (confirmsReplacement) {
+      WindowsReplacementPublicationSchema.parse(evidence);
+      return;
+    }
     if (cancelsReplacement) {
       WindowsReplacementCancellationSchema.parse(evidence);
       return;
