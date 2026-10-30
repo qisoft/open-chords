@@ -220,3 +220,44 @@ it("retains only fixed refusal boundaries and syscall evidence from a failed chi
   expect(failure.message).toContain("code=EBUSY syscall=rename");
   expect(failure.message).not.toContain("private");
 });
+
+it("preserves only bounded refusal-tree deltas from a failed child", async () => {
+  const delta =
+    "Export refusal proof source delta: added=1 removed=0 changed=1 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=0 other=0";
+  await expect(
+    runInstalledExportProcess(
+      process.execPath,
+      [
+        "-e",
+        `
+      console.error(${JSON.stringify(delta)});
+      console.error(${JSON.stringify(delta.replace("added=1", "added=10000"))});
+      console.error(${JSON.stringify(delta + " private-path")});
+      console.error("Export refusal proof source delta: /private/path");
+      process.exit(1);
+    `,
+      ],
+      {},
+    ),
+  ).rejects.toThrow(delta);
+  let failure: unknown;
+  try {
+    await runInstalledExportProcess(
+      process.execPath,
+      [
+        "-e",
+        `
+      console.error(${JSON.stringify(delta.replace("added=1", "added=10000"))});
+      console.error(${JSON.stringify(delta + " private-path")});
+      process.exit(1);
+    `,
+      ],
+      {},
+    );
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  expect(String(failure)).not.toContain("source delta");
+  expect(String(failure)).not.toContain("private-path");
+});
