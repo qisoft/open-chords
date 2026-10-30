@@ -6,6 +6,7 @@ import {
   observeSlowYouTubeClose,
   youtubeShutdownSampleDiagnostic,
   youtubeShutdownThreadDiagnostic,
+  youtubeShutdownMainLoopDiagnostic,
   youtubeShutdownSampleFailureDiagnostic,
 } from "./support/youtube-shutdown-sample.ts";
 
@@ -175,7 +176,7 @@ it("does not treat post-callgraph summary lines as another thread's frames", () 
     youtubeShutdownThreadDiagnostic(sample),
   );
 });
-it("reports both fixed summaries from the same single sampler response", async () => {
+it("reports all fixed summaries from the same single sampler response", async () => {
   vi.useFakeTimers();
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const stop = observeSlowYouTubeClose(42, "darwin");
@@ -188,6 +189,7 @@ it("reports both fixed summaries from the same single sampler response", async (
     expect(log.mock.calls).toEqual([
       [youtubeShutdownSampleDiagnostic(sample)],
       [youtubeShutdownThreadDiagnostic(sample)],
+      [youtubeShutdownMainLoopDiagnostic(sample)],
     ]);
     expect(JSON.stringify(log.mock.calls)).not.toContain("private");
   } finally {
@@ -195,7 +197,7 @@ it("reports both fixed summaries from the same single sampler response", async (
     log.mockRestore();
   }
 });
-it("suppresses both summaries when the close completed before the sampler callback", async () => {
+it("suppresses all summaries when the close completed before the sampler callback", async () => {
   vi.useFakeTimers();
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const stop = observeSlowYouTubeClose(42, "darwin");
@@ -286,5 +288,48 @@ it.each([
 ])("bounds sampler failure duration", (duration, expected) => {
   expect(youtubeShutdownSampleFailureDiagnostic(null, duration)).toContain(
     `duration_ms=${expected}`,
+  );
+});
+
+it("separates fixed main-loop frame categories without exposing symbols, paths or other threads", () => {
+  const raw =
+    "Process: /private/app\n100 Thread_1 com.apple.main-thread\n" +
+    [
+      "-[NSApplication run]",
+      "-[NSRunLoop runMode:]",
+      "CFRunLoopRunSpecific",
+      "base::MessagePump::Run",
+      "uv_run",
+      "dispatch_sync",
+      "electron::BrowserWindow::Close",
+      "StoragePartition::ClearData",
+      "private_symbol",
+    ]
+      .map((name) => ` + 100 ${name} (in /private/lib) [0xprivate]\n`)
+      .join("") +
+    "100 Thread_2 private_worker\n + 100 CFRunLoopRun (in private)\n";
+  expect(youtubeShutdownMainLoopDiagnostic(raw)).toBe(
+    "YouTube shutdown main loop: frames=9 app_run=1 ns_loop=1 cf_loop=1 chromium_pump=1 node_loop=1 dispatch=1 window_teardown=1 session_cleanup=1 truncated=false",
+  );
+});
+it("bounds main-loop classification and excludes post-callgraph summaries", () => {
+  const header = "100 Thread_1 com.apple.main-thread\n";
+  const frame = " + 100 CFRunLoopRunSpecific (in private)\n";
+  expect(youtubeShutdownMainLoopDiagnostic(header + frame.repeat(129))).toContain(
+    "frames=128 app_run=0 ns_loop=0 cf_loop=128",
+  );
+  expect(youtubeShutdownMainLoopDiagnostic(header + frame.repeat(129))).toContain("truncated=true");
+  expect(youtubeShutdownMainLoopDiagnostic(header + frame + "Binary Images:\n" + frame)).toContain(
+    "frames=1 app_run=0 ns_loop=0 cf_loop=1",
+  );
+});
+it.each([
+  "private",
+  "x".repeat(262145),
+  "100 Thread_2 other\n + 100 uv_run (in private)\n",
+  "100 Thread_1 com.apple.main-thread\nprivate",
+])("refuses incomplete or oversized main-loop input", (raw) => {
+  expect(youtubeShutdownMainLoopDiagnostic(raw)).toBe(
+    "YouTube shutdown main loop: invalid_evidence",
   );
 });

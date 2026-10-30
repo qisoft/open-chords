@@ -113,6 +113,49 @@ export function youtubeShutdownThreadDiagnostic(raw: string) {
   return `YouTube shutdown threads: threads=${threads} frames=${frames} main=${groups[0]} io=${groups[1]} pool=${groups[2]} other=${groups[3]} io_mask=${masks[1]} pool_mask=${masks[2]} other_mask=${masks[3]} category_threads=${categoryThreads.join(",")} truncated=${truncated}`;
 }
 
+// Counts recognized main-thread frames from the SAME sample; counts do not prove loop nesting.
+export function youtubeShutdownMainLoopDiagnostic(raw: string) {
+  if (raw.length > 262144) return "YouTube shutdown main loop: invalid_evidence";
+  const categories = {
+    app_run: /NSApplication.*\brun\b/,
+    ns_loop: /NSRunLoop/,
+    cf_loop: /CFRunLoopRun/,
+    chromium_pump: /MessagePump/,
+    node_loop: /(?:uv_run|node::.*(?:SpinEventLoop|RunLoop|Start))/,
+    dispatch: /dispatch_(?:main|sync|async|group|barrier)/,
+    window_teardown:
+      /(?:BrowserWindow|BaseWindow|NativeWindow|NSWindow|WebContents).*(?:[Cc]lose|[Dd]estroy)/,
+    session_cleanup:
+      /(?:StoragePartition|BrowserContext|ClearHttpCache|closeAllConnections|clearStorageData)/,
+  };
+  const counts = Object.fromEntries(Object.keys(categories).map((key) => [key, 0]));
+  let main = false,
+    frames = 0,
+    truncated = false;
+  for (const line of raw.split(/\r?\n/)) {
+    if (/^\s*(?:Total number in stack|Sort by top of stack|Binary Images:)/.test(line)) break;
+    if (/^\s*[0-9]{1,9}\s+Thread_/.test(line)) {
+      if (main) break;
+      main = /(?:com\.apple\.main-thread|CrBrowserMain)\b/.test(line);
+      continue;
+    }
+    if (!main) continue;
+    const frame = /^\s*[+!:| ]*[0-9]{1,9}\s+(.+?)\s+\(in [^)]+\)/.exec(line);
+    if (!frame) continue;
+    if (frames === 128) {
+      truncated = true;
+      break;
+    }
+    frames++;
+    for (const [key, expression] of Object.entries(categories))
+      if (expression.test(frame[1]!)) counts[key]!++;
+  }
+  if (!main || frames === 0) return "YouTube shutdown main loop: invalid_evidence";
+  return `YouTube shutdown main loop: frames=${frames} ${Object.entries(counts)
+    .map(([key, count]) => `${key}=${count}`)
+    .join(" ")} truncated=${truncated}`;
+}
+
 export function youtubeShutdownSampleFailureDiagnostic(error: unknown, durationMs: number) {
   const own = (name: string): unknown => {
     try {
@@ -184,7 +227,10 @@ export function observeSlowYouTubeClose(
             ? youtubeShutdownSampleDiagnostic(stdout)
             : youtubeShutdownSampleFailureDiagnostic(error, performance.now() - started),
         );
-        if (error === null) console.log(youtubeShutdownThreadDiagnostic(stdout));
+        if (error === null) {
+          console.log(youtubeShutdownThreadDiagnostic(stdout));
+          console.log(youtubeShutdownMainLoopDiagnostic(stdout));
+        }
       },
     );
   }, 5000);
