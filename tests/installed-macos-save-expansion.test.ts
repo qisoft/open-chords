@@ -35,6 +35,37 @@ it("accepts only native guarded press and observed expansion, without directory 
     "pressed=true expanded=true initialValue=0 finalValue=1",
   );
 });
+it("retains fixed failure-only reference observations without accepting a failed transition", () => {
+  const failed = {
+    ...evidence,
+    complete: false,
+    stage: "expansion",
+    lastError: -25204,
+    firstErrorAttribute: "AXValue",
+    finalValue: -1,
+    referenceStatus: "complete",
+    referenceOwnerMatches: "true",
+    referenceParentRole: "sheet",
+    referenceParentContains: "false",
+    referenceSheetAttached: "true",
+    referenceError: 0,
+  };
+  const output = JSON.stringify(failed);
+  expect(installedMacSaveExpansionDiagnostic(output, null, 1)).toContain(
+    "referenceParentContains=false",
+  );
+  expect(installedMacSaveExpansionSucceeded(output)).toBe(false);
+  for (const changed of [
+    { referenceParentRole: "/private" },
+    { referenceError: 32768 },
+    { referenceStatus: "private content" },
+    { referenceOwnerMatches: 123 },
+  ]) {
+    expect(
+      installedMacSaveExpansionDiagnostic(JSON.stringify({ ...failed, ...changed }), null, 1),
+    ).toBe("Native macOS Save expansion: invalid_evidence");
+  }
+});
 it.each([
   { trusted: false },
   { complete: false },

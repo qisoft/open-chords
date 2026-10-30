@@ -4,6 +4,7 @@ import {
   WindowsReplacementDiagnosticSchema,
   WindowsReplacementObservationSchema,
   WindowsReplacementBoundObservationSchema,
+  WindowsReplacementNoInputObservationSchema,
 } from "./support/installed-windows-replace-context.ts";
 
 const evidence = () => ({
@@ -117,6 +118,48 @@ const boundEvidence = () => ({
     yes: 1,
     no: 1,
   },
+});
+const noInputEvidence = () => {
+  const value = boundEvidence();
+  return {
+    ...value,
+    binding: { ...value.binding, noInputGuard: { status: "complete", guardMask: 255 } },
+  };
+};
+it("requires an independently complete No input guard in addition to the complete binding", () => {
+  expect(WindowsReplacementNoInputObservationSchema.safeParse(noInputEvidence()).success).toBe(
+    true,
+  );
+  expect(WindowsReplacementNoInputObservationSchema.safeParse(boundEvidence()).success).toBe(false);
+});
+it.each([1, 2, 4, 8, 16, 32, 64, 128])("refuses missing No input guard bit %i", (bit) => {
+  const value = noInputEvidence();
+  value.binding.noInputGuard.guardMask &= ~bit;
+  expect(WindowsReplacementNoInputObservationSchema.safeParse(value).success).toBe(false);
+});
+it.each(["not_checked", "refused", "deadline", "read_error"])(
+  "retains fixed %s No guard refusal without accepting it",
+  (status) => {
+    const value = noInputEvidence();
+    value.binding.noInputGuard.status = status;
+    expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(true);
+    expect(WindowsReplacementNoInputObservationSchema.safeParse(value).success).toBe(false);
+  },
+);
+it("rejects private fields and impossible masks in the No input probe", () => {
+  for (const extra of [
+    { x: 100 },
+    { y: 200 },
+    { handle: 123 },
+    { pid: 123 },
+    { title: "/private" },
+    { guardMask: 256 },
+    { guardMask: -1 },
+  ]) {
+    const value = noInputEvidence();
+    Object.assign(value.binding.noInputGuard, extra);
+    expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(false);
+  }
 });
 it("requires a fresh bound snapshot in addition to the original complete inventory", () => {
   expect(WindowsReplacementBoundObservationSchema.parse(boundEvidence())).toEqual(boundEvidence());
