@@ -1,6 +1,8 @@
 import { expect, it } from "vitest";
 
 import {
+  WindowsReplacementCancellationDiagnosticSchema,
+  WindowsReplacementCancellationSchema,
   WindowsReplacementDiagnosticSchema,
   WindowsReplacementObservationSchema,
   WindowsReplacementBoundObservationSchema,
@@ -313,3 +315,93 @@ it.each([
   });
   expect(WindowsReplacementDiagnosticSchema.safeParse(value).success).toBe(false);
 });
+
+const cancellationEvidence = () => ({
+  action: "cancel_replace",
+  observation: noInputEvidence(),
+  cancellation: {
+    status: "complete",
+    guardMask: 255,
+    freshNoInputGuard: { status: "complete", guardMask: 255 },
+    censusMatches: true,
+    pointUnchanged: true,
+    cursorMatches: true,
+    cursorMoved: true,
+    attempted: true,
+    sent: true,
+    modalDismissed: true,
+    saveRetained: true,
+  },
+});
+it("requires fresh guarded No dispatch, strict modal disappearance and retained Save", () => {
+  expect(WindowsReplacementCancellationSchema.parse(cancellationEvidence())).toEqual(
+    cancellationEvidence(),
+  );
+  expect(WindowsReplacementCancellationSchema.safeParse(noInputEvidence()).success).toBe(false);
+});
+for (const field of [
+  "censusMatches",
+  "pointUnchanged",
+  "cursorMatches",
+  "cursorMoved",
+  "attempted",
+  "sent",
+  "modalDismissed",
+  "saveRetained",
+] as const) {
+  it(`refuses confirmation No when ${field} is false or missing`, () => {
+    const value = cancellationEvidence();
+    value.cancellation[field] = false;
+    expect(WindowsReplacementCancellationSchema.safeParse(value).success).toBe(false);
+    const missing = structuredClone(value) as { cancellation: Record<string, unknown> };
+    delete missing.cancellation[field];
+    expect(WindowsReplacementCancellationDiagnosticSchema.safeParse(missing).success).toBe(false);
+  });
+}
+for (const bit of [1, 2, 4, 8, 16, 32, 64, 128]) {
+  it(`refuses incomplete No action guard bit ${bit}`, () => {
+    const value = cancellationEvidence();
+    value.cancellation.guardMask &= ~bit;
+    expect(WindowsReplacementCancellationSchema.safeParse(value).success).toBe(false);
+  });
+}
+for (const status of ["not_checked", "refused", "deadline"]) {
+  it(`retains fixed No ${status} evidence but refuses acceptance`, () => {
+    const value = cancellationEvidence();
+    value.cancellation.status = status;
+    expect(WindowsReplacementCancellationDiagnosticSchema.safeParse(value).success).toBe(true);
+    expect(WindowsReplacementCancellationSchema.safeParse(value).success).toBe(false);
+  });
+}
+it("refuses No cancellation without the entire prior observation and binding", () => {
+  for (const field of ["guardMask", "recheckButtons", "recheckYes", "recheckNo"] as const) {
+    const value = cancellationEvidence();
+    value.observation.binding[field] = 0;
+    expect(WindowsReplacementCancellationSchema.safeParse(value).success).toBe(false);
+  }
+  const value = cancellationEvidence();
+  value.observation.binding.noInputGuard.guardMask = 0;
+  expect(WindowsReplacementCancellationSchema.safeParse(value).success).toBe(false);
+});
+for (const field of ["x", "y", "hwnd", "pid", "title", "path", "error"]) {
+  it(`rejects private No action field ${field}`, () => {
+    const value = cancellationEvidence();
+    Object.assign(value.cancellation, { [field]: "private" });
+    expect(WindowsReplacementCancellationDiagnosticSchema.safeParse(value).success).toBe(false);
+  });
+}
+
+for (const bit of [1, 2, 4, 8, 16, 32, 64, 128]) {
+  it(`refuses incomplete post-cursor No guard bit ${bit}`, () => {
+    const value = cancellationEvidence();
+    value.cancellation.freshNoInputGuard.guardMask &= ~bit;
+    expect(WindowsReplacementCancellationSchema.safeParse(value).success).toBe(false);
+  });
+}
+for (const status of ["not_checked", "refused", "deadline", "read_error"]) {
+  it(`refuses post-cursor No guard status ${status}`, () => {
+    const value = cancellationEvidence();
+    value.cancellation.freshNoInputGuard.status = status;
+    expect(WindowsReplacementCancellationSchema.safeParse(value).success).toBe(false);
+  });
+}

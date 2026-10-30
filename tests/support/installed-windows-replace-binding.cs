@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
-// Read-only, fresh identity checks. No input API or confirmation action is exposed.
+// Observe is read-only. CancelNo independently rebuilds the same proof before one No click.
 public static class WindowsReplacementBinding {
   [StructLayout(LayoutKind.Sequential)] private struct Point { public int x, y; }
   [StructLayout(LayoutKind.Sequential)] private struct Rect { public int left, top, right, bottom; }
@@ -16,6 +16,18 @@ public static class WindowsReplacementBinding {
   [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
   [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
   [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
+  [StructLayout(LayoutKind.Sequential)] private struct MouseInput {
+    public int dx, dy;
+    public uint mouseData, flags, time;
+    public UIntPtr extraInfo;
+  }
+  [StructLayout(LayoutKind.Explicit, Size = 40)] private struct Input {
+    [FieldOffset(0)] public uint type;
+    [FieldOffset(8)] public MouseInput mouse;
+  }
+  [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] private static extern bool GetCursorPos(out Point point);
+  [DllImport("user32.dll")] private static extern uint SendInput(uint count, Input[] inputs, int size);
   private delegate bool WindowCallback(IntPtr window, IntPtr parameter);
   [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
   [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
@@ -174,7 +186,8 @@ public static class WindowsReplacementBinding {
     return snapshot;
   }
 
-  private static string ObserveNoInputGuard(IntPtr save, IntPtr modal, IntPtr noButton, uint pid, string binding, DateTime deadline) {
+  private static string ObserveNoInputGuard(IntPtr save, IntPtr modal, IntPtr noButton, uint pid, string binding, DateTime deadline, out Point guardedPoint, out Rect guardedRect) {
+    guardedPoint = new Point(); guardedRect = new Rect();
     int mask = 0;
     string status = "refused";
     if (DateTime.UtcNow >= deadline) status = "deadline";
@@ -216,14 +229,80 @@ public static class WindowsReplacementBinding {
             }
           }
           if (DateTime.UtcNow >= deadline && status != "read_error") status = "deadline";
-          if (mask == 255 && status != "read_error" && DateTime.UtcNow < deadline) status = "complete";
+          if (mask == 255 && status != "read_error" && DateTime.UtcNow < deadline) {
+            status = "complete"; guardedPoint = center; guardedRect = buttonRect;
+          }
         }
       }
     }
     return "{\"status\":\"" + status + "\",\"guardMask\":" + mask + "}";
   }
 
+  private static bool SameRect(Rect left, Rect right) {
+    return left.left == right.left && left.top == right.top && left.right == right.right && left.bottom == right.bottom;
+  }
+  private static string CancelBoundNo(IntPtr save, IntPtr modal, IntPtr yesButton, IntPtr noButton,
+      uint pid, string yesBinding, string noBinding, DateTime deadline, ChildBudget childBudget,
+      string fixturePath, Point point, Rect bounds) {
+    string status = "refused";
+    bool moved = false, attempted = false, sent = false, dismissed = false, retained = false;
+    bool censusMatches = false, pointUnchanged = false, cursorMatches = false;
+    string freshGuard = "{\"status\":\"not_checked\",\"guardMask\":0}";
+    int guardMask = 0;
+    // Verify the exact controlled fixture again before any pointer movement or input.
+    WindowsReplacementContext.VerifyFixture(fixturePath);
+    if (DateTime.UtcNow < deadline && IntPtr.Size == 8 && SetCursorPos(point.x, point.y)) {
+      moved = true;
+      var fresh = ReadButtons(modal, pid, deadline, childBudget);
+      censusMatches = fresh.Status == "complete" && fresh.Buttons == 2 && fresh.Yes == 1 && fresh.No == 1 &&
+        fresh.YesButton == yesButton && fresh.NoButton == noButton && fresh.YesBinding == yesBinding && fresh.NoBinding == noBinding;
+      if (censusMatches) {
+        Point cursor, guardedPoint; Rect guardedRect;
+        freshGuard = ObserveNoInputGuard(save, modal, noButton, pid, noBinding, deadline, out guardedPoint, out guardedRect);
+        pointUnchanged = SameRect(bounds, guardedRect) && guardedPoint.x == point.x && guardedPoint.y == point.y;
+        cursorMatches = GetCursorPos(out cursor) && cursor.x == point.x && cursor.y == point.y;
+        if (freshGuard == "{\"status\":\"complete\",\"guardMask\":255}" && pointUnchanged && cursorMatches && DateTime.UtcNow < deadline) {
+          guardMask = 255;
+          var inputs = new[] {
+            new Input { type = 0, mouse = new MouseInput { flags = 0x0002 } },
+            new Input { type = 0, mouse = new MouseInput { flags = 0x0004 } }
+          };
+          attempted = true;
+          sent = SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) == 2;
+          // A partial/failed dispatch is fatal and is never retried.
+          if (sent) {
+            while (DateTime.UtcNow < deadline && IsWindow(modal)) {
+              if (!Owned(save, pid)) break;
+              System.Threading.Thread.Sleep(Math.Min(20, Math.Max(1, (int)(deadline - DateTime.UtcNow).TotalMilliseconds)));
+            }
+            dismissed = !IsWindow(modal);
+            retained = Owned(save, pid) && IsWindowVisible(save) && IsWindowEnabled(save) &&
+              ClassIs(save, "#32770") && GetForegroundWindow() == save && GetAncestor(save, 2) == save;
+            if (dismissed && retained && DateTime.UtcNow < deadline) {
+              WindowsReplacementContext.VerifyFixture(fixturePath);
+              if (DateTime.UtcNow < deadline) status = "complete";
+            }
+          }
+        }
+      }
+    }
+    if (status != "complete" && DateTime.UtcNow >= deadline) status = "deadline";
+    return "{\"status\":\"" + status + "\",\"guardMask\":" + guardMask + ",\"freshNoInputGuard\":" + freshGuard +
+      ",\"censusMatches\":" + censusMatches.ToString().ToLowerInvariant() +
+      ",\"pointUnchanged\":" + pointUnchanged.ToString().ToLowerInvariant() +
+      ",\"cursorMatches\":" + cursorMatches.ToString().ToLowerInvariant() +
+      ",\"cursorMoved\":" + moved.ToString().ToLowerInvariant() + ",\"attempted\":" + attempted.ToString().ToLowerInvariant() +
+      ",\"sent\":" + sent.ToString().ToLowerInvariant() + ",\"modalDismissed\":" + dismissed.ToString().ToLowerInvariant() +
+      ",\"saveRetained\":" + retained.ToString().ToLowerInvariant() + "}";
+  }
   public static string Observe(IntPtr save, uint pid, int budgetMs) {
+    return ObserveCore(save, pid, budgetMs, null);
+  }
+  public static string CancelNo(IntPtr save, uint pid, int budgetMs, string fixturePath) {
+    if (String.IsNullOrEmpty(fixturePath)) throw new InvalidOperationException("Replacement fixture unavailable");
+    return ObserveCore(save, pid, budgetMs, fixturePath);
+  }
+  private static string ObserveCore(IntPtr save, uint pid, int budgetMs, string fixturePath) {
     string status = "refused";
     int mask = 0, candidates = 0, buttons = 0, yes = 0, no = 0, scanned = 0, yesMask = 0, noMask = 0;
     var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, Math.Min(2000, budgetMs)));
@@ -235,6 +314,7 @@ public static class WindowsReplacementBinding {
     bool recheckMatches = false;
     var childBudget = new ChildBudget();
     string noInputGuard = "{\"status\":\"not_checked\",\"guardMask\":0}";
+    string cancellation = "{\"status\":\"not_checked\",\"guardMask\":0,\"freshNoInputGuard\":{\"status\":\"not_checked\",\"guardMask\":0},\"censusMatches\":false,\"pointUnchanged\":false,\"cursorMatches\":false,\"cursorMoved\":false,\"attempted\":false,\"sent\":false,\"modalDismissed\":false,\"saveRetained\":false}";
     if (budgetMs > 0 && budgetMs <= 2000 && SaveValid(save, pid)) {
       mask |= 1;
       status = "complete";
@@ -285,7 +365,12 @@ public static class WindowsReplacementBinding {
         }
       }
       if (status == "complete" && mask != 255) status = "refused";
-      if (status == "complete" && mask == 255) noInputGuard = ObserveNoInputGuard(save, modal, noButton, pid, noBinding, deadline);
+      if (status == "complete" && mask == 255) {
+        Point point; Rect bounds;
+        noInputGuard = ObserveNoInputGuard(save, modal, noButton, pid, noBinding, deadline, out point, out bounds);
+        if (fixturePath != null && noInputGuard == "{\"status\":\"complete\",\"guardMask\":255}")
+          cancellation = CancelBoundNo(save, modal, yesButton, noButton, pid, yesBinding, noBinding, deadline, childBudget, fixturePath, point, bounds);
+      }
     }
     return "{\"status\":\"" + status + "\",\"guardMask\":" + mask + ",\"candidates\":" + candidates +
       ",\"buttons\":" + buttons + ",\"yes\":" + yes + ",\"no\":" + no +
@@ -294,6 +379,6 @@ public static class WindowsReplacementBinding {
       ",\"yesFailure\":" + yesFailure.Json() + ",\"noFailure\":" + noFailure.Json() +
       ",\"recheckStatus\":\"" + recheckStatus + "\",\"recheckButtons\":" + recheckButtons +
       ",\"recheckYes\":" + recheckYes + ",\"recheckNo\":" + recheckNo +
-      ",\"recheckMatches\":" + (recheckMatches ? "true" : "false") + ",\"noInputGuard\":" + noInputGuard + "}";
+      ",\"recheckMatches\":" + (recheckMatches ? "true" : "false") + ",\"noInputGuard\":" + noInputGuard + (fixturePath == null ? "" : ",\"cancellation\":" + cancellation) + "}";
   }
 }
