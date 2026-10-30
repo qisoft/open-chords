@@ -4,7 +4,7 @@ $isImport = $Scenario -in @('cancel_open', 'cancel_open_existing', 'open')
 $cancelsReplacement = $Scenario -eq 'cancel_replace'
 $confirmsReplacement = $Scenario -eq 'confirm_replace'
 $observesReplacement = $Scenario -in @('observe_replace', 'cancel_replace', 'confirm_replace')
-if ($observesReplacement -and $Format -ne 'json') { throw 'Replacement format unavailable' }
+if ($observesReplacement -and $Format -ne 'json' -and !($confirmsReplacement -and $Format -in @('lrc', 'chordpro'))) { throw 'Replacement format unavailable' }
 $setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open', 'observe_replace', 'cancel_replace', 'confirm_replace')
 if ($isImport -and $Format -notin @('archive', 'media')) { throw 'Native import format unavailable' }
 if ($Format -eq 'media' -and !$isImport) { throw 'Native media Save unavailable' }
@@ -241,7 +241,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) { throw 'action_bounds' }
     $dialogHandle = [IntPtr]$window.Current.NativeWindowHandle
     $actionHandle = [IntPtr]$button.Current.NativeWindowHandle
-    if ($observesReplacement) { [WindowsReplacementContext]::VerifyFixture($TargetPath) }
+    if ($observesReplacement) { [WindowsReplacementContext]::VerifyFixture($TargetPath, $Format) }
     [SaveNativeInput]::Click($dialogHandle, $actionHandle, [uint32]$ApplicationPid,
       [int][Math]::Floor($bounds.Left + $bounds.Width / 2), [int][Math]::Floor($bounds.Top + $bounds.Height / 2))
     Write-NativeSaveProbe 'action_clicked'
@@ -254,7 +254,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
       $cancellation = @{ status = 'not_checked'; guardMask = 0; freshNoInputGuard = @{ status = 'not_checked'; guardMask = 0 }; censusMatches = $false; pointUnchanged = $false; cursorMatches = $false; cursorMoved = $false; attempted = $false; sent = $false; modalDismissed = $false; saveRetained = $false }
       $replacement = @{ status = 'not_checked'; guardMask = 0; freshYesInputGuard = @{ status = 'not_checked'; guardMask = 0 }; censusMatches = $false; pointUnchanged = $false; cursorMatches = $false; cursorMoved = $false; fixtureVerified = $false; attempted = $false; sent = $false; modalDismissed = $false; saveDismissed = $false; foregroundOwned = $false }
       if ($confirmsReplacement -and $contextReady) {
-        $binding = [WindowsReplacementBinding]::ReplaceYes($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining, $TargetPath) | ConvertFrom-Json
+        $binding = [WindowsReplacementBinding]::ReplaceYes($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining, $TargetPath, $Format) | ConvertFrom-Json
         $replacement = $binding.replacement
         $binding.PSObject.Properties.Remove('replacement')
       } elseif ($cancelsReplacement -and $contextReady) {

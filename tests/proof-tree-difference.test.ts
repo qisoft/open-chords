@@ -68,3 +68,15 @@ it.each([
   expect(withoutChromiumPreferences(after)[path]).toBe("after");
   expect(withoutChromiumPreferences({})).not.toEqual(withoutChromiumPreferences(before));
 });
+
+it("labels refusal-tree deltas separately while preserving fixed categories and privacy", () => {
+  expect(
+    proofTreeDifference(
+      { "project-library/private/HEAD": "secret" },
+      { "project-library/private/HEAD": "changed", Preferences: "private-content" },
+      "refusal",
+    ),
+  ).toBe(
+    "Export refusal proof source delta: added=1 removed=0 changed=1 library=1 location=0 network=0 export_pending=0 chromium_preferences=1 chromium_storage=0 chromium_cache=0 other=0",
+  );
+});

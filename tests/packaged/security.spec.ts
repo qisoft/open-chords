@@ -829,7 +829,7 @@ const windowsPublicationCases = [
     format,
     replaces: false,
   })),
-  { format: "json", replaces: true } as const,
+  ...(["json", "lrc", "chordpro"] as const).map((format) => ({ format, replaces: true })),
 ];
 for (const { format, replaces } of windowsPublicationCases) {
   test(`installed Windows native ${format} ${replaces ? "Replace" : "Save"} publishes with exact bytes and one durable Receipt`, async () => {
@@ -2529,7 +2529,12 @@ function installedWindowsPickerDriver(
   const confirmsReplacement = scenario === "confirm_replace";
   const observesReplacement =
     scenario === "observe_replace" || cancelsReplacement || confirmsReplacement;
-  if (observesReplacement && format !== "json") throw new Error("Replacement format unavailable");
+  if (
+    observesReplacement &&
+    format !== "json" &&
+    !(confirmsReplacement && (format === "lrc" || format === "chordpro"))
+  )
+    throw new Error("Replacement format unavailable");
   const saveDialog = scenario === "save" || scenario === "cancel_existing" || observesReplacement;
   if (saveDialog ? format === "media" : format !== "media" && format !== "archive")
     throw new Error("Installed native picker mode unavailable");

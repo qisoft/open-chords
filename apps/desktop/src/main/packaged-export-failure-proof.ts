@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { canonicalSerialize } from "@open-chords/domain";
 
+import { proofTreeDifference } from "./packaged-proof-tree-difference.ts";
 import { proofTreeHashes } from "./packaged-proof-tree.ts";
 import { openProjectExports, type ProjectExports } from "./project-exports.ts";
 import type { ProjectLibrary } from "./project-library.ts";
@@ -20,7 +21,8 @@ export async function runPackagedExportFailureProof(options: {
   const snapshot = await library.getSnapshot(projectId);
   if (!snapshot) throw new Error("export_failure_proof_project_missing");
   await mkdir(join(outputRoot, "directory.json"));
-  const baseline = canonicalSerialize(await proofTreeHashes(stateRoot));
+  const baselineTree = await proofTreeHashes(stateRoot);
+  const baseline = canonicalSerialize(baselineTree);
   const targets = canonicalSerialize(await proofTreeHashes(outputRoot));
   const probe = (caseName: string, stage: string) =>
     process.stderr.write(`Export refusal probe: case=${caseName} stage=${stage}\n`);
@@ -39,7 +41,11 @@ export async function runPackagedExportFailureProof(options: {
     if ((await library.getSnapshot(projectId))?.projectRevisionId !== snapshot.projectRevisionId)
       changed();
     probe(caseName, "check_library_tree");
-    if (canonicalSerialize(await proofTreeHashes(stateRoot)) !== baseline) changed();
+    const actualTree = await proofTreeHashes(stateRoot);
+    if (canonicalSerialize(actualTree) !== baseline) {
+      process.stderr.write(`${proofTreeDifference(baselineTree, actualTree, "refusal")}\n`);
+      changed();
+    }
     probe(caseName, "check_output_tree");
     if (canonicalSerialize(await proofTreeHashes(outputRoot)) !== targets) changed();
     probe(caseName, "unchanged");

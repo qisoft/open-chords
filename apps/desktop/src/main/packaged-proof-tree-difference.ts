@@ -1,5 +1,9 @@
 // Fixed categories only: filenames and hashes never leave this diagnostic summary.
-export function proofTreeDifference(before: Record<string, string>, after: Record<string, string>) {
+export function proofTreeDifference(
+  before: Record<string, string>,
+  after: Record<string, string>,
+  proof: "disk" | "refusal" = "disk",
+) {
   const counts = {
     added: 0,
     removed: 0,
@@ -52,7 +56,7 @@ export function proofTreeDifference(before: Record<string, string>, after: Recor
                     : "other";
     counts[category]++;
   }
-  return `Export disk proof source delta: ${Object.entries(counts)
+  return `Export ${proof} proof source delta: ${Object.entries(counts)
     .map(([key, value]) => `${key}=${Math.min(9999, value)}`)
     .join(" ")}`;
 }
