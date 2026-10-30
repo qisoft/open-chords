@@ -126,3 +126,41 @@ export const WindowsReplacementNoInputObservationSchema =
     ({ binding }) =>
       binding?.noInputGuard?.status === "complete" && binding.noInputGuard.guardMask === 255,
   );
+
+export const WindowsReplacementCancellationDiagnosticSchema = z.strictObject({
+  action: z.literal("cancel_replace"),
+  observation: WindowsReplacementDiagnosticSchema,
+  cancellation: z.strictObject({
+    status: z.enum(["not_checked", "complete", "refused", "deadline"]),
+    guardMask: z.number().int().min(0).max(255),
+    freshNoInputGuard: z.strictObject({
+      status: z.enum(["not_checked", "complete", "refused", "deadline", "read_error"]),
+      guardMask: z.number().int().min(0).max(255),
+    }),
+    censusMatches: z.boolean(),
+    pointUnchanged: z.boolean(),
+    cursorMatches: z.boolean(),
+    cursorMoved: z.boolean(),
+    attempted: z.boolean(),
+    sent: z.boolean(),
+    modalDismissed: z.boolean(),
+    saveRetained: z.boolean(),
+  }),
+});
+export const WindowsReplacementCancellationSchema =
+  WindowsReplacementCancellationDiagnosticSchema.refine(
+    ({ observation, cancellation }) =>
+      WindowsReplacementNoInputObservationSchema.safeParse(observation).success &&
+      cancellation.status === "complete" &&
+      cancellation.guardMask === 255 &&
+      cancellation.freshNoInputGuard.status === "complete" &&
+      cancellation.freshNoInputGuard.guardMask === 255 &&
+      cancellation.censusMatches &&
+      cancellation.pointUnchanged &&
+      cancellation.cursorMatches &&
+      cancellation.cursorMoved &&
+      cancellation.attempted &&
+      cancellation.sent &&
+      cancellation.modalDismissed &&
+      cancellation.saveRetained,
+  );

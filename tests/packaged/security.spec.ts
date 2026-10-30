@@ -59,6 +59,8 @@ import {
   installedSaveDriverTiming,
 } from "../support/installed-save-diagnostics.ts";
 import {
+  WindowsReplacementCancellationDiagnosticSchema,
+  WindowsReplacementCancellationSchema,
   WindowsReplacementDiagnosticSchema,
   WindowsReplacementNoInputObservationSchema,
 } from "../support/installed-windows-replace-context.ts";
@@ -662,66 +664,68 @@ test("installed macOS observes replacement context without confirming or changin
   expect(canonicalSerialize(await proofTreeHashes(second.activeRoot))).toBe(libraryBefore);
 });
 
-test("installed Windows verifies the bound JSON confirmation No input target without confirming", async () => {
-  const format = "json";
-  test.skip(process.platform !== "win32", "Windows replacement context observation");
-  test.setTimeout(360_000);
-  const state = join(packageRoot, "windows-replacement-context");
-  const directory = realpathSync.native(
-    mkdtempSync(join(tmpdir(), "windows-replacement-context-output-")),
-  );
-  externalOutputDirectories.push(directory);
-  const filename = "Open Chords.json";
-  const target = join(directory, filename);
-  const external = join(packageRoot, "windows-replacement-context-preserved.bin");
-  const original = Buffer.from("private existing Windows replacement target fixture");
-  writeFileSync(target, original);
-  writeFileSync(join(directory, "preserved.txt"), original);
-  writeFileSync(external, original);
-  const directoryBefore = await proofTreeHashes(directory);
-  const library = await openProjectLibrary({ stateRoot: state });
-  const envelope = ProjectEnvelopeSchema.parse(
-    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
-  );
-  envelope.payload = leadSheetProject();
-  await library.createProject({ envelope, records: goldenRecords() });
-  await (await openNetworkMode(state)).setOffline(true);
-  const before = await library.readProject("project_golden");
-  expect(library.listExportReceipts("project_golden")).toEqual([]);
-  const tree = await proofTreeHashes(library.activeRoot);
-  const action = {
-    type: `save_${format}`,
-    projectId: "project_golden",
-    expectedProjectRevisionId: before.projectRevisionId,
-    presentation: "current",
-  };
-  const result = await inspectInstalled(
-    state,
-    `(() => { void window.openChords.exports.perform(${JSON.stringify(action)}).then(() => undefined, () => undefined); return { started: true }; })()`,
-    installedSystemEnvironment(),
-    installedWindowsPickerDriver("observe_replace", target, "json"),
-  );
-  expect(result).toEqual({ started: true });
-  expect(readFileSync(target)).toEqual(original);
-  expect(await proofTreeHashes(directory)).toEqual(directoryBefore);
-  expect(readFileSync(external)).toEqual(original);
-  const reopened = await openProjectLibrary({ stateRoot: state });
-  expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
-  expect(await reopened.readProject("project_golden")).toEqual(before);
-  expect(reopened.listExportReceipts("project_golden")).toEqual([]);
-  expect(await proofTreeHashes(reopened.activeRoot)).toEqual(tree);
-  expect((await openNetworkMode(state)).offline).toBe(true);
-  const second = await openProjectLibrary({ stateRoot: state });
-  expect(await second.readProject("project_golden")).toEqual(before);
-  expect(second.listExportReceipts("project_golden")).toEqual([]);
-  expect(await proofTreeHashes(second.activeRoot)).toEqual(tree);
-  expect(await proofTreeHashes(directory)).toEqual(directoryBefore);
-  expect(readFileSync(target)).toEqual(original);
-  expect(readFileSync(external)).toEqual(original);
-  expect((await openNetworkMode(state)).offline).toBe(true);
-  // Renderer output is only the fixed start marker. Actual native diagnostic privacy is
-  // enforced by the strict observation schema and its adversarial field tests.
-});
+for (const scenario of ["observe_replace", "cancel_replace"] as const) {
+  test(`installed Windows ${scenario === "observe_replace" ? "verifies the bound JSON confirmation No input target without confirming" : "clicks JSON confirmation No once and preserves the Save dialog and target"}`, async () => {
+    const format = "json";
+    test.skip(process.platform !== "win32", "Windows replacement context observation");
+    test.setTimeout(360_000);
+    const state = join(packageRoot, `windows-replacement-${scenario}`);
+    const directory = realpathSync.native(
+      mkdtempSync(join(tmpdir(), `windows-replacement-${scenario}-output-`)),
+    );
+    externalOutputDirectories.push(directory);
+    const filename = "Open Chords.json";
+    const target = join(directory, filename);
+    const external = join(packageRoot, `windows-replacement-${scenario}-preserved.bin`);
+    const original = Buffer.from("private existing Windows replacement target fixture");
+    writeFileSync(target, original);
+    writeFileSync(join(directory, "preserved.txt"), original);
+    writeFileSync(external, original);
+    const directoryBefore = await proofTreeHashes(directory);
+    const library = await openProjectLibrary({ stateRoot: state });
+    const envelope = ProjectEnvelopeSchema.parse(
+      JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+    );
+    envelope.payload = leadSheetProject();
+    await library.createProject({ envelope, records: goldenRecords() });
+    await (await openNetworkMode(state)).setOffline(true);
+    const before = await library.readProject("project_golden");
+    expect(library.listExportReceipts("project_golden")).toEqual([]);
+    const tree = await proofTreeHashes(library.activeRoot);
+    const action = {
+      type: `save_${format}`,
+      projectId: "project_golden",
+      expectedProjectRevisionId: before.projectRevisionId,
+      presentation: "current",
+    };
+    const result = await inspectInstalled(
+      state,
+      `(() => { void window.openChords.exports.perform(${JSON.stringify(action)}).then(() => undefined, () => undefined); return { started: true }; })()`,
+      installedSystemEnvironment(),
+      installedWindowsPickerDriver(scenario, target, "json"),
+    );
+    expect(result).toEqual({ started: true });
+    expect(readFileSync(target)).toEqual(original);
+    expect(await proofTreeHashes(directory)).toEqual(directoryBefore);
+    expect(readFileSync(external)).toEqual(original);
+    const reopened = await openProjectLibrary({ stateRoot: state });
+    expect(reopened.listProjects().map(({ projectId }) => projectId)).toEqual(["project_golden"]);
+    expect(await reopened.readProject("project_golden")).toEqual(before);
+    expect(reopened.listExportReceipts("project_golden")).toEqual([]);
+    expect(await proofTreeHashes(reopened.activeRoot)).toEqual(tree);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    const second = await openProjectLibrary({ stateRoot: state });
+    expect(await second.readProject("project_golden")).toEqual(before);
+    expect(second.listExportReceipts("project_golden")).toEqual([]);
+    expect(await proofTreeHashes(second.activeRoot)).toEqual(tree);
+    expect(await proofTreeHashes(directory)).toEqual(directoryBefore);
+    expect(readFileSync(target)).toEqual(original);
+    expect(readFileSync(external)).toEqual(original);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+    // Renderer output is only the fixed start marker. Actual native diagnostic privacy is
+    // enforced by the strict observation schema and its adversarial field tests.
+  });
+}
 
 for (const format of ["json", "lrc", "chordpro", "pdf", "archive"] as const) {
   test(`installed Windows cancels ${format} Save without changing an existing target`, async () => {
@@ -2487,11 +2491,18 @@ function installedMediaPickerDriver(
 }
 
 function installedWindowsPickerDriver(
-  scenario: "open" | "cancel_open_existing" | "save" | "cancel_existing" | "observe_replace",
+  scenario:
+    | "open"
+    | "cancel_open_existing"
+    | "save"
+    | "cancel_existing"
+    | "observe_replace"
+    | "cancel_replace",
   selectedPath: string,
   format: "media" | "json" | "lrc" | "chordpro" | "pdf" | "archive",
 ) {
-  const observesReplacement = scenario === "observe_replace";
+  const cancelsReplacement = scenario === "cancel_replace";
+  const observesReplacement = scenario === "observe_replace" || cancelsReplacement;
   if (observesReplacement && format !== "json") throw new Error("Replacement format unavailable");
   const saveDialog = scenario === "save" || scenario === "cancel_existing" || observesReplacement;
   if (saveDialog ? format === "media" : format !== "media" && format !== "archive")
@@ -2528,18 +2539,27 @@ function installedWindowsPickerDriver(
           }
           try {
             console.log(installedSaveDriverTiming(stderr, performance.now() - started));
-            const schema = observesReplacement
-              ? WindowsReplacementDiagnosticSchema
-              : z.strictObject({
-                  action: z.literal(scenario),
-                  filenameSet: z.literal(true),
-                  nativeClick: z.literal(true),
-                  dialogDismissed: z.literal(true),
-                  defaultNameValid: z.literal(saveDialog),
-                });
+            const schema = cancelsReplacement
+              ? WindowsReplacementCancellationDiagnosticSchema
+              : observesReplacement
+                ? WindowsReplacementDiagnosticSchema
+                : z.strictObject({
+                    action: z.literal(scenario),
+                    filenameSet: z.literal(true),
+                    nativeClick: z.literal(true),
+                    dialogDismissed: z.literal(true),
+                    defaultNameValid: z.literal(saveDialog),
+                  });
             const parsed = schema.safeParse(JSON.parse(stdout.trim()));
             if (!parsed.success) throw new Error("Invalid native picker evidence");
-            if (observesReplacement) {
+            if (cancelsReplacement) {
+              const diagnostic = WindowsReplacementCancellationDiagnosticSchema.parse(parsed.data);
+              process.stdout.write(
+                `Native Windows confirmation No: ${JSON.stringify(diagnostic)}\n`,
+              );
+              if (!WindowsReplacementCancellationSchema.safeParse(diagnostic).success)
+                throw new Error("Replacement cancellation refused");
+            } else if (observesReplacement) {
               const diagnostic = WindowsReplacementDiagnosticSchema.parse(parsed.data);
               process.stdout.write(
                 `Native Windows replacement context: ${JSON.stringify(diagnostic.context)}\n`,
@@ -2557,6 +2577,10 @@ function installedWindowsPickerDriver(
         },
       );
     });
+    if (cancelsReplacement) {
+      WindowsReplacementCancellationSchema.parse(evidence);
+      return;
+    }
     if (observesReplacement) {
       WindowsReplacementNoInputObservationSchema.parse(evidence);
       return;

@@ -1,9 +1,10 @@
-param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open', 'observe_replace')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive', 'media')][string]$Format = 'json')
+param([int]$ApplicationPid, [ValidateSet('cancel', 'cancel_existing', 'save', 'cancel_open', 'cancel_open_existing', 'open', 'observe_replace', 'cancel_replace')][string]$Scenario, [string]$TargetPath, [ValidateSet('json', 'lrc', 'chordpro', 'pdf', 'archive', 'media')][string]$Format = 'json')
 $ErrorActionPreference = 'Stop'
 $isImport = $Scenario -in @('cancel_open', 'cancel_open_existing', 'open')
-$observesReplacement = $Scenario -eq 'observe_replace'
+$cancelsReplacement = $Scenario -eq 'cancel_replace'
+$observesReplacement = $Scenario -in @('observe_replace', 'cancel_replace')
 if ($observesReplacement -and $Format -ne 'json') { throw 'Replacement format unavailable' }
-$setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open', 'observe_replace')
+$setFilename = $Scenario -in @('cancel_existing', 'save', 'cancel_open_existing', 'open', 'observe_replace', 'cancel_replace')
 if ($isImport -and $Format -notin @('archive', 'media')) { throw 'Native import format unavailable' }
 if ($Format -eq 'media' -and !$isImport) { throw 'Native media Save unavailable' }
 $extension = if ($Format -eq 'chordpro') { 'cho' } elseif ($Format -eq 'archive') { 'ocarchive' } else { $Format }
@@ -88,7 +89,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $fileNameValue = $null
     $nativeFilenameHandle = [IntPtr]::Zero
     $button = $null
-    $buttonName = if ($Scenario -eq 'open') { 'Open' } elseif ($Scenario -in @('save', 'observe_replace')) { 'Save' } else { 'Cancel' }
+    $buttonName = if ($Scenario -eq 'open') { 'Open' } elseif ($Scenario -in @('save', 'observe_replace', 'cancel_replace')) { 'Save' } else { 'Cancel' }
     $editTypes = 0
     $buttonTypes = 0
     $fileLabels = 0
@@ -248,9 +249,22 @@ while ([DateTime]::UtcNow -lt $deadline) {
       $observationDeadline = [DateTime]::UtcNow.AddMilliseconds($remaining)
       $context = [WindowsReplacementContext]::Observe($dialogHandle, [uint32]$ApplicationPid, $remaining) | ConvertFrom-Json
       $bindingRemaining = [Math]::Max(0, [int][Math]::Floor(($observationDeadline - [DateTime]::UtcNow).TotalMilliseconds))
-      $binding = [WindowsReplacementBinding]::Observe($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining) | ConvertFrom-Json
+      $contextReady = $context.status -eq 'complete' -and $context.capturedExists -and $context.capturedVisible -and !$context.capturedEnabled -and $context.foregroundOwned -and !$context.foregroundSave -and $context.windows -ge 1 -and $context.windows -le 16 -and $context.otherDialogs -eq 1 -and $context.ownedBySave -eq 1 -and $context.buttons -eq 2 -and $context.yes -eq 1 -and $context.no -eq 1 -and $context.cancel -eq 0 -and $context.replace -eq 0 -and $context.other -eq 0
+      $cancellation = @{ status = 'not_checked'; guardMask = 0; freshNoInputGuard = @{ status = 'not_checked'; guardMask = 0 }; censusMatches = $false; pointUnchanged = $false; cursorMatches = $false; cursorMoved = $false; attempted = $false; sent = $false; modalDismissed = $false; saveRetained = $false }
+      if ($cancelsReplacement -and $contextReady) {
+        $binding = [WindowsReplacementBinding]::CancelNo($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining, $TargetPath) | ConvertFrom-Json
+        $cancellation = $binding.cancellation
+        $binding.PSObject.Properties.Remove('cancellation')
+      } else {
+        $binding = [WindowsReplacementBinding]::Observe($dialogHandle, [uint32]$ApplicationPid, $bindingRemaining) | ConvertFrom-Json
+      }
       [WindowsReplacementContext]::VerifyFixture($TargetPath)
-      ConvertTo-Json -InputObject @{ action = $Scenario; filenameSet = $true; nativeClick = $true; defaultNameValid = $true; targetFixtureVerified = $true; context = $context; binding = $binding } -Compress
+      $observation = @{ action = 'observe_replace'; filenameSet = $true; nativeClick = $true; defaultNameValid = $true; targetFixtureVerified = $true; context = $context; binding = $binding }
+      if ($cancelsReplacement) {
+        ConvertTo-Json -InputObject @{ action = 'cancel_replace'; observation = $observation; cancellation = $cancellation } -Depth 8 -Compress
+      } else {
+        ConvertTo-Json -InputObject $observation -Depth 8 -Compress
+      }
       exit 0
     }
     [SaveNativeInput]::WaitForDismissal($dialogHandle, $actionHandle, $ApplicationPid)
