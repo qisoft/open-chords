@@ -1909,6 +1909,146 @@ for (const { adoptOfflineMedia, wholeSource, nativeSaved, replaces } of [
   });
 }
 
+test("installed native archive identity conflict preserves local history and converges on a separate copy", async () => {
+  test.skip(!["win32", "darwin"].includes(process.platform), "Native archive identity proof");
+  test.setTimeout(360_000);
+  const root = realpathSync(mkdtempSync(join(packageRoot, "native-archive-identity-")));
+  const state = join(root, "state");
+  const target = join(root, "conflicting.ocarchive");
+  const external = join(root, "preserved.bin");
+  const preserved = Buffer.from("private native archive identity preservation fixture");
+  writeFileSync(external, preserved);
+  const library = await openProjectLibrary({ stateRoot: state });
+  const envelope = ProjectEnvelopeSchema.parse(
+    JSON.parse(readFileSync("packages/testkit/contracts/v1/valid/project-envelope.json", "utf8")),
+  );
+  await library.createProject({ envelope, records: goldenRecords() });
+  const archived = archivedProjectFor(await library.readProject("project_golden")).document;
+  const archive = writePortableProjectArchive({ document: archived });
+  writeFileSync(target, archive.archive);
+  await library.changePractice({
+    action: { speed: 1.25, type: "settings" },
+    expectedProjectRevisionId: (await library.readProject("project_golden")).projectRevisionId,
+    projectId: "project_golden",
+  });
+  await (await openNetworkMode(state)).setOffline(true);
+  const before = await library.readProject("project_golden");
+  expect(before.envelope.payload.practice?.speed).toBe(1.25);
+  expect(before.envelope).not.toEqual(archived.envelope);
+  const originalDirectory = join(library.activeRoot, "projects", "project_golden");
+  const originalTree = await proofTreeHashes(originalDirectory);
+  const externalBefore = await proofTreeHashes(root);
+  const cache = await openOfflineMediaCache({ stateRoot: state });
+  expect(await cache.list()).toEqual([]);
+  const cacheTree = await proofTreeHashes(join(state, "offline-media-cache"));
+  const open = () =>
+    inspectInstalled(
+      state,
+      `(async () => {
+        const response = await window.openChords.archives.import({ adoptOfflineMedia: false });
+        const offline = (await window.openChords.youtube.perform({ type: "status" })).offline;
+        return { response, offline };
+      })()`,
+      installedSystemEnvironment(),
+      installedArchiveOpenDriver(target),
+    );
+  const result = await open();
+  const copyId = z
+    .object({
+      response: z.object({
+        type: z.literal("archives.import_result"),
+        result: z.object({
+          state: z.literal("imported"),
+          importedCopy: z.literal(true),
+          projectId: z.string().regex(/^project_[a-f0-9]{32}$/),
+          offlineMedia: z.object({ state: z.literal("not_included") }),
+        }),
+      }),
+      offline: z.literal(true),
+    })
+    .parse(result).response.result.projectId;
+  expect(copyId).not.toBe("project_golden");
+  const cold = await openProjectLibrary({ stateRoot: state });
+  expect(
+    cold
+      .listProjects()
+      .map(({ projectId }) => projectId)
+      .sort(),
+  ).toEqual(["project_golden", copyId].sort());
+  expect(await cold.readProject("project_golden")).toEqual(before);
+  expect(await proofTreeHashes(originalDirectory)).toEqual(originalTree);
+  const copy = await cold.readProject(copyId);
+  expect(copy.envelope).toEqual({
+    ...archived.envelope,
+    payload: {
+      ...archived.envelope.payload,
+      id: copyId,
+      importOrigins: [{ archiveManifestHash: archive.manifestHash, projectId: "project_golden" }],
+    },
+  });
+  expect(copy.records).toEqual({ ...archived.records, sources: before.records.sources });
+  expect(cold.listExportReceipts("project_golden")).toEqual([]);
+  expect(cold.listExportReceipts(copyId)).toEqual([]);
+  const tree = await proofTreeHashes(cold.activeRoot);
+  const repeated = await open();
+  expect(repeated).toMatchObject({
+    response: {
+      type: "archives.import_result",
+      result: {
+        state: "already_present",
+        importedCopy: true,
+        projectId: copyId,
+        offlineMedia: { state: "not_included" },
+      },
+    },
+    offline: true,
+  });
+  for (let index = 0; index < 2; index++) {
+    const reopened = await openProjectLibrary({ stateRoot: state });
+    expect(
+      reopened
+        .listProjects()
+        .map(({ projectId }) => projectId)
+        .sort(),
+    ).toEqual(["project_golden", copyId].sort());
+    expect(await reopened.readProject("project_golden")).toEqual(before);
+    expect(await reopened.readProject(copyId)).toEqual(copy);
+    expect(reopened.listExportReceipts("project_golden")).toEqual([]);
+    expect(reopened.listExportReceipts(copyId)).toEqual([]);
+    expect(await proofTreeHashes(reopened.activeRoot)).toEqual(tree);
+    expect(await proofTreeHashes(originalDirectory)).toEqual(originalTree);
+    expect(await (await openOfflineMediaCache({ stateRoot: state })).list()).toEqual([]);
+    expect(await proofTreeHashes(join(state, "offline-media-cache"))).toEqual(cacheTree);
+    expect((await openNetworkMode(state)).offline).toBe(true);
+  }
+  expect(readFileSync(target)).toEqual(archive.archive);
+  expect(readFileSync(external)).toEqual(preserved);
+  expect(
+    Object.fromEntries(
+      Object.entries(await proofTreeHashes(root)).filter(([path]) => !path.startsWith("state/")),
+    ),
+  ).toEqual(
+    Object.fromEntries(
+      Object.entries(externalBefore).filter(([path]) => !path.startsWith("state/")),
+    ),
+  );
+  for (const privateValue of [
+    root,
+    state,
+    target,
+    external,
+    preserved.toString(),
+    "/unavailable/golden-fixture.wav",
+  ]) {
+    const escaped = JSON.stringify(privateValue).slice(1, -1);
+    for (const value of [privateValue, escaped, JSON.stringify(escaped).slice(1, -1)]) {
+      expect(JSON.stringify(result).includes(value)).toBe(false);
+      expect(JSON.stringify(repeated).includes(value)).toBe(false);
+      expect(archive.archive.includes(Buffer.from(value))).toBe(false);
+    }
+  }
+});
+
 for (const firstOutcome of ["cancel", "refusal"] as const) {
   test(`installed Choose recording ${firstOutcome} preserves state before same-process recovery`, async () => {
     test.skip(!["win32", "darwin"].includes(process.platform), "Native renderer file picker proof");
